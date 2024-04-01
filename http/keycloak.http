@@ -1,0 +1,24 @@
+@keycloakUrl=https://auth.htl-leonding.ac.at
+@endpoint=admin/realms
+
+@realm=unterrainer
+@clientId=secureLectures
+###
+# @name POST OWN attributes (different URL) (needs no additional realm-management role)
+POST {{keycloakUrl}}/realms/{{realm}}/account
+Authorization: openid password env
+Content-Type: application/json
+
+{
+  "attributes": {
+    "customAttribute": "custom value2"
+  }
+}
+
+###
+# @name GET OWN attributes (different URL) (needs no additional realm-management role)
+GET {{keycloakUrl}}/realms/{{realm}}/account
+Authorization: openid password env
+Content-Type: application/json
+
+###

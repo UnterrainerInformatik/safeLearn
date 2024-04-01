@@ -1,0 +1,37 @@
+@endpoint=
+
+#####################################################################################
+# @name GET LIST
+@size=10
+@offset=0
+GET {{url}}/{{endpoint}}
+  ?size={{size}}
+  &offset={{offset}}
+Authorization: openid password env
+
+###
+# @name GET SINGLE
+@id=1
+GET {{url}}/{{endpoint}}/{{id}}
+Authorization: openid password env
+
+#####################################################################################
+# @name PUT
+@id=1
+PUT {{url}}/{{endpoint}}/{{id}}
+Authorization: openid password env
+
+
+
+###
+# @name POST
+PUT {{url}}/{{endpoint}}
+Authorization: openid password env
+
+
+
+###
+# @name DELETE
+@id=1
+DELETE {{url}}/{{endpoint}}/{{id}}
+Authorization: openid password env

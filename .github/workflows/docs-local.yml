@@ -1,0 +1,153 @@
+name: Docs
+
+on:
+  push:
+    branches:
+      - 'master'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build & Publish 🚀
+    runs-on: self-hosted
+    env:
+      INPUTPATH: asciidocs
+      OUTPUTPATH: dist
+      SLIDES: true
+      BRANCH: gh-pages
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Build
+        uses: quirinecker/asciidoctor-convert-action@main
+        with:
+          slides: ${{ env.SLIDES }}
+          inputPath: ${{ env.INPUTPATH }}
+          outputPath: ${{ env.OUTPUTPATH }}
+      - name: Deploy to GitHub Pages
+        uses: JamesIves/github-pages-deploy-action@releases/v4
+        with:
+          TOKEN: ${{ github.TOKEN }}
+          BRANCH: ${{ env.BRANCH }}
+          FOLDER: ${{ env.OUTPUTPATH }}
+  bump:
+    name: Get And Bump SemVer 👊
+    runs-on: self-hosted
+    needs: [build]
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+      - name: Bump version and push tag
+        uses: anothrNick/github-tag-action@master
+        env:
+          GITHUB_TOKEN: ${{ github.TOKEN }}
+          RELEASE_BRANCHES: master
+          DEFAULT_BUMP: patch
+          WITH_V: false
+  docker-build:
+    name: Build Docker Image 🐋
+    runs-on: self-hosted
+    needs: [bump]
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Checkout site
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: site
+      - name: Touch .env file
+        run: touch site/.env
+      - name: Fill .env file
+        run: |
+            echo NEXT_PUBLIC_PORT=${{ secrets.PORT }} >> site/.env
+            echo NEXT_PUBLIC_START_PAGE=${{ secrets.START_PAGE }} >> site/.env
+            echo NEXT_PUBLIC_PLANTUML_URL=${{ secrets.PLANTUML_URL }} >> site/.env
+            echo NEXT_PUBLIC_SERVER_URL=${{ secrets.SERVER_URL }} >> site/.env
+            echo NEXT_PUBLIC_IS_APP_FOLDER=true >> site/.env
+      - name: Touch keycloak.json file
+        run: touch site/keycloak.json
+      - name: Fill keycloak.json file
+        run: |
+            cat <<EOF >> site/keycloak.json
+            ${{ secrets.KEYCLOAK_FILE }}
+            EOF
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USER }}
+          password: ${{ secrets.DOCKER_HUB_PASSWORD }}
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: ./
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64/v8
+          push: true
+          tags: ${{ secrets.DOCKER_HUB_USER }}/safe-learn:latest
+  deploy:
+    name: Deployment 💻
+    runs-on: self-hosted
+    needs: [docker-build]
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Install OpenVPN
+        run: |
+          sudo apt update
+          sudo apt install -y openvpn openvpn-systemd-resolved
+      - name: Touch OVPN client-config file
+        run: touch client.ovpn
+      - name: Fill OVPN client-config file
+        run: |
+            echo "${{ secrets.VPN_OVPN_FILE }}" >> client.ovpn
+      - name: Connect to VPN 🔓
+        uses: "kota65535/github-openvpn-connect-action@v3"
+        with:
+          config_file: client.ovpn
+          username: ${{ secrets.VPN_USERNAME }}
+          password: ${{ secrets.VPN_PASSWORD }}
+      - name: Installing SSH key 🔑
+        uses: UnterrainerInformatik/setup-ssh-action@v1
+        with:
+          key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+      - name: Create deploy directory 🚧
+        uses: UnterrainerInformatik/ssh-mkdir-action@v1
+        with:
+          dir: /app/deploy/${{ secrets.DEPLOY_DIR }}
+          user: ${{ secrets.DEPLOY_SSH_USER }}
+          host: ${{ secrets.DEPLOY_SERVER }}
+          port: ${{ secrets.DEPLOY_SSH_PORT }}
+      - name: Create data directory 🚧
+        uses: UnterrainerInformatik/ssh-mkdir-action@v1
+        with:
+          dir: /app/data/${{ secrets.DEPLOY_DIR }}
+          user: ${{ secrets.DEPLOY_SSH_USER }}
+          host: ${{ secrets.DEPLOY_SERVER }}
+          port: ${{ secrets.DEPLOY_SSH_PORT }}
+      - name: Deploy using SSH 🚛
+        uses: UnterrainerInformatik/ssh-deploy-action@v1
+        with:
+          source: ./deploy
+          target: /app/deploy/${{ secrets.DEPLOY_DIR }}
+          chmod-mask: 777
+          chmod-selector: ./deploy/*.sh
+          user: ${{ secrets.DEPLOY_SSH_USER }}
+          host: ${{ secrets.DEPLOY_SERVER }}
+          port: ${{ secrets.DEPLOY_SSH_PORT }}
+      - name: Run using SSH 🏃
+        uses: UnterrainerInformatik/ssh-run-action@v1
+        with:
+          dir: /app/deploy/${{ secrets.DEPLOY_DIR }}
+          file: up.sh
+          user: ${{ secrets.DEPLOY_SSH_USER }}
+          host: ${{ secrets.DEPLOY_SERVER }}
+          port: ${{ secrets.DEPLOY_SSH_PORT }}
+

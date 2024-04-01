@@ -1,0 +1,14 @@
+= Lectures
+ifndef::imagesdir[:imagesdir: images]
+:icons: font
+:source-highlighter: highlight.js
+:experimental:
+:sectnums:
+:toc:
+ifdef::backend-html5[]
+
+// https://fontawesome.com/v4.7.0/icons/
+endif::backend-html5[]
+
+== Some Page
+link:https://yourserver/somePage.html[Android - Course]
