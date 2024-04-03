@@ -39,7 +39,7 @@ As a reader for students it has various benefits, such as responsive design allo
 
 ## Technical Explanation
 The purpose of this repository is to provide a platform for all lecture-notes and interactive material for the teacher and students.
-It hides behind a configurable Keycloak Authorization Server and thus your material is not publicly available, circumventing various license's restrictions.
+It hides behind a configurable Keycloak Authorization Server (version >16 as far as I can tell, most current version is recommended) and thus your material is not publicly available, circumventing various license's restrictions.
 
 The reason why it has its own server is because of server-side authentication as opposed to client-side. When doing client-side you'll send the contents anyways, but hide them until the user is authenticated. That, of course, doesn't help at all avoiding any crawlers looking for unlicensed images. In order to do that you have to go server-side authentication which means that you're not sending anything as long as the user is not authenticated. That, of course, may only be achieved by manipulating the server itself, which sadly is not possible with Github Pages (at least not without a costly Enterprise subscription).
 
