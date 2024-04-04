@@ -174,13 +174,14 @@ export function getLdapGroups(req) {
   return r;
 }
 
-export async function getUserAttributes(req) {
+export async function getUserAttributes(req, getAll = false) {
   if (!req || !req.user || !req.user.accessToken ||!req.user.keycloakConfig) {
     return null;
   }
   const keycloakConfig = req.user.keycloakConfig;
   const realm = keycloakConfig.realm;
-  const url = `${keycloakConfig["auth-server-url"]}/realms/${realm}/account`;
+  const u = keycloakConfig["auth-server-url"];
+  const url = `${u.endsWith("/") ? u.slice(0, -1) : u}/realms/${realm}/account`;
 
   // Fetch current user attributes
   const currentAttributes = await fetch(url, {
@@ -189,13 +190,24 @@ export async function getUserAttributes(req) {
       "Content-Type": "application/json",
     },
   })
-    .then((response) => response.json())
-    .then((data) => data.attributes || {})
+    .then((response) => {
+      return response.json();
+    })
+    .then((data) => {
+      for(let key in data.attributes) {
+        data.attributes[key] = data.attributes[key][0];
+      }
+      if(getAll) {
+      // Remove fields from the object that are not needed.
+      let { userProfileMetadata, id, username, emailVerified, ...d} = data;
+      return d;
+      }
+      return data.attributes;
+    })
     .catch((error) => {
       console.error("Error fetching current attributes:", error);
       return {};
     });
-
   return currentAttributes;
 }
 
@@ -205,25 +217,29 @@ export async function setUserAttribute(req, attributeName, attributeValue) {
   }
   const keycloakConfig = req.user.keycloakConfig;
   const realm = keycloakConfig.realm;
-  const url = `${keycloakConfig["auth-server-url"]}/realms/${realm}/account`;
+  const u = keycloakConfig["auth-server-url"];
+  const url = `${u.endsWith("/") ? u.slice(0, -1) : u}/realms/${realm}/account`;
 
   // Fetch current user attributes
-  const currentAttributes = await getUserAttributes(req);
+  const currentAttributes = await getUserAttributes(req, true);
 
   // Merge current and new attributes
-  const mergedAttributes = { ...currentAttributes, [attributeName]: attributeValue };
-
+  const mas = { ...currentAttributes.attributes, [attributeName]: attributeValue };
+  const mergedAttributes = { ...currentAttributes, attributes: mas };
+  
   const result = fetch(url, {
     method: "POST",
     headers: {
       Authorization: "Bearer " + req.user.accessToken,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ attributes: mergedAttributes }),
+    body: JSON.stringify(mergedAttributes),
   })
     .then((response) => {
       if (!response.ok) {
-        throw new Error("Failed to update attribute" + JSON.stringify({ attributeName: attributeName, attributeValue: attributeValue }, null, 2));
+        console.log('url', url);
+        console.log('response', JSON.stringify(response, null, 2));
+        throw new Error("Failed to update attribute " + JSON.stringify({ mergedAttributes: mergedAttributes }, null, 2));
       }
       return true;
     })

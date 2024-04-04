@@ -95,6 +95,7 @@ async function hasRoles(req, clientRoles, all, override) {
     }
     let clientAccess = null;
     const attributes = await getUserAttributes(req);
+    const ccr = await getClientRoles(req, clientRoles);
     if (
       req.user.rolesCalculated !== undefined &&
       req.user.rolesCalculated !== null

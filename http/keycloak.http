@@ -1,8 +1,6 @@
-@keycloakUrl=https://auth.htl-leonding.ac.at
-@endpoint=admin/realms
-
-@realm=unterrainer
-@clientId=secureLectures
+@keycloakUrl=https://auth.unterrainer.info
+@realm=safeLearn
+@clientId=safeLearn
 ###
 # @name POST OWN attributes (different URL) (needs no additional realm-management role)
 POST {{keycloakUrl}}/realms/{{realm}}/account
@@ -10,8 +8,12 @@ Authorization: openid password env
 Content-Type: application/json
 
 {
+  "firstName": "Tea",
+  "lastName": "Cher",
+  "email": "teacher@unterrainer.info",
   "attributes": {
-    "customAttribute": "custom value2"
+    "config": "custom value2",
+    "lastVisitedUrl": "https://safelearn.unterrainer.info"
   }
 }
 
