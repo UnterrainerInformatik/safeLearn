@@ -4,6 +4,15 @@ As a teacher you probably have to cover a vast field of expertise and to keep up
 This project is the attempt to unify all teaching materials using Markdown and Obsidian as an editor while using this site as a reader for the students.
 As a reader for students it has various benefits, such as responsive design allowing the use of a mobile phone when learning, or customizability of the look-and-feel to suit various tastes.
 
+See a working version of this project, hosted by myself, here:
+https://safelearn.unterrainer.info
+
+| USER    | PASSWORD | Explanation                       |
+| ------- | -------- | --------------------------------- |
+| teacher | teacher  | Teacher-user with full access.    |
+| student | student  | Student-user with limited access. |
+You will not be able to edit the files, just to watch them.
+If you'd like to host your own files, you'll have to fork this repository.
 ### Features for Teachers
 * One platform for all teaching materials
 * Everything is Markdown
