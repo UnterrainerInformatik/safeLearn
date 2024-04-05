@@ -121,14 +121,14 @@ jobs:
       - name: Create deploy directory 🚧
         uses: UnterrainerInformatik/ssh-mkdir-action@v1
         with:
-          dir: /app/deploy/${{ secrets.DEPLOY_DIR }}
+          dir: ${{ secrets.DEPLOY_DIR }}
           user: ${{ secrets.DEPLOY_SSH_USER }}
           host: ${{ secrets.DEPLOY_SERVER }}
           port: ${{ secrets.DEPLOY_SSH_PORT }}
       - name: Create data directory 🚧
         uses: UnterrainerInformatik/ssh-mkdir-action@v1
         with:
-          dir: /app/data/${{ secrets.DEPLOY_DIR }}
+          dir: ${{ secrets.DATA_DIR }}
           user: ${{ secrets.DEPLOY_SSH_USER }}
           host: ${{ secrets.DEPLOY_SERVER }}
           port: ${{ secrets.DEPLOY_SSH_PORT }}
@@ -136,7 +136,7 @@ jobs:
         uses: UnterrainerInformatik/ssh-deploy-action@v1
         with:
           source: ./deploy
-          target: /app/deploy/${{ secrets.DEPLOY_DIR }}
+          target: ${{ secrets.DEPLOY_DIR }}
           chmod-mask: 777
           chmod-selector: ./deploy/*.sh
           user: ${{ secrets.DEPLOY_SSH_USER }}
@@ -145,7 +145,7 @@ jobs:
       - name: Run using SSH 🏃
         uses: UnterrainerInformatik/ssh-run-action@v1
         with:
-          dir: /app/deploy/${{ secrets.DEPLOY_DIR }}
+          dir: ${{ secrets.DEPLOY_DIR }}
           file: up.sh
           user: ${{ secrets.DEPLOY_SSH_USER }}
           host: ${{ secrets.DEPLOY_SERVER }}
