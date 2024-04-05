@@ -715,14 +715,14 @@ async function getDirectoryListing(req) {
     return hasRole ? f : null;
   }));
   const filteredFiles = files.filter(f => f !== null);
-  let r = await getDirectoryListingInternal(req, filteredFiles, [], 1);
+  let r = await getDirectoryListingInternal(req, filteredFiles, []);
   if (filteredFiles[filteredFiles.length - 1].folders.length > 0) {
     r += `</div></div>`;
   }
   return r;
 }
 
-async function getDirectoryListingInternal(req, files, folders, indent) {
+async function getDirectoryListingInternal(req, files, folders) {
   let html = "";
   let lastProcessedFileIndex = -1;
   let lastFile = null;
@@ -746,17 +746,17 @@ async function getDirectoryListingInternal(req, files, folders, indent) {
       folders = file.folderArray;
 
       // Add the current file to the new folder section
-      html += insertDirLink(file, req, indent + 1, i, files);
+      html += insertDirLink(file, req, file.folderArray.length, i, files);
 
       // Recursive call for subfolder
       const subfolderFiles = files.filter(
         (f, index) => f.folders.startsWith(folders) && index > i
       );
+      console.log('recursive call', subfolderFiles, folders, file.folderArray.length);
       html += await getDirectoryListingInternal(
         req,
         subfolderFiles,
-        folders,
-        indent + 1
+        folders
       );
 
       // Update the last processed file index
@@ -764,7 +764,7 @@ async function getDirectoryListingInternal(req, files, folders, indent) {
       i = lastProcessedFileIndex; // Skip the files that have been processed
     } else if (i > lastProcessedFileIndex) {
       // Add file to current folder section
-      html += insertDirLink(file, req, indent, i, files);
+      html += insertDirLink(file, req, file.folderArray.length, i, files);
     }
   }
   return html;
