@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     name: Build & Publish 🚀
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     env:
       INPUTPATH: asciidocs
       OUTPUTPATH: dist
@@ -32,7 +32,7 @@ jobs:
           FOLDER: ${{ env.OUTPUTPATH }}
   bump:
     name: Get And Bump SemVer 👊
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: [build]
     steps:
       - name: Checkout repo
@@ -48,7 +48,7 @@ jobs:
           WITH_V: false
   docker-build:
     name: Build Docker Image 🐋
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: [bump]
     steps:
       - name: Checkout repo
@@ -94,7 +94,7 @@ jobs:
           tags: ${{ secrets.DOCKER_HUB_USER }}/safe-learn:latest
   deploy:
     name: Deployment 💻
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: [docker-build]
     steps:
       - name: Checkout repo
