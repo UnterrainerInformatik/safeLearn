@@ -135,7 +135,7 @@ jobs:
       - name: Deploy using SSH 🚛
         uses: UnterrainerInformatik/ssh-deploy-action@v1
         with:
-          source: ./deploy
+          source: ./deploy/
           target: ${{ secrets.DEPLOY_DIR }}
           chmod-mask: 777
           chmod-selector: ./deploy/*.sh
