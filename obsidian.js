@@ -752,7 +752,6 @@ async function getDirectoryListingInternal(req, files, folders) {
       const subfolderFiles = files.filter(
         (f, index) => f.folders.startsWith(folders) && index > i
       );
-      console.log('recursive call', subfolderFiles, folders, file.folderArray.length);
       html += await getDirectoryListingInternal(
         req,
         subfolderFiles,
