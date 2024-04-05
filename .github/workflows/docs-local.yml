@@ -137,6 +137,8 @@ jobs:
       - name: Fill .env file for deployment
         run: |
             echo WEBSERVER_PORT=${{ secrets.WEBSERVER_PORT }} >> ./deploy/.env
+            echo INTERNAL_PORT=${{ secrets.PORT }} >> ./deploy/.env
+            echo DOCKER_HUB_USER=${{ secrets.DOCKER_HUB_USER }} >> ./deploy/.env
       - name: Deploy using SSH 🚛
         uses: UnterrainerInformatik/ssh-deploy-action@v1
         with:

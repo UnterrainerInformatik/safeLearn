@@ -2,11 +2,11 @@ version: '3'
 services:
 
   test:
-    image: gufalcon/safe-learn:latest
+    image: ${DOCKER_HUB_USER}/safe-learn:latest
     container_name: safe-learn
     restart: unless-stopped
     ports:
-      - "1112:8080"
+      - "${WEBSERVER_PORT}:${INTERNAL_PORT}"
 
 networks:
   default:
