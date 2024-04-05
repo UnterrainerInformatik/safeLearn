@@ -132,6 +132,11 @@ jobs:
           user: ${{ secrets.DEPLOY_SSH_USER }}
           host: ${{ secrets.DEPLOY_SERVER }}
           port: ${{ secrets.DEPLOY_SSH_PORT }}
+      - name: Touch .env file for deployment
+        run: touch ./deploy/.env
+      - name: Fill .env file for deployment
+        run: |
+            echo WEBSERVER_PORT=${{ secrets.WEBSERVER_PORT }} >> ./deploy/.env
       - name: Deploy using SSH 🚛
         uses: UnterrainerInformatik/ssh-deploy-action@v1
         with:
