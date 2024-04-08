@@ -1,0 +1,71 @@
+@startuml
+
+  database "Database" as database2
+    component "Client 2" as client2
+    component "Client 3" as client3
+    component "Client 4" as client4
+    component "Server 4" as server4
+
+    client2 --> server4
+    client3 --> server4
+    client4 --> server4
+    server4 --> database2
+
+    component "Client 5" as client5
+    component "Client 6" as client6
+    component "Client 7" as client7
+    component "Server 5" as server5
+    component "Server 6" as server6
+    component "Server 7" as server7
+    database "Database" as database3
+
+    client5 --> server5
+    client5 --> server6
+    client5 --> server7
+    client6 --> server5
+    client6 --> server6
+    client6 --> server7
+    client7 --> server5
+    client7 --> server6
+    client7 --> server7
+    server5 --> database3
+    server6 --> database3
+    server7 --> database3
+
+  @enduml
+
+  client --> server1
+  client --> server2
+  client --> server3
+  server1 --> database1
+  server2 --> database1
+  server3 --> database1
+
+  component "Client 2" as client2
+  component "Client 3" as client3
+  component "Client 4" as client4
+  component "Server 4" as server4
+
+  client2 --> server4
+  client3 --> server4
+  client4 --> server4
+  server4 --> database2
+}
+
+@enduml
+package "Distributed Systems" {
+    component "Client" as client
+    component "Server 1" as server1
+    component "Server 2" as server2
+    component "Server 3" as server3
+    database "Database" as database
+
+    client --> server1
+    client --> server2
+    client --> server3
+    server1 --> database1
+    server2 --> database1
+    server3 --> database1
+}
+
+@enduml

@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="generator" content="Asciidoctor 2.0.22">
 <link rel="icon" type="image/png" href="themes/favicon.png">
-<title>Lectures</title>
+<title>JWT - Group Puzzle</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic%7CNoto+Serif:400,400italic,700,700italic%7CDroid+Sans+Mono:400,700">
 <style>
 /*! Asciidoctor default stylesheet | MIT License | https://asciidoctor.org */
@@ -438,22 +438,26 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 </head>
 <body class="article toc2 toc-left">
 <div id="header">
-<h1>Lectures</h1>
+<h1>JWT - Group Puzzle</h1>
 <div id="toc" class="toc2">
 <div id="toctitle">Table of Contents</div>
 <ul class="sectlevel1">
-<li><a href="#_android_course">1. Android - Course</a></li>
-<li><a href="#_jwt_lecture">2. JWT - Lecture</a>
+<li><a href="#_vorwissen">1. Vorwissen</a></li>
+<li><a href="#_ablauf">2. Ablauf</a></li>
+<li><a href="#_arbeitsauftrag">3. Arbeitsauftrag</a>
 <ul class="sectlevel2">
-<li><a href="#_jwt_group_puzzle">2.1. JWT - Group Puzzle</a></li>
+<li><a href="#_fachliche_lernziele">3.1. Fachliche Lernziele</a></li>
+<li><a href="#_soziale_lernziele">3.2. Soziale Lernziele</a></li>
+<li><a href="#_methodisch_didaktische_hinweise">3.3. Methodisch-didaktische Hinweise</a></li>
 </ul>
 </li>
-<li><a href="#_package_by_layer_vs_package_by_feature">3. Package by Layer vs. Package by Feature</a></li>
-<li><a href="#_testing">4. TESTING</a>
+<li><a href="#_texte">4. Texte</a></li>
+<li><a href="#_kompetenzen">5. Kompetenzen</a>
 <ul class="sectlevel2">
-<li><a href="#_testing_md_files">4.1. Testing MD Files</a></li>
+<li><a href="#_legende">5.1. Legende</a></li>
 </ul>
 </li>
+<li><a href="#_quellen">6. Quellen</a></li>
 </ul>
 </div>
 </div>
@@ -461,64 +465,333 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <div id="preamble">
 <div class="sectionbody">
 <div class="paragraph">
-<p><span class="icon"><a class="image" href="https://raw.githubusercontent.com/UnterrainerInformatik/lectures/main/asciidocs/index.adoc"><i class="fa fa-file-text-o"></i></a></span> ‏ ‏ ‎
-<span class="icon"><a class="image" href="https://github.com/UnterrainerInformatik/lectures"><i class="fa fa-github-square"></i></a></span> ‏ ‏ ‎</p>
+<p><span class="icon"><a class="image" href="https://raw.githubusercontent.com/UnterrainerInformatik/documents/main/asciidocs/jwt-group-puzzle.adoc"><i class="fa fa-file-text-o"></i></a></span> ‏ ‏ ‎
+<span class="icon"><a class="image" href="https://github.com/UnterrainerInformatik/documents"><i class="fa fa-github-square"></i></a></span> ‏ ‏ ‎</p>
+</div>
+<div class="paragraph">
+<p><a href="https://htl.unterrainer.info/index.html">BACK to Index</a></p>
+</div>
+<div class="paragraph">
+<p><a href="https://htl.unterrainer.info/jwt.html">BACK to JWT</a></p>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_android_course"><a class="anchor" href="#_android_course"></a>1. Android - Course</h2>
+<h2 id="_vorwissen"><a class="anchor" href="#_vorwissen"></a>1. Vorwissen</h2>
 <div class="sectionbody">
-<div class="paragraph">
-<p><a href="https://htl.unterrainer.info/android.html">Android - Course</a></p>
+<div class="ulist">
+<ul>
+<li>
+<p>Was ist ein verteiltes System?</p>
+</li>
+</ul>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_jwt_lecture"><a class="anchor" href="#_jwt_lecture"></a>2. JWT - Lecture</h2>
+<h2 id="_ablauf"><a class="anchor" href="#_ablauf"></a>2. Ablauf</h2>
+<div class="sectionbody">
+<table class="tableblock frame-all grid-all stretch">
+<colgroup>
+<col style="width: 90.909%;">
+<col style="width: 9.091%;">
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top">Ablauf inkl. methodisch-didaktische Hinweise	Lehr-/Lernmittel</th>
+<th class="tableblock halign-left valign-top">Dauer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Einleitungsvortrag zum Abgleich des Vorwissens	Frontalunterricht</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">20</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Erklärung des Gruppenpuzzles	Frontalunterricht</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">10</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Gruppenpuzzle - THINK-Phase</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">20</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Gruppenpuzzle - SQUARE-Phase</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">40</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Gruppenpuzzle - SHARE-Phase</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">40</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_arbeitsauftrag"><a class="anchor" href="#_arbeitsauftrag"></a>3. Arbeitsauftrag</h2>
 <div class="sectionbody">
 <div class="paragraph">
-<p><a href="https://htl.unterrainer.info/jwt.html">JWT - Lecture</a></p>
+<p>Methode: Gruppenpuzzle mit Stafettenpräsentation</p>
 </div>
 <div class="sect2">
-<h3 id="_jwt_group_puzzle"><a class="anchor" href="#_jwt_group_puzzle"></a>2.1. JWT - Group Puzzle</h3>
-<div class="paragraph">
-<p><a href="https://htl.unterrainer.info/jwt-group-puzzle.html">JWT - Group Puzzle</a></p>
-</div>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_package_by_layer_vs_package_by_feature"><a class="anchor" href="#_package_by_layer_vs_package_by_feature"></a>3. Package by Layer vs. Package by Feature</h2>
-<div class="sectionbody">
-<div class="paragraph">
-<p><a href="https://htl.unterrainer.info/package-by-layer-feature.html">Package by Layer vs. Package by Feature</a></p>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_testing"><a class="anchor" href="#_testing"></a>4. TESTING</h2>
-<div class="sectionbody">
-<div class="paragraph">
-<p><a href="https://htl.unterrainer.info/Lernstrecke.md">Lernstrecke</a></p>
+<h3 id="_fachliche_lernziele"><a class="anchor" href="#_fachliche_lernziele"></a>3.1. Fachliche Lernziele</h3>
+<table class="tableblock frame-all grid-all stretch">
+<colgroup>
+<col style="width: 62.5%;">
+<col style="width: 12.5%;">
+<col style="width: 12.5%;">
+<col style="width: 12.5%;">
+</colgroup>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Ich weiß um die Grundzüge von JWTs und kann sie erklären.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">voll erreicht</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">überwiegend erreicht</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">nicht überwiegend erreicht</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Ich kenne verschiedene Verwendungsmöglichkeiten von JWTs.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">voll erreicht</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">überwiegend erreicht</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">nicht überwiegend erreicht</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Ich kann den Aufbau eines JWTs schildern.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">voll erreicht</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">überwiegend erreicht</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">nicht überwiegend erreicht</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Ich kann schildern, wie eine Benutzerrolle in einem JWT transportiert wird.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">voll erreicht</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">überwiegend erreicht</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">nicht überwiegend erreicht</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Ich verstehe die Vorteile von JWTs in Verbindung mit OAuth2 und OpenIDConnect.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">voll erreicht</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">überwiegend erreicht</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">nicht überwiegend erreicht</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Ich weiß, was ein Authentication-Server im Bereich OAuth2 macht.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">voll erreicht</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">überwiegend erreicht</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">nicht überwiegend erreicht</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Ich kenne die Funktion und Funktionsweise eines Access-Tokens.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">voll erreicht</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">überwiegend erreicht</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">nicht überwiegend erreicht</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Ich kenne die Funktion und Funktionsweise eines Refresh-Tokens.</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">voll erreicht</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">überwiegend erreicht</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">nicht überwiegend erreicht</p></td>
+</tr>
+</tbody>
+</table>
 </div>
 <div class="sect2">
-<h3 id="_testing_md_files"><a class="anchor" href="#_testing_md_files"></a>4.1. Testing MD Files</h3>
+<h3 id="_soziale_lernziele"><a class="anchor" href="#_soziale_lernziele"></a>3.2. Soziale Lernziele</h3>
+<table class="tableblock frame-all grid-all stretch">
+<colgroup>
+<col style="width: 100%;">
+</colgroup>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Texte erfassen können</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Zeitpläne einhalten können</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Zuhören können</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Angemessene Lautstärke einhalten können</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Beim Thema bleiben können.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="sect2">
+<h3 id="_methodisch_didaktische_hinweise"><a class="anchor" href="#_methodisch_didaktische_hinweise"></a>3.3. Methodisch-didaktische Hinweise</h3>
 <div class="sect3">
-<h4 id="_on_github_external_link"><a class="anchor" href="#_on_github_external_link"></a>4.1.1. On GitHub (external link)</h4>
+<h4 id="_einzelarbeit_20_minuten_think_phase"><a class="anchor" href="#_einzelarbeit_20_minuten_think_phase"></a>3.3.1. Einzelarbeit (20 Minuten) THINK-Phase</h4>
 <div class="paragraph">
-<p><a href="https://htl.unterrainer.info/convert?url=https://raw.githubusercontent.com/UnterrainerInformatik/java-http-server/master/README.md">README.md</a></p>
+<p>Sie erhalten einen Text mit Links (Unterrichtsmaterialien), der sich mit einem Thema auseinandersetzt. Lesen Sie sich bitte den Text aufmerksam durch und fassen Sie die wesentlichen Inhalte in Einzelarbeit stichwortartig zusammen.</p>
 </div>
 </div>
 <div class="sect3">
-<h4 id="_on_this_site_internal_link"><a class="anchor" href="#_on_this_site_internal_link"></a>4.1.2. On this site (internal link)</h4>
+<h4 id="_expertenphase_40_minuten_square_phase"><a class="anchor" href="#_expertenphase_40_minuten_square_phase"></a>3.3.2. Expertenphase (40 Minuten) SQUARE-Phase</h4>
 <div class="paragraph">
-<p><a href="https://htl.unterrainer.info/md/Test-MD-File.md">direct call: Test-MD-File.md</a></p>
+<p>Sie bilden nun mit allen anderen Teilnehmer/innen, die denselben Text gelesen haben, eine Arbeitsgruppe (Expertengruppe für dieses eine Thema).
+Ihre Aufgabe ist es, sich über diesen Text auszutauschen und Ihre Erkenntnisse zu vergleichen. Einigen Sie sich auf die wesentlichen Aussagen, die Sie den anderen Teilnehmer/innen mitteilen möchten. Anschließend erstellen Sie ein digitales Lernplakat (oder ein anderes digitales Präsentationsmedium), das als Grundlage für eine spätere Präsentation dieser Inhalte dienen soll. Jeder/Jede von Ihnen wird dieses Thema präsentieren müssen.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_stafettenpräsentation_je_thema_10_minuten_share_phase"><a class="anchor" href="#_stafettenpräsentation_je_thema_10_minuten_share_phase"></a>3.3.3. Stafettenpräsentation (je Thema 10 Minuten) SHARE-Phase</h4>
+<div class="paragraph">
+<p>Sie werden in neue Gruppen eingetailt, in denen von jedem Thema mindestens eine Expertin / ein Experte vertreten ist.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_diskussion_20_minuten"><a class="anchor" href="#_diskussion_20_minuten"></a>3.3.4. Diskussion (20 Minuten)</h4>
+<div class="paragraph">
+<p>Wir diskutieren gemeinsam in der Klasse über den Ausgang, die Aufgabe und die benutzte Methodik.</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_texte"><a class="anchor" href="#_texte"></a>4. Texte</h2>
+<div class="sectionbody">
+<div class="exampleblock">
+<div class="content">
+<div class="paragraph">
+<p><a href="https://htl.unterrainer.info/jwt-group-puzzle-text-1.html">Text Gruppe 1</a></p>
 </div>
 <div class="paragraph">
-<p><a href="https://htl.unterrainer.info/convert?url=https://htl.unterrainer.info/md/Test-MD-File.md">convert call: Test-MD-File.md</a></p>
+<p><a href="https://htl.unterrainer.info/jwt-group-puzzle-text-2.html">Text Gruppe 2</a></p>
+</div>
+<div class="paragraph">
+<p><a href="https://htl.unterrainer.info/jwt-group-puzzle-text-3.html">Text Gruppe 3</a></p>
+</div>
+<div class="paragraph">
+<p><a href="https://htl.unterrainer.info/jwt-group-puzzle-text-4.html">Text Gruppe 4</a></p>
 </div>
 </div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_kompetenzen"><a class="anchor" href="#_kompetenzen"></a>5. Kompetenzen</h2>
+<div class="sectionbody">
+<table class="tableblock frame-all grid-all stretch">
+<colgroup>
+<col style="width: 90.909%;">
+<col style="width: 9.091%;">
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top">Kompetenzen</th>
+<th class="tableblock halign-left valign-top">Stufe</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Architekturen erklären und beschreiben</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">B</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Synchronisationsmethoden</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">B</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Softwarearchitektur verteilter Systeme</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">B</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Web Development Stack, Socktes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">D</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Auth, Webservices, REST</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">C</p></td>
+</tr>
+</tbody>
+</table>
+<table class="tableblock frame-all grid-all stretch">
+<colgroup>
+<col style="width: 90.909%;">
+<col style="width: 9.091%;">
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top">Soziale, personelle und Methoden-Kompetenzen</th>
+<th class="tableblock halign-left valign-top">Stufe</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Gruppenarbeit (Gruppenpuzzle)</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">C</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Erklären vor Klassenkollegen</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">C</p></td>
+</tr>
+</tbody>
+</table>
+<div class="sect2">
+<h3 id="_legende"><a class="anchor" href="#_legende"></a>5.1. Legende</h3>
+<table class="tableblock frame-all grid-all stretch">
+<colgroup>
+<col style="width: 9.0909%;">
+<col style="width: 90.9091%;">
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top">Stufe</th>
+<th class="tableblock halign-left valign-top">Beschreibung</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">A</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">wiedergeben	Lernende können die Inhalte wiedergeben</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">B</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">verstehen	Lernende verstehen die Thematik bzw. können diese benennen</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">C</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">anwenden	Lernende können Aufgaben anhand von AB oder Aufträgen erfüllen</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">D</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">analysieren	Lernende geben eigene Informationen an andere weiter</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">E</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">entwickeln	Fallbeispiele, Projekte - Lernende arbeiten selbstständig ohne Vorgabe</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_quellen"><a class="anchor" href="#_quellen"></a>6. Quellen</h2>
+<div class="sectionbody">
+<div class="ulist">
+<ul>
+<li>
+<p><a href="https://jwt.io" class="bare">https://jwt.io</a></p>
+</li>
+<li>
+<p><a href="https://jwt.io/introduction" class="bare">https://jwt.io/introduction</a></p>
+</li>
+<li>
+<p><a href="https://jwt.io/#debugger-io" class="bare">https://jwt.io/#debugger-io</a></p>
+</li>
+<li>
+<p><a href="https://quarkus.io/guides/security-jwt" class="bare">https://quarkus.io/guides/security-jwt</a></p>
+</li>
+<li>
+<p><a href="https://developer.okta.com/docs/guides/implement-grant-type/authcode/main/" class="bare">https://developer.okta.com/docs/guides/implement-grant-type/authcode/main/</a></p>
+</li>
+<li>
+<p><a href="https://auth0.com/blog/refresh-tokens-what-are-they-and-when-to-use-them/" class="bare">https://auth0.com/blog/refresh-tokens-what-are-they-and-when-to-use-them/</a></p>
+</li>
+</ul>
 </div>
 </div>
 </div>

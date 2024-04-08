@@ -1,0 +1,28 @@
+@startuml
+
+component "Peer A"
+component "Peer B"
+component "Peer C"
+
+component "Peer D"
+component "Peer E"
+component "Peer J"
+component "Peer K"
+component "Peer L"
+component "Peer M"
+
+"Peer A" -- "Peer B"
+"Peer A" -- "Peer C"
+"Peer B" -- "Peer C"
+"Peer D" -- "Peer E"
+"Peer E" -- "Peer K"
+"Peer L" -- "Peer M"
+"Peer A" -- "Peer D"
+"Peer C" -- "Peer E"
+"Peer D" -- "Peer K"
+"Peer J" -- "Peer L"
+"Peer C" -- "Peer D"
+"Peer B" -- "Peer E"
+"Peer J" -- "Peer M"
+
+@enduml

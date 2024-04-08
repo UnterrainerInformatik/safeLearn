@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="generator" content="Asciidoctor 2.0.22">
 <link rel="icon" type="image/png" href="themes/favicon.png">
-<title>Lectures</title>
+<title>Android - Course - 1 - Lifecycles &amp; ViewModel</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic%7CNoto+Serif:400,400italic,700,700italic%7CDroid+Sans+Mono:400,700">
 <style>
 /*! Asciidoctor default stylesheet | MIT License | https://asciidoctor.org */
@@ -438,20 +438,34 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 </head>
 <body class="article toc2 toc-left">
 <div id="header">
-<h1>Lectures</h1>
+<h1>Android - Course - 1 - Lifecycles &amp; ViewModel</h1>
 <div id="toc" class="toc2">
 <div id="toctitle">Table of Contents</div>
 <ul class="sectlevel1">
-<li><a href="#_android_course">1. Android - Course</a></li>
-<li><a href="#_jwt_lecture">2. JWT - Lecture</a>
+<li><a href="#_ui_controllers">1. UI-Controllers</a>
 <ul class="sectlevel2">
-<li><a href="#_jwt_group_puzzle">2.1. JWT - Group Puzzle</a></li>
+<li><a href="#_activities">1.1. Activities</a></li>
+<li><a href="#_fragments">1.2. Fragments</a></li>
 </ul>
 </li>
-<li><a href="#_package_by_layer_vs_package_by_feature">3. Package by Layer vs. Package by Feature</a></li>
-<li><a href="#_testing">4. TESTING</a>
+<li><a href="#_lifecycles">2. Lifecycles</a>
 <ul class="sectlevel2">
-<li><a href="#_testing_md_files">4.1. Testing MD Files</a></li>
+<li><a href="#_activity_lifecycle">2.1. Activity Lifecycle</a></li>
+<li><a href="#_fragment_lifecycle">2.2. Fragment Lifecycle</a></li>
+<li><a href="#_daten_persistieren">2.3. Daten Persistieren</a></li>
+</ul>
+</li>
+<li><a href="#_viewmodel">3. ViewModel</a>
+<ul class="sectlevel2">
+<li><a href="#_viewmodel_lifecycle">3.1. ViewModel Lifecycle</a></li>
+<li><a href="#_shared_viewmodel">3.2. Shared Viewmodel</a></li>
+</ul>
+</li>
+<li><a href="#_livedata">4. LiveData</a>
+<ul class="sectlevel2">
+<li><a href="#_observer_pattern">4.1. Observer Pattern</a></li>
+<li><a href="#_livecycle_awareness">4.2. Livecycle-Awareness</a></li>
+<li><a href="#_vorteile">4.3. Vorteile</a></li>
 </ul>
 </li>
 </ul>
@@ -461,62 +475,357 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <div id="preamble">
 <div class="sectionbody">
 <div class="paragraph">
-<p><span class="icon"><a class="image" href="https://raw.githubusercontent.com/UnterrainerInformatik/lectures/main/asciidocs/index.adoc"><i class="fa fa-file-text-o"></i></a></span> ‏ ‏ ‎
-<span class="icon"><a class="image" href="https://github.com/UnterrainerInformatik/lectures"><i class="fa fa-github-square"></i></a></span> ‏ ‏ ‎</p>
+<p><span class="icon"><a class="image" href="https://raw.githubusercontent.com/UnterrainerInformatik/documents/main/asciidocs/android-3.adoc"><i class="fa fa-file-text-o"></i></a></span> ‏ ‏ ‎
+<span class="icon"><a class="image" href="https://github.com/UnterrainerInformatik/documents"><i class="fa fa-github-square"></i></a></span> ‏ ‏ ‎</p>
+</div>
+<div class="paragraph">
+<p><a href="https://htl.unterrainer.info/index.html">BACK to Index</a></p>
+</div>
+<div class="paragraph">
+<p><a href="https://htl.unterrainer.info/android.html">BACK to Android - Course</a></p>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_android_course"><a class="anchor" href="#_android_course"></a>1. Android - Course</h2>
+<h2 id="_ui_controllers"><a class="anchor" href="#_ui_controllers"></a>1. UI-Controllers</h2>
 <div class="sectionbody">
 <div class="paragraph">
-<p><a href="https://htl.unterrainer.info/android.html">Android - Course</a></p>
+<p>In Android gibt es 2 Arten von UI-Controllern:
+  * Activities
+  * Fragments</p>
 </div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_jwt_lecture"><a class="anchor" href="#_jwt_lecture"></a>2. JWT - Lecture</h2>
-<div class="sectionbody">
 <div class="paragraph">
-<p><a href="https://htl.unterrainer.info/jwt.html">JWT - Lecture</a></p>
+<p>Änderungen am Android-System führen im Allgemeinen dazu, dass UI-Controller zerstört und wieder neu erstellt werden
+Man hat im allgemeinen keinen Einfluss auf diese Vorgänge&#8230;&#8203; Das passiert einfach bei:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>User Aktionen</p>
+<div class="ulist">
+<ul>
+<li>
+<p>Rotation</p>
+</li>
+<li>
+<p>Zurück-Button</p>
+</li>
+<li>
+<p>&#8230;&#8203;</p>
+</li>
+</ul>
+</div>
+</li>
+<li>
+<p>System Events</p>
+<div class="ulist">
+<ul>
+<li>
+<p>Konfigurationsänderungen</p>
+</li>
+<li>
+<p>Zu wenig Speicher</p>
+</li>
+<li>
+<p>&#8230;&#8203;</p>
+</li>
+</ul>
+</div>
+</li>
+</ul>
+</div>
+<div class="exampleblock">
+<div class="content">
+<div class="admonitionblock warning">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-warning" title="Warning"></i>
+</td>
+<td class="content">
+Handys raus, App starten und dann rotieren, pausieren, App switchen, etc&#8230;&#8203; Was glaubt ihr passiert hier wohl mit den Applikationen im Hintergund und warum kommen die zum Beispiel beim Switchen wieder zurück an genau die richtige Stelle?
+</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>Daten sollten daher NICHT direkt in Activities oder Fragments gespeichert werden!
+Diese wären dann nämlich einfach weg.</p>
+</div>
+</div>
 </div>
 <div class="sect2">
-<h3 id="_jwt_group_puzzle"><a class="anchor" href="#_jwt_group_puzzle"></a>2.1. JWT - Group Puzzle</h3>
+<h3 id="_activities"><a class="anchor" href="#_activities"></a>1.1. Activities</h3>
+<div class="ulist">
+<ul>
+<li>
+<p>Android Applikationen bestehen aus Activities</p>
+</li>
+<li>
+<p>Diese konzentrieren sich auf eine einzelne Handlung eines Users (deswegen "Activity")</p>
+</li>
+</ul>
+</div>
 <div class="paragraph">
-<p><a href="https://htl.unterrainer.info/jwt-group-puzzle.html">JWT - Group Puzzle</a></p>
+<p><span class="image"><img src="images/android-3-1.png" alt="android 3 1" width="70%"></span></p>
 </div>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_package_by_layer_vs_package_by_feature"><a class="anchor" href="#_package_by_layer_vs_package_by_feature"></a>3. Package by Layer vs. Package by Feature</h2>
-<div class="sectionbody">
-<div class="paragraph">
-<p><a href="https://htl.unterrainer.info/package-by-layer-feature.html">Package by Layer vs. Package by Feature</a></p>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_testing"><a class="anchor" href="#_testing"></a>4. TESTING</h2>
-<div class="sectionbody">
-<div class="paragraph">
-<p><a href="https://htl.unterrainer.info/Lernstrecke.md">Lernstrecke</a></p>
 </div>
 <div class="sect2">
-<h3 id="_testing_md_files"><a class="anchor" href="#_testing_md_files"></a>4.1. Testing MD Files</h3>
-<div class="sect3">
-<h4 id="_on_github_external_link"><a class="anchor" href="#_on_github_external_link"></a>4.1.1. On GitHub (external link)</h4>
+<h3 id="_fragments"><a class="anchor" href="#_fragments"></a>1.2. Fragments</h3>
+<div class="ulist">
+<ul>
+<li>
+<p>Fragments sind wiederverwendbare UI-Elemente</p>
+</li>
+<li>
+<p>Sie sind Teile von Activities</p>
+</li>
+</ul>
+</div>
 <div class="paragraph">
-<p><a href="https://htl.unterrainer.info/convert?url=https://raw.githubusercontent.com/UnterrainerInformatik/java-http-server/master/README.md">README.md</a></p>
+<p><span class="image"><img src="images/android-3-2.png" alt="android 3 2" width="80%"></span></p>
 </div>
 </div>
-<div class="sect3">
-<h4 id="_on_this_site_internal_link"><a class="anchor" href="#_on_this_site_internal_link"></a>4.1.2. On this site (internal link)</h4>
-<div class="paragraph">
-<p><a href="https://htl.unterrainer.info/md/Test-MD-File.md">direct call: Test-MD-File.md</a></p>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_lifecycles"><a class="anchor" href="#_lifecycles"></a>2. Lifecycles</h2>
+<div class="sectionbody">
+<div class="ulist">
+<ul>
+<li>
+<p>Unterschiedliche Elemente in Android können unterschiedliche Lifecycles haben.</p>
+</li>
+<li>
+<p>Diese bestimmen die Events, die automatisch vom System ausgelöst werden.</p>
+</li>
+<li>
+<p>Das System kann damit die Lebensdauer von Elementen verwalten.</p>
+</li>
+</ul>
 </div>
 <div class="paragraph">
-<p><a href="https://htl.unterrainer.info/convert?url=https://htl.unterrainer.info/md/Test-MD-File.md">convert call: Test-MD-File.md</a></p>
+<p><strong>Beispiel:</strong>
+Benötige eine Applikation mit höherer Priorität mehr Speicher, werden pausierte Activities einfach gelöscht.</p>
+</div>
+<div class="paragraph">
+<p>Dabei verliert man das jeweilige Element natürlich.</p>
+</div>
+<div class="paragraph">
+<p><strong>Man ist selbst dafür verantwortlich, dass die Daten dieses Prozedere überleben und das Element später wieder aufgebaut werden kann.</strong></p>
+</div>
+<div class="sect2">
+<h3 id="_activity_lifecycle"><a class="anchor" href="#_activity_lifecycle"></a>2.1. Activity Lifecycle</h3>
+<div class="paragraph">
+<p><span class="image"><img src="images/android-3-3.png" alt="android 3 3" width="50%"></span></p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_fragment_lifecycle"><a class="anchor" href="#_fragment_lifecycle"></a>2.2. Fragment Lifecycle</h3>
+<div class="paragraph">
+<p><span class="image"><img src="images/android-3-4.png" alt="android 3 4" width="50%"></span></p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_daten_persistieren"><a class="anchor" href="#_daten_persistieren"></a>2.3. Daten Persistieren</h3>
+<div class="paragraph">
+<p>Es gibt die Methoden:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>onSaveInstanceState()</p>
+</li>
+<li>
+<p>onRestoreInstanceState()</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Diese werden automatisch aufgerufen, wenn das System die Daten speichern oder wiederherstellen will.
+Das ist für kleinere Datenmengen gedacht und funktioniert auch ganz gut.</p>
+</div>
+<div class="paragraph">
+<p>Für große Datenmengen oder Daten, die schwierig zu serialisieren sind, ist das aber weniger geeignet.
+Außerdem gibt es noch asynchrone Aufrufe, die noch laufen können, obwohl diese Methoden schon aufgerufen wurden und der UI-Controller gerade zerstört wurde.
+Dafür brauchen wir dann doch eine andere Lösung.</p>
+</div>
+<div class="paragraph">
+<p>Ohne System wird das ganze ziemlich schnell unübersichtlich.</p>
+</div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_viewmodel"><a class="anchor" href="#_viewmodel"></a>3. ViewModel</h2>
+<div class="sectionbody">
+<div class="ulist">
+<ul>
+<li>
+<p>Teil der Android Architektur</p>
+</li>
+<li>
+<p>Speichert und managed UI-Daten unter Berücksichtigung des Activity-Lifecycles</p>
+</li>
+<li>
+<p>Wird bei Konfigurationsänderungen NICHT zerstört!</p>
+</li>
+<li>
+<p>Erlaubt dadurch der Applikation Konfigurationsänderungen zu überstehen</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Im ViewModel werden auch externe Datenquellen angebunden (Datenbank, Webservices&#8230;&#8203;)</p>
+</div>
+<div class="paragraph">
+<p><span class="image"><img src="images/android-3-5.png" alt="android 3 5" width="50%"></span></p>
+</div>
+<div class="sect2">
+<h3 id="_viewmodel_lifecycle"><a class="anchor" href="#_viewmodel_lifecycle"></a>3.1. ViewModel Lifecycle</h3>
+<div class="paragraph">
+<p><span class="image"><img src="images/android-3-6.png" alt="android 3 6" width="50%"></span></p>
+</div>
+<div class="olist lowerroman">
+<ol class="lowerroman" type="i">
+<li>
+<p>Das ViewModel wird erst zerstört, wenn die Applikation komplett beendet wird.</p>
+</li>
+</ol>
+</div>
+<div class="exampleblock">
+<div class="content">
+<div class="admonitionblock warning">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-warning" title="Warning"></i>
+</td>
+<td class="content">
+Ihr verwendet das ViewModel mit <code>remember()</code> oder <code>mutableStateOf()</code>.
+</td>
+</tr>
+</table>
+</div>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_shared_viewmodel"><a class="anchor" href="#_shared_viewmodel"></a>3.2. Shared Viewmodel</h3>
+<div class="paragraph">
+<p>Ein gängiges Problem ist, dass sich zwei Fragments Daten teilen müssen.</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>Das erste selektiert zum Beispiel ein List-Item (z.B. ein Land)</p>
+</li>
+<li>
+<p>Das zweite zeigt Daten zum vom ersten ausgewählten Item an (z.B. das Bundesland)</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Hier ist ein ViewModel sehr hilfreich, auf das beide Fragments Zugriff haben.</p>
+</div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_livedata"><a class="anchor" href="#_livedata"></a>4. LiveData</h2>
+<div class="sectionbody">
+<div class="ulist">
+<ul>
+<li>
+<p>LiveData ist ein Observable Datenhalter</p>
+</li>
+<li>
+<p>Wird von Android bereitgestellt</p>
+</li>
+<li>
+<p>Wird von ViewModels verwendet, um Daten zu speichern</p>
+</li>
+<li>
+<p>Wird von Activities und Fragments verwendet, um auf Daten zu reagieren</p>
+</li>
+</ul>
+</div>
+<div class="sect2">
+<h3 id="_observer_pattern"><a class="anchor" href="#_observer_pattern"></a>4.1. Observer Pattern</h3>
+<div class="ulist">
+<ul>
+<li>
+<p>ViewModels sollten nichts vom View wissen</p>
+</li>
+<li>
+<p>Der View trägt sich beim LiveData im ViewModel ein, damit er updates bekommt</p>
+</li>
+<li>
+<p>Der View kann Methoden im ViewModel aufrufen, falls ein Benutzer eine Aktion ausführt</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p><span class="image"><img src="images/android-3-7.png" alt="android 3 7" width="50%"></span></p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_livecycle_awareness"><a class="anchor" href="#_livecycle_awareness"></a>4.2. Livecycle-Awareness</h3>
+<div class="ulist">
+<ul>
+<li>
+<p>Schickt nur Updates an aktive Abonnenten (STARTED oder RESUMED)</p>
+</li>
+<li>
+<p>Beim Abonnieren wird ein LifeCylce-Objekt übergeben</p>
+</li>
+<li>
+<p>Wenn dieses Objekt auf DESTROYED wechselt, wird das Abonnement automatisch entfernt</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p><span class="image"><img src="images/android-3-8.png" alt="android 3 8" width="50%"></span></p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_vorteile"><a class="anchor" href="#_vorteile"></a>4.3. Vorteile</h3>
+<div class="ulist">
+<ul>
+<li>
+<p>UI zeigt sicher immer den Data-State an</p>
+</li>
+<li>
+<p>Keine Mem-Leaks</p>
+</li>
+<li>
+<p>Keine Crashes wegen gestoppter Activities</p>
+</li>
+<li>
+<p>Kein manuelles Lifecycle-Handling</p>
+</li>
+<li>
+<p>Immer Up-To-Date (auch nach Aufwachen, Config-Änderungen, &#8230;&#8203;)</p>
+</li>
+<li>
+<p>Resourcen teilen (singleton LiveData)</p>
+</li>
+</ul>
+</div>
+<div class="exampleblock">
+<div class="content">
+<div class="admonitionblock warning">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-warning" title="Warning"></i>
+</td>
+<td class="content">
+Ihr verwendet LiveData mit <code>observeAsState()</code> oder <code>observe()</code>.
+</td>
+</tr>
+</table>
+</div>
 </div>
 </div>
 </div>
@@ -525,7 +834,7 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2024-04-08 13:11:47 UTC
+Last updated 2024-04-08 13:11:46 UTC
 </div>
 </div>
 </body>

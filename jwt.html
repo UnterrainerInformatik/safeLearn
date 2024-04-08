@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="generator" content="Asciidoctor 2.0.22">
 <link rel="icon" type="image/png" href="themes/favicon.png">
-<title>Lectures</title>
+<title>JWT (JSON Web Token) und OAuth2</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic%7CNoto+Serif:400,400italic,700,700italic%7CDroid+Sans+Mono:400,700">
 <style>
 /*! Asciidoctor default stylesheet | MIT License | https://asciidoctor.org */
@@ -438,20 +438,32 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 </head>
 <body class="article toc2 toc-left">
 <div id="header">
-<h1>Lectures</h1>
+<h1>JWT (JSON Web Token) und OAuth2</h1>
 <div id="toc" class="toc2">
 <div id="toctitle">Table of Contents</div>
 <ul class="sectlevel1">
-<li><a href="#_android_course">1. Android - Course</a></li>
-<li><a href="#_jwt_lecture">2. JWT - Lecture</a>
+<li><a href="#_vorwissen">1. Vorwissen</a></li>
+<li><a href="#_lernziele">2. Lernziele</a></li>
+<li><a href="#_sinn_von_jwt">3. Sinn von JWT</a>
 <ul class="sectlevel2">
-<li><a href="#_jwt_group_puzzle">2.1. JWT - Group Puzzle</a></li>
+<li><a href="#_was_heißt_sicher">3.1. Was heißt Sicher?</a></li>
 </ul>
 </li>
-<li><a href="#_package_by_layer_vs_package_by_feature">3. Package by Layer vs. Package by Feature</a></li>
-<li><a href="#_testing">4. TESTING</a>
+<li><a href="#_aufbau_und_inhalt_eines_jwt">4. Aufbau und Inhalt eines JWT</a>
 <ul class="sectlevel2">
-<li><a href="#_testing_md_files">4.1. Testing MD Files</a></li>
+<li><a href="#_struktur">4.1. Struktur</a></li>
+</ul>
+</li>
+<li><a href="#_typische_verwendung">5. Typische Verwendung</a>
+<ul class="sectlevel2">
+<li><a href="#_oauth2">5.1. OAuth2</a></li>
+</ul>
+</li>
+<li><a href="#_authorization_code_flow">6. Authorization Code Flow</a></li>
+<li><a href="#_access_token_refresh_token">7. Access Token / Refresh Token</a>
+<ul class="sectlevel2">
+<li><a href="#_access_token">7.1. Access Token</a></li>
+<li><a href="#_refresh_token">7.2. Refresh Token</a></li>
 </ul>
 </li>
 </ul>
@@ -461,63 +473,583 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <div id="preamble">
 <div class="sectionbody">
 <div class="paragraph">
-<p><span class="icon"><a class="image" href="https://raw.githubusercontent.com/UnterrainerInformatik/lectures/main/asciidocs/index.adoc"><i class="fa fa-file-text-o"></i></a></span> ‏ ‏ ‎
-<span class="icon"><a class="image" href="https://github.com/UnterrainerInformatik/lectures"><i class="fa fa-github-square"></i></a></span> ‏ ‏ ‎</p>
+<p><span class="icon"><a class="image" href="https://raw.githubusercontent.com/UnterrainerInformatik/documents/main/asciidocs/jwt.adoc"><i class="fa fa-file-text-o"></i></a></span> ‏ ‏ ‎
+<span class="icon"><a class="image" href="https://github.com/UnterrainerInformatik/documents"><i class="fa fa-github-square"></i></a></span> ‏ ‏ ‎</p>
+</div>
+<div class="paragraph">
+<p><a href="https://htl.unterrainer.info/index.html">BACK to Index</a></p>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_android_course"><a class="anchor" href="#_android_course"></a>1. Android - Course</h2>
+<h2 id="_vorwissen"><a class="anchor" href="#_vorwissen"></a>1. Vorwissen</h2>
 <div class="sectionbody">
+<div class="ulist">
+<ul>
+<li>
+<p>Was ist ein verteiltes System?</p>
+</li>
+</ul>
+</div>
 <div class="paragraph">
-<p><a href="https://htl.unterrainer.info/android.html">Android - Course</a></p>
+<p>Zusammenschluss unabhängiger Computer, die sich für den Benutzer als ein einziges System präsentieren.</p>
+</div>
+<div class="paragraph">
+<p><span class="image"><img src="images/distributed-systems-0.png" alt="distributed systems 0" width="40%"></span></p>
+</div>
+<div class="paragraph">
+<p><span class="image"><img src="images/distributed-systems-1.png" alt="distributed systems 1" width="80%"></span></p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>Warum müssen in verteilten Systemen Nachrichten übertragen werden?</p>
+<div class="ulist">
+<ul>
+<li>
+<p>Kommunikation</p>
+</li>
+<li>
+<p>Koordination</p>
+</li>
+<li>
+<p>Konsistenz</p>
+</li>
+<li>
+<p>Fehlertoleranz</p>
+</li>
+<li>
+<p>Skalierbarkeit</p>
+</li>
+<li>
+<p>Transparenz</p>
+</li>
+</ul>
+</div>
+</li>
+<li>
+<p>Asymmetrische Verschlüsselung (public-private key-pair)</p>
+<div class="ulist">
+<ul>
+<li>
+<p>Public- Private Key Pair</p>
+</li>
+</ul>
+</div>
+</li>
+<li>
+<p>OAuth2 (basic)</p>
+<div class="ulist">
+<ul>
+<li>
+<p>OAuth2 ist ein offenes Protokoll, das es ermöglicht, in einer standardisierten Weise den Zugriff auf Webdienste zu delegieren, ohne dass der Benutzer seine Zugangsdaten weitergeben muss.</p>
+</li>
+</ul>
+</div>
+</li>
+<li>
+<p>OpenIDConnect (basic)</p>
+<div class="ulist">
+<ul>
+<li>
+<p>OpenID Connect (OIDC) ist ein Identitätsauthentifizierungsprotokoll, das eine Erweiterung der offenen Autorisierung (OAuth) 2.0 darstellt, um den Prozess der Authentifizierung und Autorisierung von Benutzern zu standardisieren, wenn sie sich anmelden, um auf digitale Dienste zuzugreifen.</p>
+</li>
+</ul>
+</div>
+</li>
+</ul>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_jwt_lecture"><a class="anchor" href="#_jwt_lecture"></a>2. JWT - Lecture</h2>
+<h2 id="_lernziele"><a class="anchor" href="#_lernziele"></a>2. Lernziele</h2>
 <div class="sectionbody">
-<div class="paragraph">
-<p><a href="https://htl.unterrainer.info/jwt.html">JWT - Lecture</a></p>
+<div class="ulist">
+<ul>
+<li>
+<p>JWT</p>
+<div class="ulist">
+<ul>
+<li>
+<p>Was sind JWTs?</p>
+</li>
+<li>
+<p>Wie sieht ein JWT aus?</p>
+</li>
+<li>
+<p>Welche Probleme lösen sie?</p>
+</li>
+<li>
+<p>Wie funktioniert das Signieren?</p>
+</li>
+</ul>
+</div>
+</li>
+<li>
+<p>OAuth2 / OpenID Connect (OIDC)</p>
+<div class="ulist">
+<ul>
+<li>
+<p>Wie wird ein JWT bei OAuth-Authorization verwendet?</p>
+</li>
+<li>
+<p>Was ist ein Access-Token?</p>
+<div class="ulist">
+<ul>
+<li>
+<p>Wozu braucht man ihn?</p>
+</li>
+<li>
+<p>Wie wird er verwendet?</p>
+</li>
+</ul>
+</div>
+</li>
+<li>
+<p>Was ist ein Refresh-Token?</p>
+<div class="ulist">
+<ul>
+<li>
+<p>Wozu braucht man ihn?</p>
+</li>
+<li>
+<p>Wie wird er verwendet?</p>
+</li>
+</ul>
+</div>
+</li>
+</ul>
+</div>
+</li>
+</ul>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_sinn_von_jwt"><a class="anchor" href="#_sinn_von_jwt"></a>3. Sinn von JWT</h2>
+<div class="sectionbody">
+<div class="ulist">
+<ul>
+<li>
+<p>Sichere Übertragung von Informationen über JSON</p>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>Datenübertragung</strong></p>
+<div class="ulist">
+<ul>
+<li>
+<p>Sichere Übertragung von Daten</p>
+</li>
+</ul>
+</div>
+</li>
+<li>
+<p><strong>Authorisation</strong></p>
+<div class="ulist">
+<ul>
+<li>
+<p>Wenn ein Benutzer eingeloggt ist, enthält von da an jeder Request einen JWT (bearer-token). Dieser enthält die Identität des Benutzers (Identity - Wer bin ich?) und dessen Rechte (Claims - Anrechte).</p>
+</li>
+</ul>
+</div>
+</li>
+</ul>
+</div>
+</li>
+</ul>
 </div>
 <div class="sect2">
-<h3 id="_jwt_group_puzzle"><a class="anchor" href="#_jwt_group_puzzle"></a>2.1. JWT - Group Puzzle</h3>
+<h3 id="_was_heißt_sicher"><a class="anchor" href="#_was_heißt_sicher"></a>3.1. Was heißt Sicher?</h3>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>Integrität</strong></p>
 <div class="paragraph">
-<p><a href="https://htl.unterrainer.info/jwt-group-puzzle.html">JWT - Group Puzzle</a></p>
+<p>Ist das die Nachricht von meinem Gegenüber, oder wurde diese abgefangen und verändert?</p>
+</div>
+<div class="paragraph">
+<p>&#8594; signieren (Header + Payload)</p>
+</div>
+</li>
+<li>
+<p><strong>Geheimhaltung</strong></p>
+<div class="paragraph">
+<p>Niemand, außer dem Empfänger, soll die Übertragung lesen können.</p>
+</div>
+<div class="paragraph">
+<p>&#8594; verschlüsseln (gesamten Token)</p>
+</div>
+<div class="paragraph">
+<p>Ist nicht die Norm. Normalerweise wird nur signiert. Wenn ihr verschlüsseln wollt, müsst ihr euch selber darum kümmern.</p>
+</div>
+</li>
+</ul>
+</div>
+<div class="exampleblock">
+<div class="content">
+<div class="admonitionblock warning">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-warning" title="Warning"></i>
+</td>
+<td class="content">
+Hier <a href="https://htl.unterrainer.info/jwt-group-puzzle.html">JWT - Group Puzzle</a> beginnen, oder mit normalen Vortrag hier weitermachen.
+</td>
+</tr>
+</table>
+</div>
+</div>
 </div>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_package_by_layer_vs_package_by_feature"><a class="anchor" href="#_package_by_layer_vs_package_by_feature"></a>3. Package by Layer vs. Package by Feature</h2>
+<h2 id="_aufbau_und_inhalt_eines_jwt"><a class="anchor" href="#_aufbau_und_inhalt_eines_jwt"></a>4. Aufbau und Inhalt eines JWT</h2>
 <div class="sectionbody">
-<div class="paragraph">
-<p><a href="https://htl.unterrainer.info/package-by-layer-feature.html">Package by Layer vs. Package by Feature</a></p>
+<div class="ulist">
+<ul>
+<li>
+<p><strong>Identity (Identität)</strong></p>
+<div class="ulist">
+<ul>
+<li>
+<p>Benutzerdaten</p>
+<div class="ulist">
+<ul>
+<li>
+<p>Name</p>
+</li>
+<li>
+<p>Email</p>
+</li>
+<li>
+<p>…</p>
+</li>
+</ul>
 </div>
+</li>
+</ul>
 </div>
+</li>
+<li>
+<p><strong>Claims (Anrechte)</strong></p>
+<div class="ulist">
+<ul>
+<li>
+<p>Zum Beispiel das Recht…</p>
+<div class="ulist">
+<ul>
+<li>
+<p>… in der UI …</p>
+<div class="ulist">
+<ul>
+<li>
+<p>… eine gewisse Aktion ausführen zu dürfen</p>
+</li>
+<li>
+<p>… einen Bildschirm zu sehen</p>
+</li>
+<li>
+<p>… eine detailliertere Ansicht zu haben</p>
+</li>
+<li>
+<p>…</p>
+</li>
+</ul>
 </div>
-<div class="sect1">
-<h2 id="_testing"><a class="anchor" href="#_testing"></a>4. TESTING</h2>
-<div class="sectionbody">
-<div class="paragraph">
-<p><a href="https://htl.unterrainer.info/Lernstrecke.md">Lernstrecke</a></p>
+</li>
+<li>
+<p>… im Backend…</p>
+<div class="ulist">
+<ul>
+<li>
+<p>… einen Datensatz abzufragen</p>
+</li>
+<li>
+<p>… einen Datensatz zu ändern</p>
+</li>
+<li>
+<p>… einen Datensatz zu löschen</p>
+</li>
+<li>
+<p>…</p>
+</li>
+</ul>
+</div>
+</li>
+</ul>
+</div>
+</li>
+</ul>
+</div>
+</li>
+</ul>
 </div>
 <div class="sect2">
-<h3 id="_testing_md_files"><a class="anchor" href="#_testing_md_files"></a>4.1. Testing MD Files</h3>
+<h3 id="_struktur"><a class="anchor" href="#_struktur"></a>4.1. Struktur</h3>
+<div class="ulist">
+<ul>
+<li>
+<p>Header</p>
+<div class="ulist">
+<ul>
+<li>
+<p>Welcher Signaturalgorithmus wird verwendet?</p>
+</li>
+<li>
+<p>Typ des Tokens (meistens 'JWT')</p>
+</li>
+<li>
+<p><strong>Base64Url encoded</strong></p>
+</li>
+</ul>
+</div>
+</li>
+<li>
+<p>Inhalt (Payload)</p>
+<div class="ulist">
+<ul>
+<li>
+<p>Anrechte (Claims)</p>
+</li>
+<li>
+<p><strong>Base64Url encoded</strong></p>
+</li>
+</ul>
+</div>
+</li>
+<li>
+<p>Signatur</p>
+<div class="literalblock">
+<div class="content">
+<pre>Verschlüsselungsalgorithmus(
+	base64UrlEncode(header) + "." +
+	base64UrlEncode(payload),
+	secret
+)</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>In der Form: xxxxx.yyyyy.zzzzz</p>
+</div>
+<div class="paragraph">
+<p>Siehe: <a href="https://jwt.io/#debugger-io" class="bare">https://jwt.io/#debugger-io</a></p>
+</div>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p><span class="image"><img src="images/jwt-0.png" alt="jwt 0" width="60%"></span></p>
+</div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_typische_verwendung"><a class="anchor" href="#_typische_verwendung"></a>5. Typische Verwendung</h2>
+<div class="sectionbody">
+<div class="sect2">
+<h3 id="_oauth2"><a class="anchor" href="#_oauth2"></a>5.1. OAuth2</h3>
+<div class="paragraph">
+<p><span class="image"><img src="images/jwt-1.png" alt="jwt 1" width="80%"></span></p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p>Die Anwendung oder der Client fordert beim Autorisierungsserver eine Berechtigung an. Dies erfolgt über einen der verschiedenen Autorisierungsabläufe. Beispielsweise durchläuft eine typische OpenID Connect-konforme Webanwendung den /oauth/authorize-Endpunkt mit dem 'authorization code flow'.</p>
+</li>
+<li>
+<p>Wenn die Berechtigung erteilt wird, gibt der Autorisierungsserver ein Zugriffstoken an die Anwendung zurück.</p>
+</li>
+<li>
+<p>Die Anwendung verwendet das Zugriffstoken, um auf eine geschützte Ressource (wie eine API) zuzugreifen.</p>
+</li>
+</ol>
+</div>
+<div class="paragraph">
+<p>Während dieser Kommunikation wird der Inhalt des Tokens immer wieder lesbar über verschiedene Ressourcen hinweg übertragen.</p>
+</div>
+<div class="exampleblock">
+<div class="content">
+<div class="admonitionblock important">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-important" title="Important"></i>
+</td>
+<td class="content">
+NIEMALS Geheimnisse in einen unverschlüsselten Token packen!
+</td>
+</tr>
+</table>
+</div>
+</div>
+</div>
 <div class="sect3">
-<h4 id="_on_github_external_link"><a class="anchor" href="#_on_github_external_link"></a>4.1.1. On GitHub (external link)</h4>
+<h4 id="_openid_connect_oidc"><a class="anchor" href="#_openid_connect_oidc"></a>5.1.1. OpenID Connect (OIDC)</h4>
 <div class="paragraph">
-<p><a href="https://htl.unterrainer.info/convert?url=https://raw.githubusercontent.com/UnterrainerInformatik/java-http-server/master/README.md">README.md</a></p>
+<p><a href="https://de.wikipedia.org/wiki/OpenID_Connect" class="bare">https://de.wikipedia.org/wiki/OpenID_Connect</a></p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>OpenID Connect (OIDC) ist ein Identitätsauthentifizierungsprotokoll, das eine Erweiterung der offenen Autorisierung (OAuth) 2.0 darstellt, um den Prozess der Authentifizierung und Autorisierung von Benutzern zu standardisieren, wenn sie sich anmelden, um auf digitale Dienste zuzugreifen.</p>
+</li>
+<li>
+<p>Erweiterung von OAuth2</p>
+</li>
+<li>
+<p>Wird gerne bei der Authentifizierung bei REST-Schnittstellen verwendet
+§ Verwendet auch laut Spezifikation selbst REST-Schnittstellen und JSON-Datenformat</p>
+</li>
+<li>
+<p>De-Fakto-Standard</p>
+</li>
+</ul>
 </div>
 </div>
 <div class="sect3">
-<h4 id="_on_this_site_internal_link"><a class="anchor" href="#_on_this_site_internal_link"></a>4.1.2. On this site (internal link)</h4>
+<h4 id="_keycloak"><a class="anchor" href="#_keycloak"></a>5.1.2. Keycloak</h4>
 <div class="paragraph">
-<p><a href="https://htl.unterrainer.info/md/Test-MD-File.md">direct call: Test-MD-File.md</a></p>
+<p><a href="https://en.wikipedia.org/wiki/Keycloak" class="bare">https://en.wikipedia.org/wiki/Keycloak</a>
+<a href="https://www.keycloak.org/" class="bare">https://www.keycloak.org/</a>
+<a href="https://www.intension.de/infoblog/was-ist-keycloak/" class="bare">https://www.intension.de/infoblog/was-ist-keycloak/</a></p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>Open Source</p>
+</li>
+<li>
+<p>Implementierung von OpenID Connect und OAuth2 und SAML</p>
+<div class="ulist">
+<ul>
+<li>
+<p>LDAP, OAuth, SAML</p>
+</li>
+</ul>
+</div>
+</li>
+<li>
+<p>Auf Java-Basis</p>
+</li>
+<li>
+<p>Identity Access Management (IAM) System</p>
+</li>
+<li>
+<p>On premise oder in Cloud</p>
+</li>
+<li>
+<p>SAML - Im Java-Code mit Annotationen sagen, wer wo was darf</p>
+<div class="ulist">
+<ul>
+<li>
+<p>Muss ja auch im Code irgendwo definiert sein</p>
+</li>
+<li>
+<p>Alt, aber immer noch OK</p>
+</li>
+</ul>
+</div>
+</li>
+<li>
+<p>Single-Sign-On (SSO) Provider</p>
+</li>
+</ul>
+</div>
+<div class="exampleblock">
+<div class="content">
+<div class="admonitionblock warning">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-warning" title="Warning"></i>
+</td>
+<td class="content">
+ÜBUNG: <a href="https://quarkus.io/guides/security-jwt" class="bare">https://quarkus.io/guides/security-jwt</a>
+ <br>
+  Wenn wir uns nochmal die Claims (Anrechte) ins Gedächtnis rufen, dann gibt es GUI- und Server-bezogene.
+  Wir bekommen jetzt am Server einen Bearer-Token im Authorization-Header und können den mit einer Library überprüfen (Signatur testen).
+  Dann können wir am Backend Zugriff basierend auf diesen Claims zulassen oder nicht.
+  Irgendwie müssen wir das dem Backend sagen (diese Rolle darf auf diesen Endpoint POST machen)…
+  Das machen wir mit SmallryeJWT-Annotations.
+</td>
+</tr>
+</table>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_authorization_code_flow"><a class="anchor" href="#_authorization_code_flow"></a>6. Authorization Code Flow</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p><a href="https://developer.okta.com/docs/guides/implement-grant-type/authcode/main/" class="bare">https://developer.okta.com/docs/guides/implement-grant-type/authcode/main/</a></p>
 </div>
 <div class="paragraph">
-<p><a href="https://htl.unterrainer.info/convert?url=https://htl.unterrainer.info/md/Test-MD-File.md">convert call: Test-MD-File.md</a></p>
+<p><span class="image"><img src="images/jwt-2.png" alt="jwt 2" width="90%"></span></p>
 </div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p>Ihre Anwendung (App) fordert einen Autorisierungscode vom Autorisierungsserver (Okta) an.</p>
+</li>
+<li>
+<p>Okta präsentiert eine Authentifizierungsaufforderung (die Okta-Anmeldeseite) im Browser des Benutzers.</p>
+</li>
+<li>
+<p>Der Benutzer authentifiziert sich beim Autorisierungsserver und erteilt seine Zustimmung.</p>
+</li>
+<li>
+<p>Der Browser erhält nach der Benutzerauthentifizierung einen Autorisierungscode vom Autorisierungsserver (Okta). Der Autorisierungscode wird an Ihre App übergeben.</p>
+</li>
+<li>
+<p>Ihre App sendet diesen Code und das Client-Geheimnis an Okta. Siehe Austausch des Codes gegen Tokens.</p>
+</li>
+<li>
+<p>Okta gibt Zugriffs- und ID-Tokens zurück, sowie optional einen Aktualisierungstoken.</p>
+</li>
+<li>
+<p>Ihre App kann diese Tokens jetzt verwenden, um im Namen des Benutzers den Ressourcenserver (zum Beispiel eine API) aufzurufen.</p>
+</li>
+<li>
+<p>Der Ressourcenserver überprüft das Token, bevor er auf die Anfrage antwortet. Siehe Zugriffstoken validieren.</p>
+</li>
+</ol>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_access_token_refresh_token"><a class="anchor" href="#_access_token_refresh_token"></a>7. Access Token / Refresh Token</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p><a href="https://auth0.com/blog/refresh-tokens-what-are-they-and-when-to-use-them/" class="bare">https://auth0.com/blog/refresh-tokens-what-are-they-and-when-to-use-them/</a></p>
+</div>
+<div class="sect2">
+<h3 id="_access_token"><a class="anchor" href="#_access_token"></a>7.1. Access Token</h3>
+<div class="paragraph">
+<p><span class="image"><img src="images/jwt-3.png" alt="jwt 3" width="50%"></span></p>
+</div>
+<div class="paragraph">
+<p>Hat traditionell eine sehr kurze Ablauffrist!
+Dadurch müssen die Clients sehr häufig am Authorization-Server einen neuen Access-Token abholen (aber eben nicht bei JEDEM Request).
+Wenn ich jetzt einen User sperren will (löschen oder die Rechte (Rollen) verändern), dann dauert es maximal genau diese Expires-Zeit, bis der Client einen neuen Token mit den neuen Rechten (oder keinen Token mehr) bekommt und damit diese Änderungen in Kraft treten.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_refresh_token"><a class="anchor" href="#_refresh_token"></a>7.2. Refresh Token</h3>
+<div class="paragraph">
+<p>Verhindert, dass Du immer wieder Dein Passwort am Google-OAuth-Authorization Server eingeben musst.
+Client muss trotzdem zum Authorization-Server.
+Falls Änderungen in der Berechtigung waren, werden diese im neuen Access-Token mitgegeben.
+Wenn der User gelöscht wurde, bekommt er auch mit dem Refresh-Token keinen neuen Access-Token mehr.</p>
+</div>
+<div class="paragraph">
+<p><span class="image"><img src="images/jwt-4.png" alt="jwt 4" width="80%"></span></p>
 </div>
 </div>
 </div>
