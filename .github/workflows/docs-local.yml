@@ -91,7 +91,7 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64/v8
           push: true
-          tags: ${{ secrets.DOCKER_HUB_USER }}/safe-learn:latest
+          tags: ${{ secrets.DOCKER_HUB_USER }}/${{ secrets.DOCKER_IMAGE_NAME}}:latest
   deploy:
     name: Deployment 💻
     runs-on: ubuntu-latest
@@ -139,6 +139,7 @@ jobs:
             echo WEBSERVER_PORT=${{ secrets.WEBSERVER_PORT }} >> ./deploy/.env
             echo INTERNAL_PORT=${{ secrets.PORT }} >> ./deploy/.env
             echo DOCKER_HUB_USER=${{ secrets.DOCKER_HUB_USER }} >> ./deploy/.env
+            echo DOCKER_IMAGE_NAME=${{ secrets.DOCKER_IMAGE_NAME }} >> ./deploy/.env
       - name: Deploy using SSH 🚛
         uses: UnterrainerInformatik/ssh-deploy-action@v1
         with:

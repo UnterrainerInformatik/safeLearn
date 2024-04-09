@@ -2,8 +2,7 @@ version: '3'
 services:
 
   test:
-    image: ${DOCKER_HUB_USER}/safe-learn:latest
-    container_name: safe-learn
+    image: ${DOCKER_HUB_USER}/${DOCKER_IMAGE_NAME}:latest
     restart: unless-stopped
     ports:
       - "${WEBSERVER_PORT}:${INTERNAL_PORT}"
