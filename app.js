@@ -187,7 +187,8 @@ initKeycloak(app).then(() => {
       fs.readFile(filePath, "utf8", (err, data) => {
         if (err) {
           console.error(`Error reading file ${filePath}`, err);
-          return next(err);
+          res.redirect(getStartPage());
+          return;
         }
         const reveal = req.query.reveal;
         if (reveal) {
@@ -301,4 +302,7 @@ initKeycloak(app).then(() => {
   scanFiles(basePath).then(() => {
     app.listen(process.env.NEXT_PUBLIC_PORT, "0.0.0.0");
   });
+
+  // If file is not found, redirect to the start page.
+  app.use((_, res) => res.redirect(getStartPage()));
 });
