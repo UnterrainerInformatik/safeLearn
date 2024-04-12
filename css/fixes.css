@@ -1,0 +1,30 @@
+.highlight {
+  background-color: #dfeffc;
+}
+
+.dark-mode{
+  background-color: #1c1c1c !important;
+  color: #ffffff;
+}
+.dark-mode.width-reveal, .dark-mode.width-reveal .sidebar-menu a.dark-mode {
+  background-color: #2d2d2df0 !important;
+}
+a.dark-mode.highlight {
+  background-color: #004b88 !important;
+}
+
+/* Fix autoscroller. */
+#markdown-content::before {
+  content: "";
+  display: block;
+  height: 50px;
+  /* Equivalent to your header's height */
+  margin-top: -50px;
+  /* Negative equivalent to your header's height */
+  visibility: hidden;
+}
+
+.topdown-menu-chevron {
+  opacity: 1;
+  transition: opacity 0.3s ease-in-out, transform 0.3s ease;
+}

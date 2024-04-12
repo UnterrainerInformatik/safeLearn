@@ -1,0 +1,99 @@
+.flipswitch {
+  position: relative;
+  width: 80px;
+}
+
+.flipswitch input[type=checkbox] {
+  display: none;
+}
+
+.flipswitch-label {
+  display: block;
+  overflow: hidden;
+  cursor: pointer;
+  border: 1px solid #999999;
+  border-radius: 8px;
+}
+
+.flipswitch-inner {
+  width: 200%;
+  margin-left: -100%;
+  transition: margin 0.3s ease-in 0s;
+}
+
+.flipswitch-inner:before, .flipswitch-inner:after {
+  float: left;
+  width: 50%;
+  height: 20px;
+  padding: 0;
+  line-height: 12px;
+  font-size: 14px;
+  color: #fffffff0;
+  font-family: Consolas, monospace;
+  font-weight: bold;
+  box-sizing: border-box;
+}
+
+.flipswitch-inner:before {
+  content: "student";
+  padding-left: 8px;
+  padding-right: 20px;
+  padding-top: 3px;
+  background-color: #256799f0;
+  color: #FFFFFF;
+}
+
+.flipswitch-inner:after {
+  content: "teacher";
+  padding-right: 8px;
+  padding-top: 3px;
+  background-color: #ff5050f0;
+  color: #ffffff;
+  text-align: right;
+}
+
+.flipswitch-switch {
+  width: 15px;
+  margin: -3.5px;
+  background: #FAFBFCf0;
+  border: 1px solid #999999f0;
+  border-radius: 8px;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 75px;
+  transition: all 0.3s ease-in 0s;
+}
+
+.flipswitch-cb:checked + .flipswitch-label .flipswitch-inner {
+  margin-left: 0;
+}
+
+.flipswitch-cb:checked + .flipswitch-label .flipswitch-switch {
+  right: 0;
+}
+
+.menu.flipswitch {
+  width: 180px;
+}
+.menu.flipswitch-inner:before {
+  background-color: #256799;
+}
+.menu.flipswitch-inner:after {
+  background-color: #9d4444;
+}
+.menu.flipswitch-switch {
+  right: 170px;
+}
+.answers.flipswitch-inner:before {
+  content: "no answers";
+}
+.answers.flipswitch-inner:after {
+  content: "answers";
+}
+.exam.flipswitch-inner:before {
+  content: "show practice";
+}
+.exam.flipswitch-inner:after {
+  content: "show exam";
+}

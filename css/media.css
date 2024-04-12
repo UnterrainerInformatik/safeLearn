@@ -1,0 +1,31 @@
+@media screen and (max-width: 1024px) {
+  #sidebar {
+    opacity: 0;
+    max-width: 0;
+    overflow: hidden;
+    transition: background-color 0.3s ease-in-out, padding 0.3s ease, max-width 0.3s ease, opacity 0.3s ease-in-out, visibility 0.3s step-start;
+  }
+
+  .topbar-burger {
+    opacity: 1;
+    transition: opacity 0.3s ease-in-out, transform 0.3s ease;
+  }
+
+  #markdown-content {
+    margin: 0px;
+    padding-left: 10px;
+    padding-right: 10px;
+    max-width: none;
+    width: 100%;
+    min-width: 280px;
+    transition: padding 0.3s ease, width 0.3s ease, max-width 0.3s ease, padding 0.3s ease;
+  }
+}
+
+@media screen and (max-width: 700px) {
+  #markdown-content {
+    padding-left: 0px;
+    padding-right: 0px;
+    transition: padding 0.3s ease, width 0.3s ease, max-width 0.3s ease, padding 0.3s ease;
+  }
+}

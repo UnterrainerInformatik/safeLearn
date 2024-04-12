@@ -1,0 +1,10 @@
+#sidebar {
+  width: 250px;
+  height: 100vh;
+  padding-top: 50px;
+  padding-left: 10px;
+  position: fixed;
+  border-top-right-radius: 10px;
+  font-size: 12px;
+  transition: background-color 0.3s ease-in-out, padding 0.3s ease, max-width 0.3s ease, opacity 0.3s ease-in-out, visibility 0.3s step-end;
+}

@@ -995,7 +995,7 @@ export async function wrapInPage(html, startPage, req) {
         <style>
           ${await getFontImports()}
         </style>
-        <link rel="stylesheet" href="/obsidian-page.css">
+        <link rel="stylesheet" href="/css/main.css">
         <link rel="shortcut icon" href="/assets/favicon.ico" type="image/x-icon" />
       </head>
       <body style="display: none;">

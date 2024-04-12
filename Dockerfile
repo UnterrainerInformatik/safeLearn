@@ -18,6 +18,8 @@ COPY md/ /app/md
 COPY assets/ /app/assets
 # Copy the middlewares folder to app directory.
 COPY middlewares/ /app/middlewares
+# Copy the css folder to app directory.
+COPY css/ /app/css
 
 # Copy package.json app directory.
 COPY package.json /app

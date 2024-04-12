@@ -1,0 +1,120 @@
+#topdown-menu {
+  width: 220px;
+  padding-top: 10px;
+  padding-left: 10px;
+  position: fixed;
+  right: 0px;
+  border-bottom-left-radius: 10px;
+  border-top-left-radius: 10px;
+  font-size: 12px;
+  overflow: hidden;
+  max-width: 0px;
+  transition: background-color 0.3s ease-in-out, padding 0.3s ease, max-width 0.3s ease, opacity 0.3s ease-in-out, visibility 0.3s step-start;
+}
+
+.topdown-menu-chevron {
+  text-align: center;
+  text-justify: center;
+  transition: transform 0.3s ease, opacity 0.3s ease-in-out;
+  transition: opacity 0.3s ease-in-out, transform 0.3s ease;
+}
+
+.row {
+  display: flex;
+}
+
+.col {
+  margin: 4px;
+}
+
+.open {
+  opacity: 1;
+  padding-top: 0px;
+}
+
+.obsidian-callout-chevron {
+  margin-left: 0px;
+  transition: transform 0.3s ease;
+  transform-origin: 50% 10.4px;
+  align-self: top;
+  justify-self: center;
+}
+
+.rotated.obsidian-callout-chevron {
+  transform: rotate(90deg);
+}
+
+.sidebar-menu a:link,
+.folder-files a:link,
+a:visited {
+  color: blue;
+}
+
+.sidebar-menu a:hover,
+.folder-files a:hover {
+  color: darkblue;
+}
+.dark-mode a:link,
+.dark-mode a:visited {
+  color: rgb(180, 180, 255);
+}
+
+.dark-mode a:hover {
+  color: rgb(115, 115, 255);
+}
+
+.sidebar-menu a:link,
+.folder-files a:link,
+a:visited {
+  text-decoration: none;
+}
+
+.sidebar-title-content {
+  margin-top: 20px;
+}
+
+.sidebar-title-dirlist {
+  margin-top: 10px;
+  cursor: pointer;
+}
+
+.sidebar-dirlist {
+  opacity: 0;
+  padding-top: 0px;
+  margin-left: 7px;
+  max-height: 0;
+  overflow: hidden;
+  transition: padding 0.3s ease, max-height 0.3s ease, opacity 0.3s ease, visibility 0.3s step-start;
+}
+
+.sidebar-dirlist-chevron {
+  position: relative;
+  top: 1px;
+  padding: 0px;
+  margin: 0px;
+  transition: transform 0.3s ease;
+}
+
+.normal-reveal {
+  display: block;
+  overflow: hidden;
+  opacity: 1;
+  transition: padding 0.3s ease, max-height 0.3s ease, opacity 0.3s ease-in-out, visibility 0.3s step-start;
+}
+
+.width-reveal {
+  background-color: #f0f0f0f0;
+  z-index: 1000;
+  display: block !important;
+  opacity: 1 !important;
+  transition: background-color 0.3s ease-in-out, padding 0.3s ease, max-width 0.3s ease, opacity 0.3s ease-in-out, visibility 0.3s step-start;
+}
+
+.force-rotate-right {
+  transform: rotate(90deg);
+  transition: transform 0.3s ease;
+}
+.force-rotate-left {
+  transform: rotate(-90deg);
+  transition: transform 0.3s ease;
+}
