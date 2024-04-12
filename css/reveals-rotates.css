@@ -1,0 +1,23 @@
+.normal-reveal {
+  display: block;
+  overflow: hidden;
+  opacity: 1;
+  transition: background-color 0.3s ease-in-out, padding 0.3s ease, max-height 0.3s ease, opacity 0.3s ease-in-out, visibility 0.3s step-start;
+}
+
+.width-reveal {
+  background-color: #f0f0f0f0;
+  z-index: 1000;
+  display: block !important;
+  opacity: 1 !important;
+  transition: background-color 0.3s ease-in-out, padding 0.3s ease, max-width 0.3s ease, opacity 0.3s ease-in-out, visibility 0.3s step-start;
+}
+
+.force-rotate-right {
+  transform: rotate(90deg);
+  transition: transform 0.3s ease;
+}
+.force-rotate-left {
+  transform: rotate(-90deg);
+  transition: transform 0.3s ease;
+}

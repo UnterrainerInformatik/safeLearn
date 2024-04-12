@@ -80,11 +80,13 @@ a:visited {
 
 .sidebar-dirlist {
   opacity: 0;
+  visibility: visible;
+  width: 250px;
   padding-top: 0px;
   margin-left: 7px;
   max-height: 0;
   overflow: hidden;
-  transition: padding 0.3s ease, max-height 0.3s ease, opacity 0.3s ease, visibility 0.3s step-start;
+  transition: background-color 0.3s ease-in-out, padding 0.3s ease, max-height 0.3s ease, opacity 0.3s ease-in-out, visibility 0.3s step-start;
 }
 
 .sidebar-dirlist-chevron {
@@ -92,29 +94,5 @@ a:visited {
   top: 1px;
   padding: 0px;
   margin: 0px;
-  transition: transform 0.3s ease;
-}
-
-.normal-reveal {
-  display: block;
-  overflow: hidden;
-  opacity: 1;
-  transition: padding 0.3s ease, max-height 0.3s ease, opacity 0.3s ease-in-out, visibility 0.3s step-start;
-}
-
-.width-reveal {
-  background-color: #f0f0f0f0;
-  z-index: 1000;
-  display: block !important;
-  opacity: 1 !important;
-  transition: background-color 0.3s ease-in-out, padding 0.3s ease, max-width 0.3s ease, opacity 0.3s ease-in-out, visibility 0.3s step-start;
-}
-
-.force-rotate-right {
-  transform: rotate(90deg);
-  transition: transform 0.3s ease;
-}
-.force-rotate-left {
-  transform: rotate(-90deg);
   transition: transform 0.3s ease;
 }
