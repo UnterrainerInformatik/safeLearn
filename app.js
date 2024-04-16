@@ -299,7 +299,7 @@ initKeycloak(app).then(() => {
   });
 
   const basePath = process.env.NEXT_PUBLIC_IS_APP_FOLDER ? '/app/' : '.';
-  scanFiles(basePath).then(() => {
+  scanFiles("md/", path.join(basePath, "md")).then(() => {
     app.listen(process.env.NEXT_PUBLIC_PORT, "0.0.0.0");
   });
 

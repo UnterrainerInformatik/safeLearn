@@ -103,6 +103,7 @@ export const callouts = {
 export const mdFilesMap = {};
 export const filesMap = {};
 export const mdFilesDir = {};
+export const mdFilesDirOnHdd = {};
 export let mdFilesDirStructure = {};
 export const mainFonts = {};
 export const mainFontsArray = [];
@@ -162,7 +163,10 @@ function makeSafeForCSS(name) {
   });
 }
 
-export async function scanFiles(dir, root = dir) {
+/**
+ * If it's the root dir, dirPrefix should be an empty string.
+ */
+export async function scanFiles(dirPrefix, dir, root = dir) {
   scanFilesInternal(dir, root);
   let mdFiles = await Promise.all(
     Object.keys(mdFilesDir).map(async (file) => {
@@ -174,6 +178,7 @@ export async function scanFiles(dir, root = dir) {
       }
       return {
         [file]: {
+          dirPrefix: dirPrefix,
           path: file,
           pathWithoutExt: pwe,
           folders: folders,
@@ -183,7 +188,7 @@ export async function scanFiles(dir, root = dir) {
           fileNameWithoutExtension: pwe.split("/").pop().split(".")[0],
           lastFolder: pwe.split("/").slice(-2, -1)[0] || "",
           cssName: makeSafeForCSS(folders),
-          permissions: await getPermissionsFor(file),
+          permissions: await getPermissionsFor(dirPrefix + file),
         },
       };
     })
@@ -793,7 +798,8 @@ function insertDirFolder(folder, j) {
 
 function insertDirLink(file, req, indent, i, files) {
   let r = "";
-  r += `<a href="/${file.path}" class="${
+  console.log(file);
+  r += `<a href="/${file.dirPrefix + file.path}" class="${
     "/" + file.path === decodeURIComponent(req.path) ? "highlight" : ""
   }">${indentStringFor(file.lastFolder === "" ? 0 : indent)}${
     file.fileNameWithoutExtension
