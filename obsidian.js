@@ -947,7 +947,7 @@ async function getTopBar(startPage, req) {
     )}</button>
     <div class="topbar-title nav-font">${
       req.path !== "/convert/"
-        ? decodeURIComponent(req.path)
+        ? decodeURIComponent(req.path.startsWith(`/${dirPrefix}`) ? req.path.slice(dirPrefix.length + 1) : req.path)
         : decodeURIComponent(req.query.url)
     }</div>
     <div class="topbar-menu">
