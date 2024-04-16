@@ -95,6 +95,9 @@ Add them using an absolute image-url like so:
 `https://raw.githubusercontent.com/UnterrainerInformatik/java-http-server/master/docs/standard-request-response-process.png`
 
 ![global-image|100x300](https://raw.githubusercontent.com/UnterrainerInformatik/java-http-server/master/docs/standard-request-response-process.png) 
+
+### Obsidian Link Images
+![[Pasted image 20240315152828.png]]
 ### Local Images (path)
 Add them using a relative path in your repository like so:
 (The base of your path is the path of the current MD-file)

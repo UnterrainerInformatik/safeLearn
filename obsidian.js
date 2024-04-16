@@ -100,6 +100,7 @@ export const callouts = {
 // Key is the file-name without path (and no extension for the md-file-list).
 // Value is an array of the relative paths to all the files with that name anywhere in the file-system.
 // If there is only one file with that name, the array will contain only one element.
+export let dirPrefix = "";
 export const mdFilesMap = {};
 export const filesMap = {};
 export const mdFilesDir = {};
@@ -166,7 +167,8 @@ function makeSafeForCSS(name) {
 /**
  * If it's the root dir, dirPrefix should be an empty string.
  */
-export async function scanFiles(dirPrefix, dir, root = dir) {
+export async function scanFiles(prefix, dir, root = dir) {
+  dirPrefix = prefix;
   scanFilesInternal(dir, root);
   let mdFiles = await Promise.all(
     Object.keys(mdFilesDir).map(async (file) => {
@@ -178,7 +180,6 @@ export async function scanFiles(dirPrefix, dir, root = dir) {
       }
       return {
         [file]: {
-          dirPrefix: dirPrefix,
           path: file,
           pathWithoutExt: pwe,
           folders: folders,
@@ -419,7 +420,7 @@ function preReplaceObsidianFileLinks(html, req) {
       }
       f = encodeURIComponent(f);
       const serverUrl = `${req.protocol}://${req.get("host")}`;
-      return `[${alt ? alt : fileName}](${serverUrl}/${f})`;
+      return `[${alt ? alt : fileName}](${serverUrl}/${dirPrefix + f})`;
     } else {
       return match;
     }
@@ -612,7 +613,7 @@ function replaceObsidianImageLinks(html, req) {
         }
       }
       const serverUrl = `${req.protocol}://${req.get("host")}`;
-      return `<img alt="${fileName}" src="${serverUrl}/${f}" style="${
+      return `<img alt="${fileName}" src="${serverUrl}/${dirPrefix + f}" style="${
         r ? `width: ${r.width}; height: ${r.height};` : ""
       }" />`;
     } else {
@@ -798,8 +799,7 @@ function insertDirFolder(folder, j) {
 
 function insertDirLink(file, req, indent, i, files) {
   let r = "";
-  console.log(file);
-  r += `<a href="/${file.dirPrefix + file.path}" class="${
+  r += `<a href="/${dirPrefix + file.path}" class="${
     "/" + file.path === decodeURIComponent(req.path) ? "highlight" : ""
   }">${indentStringFor(file.lastFolder === "" ? 0 : indent)}${
     file.fileNameWithoutExtension
