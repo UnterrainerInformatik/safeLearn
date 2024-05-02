@@ -1043,8 +1043,9 @@ export async function wrapInReveal(reveal) {
   
     <title>Sample RevealJS with CDN</title>
   
+    <link href='https://fonts.googleapis.com/css?family=Lato:300,700' rel='stylesheet' type='text/css'>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@3.7.0/css/reveal.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@3.7.0/css/theme/white.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@3.7.0/css/theme/moon.css">
 
     <style>
       ${getFontImports()}
@@ -1060,6 +1061,12 @@ export async function wrapInReveal(reveal) {
       pre.shiki code {
         max-width: 100%;
         max-height: 60vh !important; 
+      }
+
+      .reveal {
+        font-family: "Lato", serif;
+        font-size: 32px;
+        font-weight: 300;
       }
     </style>
     <link rel="stylesheet" href="/obsidian-page.css">
@@ -1101,8 +1108,8 @@ export async function wrapInReveal(reveal) {
         // The "normal" size of the presentation, aspect ratio will
         // be preserved when the presentation is scaled to fit different
         // resolutions. Can be specified using percentage units.
-        width: "80%",
-        height: "80%",
+        width: "90%",
+        height: "90%",
 
         // Factor of the display size that should remain empty around
         // the content
