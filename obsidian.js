@@ -164,6 +164,52 @@ function makeSafeForCSS(name) {
   });
 }
 
+export async function scanFonts(dir, root = dir) {
+  const files = fs.readdirSync(dir);
+
+  for (const file of files) {
+    try {
+      if (dir && file) {
+        // Check if dir and file are not null
+        const filePath = path.join(dir, file);
+        const isDirectory = fs.statSync(filePath).isDirectory();
+        if (isDirectory) {
+          const nmods = process.env.NEXT_PUBLIC_IS_APP_FOLDER
+            ? "/app/node_modules"
+            : "node_modules";
+          const slides = process.env.NEXT_PUBLIC_IS_APP_FOLDER
+            ? "/app/slides"
+            : "slides";
+          if (
+            filePath.startsWith(".") ||
+            filePath.startsWith(nmods) ||
+            filePath.startsWith(slides)
+          )
+            continue;
+            scanFonts(filePath, root);
+        } else {
+          // All other files.
+          const fileName = path.basename(file);
+          const relativePath = path.relative(root, filePath);
+          const p = relativePath.replace(/\\/g, "/");
+          if (p.startsWith("main-fonts/")) {
+            const fontName = path.basename(file, ".ttf");
+            mainFonts[fontName] = "assets/" + p;
+            mainFontsArray.push(fontName);
+          }
+          if (p.startsWith("nav-fonts/")) {
+            const fontName = path.basename(file, ".ttf");
+            navFonts[fontName] = "assets/" + p;
+            navFontsArray.push(fontName);
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`Error reading file while scanning fonts ${file}`, err);
+    }
+  }
+}
+
 /**
  * If it's the root dir, dirPrefix should be an empty string.
  */

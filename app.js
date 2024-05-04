@@ -95,7 +95,7 @@ const DOMPurify = createDOMPurify(window);
 const app = express();
 app.set("trust proxy", true);
 
-import { scanFiles, preParse, manipulateHtml, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions } from "./obsidian.js";
+import { scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions } from "./obsidian.js";
 import { hasSomeRoles } from "./utils.js";
 
 async function sanitizeAndParseMarkdown(data, req) {
@@ -300,7 +300,9 @@ initKeycloak(app).then(() => {
 
   const basePath = process.env.NEXT_PUBLIC_IS_APP_FOLDER ? '/app/' : '.';
   scanFiles("md/", path.join(basePath, "md")).then(() => {
-    app.listen(process.env.NEXT_PUBLIC_PORT, "0.0.0.0");
+    scanFonts(path.join(basePath, "assets")).then(() => {
+      app.listen(process.env.NEXT_PUBLIC_PORT, "0.0.0.0");
+    });
   });
 
   // If file is not found, redirect to the start page.
