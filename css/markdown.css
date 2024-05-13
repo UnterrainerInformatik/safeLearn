@@ -1,12 +1,3 @@
-
-
-
-
-
-
-
-
-
 #markdown-content {
   margin: auto;
   min-width: 830.67px;
@@ -20,11 +11,6 @@
   max-width: 100%;
   height: auto;
   background-color: #c3c3c3;
-}
-
-#markdown-content .line,
-#markdown-content .line * {
-  white-space: pre-line;
 }
 
 #markdown-content table {
@@ -53,4 +39,7 @@
 .shiki {
   word-wrap: break-word;
   word-break: break-all;
+  line-height: 1.3em;
+  font-size: 0.9em;
+  font-family: Fira-Code, monospace;
 }

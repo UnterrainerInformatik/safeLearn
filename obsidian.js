@@ -186,7 +186,7 @@ export async function scanFonts(dir, root = dir) {
             filePath.startsWith(slides)
           )
             continue;
-            scanFonts(filePath, root);
+          scanFonts(filePath, root);
         } else {
           // All other files.
           const fileName = path.basename(file);
@@ -374,10 +374,14 @@ export async function preParse(md, req) {
 async function removeForbiddenContent(md, req) {
   const regex = /^[ \t]*@@@(.*?)\n([\s\S]*?)@@@/gms;
   const matches = Array.from(md.matchAll(regex));
-  const replacements = await Promise.all(matches.map(([match, perms, content]) => {
-    const permissions = perms.split(",").map((p) => p.trim().toLowerCase());
-    return hasSomeRoles(req, permissions, true).then((r) => r ? content : "");
-  }));
+  const replacements = await Promise.all(
+    matches.map(([match, perms, content]) => {
+      const permissions = perms.split(",").map((p) => p.trim().toLowerCase());
+      return hasSomeRoles(req, permissions, true).then((r) =>
+        r ? content : ""
+      );
+    })
+  );
   for (let i = 0; i < matches.length; i++) {
     md = md.replace(matches[i][0], replacements[i]);
   }
@@ -385,13 +389,15 @@ async function removeForbiddenContent(md, req) {
 }
 
 function preMarkCode(md) {
-  const regex = /(^[ \t]*```[\s\S]*?```)/gms;
+  let regex = /^[ \t]*```(.*?)\n([\s\S]*?)```/gms;
   let match;
   let r = md;
   codeList = [];
   while ((match = regex.exec(r)) !== null) {
-    codeList.push(match[0]);
+    const string = `\`\`\`${match[1].toLowerCase()}\n${match[2]}\`\`\``;
+    codeList.push(string);
     r = r.replace(match[0], internalSubstitutions.code.string);
+    regex = /^[ \t]*```(.*?)\n([\s\S]*?)```/gms;
   }
   return r;
 }
@@ -474,27 +480,26 @@ function preReplaceObsidianFileLinks(html, req) {
 }
 
 export async function preReplacePlantUml(md, req) {
-  const regex = /^\s*```+\s*([\w\s]+)$/gm;
+  let regex = /^\s*```+\s*(plantuml)$/gim;
   let match;
   while ((match = regex.exec(md)) !== null) {
-    if (match[1].toLowerCase().trim() === "plantuml") {
-      // PlantUML
-      const start = match.index + match[0].length;
-      const end = md.indexOf("```", start);
-      const plantuml = md.substring(start, end);
-      let serverUrl = process.env.NEXT_PUBLIC_PLANTUML_URL;
-      if (serverUrl === undefined || serverUrl === null || serverUrl === "") {
-        serverUrl = `https://plantuml.unterrainer.info/plantuml`;
-      }
-
-      // Encode in UTF-8, compress using Deflate, and reencode in ASCII
-      const compressed = pako.deflate(plantuml, { to: "string" });
-      const encoded = toPlantUmlEncoding(compressed);
-
-      const url = `${serverUrl}/svg/${encoded}`;
-      const img = `![PlantUML](${url})`;
-      md = md.substring(0, match.index) + img + md.substring(end + 3);
+    // PlantUML
+    const start = match.index + match[0].length;
+    const end = md.indexOf("```", start);
+    const plantuml = md.substring(start, end);
+    let serverUrl = process.env.NEXT_PUBLIC_PLANTUML_URL;
+    if (serverUrl === undefined || serverUrl === null || serverUrl === "") {
+      serverUrl = `https://plantuml.unterrainer.info/plantuml`;
     }
+
+    // Encode in UTF-8, compress using Deflate, and reencode in ASCII
+    const compressed = pako.deflate(plantuml, { to: "string" });
+    const encoded = toPlantUmlEncoding(compressed);
+
+    const url = `${serverUrl}/svg/${encoded}`;
+    const img = `![PlantUML](${url})`;
+    md = md.substring(0, match.index) + img + md.substring(end + 3);
+    regex = /^\s*```+\s*(plantuml)$/gim;
   }
   return md;
 }
@@ -659,9 +664,9 @@ function replaceObsidianImageLinks(html, req) {
         }
       }
       const serverUrl = `${req.protocol}://${req.get("host")}`;
-      return `<img alt="${fileName}" src="${serverUrl}/${dirPrefix + f}" style="${
-        r ? `width: ${r.width}; height: ${r.height};` : ""
-      }" />`;
+      return `<img alt="${fileName}" src="${serverUrl}/${
+        dirPrefix + f
+      }" style="${r ? `width: ${r.width}; height: ${r.height};` : ""}" />`;
     } else {
       return match;
     }
@@ -762,11 +767,13 @@ function findFirstDifferentIndex(arr1, arr2) {
 
 async function getDirectoryListing(req) {
   const allFiles = Object.values(mdFilesDirStructure);
-  const files = await Promise.all(allFiles.map(async (f) => {
-    const hasRole = await hasSomeRoles(req, f.permissions, true);
-    return hasRole ? f : null;
-  }));
-  const filteredFiles = files.filter(f => f !== null);
+  const files = await Promise.all(
+    allFiles.map(async (f) => {
+      const hasRole = await hasSomeRoles(req, f.permissions, true);
+      return hasRole ? f : null;
+    })
+  );
+  const filteredFiles = files.filter((f) => f !== null);
   let r = await getDirectoryListingInternal(req, filteredFiles, []);
   if (filteredFiles[filteredFiles.length - 1].folders.length > 0) {
     r += `</div></div>`;
@@ -804,11 +811,7 @@ async function getDirectoryListingInternal(req, files, folders) {
       const subfolderFiles = files.filter(
         (f, index) => f.folders.startsWith(folders) && index > i
       );
-      html += await getDirectoryListingInternal(
-        req,
-        subfolderFiles,
-        folders
-      );
+      html += await getDirectoryListingInternal(req, subfolderFiles, folders);
 
       // Update the last processed file index
       lastProcessedFileIndex = i + subfolderFiles.length;
@@ -993,7 +996,11 @@ async function getTopBar(startPage, req) {
     )}</button>
     <div class="topbar-title nav-font">${
       req.path !== "/convert/"
-        ? decodeURIComponent(req.path.startsWith(`/${dirPrefix}`) ? req.path.slice(dirPrefix.length + 1) : req.path)
+        ? decodeURIComponent(
+            req.path.startsWith(`/${dirPrefix}`)
+              ? req.path.slice(dirPrefix.length + 1)
+              : req.path
+          )
         : decodeURIComponent(req.query.url)
     }</div>
     <div class="topbar-menu">
@@ -1106,7 +1113,7 @@ export async function wrapInReveal(reveal) {
       }
       pre.shiki code {
         max-width: 100%;
-        max-height: 60vh !important; 
+        max-height: 60vh !important;
       }
 
       .reveal {
