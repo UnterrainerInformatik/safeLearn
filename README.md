@@ -324,11 +324,11 @@ Then you can run the REST-examples in the `http` directory.
 In order for this setup to work correctly, you'll have to have a Keycloak-client (private with secret) and standard-authorization-flow enabled (should be enabled anyway).
 You need the following user-attributes of type `string` with mapper to the token.
 
-| ATTRIBUTE-NAME | TYPE   | DESCRIPTION                                                                                           |
-| -------------- | ------ | ----------------------------------------------------------------------------------------------------- |
-| config         | string | Holds several preference-values like dark-mode or not or the preferred font, fontsize or line-height. |
-| lastPage       | string | Holds the last-visited page of the current user.                                                      |
-
+| ATTRIBUTE-NAME                                                                                                     | TYPE   | DESCRIPTION                                                                                           |
+| ------------------------------------------------------------------------------------------------------------------ | ------ | ----------------------------------------------------------------------------------------------------- |
+| Client -> Client Scopes -> ...-dedicated -> Add Mapper (User Attribute)<br>`config`                                | string | Holds several preference-values like dark-mode or not or the preferred font, fontsize or line-height. |
+| Client -> Client Scopes -> ...-dedicated -> Add Mapper (User Attribute)<br>`lastVisitedUrl`                        | string | Holds the last-visited page of the current user.                                                      |
+| Client -> Client Scopes -> ...-dedicated -> Add Mapper (User Attribute)<br>map the field `LDAP_ENTRY_DN` to `ldap` | string | Holds the users LDAP information (class, teacher, etc.).                                              |
 ## MD-File Conversion
 This is done using [marked](https://www.npmjs.com/package/marked) which is installed on the web-server (via `package.json`).
 With the help of this you can link to any MD-file and show it in the context of your site.
