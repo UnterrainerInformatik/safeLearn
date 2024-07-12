@@ -1,6 +1,3 @@
-@keycloakUrl=https://auth.unterrainer.info
-@realm=safeLearn
-@clientId=safeLearn
 ###
 # @name POST OWN attributes (different URL) (needs no additional realm-management role)
 POST {{keycloakUrl}}/realms/{{realm}}/account
@@ -8,11 +5,10 @@ Authorization: openid password env
 Content-Type: application/json
 
 {
-  "firstName": "Tea",
-  "lastName": "Cher",
-  "email": "teacher@unterrainer.info",
   "attributes": {
-    "config": "custom value2",
+    "firstName": "Tea",
+    "lastName": "Cher",
+    "config": "custom value1",
     "lastVisitedUrl": "https://safelearn.unterrainer.info"
   }
 }

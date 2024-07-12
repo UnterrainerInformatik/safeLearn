@@ -194,15 +194,15 @@ export async function getUserAttributes(req, getAll = false) {
       return response.json();
     })
     .then((data) => {
-      for(let key in data.attributes) {
-        data.attributes[key] = data.attributes[key][0];
+      for(let key in data) {
+        data[key] = data[key][0];
       }
       if(getAll) {
       // Remove fields from the object that are not needed.
       let { userProfileMetadata, id, username, emailVerified, ...d} = data;
       return d;
       }
-      return data.attributes;
+      return data;
     })
     .catch((error) => {
       console.error("Error fetching current attributes:", error);
@@ -212,7 +212,7 @@ export async function getUserAttributes(req, getAll = false) {
 }
 
 export async function setUserAttribute(req, attributeName, attributeValue) {
-  if (!req || !req.user || !req.user.accessToken ||!req.user.keycloakConfig) {
+  if (!req || !req.user || !req.user.accessToken || !req.user.keycloakConfig) {
     return null;
   }
   const keycloakConfig = req.user.keycloakConfig;
@@ -223,10 +223,12 @@ export async function setUserAttribute(req, attributeName, attributeValue) {
   // Fetch current user attributes
   const currentAttributes = await getUserAttributes(req, true);
 
-  // Merge current and new attributes
-  const mas = { ...currentAttributes.attributes, [attributeName]: attributeValue };
-  const mergedAttributes = { ...currentAttributes, attributes: mas };
-  
+  // Merge current and new attributes at the root level
+  let mergedAttributes = { ...currentAttributes, [attributeName]: attributeValue };
+  mergedAttributes = {
+    attributes: mergedAttributes
+  }
+
   const result = fetch(url, {
     method: "POST",
     headers: {
