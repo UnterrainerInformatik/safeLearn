@@ -156,6 +156,7 @@ export function getLdapGroups(req) {
     return r;
   }
   const ldap = req.user.ldap;
+  // console.log("LDAP-String", ldap)
   
   // Regular expression to match "OU=..."
   const regex = /OU=[^,]*/gi;
@@ -170,7 +171,7 @@ export function getLdapGroups(req) {
       r[value] = true;
     });
   }
-  
+  // console.log("LDAP-Groups", r);
   return r;
 }
 
@@ -194,13 +195,14 @@ export async function getUserAttributes(req, getAll = false) {
       return response.json();
     })
     .then((data) => {
-      for(let key in data) {
-        data[key] = data[key][0];
+      // console.log("data of user attributes", data);
+      for(let key in data.attributes) {
+        data.attributes[key] = data.attributes[key][0];
       }
       if(getAll) {
-      // Remove fields from the object that are not needed.
-      let { userProfileMetadata, id, username, emailVerified, ...d} = data;
-      return d;
+        // Remove fields from the object that are not needed.
+        let { userProfileMetadata, id, username, emailVerified, ...d} = data;
+        return d;
       }
       return data;
     })
@@ -222,12 +224,12 @@ export async function setUserAttribute(req, attributeName, attributeValue) {
 
   // Fetch current user attributes
   const currentAttributes = await getUserAttributes(req, true);
+  // console.log("current attributes", currentAttributes);
 
-  // Merge current and new attributes at the root level
-  let mergedAttributes = { ...currentAttributes, [attributeName]: attributeValue };
-  mergedAttributes = {
-    attributes: mergedAttributes
-  }
+  // Merge current and new attributes
+  const mas = { ...currentAttributes.attributes, [attributeName]: attributeValue };
+  const mergedAttributes = { ...currentAttributes, attributes: mas };  
+  // console.log("merged attributes before saving", mergedAttributes);
 
   const result = fetch(url, {
     method: "POST",
