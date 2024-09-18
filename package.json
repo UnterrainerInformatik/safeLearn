@@ -20,7 +20,7 @@
     "lucide-static": "^0.357.0",
     "marked": "^12.0.1",
     "marked-shiki": "^1.0.1",
-    "nodemon": "^3.1.0",
+    "nodemon": "^3.1.5",
     "openid-client": "^5.6.5",
     "pako": "^2.1.0",
     "passport": "^0.7.0",

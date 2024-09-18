@@ -1060,7 +1060,7 @@ export async function wrapInPage(html, startPage, req) {
       <body style="display: none;">
         <div id="topbar">${await getTopBar(startPage, req)}</div>
         <div id="wrapper">
-          <div id="sidebar" class="nav-font">${await getSideBar(
+          <div id="sidebar" class="nav-font">&nbsp;<br>${await getSideBar(
             startPage,
             req
           )}</div>
