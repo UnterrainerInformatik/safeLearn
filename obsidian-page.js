@@ -375,3 +375,29 @@ function toggleViewExam() {
     }, 1000);
   });
 }
+
+/*
+* This script is used to resize the right panel by dragging the border.
+*/
+const BORDER_SIZE = 4;
+const panel = document.getElementById("sidebar");
+
+let m_pos;
+function resize(e){
+  const dx = m_pos - e.x;
+  m_pos = e.x;
+  panel.style.width = (parseInt(getComputedStyle(panel, '').width) - dx) + "px";
+}
+
+panel.addEventListener("mousedown", function(e){
+  const cs = getComputedStyle(panel, '')
+  const w = parseInt(cs.width) + parseInt(cs.paddingLeft) + parseInt(cs.paddingRight)
+  if (e.offsetX >= w - BORDER_SIZE) {
+    m_pos = e.x;
+    document.addEventListener("mousemove", resize, false);
+  }
+}, false);
+
+document.addEventListener("mouseup", function(){
+  document.removeEventListener("mousemove", resize, false);
+}, false);
