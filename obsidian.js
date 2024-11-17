@@ -454,6 +454,9 @@ function preReplaceObsidianFileLinks(html, req) {
     if (fileName && fileName.includes("|")) {
       const parts = fileName.split("|");
       fileName = parts[0].trim();
+      if (fileName.endsWith("\\")) {
+        fileName = fileName.slice(0, -1);
+      }
       alt = parts[1].trim();
       if (alt === "") {
         alt = null;
