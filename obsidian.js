@@ -362,10 +362,10 @@ export function lucideIcon(name, color, size = 18) {
 
 export async function preParse(md, req) {
   let r = md;
+  r = await removeForbiddenContent(r, req);
   r = await preReplacePlantUml(r, req);
   r = preMarkCode(r);
   r = preReplaceObsidianFileLinks(r, req);
-  r = await removeForbiddenContent(r, req);
   r = preMarkCallouts(r);
   r = unmarkCode(r);
   return r;
