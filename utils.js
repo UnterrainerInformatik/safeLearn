@@ -105,8 +105,15 @@ async function hasRoles(req, clientRoles, all, override) {
       // console.log("attributes", attributes);
       if (attributes && attributes.attributes && attributes.attributes.config) {
         const a = JSON.parse(attributes.attributes.config);
-        const r = JSON.parse(req.user.rolesCalculated);
+        let r = JSON.parse(req.user.rolesCalculated);
         // console.log("Roles Calculated", r);
+        if (r === undefined || r === null) {
+          r = {};
+        }
+        let name = req.user.name
+        name = name.trim()
+        name = name.toLowerCase()
+        r[name] = true;
         const cr = await getClientRoles(req, clientRoles);
         if (cr) {
           for (const role of cr) {

@@ -13,12 +13,14 @@ The following paragraph is only visible to 5BHIF:
 @@@
 
 # User Permission
-The following paragraph is only visible to Gerald Unterrainer
-@@@ Gerald Unterrainer
->Only visible to Gerald Unterrainer
+The following paragraph is only visible to Stu Dent
+@@@ Stu Dent
+>Only visible to Stu Dent
 
 @@@
-# Nested Permission
+# NO Nested Permissions!
+Nested permissions don't work due to the way we parse the permission-declarations (regexp).
+
 The following paragraph is only visible to 5BHIF:
 @@@ 5bhif
 >Only visible to users in 5BHIF group.

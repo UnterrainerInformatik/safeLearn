@@ -106,6 +106,8 @@ Anyone who has even one of these roles assigned will be able to view the documen
 	* `admin`... is a role for testing-purposes, new features, etc...
 	* `teacher`... see everything (except for admin-only). So when you make a document visible to users with the role, let's say `5chif`, then you don't have to specify `teacher`. That is implied.
 	* You gain a role either by getting the OU= value set by LDAP (`Teachers` gets translated to `teacher` and `Students` to `students`), or by assigning a client-role with that name.
+	* The name of the user works as permission-role as well. So in the case of this test-setup here the user 'student' has first-name 'Stu' and last-name 'Dent'; So the viable permission for this user would be `@@@ Stu Dent`.
+* Roles are case-insensitive. So putting `@@@ Stu Dent, 4BHIF` is the same as putting `@@@ stu dent, 4bhif`.
 * If the directive is in the first line of the document (the very first line), then it applies to the whole document.
 	* In that case, there is no end-directive.
 * Documents that are hidden for a viewer will not be displayed to that viewer, even if the viewer has a direct-link.
@@ -140,6 +142,7 @@ Some text in a document only visible to users with the `4bhif` OR `4chif` OR `5a
 #### File-Content Restrictions
 Put the security directive in the middle of your documents' content.
 Don't forget to put in an end-directive in this case.
+These directives cannot be nested!
 
 ```markdown
 # Some Docuemnt
