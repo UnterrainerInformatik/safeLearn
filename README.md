@@ -80,7 +80,7 @@ So there are some intricacies you should be aware of when working with it and se
 Here you can find the technical intricacies of the Obsidian-specific language extension implemented in this project [docs](docs-obsidian.md).
 ## Permissions
 You can specify who is able to read whole files, or only parts of it.
-Here you can find more information about [docs-permissions](permissions).
+Here you can find more information about [permissions](docs-permissions).
 ## Technical Details
 If you're interested about the software used behind the scenes or some of the URLs you may use to do stuff, then look [here](docs-technical-details).
 ## Development: Building this Project

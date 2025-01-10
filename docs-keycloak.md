@@ -1,6 +1,6 @@
 Here you find information about the keycloak-setup when you're trying to host it yourself.
 
-[back](README.md) to the main page.
+[Back](README.md) to the main page.
 ## Keycloak Setup
 In order for this setup to work correctly, you'll have to have a Keycloak-client (private with secret) and standard-authorization-flow enabled (should be enabled anyway).
 You need the following user-attributes of type `string` with mapper to the token.

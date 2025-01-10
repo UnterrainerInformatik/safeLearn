@@ -1,7 +1,7 @@
 # Building
 If you'd like to build and install your own instance of this project, you've come to the right page.
 
-[back](README.md) to the main page.
+[Back](README.md) to the main page.
 ## How To Build / Update
 The repository derives from https://github.com/htl-leonding-college/asciidoctor-docker-template and adds functionality to publish the output to a web-server of your liking using DockerHub.
 It hides (server-side) all pages behind a OIDC token redirecting to an authentication server of your liking (in the default-case it's client on a Keycloak instance linked to our school's AD service, so we never have to maintain the users because the school does this for us).

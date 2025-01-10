@@ -1,6 +1,6 @@
 Here you find in-depth information about some of the technical background behind the scenes.
 
-[back](README.md) to the main page.
+[Back](README.md) to the main page.
 ## MD-File Conversion
 This is done using [marked](https://www.npmjs.com/package/marked) which is installed on the web-server (via `package.json`).
 With the help of this you can link to any MD-file and show it in the context of your site.
@@ -73,3 +73,21 @@ You can now add the parameter `print-pdf` to the path-string like so:
 https://safelearn.unterrainer.info/md/presentations/test-presentation.md?reveal=true&print-pdf
 ```
 This then renders your RevealJS presentation as a continuous page that you may print as PDF or on whatever printer you have currently installed.
+## Render-Pipeline
+When you have a look inside the code, you'll find that the file `obsidian.js` prepares a page in a very particular way before it is rendered to HTML-output. Here I want to document that pipeline.
+
+1. File is loaded from disk (`app.js`)
+2. Accesstoken is refreshed, so it and all contained roles and attributes are actually current
+3. `preParse` is called preparing the content for HTML-conversion
+	1. `removeForbiddenContent` parses for file- and inline-permissions and removes forbidden parts of the file
+	2. `preReplacePlantUml` replaces the code tags containing PlantUML-code with a rendered version of it by calling a proper PlantUML conversion service and inserting the SVG of that output here instead of the code-tags
+	3. `preMarkCode` parses the file for code-marks (cannot be nested) and replaces them for later use of the marks (the content of the code-tags parsed is saved in an array for later insertion)
+	4. `preReplaceObsidianFileLinks` replaces Obsidian- (or Wiki-) style links with proper links your browser can understand
+	5. `preMarkCallouts` parses for callouts (may be nested) and replaces their tags inline with appropriate start- and end-tags of our own
+	6. `unmarkCode` replaces the code-marks by the content of the previously saved array
+4. `manipulateHtml` is called actually converting the file
+	1. `replacePreMarkCallouts` renders the proper callouts pre-marked earlier on
+	2. `replaceObsidianImageLinks` deals with the Obsidian- (or Wiki-) specific image links (shortform) by expanding that into a proper image-tag
+	3. `replaceObsidianImageLatResizeValues` deals with the conditional image resizing described in the Obsidian-specific document [here](docs-obsidian)
+	4. `makeContentMap` generates the map of the files' content later on displayed on the left navbar
+5. `DOMPurify.santitize` is called before sending the response to the client

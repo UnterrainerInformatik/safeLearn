@@ -1,7 +1,7 @@
 # Permissions
 Here you can find an explanation of the projects permissions-features.
 
-[back](README.md) to the main page.
+[Back](README.md) to the main page.
 ## Security
 To restrict the visibility of a whole file or parts of a document's content and therefore effectively hiding it from anyone not having any of the given roles assigned, you specify a comma-separated list of roles.
 Anyone who has even one of these roles assigned will be able to view the document or that part of the document you specified the directive for.

@@ -1,7 +1,7 @@
 # Obsidian Extensions
 Here you can find the technical intricacies of the Obsidian-specific language extension.
 
-[back](README.md) to the main page.
+[Back](README.md) to the main page.
 ## Globally Unique File Names
 Obsidian uses quick-links like so:
 ```markdown

@@ -1,7 +1,7 @@
 # # Debugging
 Here you can find help with debugging the project.
 
-[back](README.md) to the main page.
+[Back](README.md) to the main page.
 ## Debugging
 To test the portions of the web-site that isn't directly connected to the gh-pages generation and Asciidoc conversion, you may want to start it using VSCode.
 Just do the following:
