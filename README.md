@@ -86,6 +86,6 @@ If you're interested about the software used behind the scenes or some of the UR
 ## Development: Building this Project
 Here you can find information about [building](docs-building) this project.
 ## Development: Debugging
-Here you can find information about [docs-debugging](debugging) this project when you've decided to help develop it.
+Here you can find information about [debugging](docs-debugging) this project when you've decided to help develop it.
 ## Self-Hosting: Keycloak
 If you like to host your own server, you'll need a Keycloak-Server to host your users' credentials that is probably connected to your schools' LDAP in some way. [Here](docs-keycloak) you can find information about that.
