@@ -1018,8 +1018,11 @@ async function getTopBar(startPage, req) {
       </div>`
           : ""
       }
-      <button class="sl-button" style="height: 32px; margin: 6px;" onclick="openAsPresentation()">${lucideIcon(
+      <button class="sl-button" style="height: 32px; margin: 6px;" onclick="openAsPresentation(false)">${lucideIcon(
         "Presentation"
+      )}</button>
+      <button class="sl-button" style="height: 32px; margin: 6px;" onclick="openAsPresentation(true)">${lucideIcon(
+        "Printer"
       )}</button>
       <button class="sl-button-accent topdown-menu-chevron" style="height: 32px; margin: 6px;" onclick="toggleTopdownMenu()">${lucideIcon(
         "Settings"
@@ -1088,7 +1091,7 @@ export async function wrapInPage(html, startPage, req) {
   return pre + html + post;
 }
 
-export async function wrapInReveal(reveal) {
+export async function wrapInReveal(reveal, req) {
   const pre = `
   <!DOCTYPE html>
   <html>
@@ -1097,7 +1100,7 @@ export async function wrapInReveal(reveal) {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   
-    <title>Sample RevealJS with CDN</title>
+    <title>${req.file.name}</title>
   
     <link href='https://fonts.googleapis.com/css?family=Lato:300,700' rel='stylesheet' type='text/css'>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@3.7.0/css/reveal.css">

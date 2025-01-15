@@ -166,7 +166,10 @@ function toggleTopdownMenu() {
 }
 
 function openAsPresentation() {
-  const url = new URL(window.location.href);
+  let url = new URL(window.location.href);
+  if (print) {
+    url.searchParams.set("print-pdf", "true")
+  }
   url.searchParams.set("reveal", "true");
   window.open(url, "_blank");
 }
