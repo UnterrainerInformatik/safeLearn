@@ -165,12 +165,18 @@ function toggleTopdownMenu() {
   }
 }
 
-function openAsPresentation() {
+function openAsPresentation(print) {
   let url = new URL(window.location.href);
   if (print) {
     url.searchParams.set("print-pdf", "true")
   }
   url.searchParams.set("reveal", "true");
+  window.open(url, "_blank");
+}
+
+function openAsDocument() {
+  const url = new URL(window.location.href);
+  url.searchParams.set("document", "true");
   window.open(url, "_blank");
 }
 

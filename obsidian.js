@@ -988,6 +988,22 @@ async function getTopdownMenu(req) {
     </div>`
         : ""
     }
+    <div style="padding: 0px; margin: 0px; margin-left: 0px; margin-top: 25px; margin-bottom: -10px; text-align: left; display: flex;">
+      <button class="sl-button" style="height: 32px; margin: 0px;" onclick="openAsPresentation(true)">${lucideIcon(
+        "Printer"
+      )}
+      ${lucideIcon(
+        "Presentation"
+      )}
+      </button>
+      <button class="sl-button" style="height: 32px; margin: 0px; margin-left: 6px" onclick="openAsDocument(true)">${lucideIcon(
+        "Printer"
+      )}
+      ${lucideIcon(
+        "ReceiptText"
+      )}
+      </button>
+    </div>
   </div>
   `;
 }
@@ -1020,9 +1036,6 @@ async function getTopBar(startPage, req) {
       }
       <button class="sl-button" style="height: 32px; margin: 6px;" onclick="openAsPresentation(false)">${lucideIcon(
         "Presentation"
-      )}</button>
-      <button class="sl-button" style="height: 32px; margin: 6px;" onclick="openAsPresentation(true)">${lucideIcon(
-        "Printer"
       )}</button>
       <button class="sl-button-accent topdown-menu-chevron" style="height: 32px; margin: 6px;" onclick="toggleTopdownMenu()">${lucideIcon(
         "Settings"
@@ -1062,6 +1075,7 @@ export async function wrapInPage(html, startPage, req) {
         </style>
         <link rel="stylesheet" href="/css/main.css">
         <link rel="shortcut icon" href="/assets/favicon.ico" type="image/x-icon" />
+        <title>${req.file.name}</title>
       </head>
       <body style="display: none;">
         <div id="topbar">${await getTopBar(startPage, req)}</div>
@@ -1076,6 +1090,39 @@ export async function wrapInPage(html, startPage, req) {
           </div>
           <div id="topdown-menu" class="nav-font">
             ${await getTopdownMenu(req)}
+          </div>
+        </div>
+        <script src="/obsidian-page.js"></script>
+        <script lang="javascript">
+        initFonts('${JSON.stringify(mainFontsArray)}', '${JSON.stringify(
+    navFontsArray
+  )}');
+        init();
+        </script>
+      </body>
+      </html>
+    `;
+  return pre + html + post;
+}
+
+export async function wrapAsDocument(html, req) {
+  const pre = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <style>
+          ${await getFontImports()}
+        </style>
+        <link rel="stylesheet" href="/css/main.css">
+        <link rel="shortcut icon" href="/assets/favicon.ico" type="image/x-icon" />
+        <title>${req.file.name}</title>
+      </head>
+      <body style="display: none;">
+        <div id="wrapper">
+          <div id="markdown-content">
+    `;
+  const post = `
           </div>
         </div>
         <script src="/obsidian-page.js"></script>

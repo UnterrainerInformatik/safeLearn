@@ -95,7 +95,7 @@ const DOMPurify = createDOMPurify(window);
 const app = express();
 app.set("trust proxy", true);
 
-import { scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions } from "./obsidian.js";
+import { scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions, wrapAsDocument } from "./obsidian.js";
 import { hasSomeRoles } from "./utils.js";
 
 async function sanitizeAndParseMarkdown(data, req) {
@@ -199,12 +199,22 @@ initKeycloak(app).then(() => {
             });
           });
         } else {
-          sanitizeAndParseMarkdown(data, req).then((html) => {
-            setUserAttribute(req, "lastVisitedUrl", req.originalUrl);
-            wrapInPage(html, getStartPage(), req).then((r) => {
-              res.send(r);
+          const doc = req.query.document;
+          if  (doc) {
+            sanitizeAndParseMarkdown(data, req).then((html) => {
+              setUserAttribute(req, "lastVisitedUrl", req.originalUrl);
+              wrapAsDocument(html, req).then((r) => {
+                res.send(r);
+              });
             });
-          });
+          } else {
+            sanitizeAndParseMarkdown(data, req).then((html) => {
+              setUserAttribute(req, "lastVisitedUrl", req.originalUrl);
+              wrapInPage(html, getStartPage(), req).then((r) => {
+                res.send(r);
+              });
+            });
+          }
         }
       });
     } else {
