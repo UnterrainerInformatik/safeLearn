@@ -26,6 +26,7 @@ const internalSubstitutions = {
   },
 };
 let codeList = [];
+let openNavTreeScript = '';
 
 export const callouts = {
   note: {
@@ -777,17 +778,23 @@ async function getDirectoryListing(req) {
     })
   );
   const filteredFiles = files.filter((f) => f !== null);
-  await getSelectedPage(req, files);
-  let r = await getDirectoryListingInternal(req, filteredFiles, []);
+  const p = await markPathForSelectedPage(req, files);
+  
+  openNavTreeScript = "<script lang=\"javascript\">\n"
+  openNavTreeScript += `toggleDirList('sidebar-dirlist');\n`;
+  let r = await getDirectoryListingInternal(p, req, filteredFiles, []);
+  openNavTreeScript += "</script>";
+  // console.log("openNavTreeScript", openNavTreeScript);
+
   if (filteredFiles[filteredFiles.length - 1].folders.length > 0) {
     r += `</div></div>`;
   }
   return r;
 }
 
-async function getSelectedPage(req, files) {
-  //  console.log("getSelectedPage", req);
-  console.log("getSelectedPage", files);
+async function markPathForSelectedPage(req, files) {
+  // console.log("getSelectedPage", req);
+  // console.log("getSelectedPage", files);
   let path = req._parsedUrl.path;
   if(path.startsWith("/md/")) {
     path = path.slice(4);
@@ -795,13 +802,38 @@ async function getSelectedPage(req, files) {
   while (path.startsWith("/")) {
     path = path.slice(1);
   }
-  console.log('parsedOriginalUrl', path);
+  const r = {
+    path: [],
+    file: null
+  }
+  const splitPath = path.split("/");
+  r.file = splitPath.pop();
+  for (let i = 0; i < splitPath.length; i++) {
+    const f = {
+      dir: splitPath[i],
+      level: i
+    }
+    r.path.push(f);
+  }
+  // console.log("markPathForSelectedPage", r);
+  return r;
 }
 
-async function getDirectoryListingInternal(req, files, folders) {
+function lookupAndMarkPath(folder, level, path) {
+  for (const p of path) {
+    if (p.level === level && p.dir === folder) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function getDirectoryListingInternal(path, req, files, folders) {
   let html = "";
   let lastProcessedFileIndex = -1;
   let lastFile = null;
+  let currentLevel = 0;
+
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     lastFile = file;
@@ -818,6 +850,10 @@ async function getDirectoryListingInternal(req, files, folders) {
       for (let j = diffIndex; j < file.folderArray.length; j++) {
         const folder = file.folderArray[j];
         html += insertDirFolder(folder, j);
+        if (lookupAndMarkPath(folder, currentLevel, path.path)) {
+          openNavTreeScript += `toggleDirList('ff-${folder}-${j}');\n`;
+          currentLevel++;
+        }
       }
       folders = file.folderArray;
 
@@ -828,7 +864,7 @@ async function getDirectoryListingInternal(req, files, folders) {
       const subfolderFiles = files.filter(
         (f, index) => f.folders.startsWith(folders) && index > i
       );
-      html += await getDirectoryListingInternal(req, subfolderFiles, folders);
+      html += await getDirectoryListingInternal(path, req, subfolderFiles, folders);
 
       // Update the last processed file index
       lastProcessedFileIndex = i + subfolderFiles.length;
@@ -865,9 +901,14 @@ function insertDirFolder(folder, j) {
 
 function insertDirLink(file, req, indent, i, files) {
   let r = "";
-  r += `<a href="/${dirPrefix + file.path}" class="${
-    "/" + file.path === decodeURIComponent(req.path) ? "highlight" : ""
-  }">${indentStringFor(file.lastFolder === "" ? 0 : indent)}${
+  let correctedPath = decodeURIComponent(req.path);
+  if(correctedPath.startsWith("/md/")) {
+    correctedPath = correctedPath.slice(4);
+  }
+  let highlight = "";
+  if(file.path === correctedPath)
+    highlight = "highlight";
+  r += `<a href="/${dirPrefix + file.path}" class="${highlight}">${indentStringFor(file.lastFolder === "" ? 0 : indent)}${
     file.fileNameWithoutExtension
   }</a>`;
   // Only add <br> if it isn't the last file in the folder
@@ -1113,6 +1154,7 @@ export async function wrapInPage(html, startPage, req) {
   )}');
         init();
         </script>
+        ${openNavTreeScript}
       </body>
       </html>
     `;
