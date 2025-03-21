@@ -777,7 +777,7 @@ async function getDirectoryListing(req) {
     })
   );
   const filteredFiles = files.filter((f) => f !== null);
-  await getSelectedPage(req, filteredFiles);
+  await getSelectedPage(req, files);
   let r = await getDirectoryListingInternal(req, filteredFiles, []);
   if (filteredFiles[filteredFiles.length - 1].folders.length > 0) {
     r += `</div></div>`;
@@ -788,7 +788,14 @@ async function getDirectoryListing(req) {
 async function getSelectedPage(req, files) {
   //  console.log("getSelectedPage", req);
   console.log("getSelectedPage", files);
-  console.log('parsedOriginalUrl', req._parsedUrl.path);
+  let path = req._parsedUrl.path;
+  if(path.startsWith("/md/")) {
+    path = path.slice(4);
+  }
+  while (path.startsWith("/")) {
+    path = path.slice(1);
+  }
+  console.log('parsedOriginalUrl', path);
 }
 
 async function getDirectoryListingInternal(req, files, folders) {
@@ -807,7 +814,7 @@ async function getDirectoryListingInternal(req, files, folders) {
           html += `</div></div>`;
         }
       }
-      // Open as many folders as needed to reach the new folder
+      // Insert as many folders as needed to reach the new folder
       for (let j = diffIndex; j < file.folderArray.length; j++) {
         const folder = file.folderArray[j];
         html += insertDirFolder(folder, j);
