@@ -777,11 +777,18 @@ async function getDirectoryListing(req) {
     })
   );
   const filteredFiles = files.filter((f) => f !== null);
+  await getSelectedPage(req, filteredFiles);
   let r = await getDirectoryListingInternal(req, filteredFiles, []);
   if (filteredFiles[filteredFiles.length - 1].folders.length > 0) {
     r += `</div></div>`;
   }
   return r;
+}
+
+async function getSelectedPage(req, files) {
+  //  console.log("getSelectedPage", req);
+  console.log("getSelectedPage", files);
+  console.log('parsedOriginalUrl', req._parsedUrl.path);
 }
 
 async function getDirectoryListingInternal(req, files, folders) {
