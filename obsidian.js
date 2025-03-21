@@ -795,7 +795,7 @@ async function getDirectoryListing(req) {
 async function markPathForSelectedPage(req, files) {
   // console.log("getSelectedPage", req);
   // console.log("getSelectedPage", files);
-  let path = req._parsedUrl.path;
+  let path = decodeURIComponent(req.path);
   if(path.startsWith("/md/")) {
     path = path.slice(4);
   }
