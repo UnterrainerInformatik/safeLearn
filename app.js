@@ -83,7 +83,7 @@ markedDark.use(
 import axios from "axios";
 
 import { config } from "dotenv";
-import path from "path";
+import path from "node:path";
 import fs from "fs";
 const __dirname = import.meta.dirname;
 

@@ -241,8 +241,8 @@ export async function setUserAttribute(req, attributeName, attributeValue) {
   })
     .then((response) => {
       if (!response.ok) {
-        console.log('url', url);
-        console.log('response', JSON.stringify(response, null, 2));
+        // console.log('url', url);
+        // console.log('response', JSON.stringify(response, null, 2));
         throw new Error("Failed to update attribute " + JSON.stringify({ mergedAttributes: mergedAttributes }, null, 2));
       }
       return true;
