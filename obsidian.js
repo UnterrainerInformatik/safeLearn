@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from "uuid";
 import { JSDOM } from "jsdom";
 import { hasSomeRoles } from "./utils.js";
 import * as lucideIcons from "lucide-static";
+import { get } from "http";
 
 const internalTags = {
   callout: {
@@ -668,13 +669,31 @@ function replaceObsidianImageLinks(html, req) {
         }
       }
       const serverUrl = `${req.protocol}://${req.get("host")}`;
-      return `<img alt="${fileName}" src="${serverUrl}/${
-        dirPrefix + f
-      }" style="${r ? `width: ${r.width}; height: ${r.height};` : ""}" />`;
+      return getHtmlFor(getFileExtension(f), fileName, serverUrl, dirPrefix, f);
     } else {
       return match;
     }
   });
+}
+
+const imageFileTypes = ['png', 'jpg', 'jpeg', 'apng', 'avif', 'gif', 'jfif', 'pjpeg', 'pjp', 'svg', 'webp', 'bmp', 'ico', 'tiff', 'tif', 'heif', 'heic'];
+
+function getHtmlFor(fileType, fileName, serverUrl, dirPrefix, file) {
+  const type = fileType.toLowerCase();
+  if (imageFileTypes.includes(type)) {
+    return `<img src="${serverUrl}/${dirPrefix + file}" alt="${fileName}" style="${r ? `width: ${r.width}; height: ${r.height};` : ""}"/>`;
+  } else if (type === "svg") {
+    return `<img src="${serverUrl}/${dirPrefix + file}" alt="${fileName}" />`;
+  } else if (type === "pdf") {
+    return `<iframe src="${serverUrl}/${dirPrefix + file}" style="${r ? `width: ${r.width}; height: ${r.height};` : ""}"></iframe>`;
+  } else if (type === "mp4") {
+    return `<video controls><source src="${serverUrl}/${dirPrefix + file}" type="video/mp4"></video>`;
+  } else if (type === "webm") {
+    return `<video controls><source src="${serverUrl}/${dirPrefix + file}" type="video/webm"></video>`;
+  } else if (type === "ogg") {
+    return `<audio controls><source src="${serverUrl}/${dirPrefix + file}" type="audio/ogg"></audio>`;
+  }
+  return `${serverUrl}/${dirPrefix + file}`;
 }
 
 function replacePreMarkCallouts(html) {
