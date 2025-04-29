@@ -27,7 +27,7 @@ const internalSubstitutions = {
   },
 };
 let codeList = [];
-let openNavTreeScript = '';
+let openNavTreeScript = "";
 
 export const callouts = {
   note: {
@@ -669,31 +669,68 @@ function replaceObsidianImageLinks(html, req) {
         }
       }
       const serverUrl = `${req.protocol}://${req.get("host")}`;
-      return getHtmlFor(getFileExtension(f), fileName, serverUrl, dirPrefix, f);
+      return getHtmlFor(getFileExtension(f), fileName, serverUrl, dirPrefix, f, r);
     } else {
       return match;
     }
   });
 }
 
-const imageFileTypes = ['png', 'jpg', 'jpeg', 'apng', 'avif', 'gif', 'jfif', 'pjpeg', 'pjp', 'svg', 'webp', 'bmp', 'ico', 'tiff', 'tif', 'heif', 'heic'];
-
-function getHtmlFor(fileType, fileName, serverUrl, dirPrefix, file) {
-  const type = fileType.toLowerCase();
-  if (imageFileTypes.includes(type)) {
-    return `<img src="${serverUrl}/${dirPrefix + file}" alt="${fileName}" style="${r ? `width: ${r.width}; height: ${r.height};` : ""}"/>`;
-  } else if (type === "svg") {
-    return `<img src="${serverUrl}/${dirPrefix + file}" alt="${fileName}" />`;
-  } else if (type === "pdf") {
-    return `<iframe src="${serverUrl}/${dirPrefix + file}" style="${r ? `width: ${r.width}; height: ${r.height};` : ""}"></iframe>`;
-  } else if (type === "mp4") {
-    return `<video controls><source src="${serverUrl}/${dirPrefix + file}" type="video/mp4"></video>`;
-  } else if (type === "webm") {
-    return `<video controls><source src="${serverUrl}/${dirPrefix + file}" type="video/webm"></video>`;
-  } else if (type === "ogg") {
-    return `<audio controls><source src="${serverUrl}/${dirPrefix + file}" type="audio/ogg"></audio>`;
+function getFileExtension(filePath) {
+  const parts = filePath.split(".");
+  if (parts.length > 1) {
+    return parts[parts.length - 1].toLowerCase();
   }
-  return `${serverUrl}/${dirPrefix + file}`;
+  return null;
+}
+
+const imageFileTypes = [
+  "png",
+  "jpg",
+  "jpeg",
+  "apng",
+  "avif",
+  "gif",
+  "jfif",
+  "pjpeg",
+  "pjp",
+  "svg",
+  "webp",
+  "bmp",
+  "ico",
+  "tiff",
+  "tif",
+  "heif",
+  "heic",
+];
+
+function getHtmlFor(fileType, fileName, serverUrl, dirPrefix, file, r) {
+  if (fileType !== null) {
+    const type = fileType.toLowerCase();
+    console.log(type)
+    if (imageFileTypes.includes(type)) {
+      return `<img src="${serverUrl}/${
+        dirPrefix + file
+      }" alt="${fileName}" style="${
+        r ? `width: ${r.width}; height: ${r.height};` : ""
+      }"/>`;
+    } else if (type === "svg") {
+      return `<img src="${serverUrl}/${dirPrefix + file}" alt="${fileName}" />`;
+    } else if (type === "mp4") {
+      return `<video controls><source src="${serverUrl}/${
+        dirPrefix + file
+      }" type="video/mp4"></video>`;
+    } else if (type === "webm") {
+      return `<video controls><source src="${serverUrl}/${
+        dirPrefix + file
+      }" type="video/webm"></video>`;
+    } else if (type === "ogg") {
+      return `<audio controls><source src="${serverUrl}/${
+        dirPrefix + file
+      }" type="audio/ogg"></audio>`;
+    }
+  }
+  return `<a href="${serverUrl}/${dirPrefix + file}">${fileName}</a>`;
 }
 
 function replacePreMarkCallouts(html) {
@@ -798,8 +835,8 @@ async function getDirectoryListing(req) {
   );
   const filteredFiles = files.filter((f) => f !== null);
   const p = await markPathForSelectedPage(req, files);
-  
-  openNavTreeScript = "<script lang=\"javascript\">\n"
+
+  openNavTreeScript = '<script lang="javascript">\n';
   openNavTreeScript += `toggleDirList('sidebar-dirlist');\n`;
   let r = await getDirectoryListingInternal(p, req, filteredFiles, []);
   openNavTreeScript += "</script>";
@@ -815,7 +852,7 @@ async function markPathForSelectedPage(req, files) {
   // console.log("getSelectedPage", req);
   // console.log("getSelectedPage", files);
   let path = decodeURIComponent(req.path);
-  if(path.startsWith("/md/")) {
+  if (path.startsWith("/md/")) {
     path = path.slice(4);
   }
   while (path.startsWith("/")) {
@@ -823,15 +860,15 @@ async function markPathForSelectedPage(req, files) {
   }
   const r = {
     path: [],
-    file: null
-  }
+    file: null,
+  };
   const splitPath = path.split("/");
   r.file = splitPath.pop();
   for (let i = 0; i < splitPath.length; i++) {
     const f = {
       dir: splitPath[i],
-      level: i
-    }
+      level: i,
+    };
     r.path.push(f);
   }
   // console.log("markPathForSelectedPage", r);
@@ -883,7 +920,12 @@ async function getDirectoryListingInternal(path, req, files, folders) {
       const subfolderFiles = files.filter(
         (f, index) => f.folders.startsWith(folders) && index > i
       );
-      html += await getDirectoryListingInternal(path, req, subfolderFiles, folders);
+      html += await getDirectoryListingInternal(
+        path,
+        req,
+        subfolderFiles,
+        folders
+      );
 
       // Update the last processed file index
       lastProcessedFileIndex = i + subfolderFiles.length;
@@ -921,15 +963,16 @@ function insertDirFolder(folder, j) {
 function insertDirLink(file, req, indent, i, files) {
   let r = "";
   let correctedPath = decodeURIComponent(req.path);
-  if(correctedPath.startsWith("/md/")) {
+  if (correctedPath.startsWith("/md/")) {
     correctedPath = correctedPath.slice(4);
   }
   let highlight = "";
-  if(file.path === correctedPath)
-    highlight = "highlight";
-  r += `<a href="/${dirPrefix + file.path}" class="${highlight}">${indentStringFor(file.lastFolder === "" ? 0 : indent)}${
-    file.fileNameWithoutExtension
-  }</a>`;
+  if (file.path === correctedPath) highlight = "highlight";
+  r += `<a href="/${
+    dirPrefix + file.path
+  }" class="${highlight}">${indentStringFor(
+    file.lastFolder === "" ? 0 : indent
+  )}${file.fileNameWithoutExtension}</a>`;
   // Only add <br> if it isn't the last file in the folder
   if (i < files.length - 1 && files[i + 1].folders === file.folders) {
     r += "<br>";
@@ -1066,16 +1109,12 @@ async function getTopdownMenu(req) {
       <button class="sl-button" style="height: 32px; margin: 0px;" onclick="openAsPresentation(true)">${lucideIcon(
         "Printer"
       )}
-      ${lucideIcon(
-        "Presentation"
-      )}
+      ${lucideIcon("Presentation")}
       </button>
       <button class="sl-button" style="height: 32px; margin: 0px; margin-left: 6px" onclick="openAsDocument(true)">${lucideIcon(
         "Printer"
       )}
-      ${lucideIcon(
-        "ReceiptText"
-      )}
+      ${lucideIcon("ReceiptText")}
       </button>
     </div>
   </div>

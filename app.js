@@ -157,6 +157,12 @@ function getStartPage() {
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
+app.use((req, res, next) => {
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'self'");
+  next();
+});
+
 initKeycloak(app).then(() => {
   // Protect all routes and serve them statically after authentication.
   // Order matters when dealing with middleware!

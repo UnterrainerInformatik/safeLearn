@@ -105,3 +105,8 @@ Add them using a relative path in your repository like so:
 
 Example:
 ![local-image](/md/assets/test-local-image.jpg)
+## Other files treated like images by Obsidian
+### PDF
+![[Test.pdf]]
+### Docx
+![[Test.docx]]
