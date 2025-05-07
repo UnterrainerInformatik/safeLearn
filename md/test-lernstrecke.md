@@ -4,7 +4,7 @@
 
 > [!info]- Präsentation
 >Hier findet Ihr den gesamten Stoff als Präsentation.
->https://htl.unterrainer.info/jwt.html
+>[[test-presentation]]
 >* test
 >* test
 

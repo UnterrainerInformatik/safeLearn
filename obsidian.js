@@ -707,7 +707,7 @@ const imageFileTypes = [
 function getHtmlFor(fileType, fileName, serverUrl, dirPrefix, file, r) {
   if (fileType !== null) {
     const type = fileType.toLowerCase();
-    console.log(type)
+    // console.log(type)
     if (imageFileTypes.includes(type)) {
       return `<img src="${serverUrl}/${
         dirPrefix + file
