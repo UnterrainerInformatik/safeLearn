@@ -464,8 +464,16 @@ function preReplaceObsidianFileLinks(html, req) {
         alt = null;
       }
     }
+    if (fileName.startsWith("/md/")) {
+      fileName = fileName.slice(4);
+    }
+    if (fileName.startsWith("md/")) {
+      fileName = fileName.slice(3);
+    }
     const lastPartOfFileName = fileName.split("/").pop();
     const filePath = mdFilesMap[lastPartOfFileName];
+    console.log(fileName)
+    console.log(mdFilesMap)
     if (filePath) {
       let f = filePath[0];
       if (filePath.length > 1) {
@@ -657,6 +665,12 @@ function replaceObsidianImageLinks(html, req) {
     const r = parseWidthHeight(fileName);
     if (r) {
       fileName = r.name;
+    }
+    if (fileName.startsWith("/md/")) {
+      fileName = fileName.slice(4);
+    }
+    if (fileName.startsWith("md/")) {
+      fileName = fileName.slice(3);
     }
     const lastPartOfFileName = fileName.split("/").pop();
     const filePath = filesMap[lastPartOfFileName];
