@@ -93,7 +93,6 @@ You may add images...
 ### Global Images (URL)
 Add them using an absolute image-url like so:
 `https://raw.githubusercontent.com/UnterrainerInformatik/java-http-server/master/docs/standard-request-response-process.png`
-
 ![global-image|100x300](https://raw.githubusercontent.com/UnterrainerInformatik/java-http-server/master/docs/standard-request-response-process.png) 
 
 ### Obsidian Link Images
@@ -110,3 +109,69 @@ Example:
 ![[Test.pdf]]
 ### Docx
 ![[Test.docx]]
+## Lists And Fragments
+### Lists
+- one
+- two
+- three
+
++ one
++ two
++ three
+
+* one
+* two
+* three
+
+1. one
+2. two
+3. three
+### Fragments
+#fragment
+Fragmented Text.
+#fragment 
+- one
+#fragment 
+- two
+ #fragment
+![global-image|100x300](https://raw.githubusercontent.com/UnterrainerInformatik/java-http-server/master/docs/standard-request-response-process.png) 
+
+#fragment 
+another text
+
+#fragment-start
+- Fragment 1
+- Fragment 2
+- Fragment 3
+#fragment-end
+
+#fragment 
+- one
+#fragment 
+- two
+#fragment 
+- three
+
+#fragment 
++ one
+#fragment 
++ two
+#fragment 
++ three
+
+#fragment 
+* one
+#fragment 
+* two
+#fragment 
+* three
+
+#fragment 
+1. one
+#fragment 
+2. two
+#fragment 
+3. three
+
+#fragment 
+Done.

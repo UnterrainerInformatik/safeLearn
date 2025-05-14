@@ -30,9 +30,9 @@ class question
 ```bash
 class question
 ```
-* What development tools will you be using?
-* Make a plan.
-* Explain the steps to get to a finished new product.
+- What development tools will you be using?
+- Make a plan.
+- Explain the steps to get to a finished new product.
 @@@ #answer
 ## Answer
 ```plantuml
@@ -41,7 +41,7 @@ class answer
 ```bash
 class answer
 ```
-* Java and Javascript.
-* Just do it.
-* Do it. See, you're done.
+- Java and Javascript.
+- Just do it.
+- Do it. See, you're done.
 @@@

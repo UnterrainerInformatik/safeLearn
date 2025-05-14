@@ -25,6 +25,15 @@ const internalSubstitutions = {
     string: "@#@##@@--@code@--@@##@#@",
     regexp: /@#@##@@--@code@--@@##@#@/gms,
   },
+  fragment_single: {
+    string: "<!-- __fragment-single__ -->"
+  },
+  fragment_start: {
+    string: "<!-- __fragment-start__ -->"
+  },
+  fragment_end: {
+    string: "<!-- __fragment-end__ -->"
+  }
 };
 let codeList = [];
 let openNavTreeScript = "";
@@ -369,6 +378,7 @@ export async function preParse(md, req) {
   r = preMarkCode(r);
   r = preReplaceObsidianFileLinks(r, req);
   r = preMarkCallouts(r);
+  r = preprocessFragments(r)
   r = unmarkCode(r);
   return r;
 }
@@ -447,6 +457,50 @@ function getFollowingQuotedLines(md, index) {
   return { trimmedLines: lines.slice(0, i).join("\n"), originalLength };
 }
 
+function preprocessFragments(md) {
+  return md
+    .replace(/^[ \t]*#fragment-start[ \t]*$/gm, internalSubstitutions.fragment_start.string)
+    .replace(/^[ \t]*#fragment-end[ \t]*$/gm, internalSubstitutions.fragment_end.string)
+
+    .replace(/^[ \t]*#fragment[ \t]*\n([^\n]+)/gm, (_, nextLine) => {
+      if (/^\s*[-*+1.]\s/.test(nextLine)) {
+        return nextLine.replace(/^(\s*[-*+1.]\s*)(.+)/, (_, prefix, content) => {
+          return `${prefix}%%LI_FRAGMENT%% ${content}`;
+        });
+      }
+      return `<span class="fragment">${nextLine.trim()}</span>`;
+    });
+}
+
+function postprocessFragments(html) {
+  const { fragment_start, fragment_end } = internalSubstitutions;
+
+  // Block fragments
+  html = html.replace(
+  new RegExp(`${fragment_start.string}([\\s\\S]*?)${fragment_end.string}([\\s\\S]*?</li>)`, 'g'),
+  (fullMatch, content, trailingLi) => {
+    let fixed = (content + trailingLi).trim();
+
+    // Remove <p> inside <li>
+    fixed = fixed.replace(
+      /<li>\s*\n?\s*<p>([\s\S]*?)<\/p>\s*\n?\s*<\/li>/gm,
+      (_, inner) => `<li>${inner.trim()}</li>`
+    );
+
+    return `<div class="fragment">\n${fixed}\n</div>\n\n`;
+  }
+);
+
+
+  // Inline fragment: list item
+  html = html.replace(
+    /<li[^>]*>\s*(?:<p>)?%%LI_FRAGMENT%%\s*(.*?)(?:<\/p>)?\s*<\/li>/g,
+    (_, content) => `<li class="fragment">${content.trim()}</li>`
+  );
+
+  return html;
+}
+
 function preReplaceObsidianFileLinks(html, req) {
   const regex = /(?<!\!)\[\[([^\]\n]+)\]\]/g;
 
@@ -472,8 +526,8 @@ function preReplaceObsidianFileLinks(html, req) {
     }
     const lastPartOfFileName = fileName.split("/").pop();
     const filePath = mdFilesMap[lastPartOfFileName];
-    console.log(fileName)
-    console.log(mdFilesMap)
+    // console.log(fileName)
+    // console.log(mdFilesMap)
     if (filePath) {
       let f = filePath[0];
       if (filePath.length > 1) {
@@ -543,6 +597,7 @@ export function manipulateHtml(html, req) {
   r = replacePreMarkCallouts(r);
   r = replaceObsidianImageLinks(r, req);
   r = replaceObsidianImageAltResizeValues(r);
+  r = postprocessFragments(r)
   r = makeContentMap(r);
   return r;
 }

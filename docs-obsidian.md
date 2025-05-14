@@ -72,3 +72,11 @@ Those work on normal image-links, like the standard DM ones and the shortcut-lin
 # And as short-link
 ![[my-img.png|120]]
 ```
+## Fragments in Reveal.js
+You can use fragments.
+Fragment lines have `#fragment` in the line above them.
+For blocks you may also have a `#fragment-start` followed by a `#fragment-end`.
+It is important to note that those flags must be on their own line.
+
+This then will become a fragment in the presentation-view.
+It will be invisible in the normal view.
