@@ -478,19 +478,18 @@ function postprocessFragments(html) {
   // Block fragments
   html = html.replace(
   new RegExp(`${fragment_start.string}([\\s\\S]*?)${fragment_end.string}([\\s\\S]*?</li>)`, 'g'),
-  (fullMatch, content, trailingLi) => {
-    let fixed = (content + trailingLi).trim();
+    (fullMatch, content, trailingLi) => {
+      let fixed = (content + trailingLi).trim();
 
-    // Remove <p> inside <li>
-    fixed = fixed.replace(
-      /<li>\s*\n?\s*<p>([\s\S]*?)<\/p>\s*\n?\s*<\/li>/gm,
-      (_, inner) => `<li>${inner.trim()}</li>`
-    );
+      // Remove <p> inside <li>
+      fixed = fixed.replace(
+        /<li>\s*\n?\s*<p>([\s\S]*?)<\/p>\s*\n?\s*<\/li>/gm,
+        (_, inner) => `<li>${inner.trim()}</li>`
+      );
 
-    return `<div class="fragment">\n${fixed}\n</div>\n\n`;
-  }
-);
-
+      return `<div class="fragment">\n${fixed}\n</div>\n\n`;
+    }
+  );
 
   // Inline fragment: list item
   html = html.replace(
