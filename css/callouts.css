@@ -1,25 +1,25 @@
 .obsidian-callout {
-  line-height: 20.8px;
-  padding: 12px;
-  padding-left: 25px;
-  padding-right: 25px;
+  line-height: 1em;
+  padding: 0.6em;
+  padding-left: 1.35em;
+  padding-right: 1.35em;
   border-radius: 5px;
-  margin-top: 10px;
-  margin-bottom: 10px;
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
 }
 
 .obsidian-callout-icon {
-  width: 18px;
-  height: 18px;
-  line-height: 20.8px;
-  margin-right: 2px;
+  width: 1em;
+  height: 1em;
+  line-height: 1.35em;
+  margin-right: 1em;
 }
 
 .obsidian-callout-title {
-  line-height: 20.8px;
+  line-height: 1.35em;
   position: relative;
-  top: -2px;
-  font-size: 16px;
+  top: 0em;
+  font-size: 0.89em;
   font-weight: 600;
   display: inline-block;
 }
