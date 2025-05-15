@@ -73,10 +73,17 @@ Those work on normal image-links, like the standard DM ones and the shortcut-lin
 ![[my-img.png|120]]
 ```
 ## Fragments in Reveal.js
-You can use fragments.
-Fragment lines have `#fragment` in the line above them.
+You may use fragments when starting a presentation.
+Fragments are parts of you page that pop up one after another, step by step, when you're pressing the forward-button you normally press to advance to the next vertical page.
+### Single Fragment Lines
+You may mark single lines as Fragments. Those lines are denoted by having a `#fragment` in the line above them.
+A single line is defined as from the start of a line to the next `newline`, so that may as well span more than a single line when line-breaks are inserted by the browser in order to fit that single line on the screen.
+### Fragment Blocks
 For blocks you may also have a `#fragment-start` followed by a `#fragment-end`.
-It is important to note that those flags must be on their own line.
+Everything between those tags will be treated as a fragment.
+That allows you to fade-in more than one line at a time.
+
+It is important to note that all those flags must be on their own line.
 
 This then will become a fragment in the presentation-view.
-It will be invisible in the normal view.
+All of this will be completely invisible in the normal view.
