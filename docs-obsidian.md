@@ -78,6 +78,8 @@ Fragments are parts of you page that pop up one after another, step by step, whe
 ### Single Fragment Lines
 You may mark single lines as Fragments. Those lines are denoted by having a `#fragment` in the line above them.
 A single line is defined as from the start of a line to the next `newline`, so that may as well span more than a single line when line-breaks are inserted by the browser in order to fit that single line on the screen.
+#### Single Fragment Example
+![[Pasted image 20250523183945.png]]
 ### Fragment Blocks
 For blocks you may also have a `#fragment-start` followed by a `#fragment-end`.
 Everything between those tags will be treated as a fragment.
@@ -87,3 +89,5 @@ It is important to note that all those flags must be on their own line.
 
 This then will become a fragment in the presentation-view.
 All of this will be completely invisible in the normal view.
+#### Fragment Block Example
+![[Pasted image 20250523184030.png]]
