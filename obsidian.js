@@ -27,8 +27,18 @@ const internalSubstitutions = {
   },
   fragment_single: {
     string: "<!-- __fragment-marker__ -->"
-  }
+  },
+  side_by_side_start: {
+    string: "<!-- __side-by-side-start__ -->"
+  },
+  side_by_side_separator: {
+    string: "<!-- __side-by-side-separator__ -->"
+  },
+  side_by_side_end: {
+    string: "<!-- __side-by-side-end__ -->"
+  },
 };
+
 let codeList = [];
 let openNavTreeScript = "";
 
@@ -373,6 +383,7 @@ export async function preParse(md, req) {
   r = preReplaceObsidianFileLinks(r, req);
   r = preMarkCallouts(r);
   r = preprocessFragments(r)
+  r = preprocessSideBySide(r);
   r = unmarkCode(r);
   return r;
 }
@@ -451,6 +462,29 @@ function getFollowingQuotedLines(md, index) {
   return { trimmedLines: lines.slice(0, i).join("\n"), originalLength };
 }
 
+function preprocessSideBySide(md) {
+  const START = "##side-by-side-start";
+  const END = "##side-by-side-end";
+  const SEP = "##separator";
+
+  // Regex für kompletten Block
+  const blockRegex = new RegExp(`${START}[\\s\\S]*?${END}`, "g");
+
+  return md.replace(blockRegex, (block) => {
+    const content = block
+      .replace(START, "")
+      .replace(END, "")
+      .trim();
+
+    const columns = content.split(SEP).map(col => col.trim());
+    
+    // Jede Spalte in divs packen
+    const htmlColumns = columns.map(col => `<div class="side-by-side-col">\n\n${col}\n\n</div>`);
+
+    return `<div class="side-by-side">\n${htmlColumns.join("\n")}\n</div>\n\n`;
+  });
+}
+
 function preprocessFragments(md) {
   const marker = internalSubstitutions.fragment_single.string;
   const r = md.replace(/##fragment(?=\s|$)/g, marker)
@@ -467,12 +501,22 @@ function postprocessFragments(html) {
   let fragmentIndex = -1;
   let started = false;
 
+  function resetFragmentIndex() {
+    fragmentIndex = -1;
+    started = false;
+  }
+
   function walk(node) {
     if (!node) return;
 
     const childNodes = Array.from(node.childNodes);
     for (let child of childNodes) {
-      // Marker detection
+      // Reset bei h2 oder h3
+      if (child.nodeType === 1 && (child.tagName === "H2" || child.tagName === "H3")) {
+        resetFragmentIndex();
+      }
+
+      // Fragmentmarker
       if (child.nodeType === 8 && child.nodeValue.trim() === markerValue) {
         fragmentIndex++;
         started = true;
@@ -480,15 +524,12 @@ function postprocessFragments(html) {
         continue;
       }
 
-      // Skip before first marker
       if (!started) {
-        if (child.nodeType === 1) {
-          walk(child); // still traverse deeper
-        }
+        if (child.nodeType === 1) walk(child);
         continue;
       }
 
-      // Text node
+      // Text-Node
       if (child.nodeType === 3 && child.textContent.trim() !== "") {
         const span = document.createElement("span");
         span.classList.add("fragment");
@@ -498,11 +539,11 @@ function postprocessFragments(html) {
         continue;
       }
 
-      // Element node
+      // Element-Node
       if (child.nodeType === 1) {
         child.classList.add("fragment");
         child.setAttribute("data-fragment-index", fragmentIndex);
-        walk(child); // recurse
+        walk(child); // Rekursiv in Tiefe gehen
       }
     }
   }
@@ -510,6 +551,8 @@ function postprocessFragments(html) {
   walk(document.body);
   return document.body.innerHTML;
 }
+
+
 
 function preReplaceObsidianFileLinks(html, req) {
   const regex = /(?<!\!)\[\[([^\]\n]+)\]\]/g;
@@ -1366,6 +1409,19 @@ export async function wrapInReveal(reveal, req) {
         font-family: "Lato", serif;
         font-size: 32px;
         font-weight: 300;
+      }
+      .side-by-side {
+        display: flex;
+        flex-wrap: nowrap;
+        justify-content: stretch;
+        align-items: flex-start;
+        gap: 2rem;
+        width: 100%;
+      }
+
+      .side-by-side-col {
+        flex: 1 1 0;
+        min-width: 0;
       }
     </style>
     <link rel="stylesheet" href="/obsidian-page.css">

@@ -98,3 +98,23 @@ This text is already on the page.
 - lines
 ```
 So you may see the `##fragment` tag as some kind of a `stop here and wait for me to press space` tag.
+## Side-By-Side in Reveal.js
+It's possible to make columns that only work when making a presentation in Reveal.js.
+You may denote a side-by-side number of columns this and every section (column) will then render side by side, from left to right. This enables you to fill a wide-screen with, let's say, an image and a table with an explanation besides it.
+```bash
+Normal text. Will be displayed centered.
+##side-by-side-start
+This text will be on the left side...
+- one
+- two
+##separator
+- three
+- four
+
+This will be on the right side
+##side-by-side-end
+
+and this will be below the side-by-side element on the bottom.
+```
+When watching the document in the normal HTML view those tags have no effect.
+You can specify more than one separator resulting in more columns.

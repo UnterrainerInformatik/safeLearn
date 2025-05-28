@@ -149,3 +149,36 @@ Text
 >+ three ##fragment
 
 Done.
+## Side-By-Side
+Normal text. Will be displayed centered.
+##side-by-side-start
+This text will be on the left side...
+- one
+- two
+##separator
+- three
+- four
+
+This will be on the right side
+##side-by-side-end
+
+and this will be below the side-by-side element on the bottom.
+## Side-By-Side 3 Cols
+Normal text. Will be displayed centered.
+##side-by-side-start
+This text will be on the left side...
+- one
+- two
+##separator
+- three
+- four
+
+This will be in the middle
+##separator
+- three
+- four
+
+This will be on the right side
+##side-by-side-end
+
+and this will be below the side-by-side element on the bottom.
