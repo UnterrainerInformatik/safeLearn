@@ -115,63 +115,37 @@ Example:
 - two
 - three
 
-+ one
-+ two
-+ three
+>+ one
+>+ two
+>+ three
 
 * one
 * two
 * three
 
-1. one
-2. two
-3. three
+>1. one
+>2. two
+>3. three
 ### Fragments
-#fragment
+##fragment
 Fragmented Text.
-#fragment 
+##fragment 
 - one
-#fragment 
-- two
- #fragment
+- ##fragment two
 ![global-image|100x300](https://raw.githubusercontent.com/UnterrainerInformatik/java-http-server/master/docs/standard-request-response-process.png) 
 
-#fragment 
+##fragment 
 another text
 
-#fragment-start
-- Fragment 1
-- Fragment 2
-- Fragment 3
-#fragment-end
+## Second Fragment Test
+Text
+##fragment 
+>- one ##fragment 
+>- two ##fragment 
+>- three ##fragment 
 
-#fragment 
-- one
-#fragment 
-- two
-#fragment 
-- three
+>+ one ##fragment 
+>+ two ##fragment 
+>+ three ##fragment
 
-#fragment 
-+ one
-#fragment 
-+ two
-#fragment 
-+ three
-
-#fragment 
-* one
-#fragment 
-* two
-#fragment 
-* three
-
-#fragment 
-1. one
-#fragment 
-2. two
-#fragment 
-3. three
-
-#fragment 
 Done.

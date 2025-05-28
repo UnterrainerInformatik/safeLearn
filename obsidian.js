@@ -26,13 +26,7 @@ const internalSubstitutions = {
     regexp: /@#@##@@--@code@--@@##@#@/gms,
   },
   fragment_single: {
-    string: "<!-- __fragment-single__ -->"
-  },
-  fragment_start: {
-    string: "<!-- __fragment-start__ -->"
-  },
-  fragment_end: {
-    string: "<!-- __fragment-end__ -->"
+    string: "<!-- __fragment-marker__ -->"
   }
 };
 let codeList = [];
@@ -458,46 +452,63 @@ function getFollowingQuotedLines(md, index) {
 }
 
 function preprocessFragments(md) {
-  return md
-    .replace(/^[ \t]*#fragment-start[ \t]*$/gm, internalSubstitutions.fragment_start.string)
-    .replace(/^[ \t]*#fragment-end[ \t]*$/gm, internalSubstitutions.fragment_end.string)
-
-    .replace(/^[ \t]*#fragment[ \t]*\n([^\n]+)/gm, (_, nextLine) => {
-      if (/^\s*[-*+1.]\s/.test(nextLine)) {
-        return nextLine.replace(/^(\s*[-*+1.]\s*)(.+)/, (_, prefix, content) => {
-          return `${prefix}%%LI_FRAGMENT%% ${content}`;
-        });
-      }
-      return `<span class="fragment">${nextLine.trim()}</span>`;
-    });
+  const marker = internalSubstitutions.fragment_single.string;
+  const r = md.replace(/##fragment(?=\s|$)/g, marker)
+  return r;
 }
 
 function postprocessFragments(html) {
-  const { fragment_start, fragment_end } = internalSubstitutions;
+  const { fragment_single } = internalSubstitutions;
+  const markerValue = fragment_single.string.replace(/<!--|-->/g, "").trim();
 
-  // Block fragments
-  html = html.replace(
-  new RegExp(`${fragment_start.string}([\\s\\S]*?)${fragment_end.string}([\\s\\S]*?</li>)`, 'g'),
-    (fullMatch, content, trailingLi) => {
-      let fixed = (content + trailingLi).trim();
+  const dom = new JSDOM(html);
+  const document = dom.window.document;
 
-      // Remove <p> inside <li>
-      fixed = fixed.replace(
-        /<li>\s*\n?\s*<p>([\s\S]*?)<\/p>\s*\n?\s*<\/li>/gm,
-        (_, inner) => `<li>${inner.trim()}</li>`
-      );
+  let fragmentIndex = -1;
+  let started = false;
 
-      return `<div class="fragment">\n${fixed}\n</div>\n\n`;
+  function walk(node) {
+    if (!node) return;
+
+    const childNodes = Array.from(node.childNodes);
+    for (let child of childNodes) {
+      // Marker detection
+      if (child.nodeType === 8 && child.nodeValue.trim() === markerValue) {
+        fragmentIndex++;
+        started = true;
+        child.remove();
+        continue;
+      }
+
+      // Skip before first marker
+      if (!started) {
+        if (child.nodeType === 1) {
+          walk(child); // still traverse deeper
+        }
+        continue;
+      }
+
+      // Text node
+      if (child.nodeType === 3 && child.textContent.trim() !== "") {
+        const span = document.createElement("span");
+        span.classList.add("fragment");
+        span.setAttribute("data-fragment-index", fragmentIndex);
+        span.textContent = child.textContent;
+        child.replaceWith(span);
+        continue;
+      }
+
+      // Element node
+      if (child.nodeType === 1) {
+        child.classList.add("fragment");
+        child.setAttribute("data-fragment-index", fragmentIndex);
+        walk(child); // recurse
+      }
     }
-  );
+  }
 
-  // Inline fragment: list item
-  html = html.replace(
-    /<li[^>]*>\s*(?:<p>)?%%LI_FRAGMENT%%\s*(.*?)(?:<\/p>)?\s*<\/li>/g,
-    (_, content) => `<li class="fragment">${content.trim()}</li>`
-  );
-
-  return html;
+  walk(document.body);
+  return document.body.innerHTML;
 }
 
 function preReplaceObsidianFileLinks(html, req) {
