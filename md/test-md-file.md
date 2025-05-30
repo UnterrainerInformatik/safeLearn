@@ -16,7 +16,7 @@ Only visible to 4bhif and teachers.
 @@@ admin
 Admins only!!!
 @@@
-@@@4bhif,5bhif, 4ahif
+@@@ 4bhif,5bhif, 4ahif
 Special visibility
 @@@
 
@@ -145,7 +145,7 @@ Text
 >- three ##fragment 
 
 >+ one ##fragment 
->+ two ##fragment 
+>+ two ##fragment
 >+ three ##fragment
 
 Done.
