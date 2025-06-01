@@ -134,7 +134,7 @@ Fragmented Text.
 - ##fragment two
 ![global-image|100x300](https://raw.githubusercontent.com/UnterrainerInformatik/java-http-server/master/docs/standard-request-response-process.png) 
 
-##fragment 
+##fragment
 another text
 
 ## Second Fragment Test
