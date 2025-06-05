@@ -162,7 +162,7 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
         }
       }
     }
-    console.log("Checking roles:", clientRoles, "all:", all, "allowOverride:", allowOverride, "isAdmin:", isAdmin, "isTeacher:", isTeacher, "studOvr:", a.vt == 0, "Client access:", clientAccess);
+    //console.log("Checking roles:", clientRoles, "all:", all, "allowOverride:", allowOverride, "isAdmin:", isAdmin, "isTeacher:", isTeacher, "studOvr:", a.vt == 0, "Client access:", clientAccess);
     if (clientAccess === null) {
       clientAccess = false;
     }
