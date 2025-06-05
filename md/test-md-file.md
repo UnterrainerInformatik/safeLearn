@@ -10,14 +10,14 @@ This is a sample text...
 @@@ teacher
 Only visible to the teachers.
 @@@
-@@@ 4bhif
+@@@ teacher, 4bhif
 Only visible to 4bhif and teachers.
 @@@
 @@@ admin
 Admins only!!!
 @@@
 @@@ 4bhif,5bhif, 4ahif
-Special visibility
+Special visibility (4bhif, 5bhif and 4ahif only)
 @@@
 
 ## Test PlantUML

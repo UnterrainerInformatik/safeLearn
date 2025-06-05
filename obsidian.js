@@ -1217,7 +1217,7 @@ async function getTopdownMenu(req) {
       </label>
     </div>
     ${
-      (await hasSomeRoles(req, ["teacher"]))
+      (await hasSomeRoles(req, ["teacher"], true))
         ? `<div class="flipswitch menu" style="display: inline-block; top: 16px; margin-top: 12px; margin-left: 3px;">
         <input checked="" onchange="toggleViewExam()" id="examFs" class="flipswitch-cb" name="flipswitch" type="checkbox">
         <label for="examFs" class="flipswitch-label">

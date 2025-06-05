@@ -1,20 +1,8 @@
 # Question 23
-@@@ #answer 
-## Webservices, REST, SQL-Databases
-@@@
 ## Introduction
-@@@ #practice
-### Practice-question
-```plantuml
-class practice
-```
-```bash
-class practice
-```
-You are a student making an internship at a big company that wants to re-write the legacy software.
-@@@
 @@@ #exam
-### Exam-question
+## Exam-question: Webservices, REST, SQL-Databases
+
 ```plantuml
 class exam
 ```
@@ -22,6 +10,17 @@ class exam
 class exam
 ```
 You are employed at a company that wants to re-structure their legacy software.
+@@@
+@@@ #practice
+## Practice-question: Webservices, REST, SQL-Databases
+
+```plantuml
+class practice
+```
+```bash
+class practice
+```
+You are a student making an internship at a big company that wants to re-write the legacy software.
 @@@
 ## Question
 ```plantuml
