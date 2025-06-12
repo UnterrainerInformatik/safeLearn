@@ -29,3 +29,22 @@
     transition: padding 0.3s ease, width 0.3s ease, max-width 0.3s ease, padding 0.3s ease;
   }
 }
+
+@media print {
+  #sidebar,
+  #topbar,
+  #topdown-menu {
+    display: none !important;
+  }
+  #wrapper {
+    display: block !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  #markdown-content {
+    width: 100% !important;
+    margin: 30px !important;
+    padding: 0 !important;
+  }
+}
