@@ -45,6 +45,7 @@
   #markdown-content {
     width: 100% !important;
     margin: 30px !important;
+    margin-left: 50px !important;
     padding: 0 !important;
   }
 }
