@@ -10,6 +10,32 @@ window.addEventListener("scroll", function () {
   markTopAnchor();
 });
 
+/**
+ * Opens print-document-as-pdf or print-presentation-as-pdf page in new tab.
+ */
+window.addEventListener(
+  "keydown",
+  (event) => {
+    if (event.defaultPrevented) {
+      return; // Do nothing if the event was already processed
+    }
+    if (event.ctrlKey && event.altKey) {
+      if (event.key === "p" || event.key === "P") {
+        console.log("Opening print-presentation page");
+        openAsPresentation(true, true);
+        event.preventDefault();
+      }
+      if (event.key === "d" || event.key === "d") {
+        console.log("Opening print-document page");
+        openAsDocument(true);
+        event.preventDefault();
+      }
+      return;
+    }
+  },
+  true
+);
+
 function markTopAnchor() {
   const mainAnchors = document.querySelectorAll(".docanchor");
   const sidebarAnchors = document.querySelectorAll(".sidebar-anchors a");
@@ -165,19 +191,27 @@ function toggleTopdownMenu() {
   }
 }
 
-function openAsPresentation(print) {
+function openAsPresentation(print, sameWindow = false) {
   let url = new URL(window.location.href);
   if (print) {
-    url.searchParams.set("print-pdf", "true")
+    url.searchParams.set("print-pdf", "true");
   }
   url.searchParams.set("reveal", "true");
-  window.open(url, "_blank");
+  if (sameWindow) {
+    window.location.href = url;
+  } else {
+    window.open(url, "_blank");
+  }
 }
 
-function openAsDocument() {
+function openAsDocument(sameWindow = false) {
   const url = new URL(window.location.href);
   url.searchParams.set("document", "true");
-  window.open(url, "_blank");
+  if (sameWindow) {
+    window.location.href = url;
+  } else {
+    window.open(url, "_blank");
+  }
 }
 
 let mainFontsArray = [];
@@ -386,27 +420,36 @@ function toggleViewExam() {
 }
 
 /*
-* This script is used to resize the right panel by dragging the border.
-*/
+ * This script is used to resize the right panel by dragging the border.
+ */
 const BORDER_SIZE = 4;
 const panel = document.getElementById("sidebar");
 
 let m_pos;
-function resize(e){
+function resize(e) {
   const dx = m_pos - e.x;
   m_pos = e.x;
-  panel.style.width = (parseInt(getComputedStyle(panel, '').width) - dx) + "px";
+  panel.style.width = parseInt(getComputedStyle(panel, "").width) - dx + "px";
 }
 
-panel.addEventListener("mousedown", function(e){
-  const cs = getComputedStyle(panel, '')
-  const w = parseInt(cs.width) + parseInt(cs.paddingLeft) + parseInt(cs.paddingRight)
-  if (e.offsetX >= w - BORDER_SIZE) {
-    m_pos = e.x;
-    document.addEventListener("mousemove", resize, false);
-  }
-}, false);
+panel.addEventListener(
+  "mousedown",
+  function (e) {
+    const cs = getComputedStyle(panel, "");
+    const w =
+      parseInt(cs.width) + parseInt(cs.paddingLeft) + parseInt(cs.paddingRight);
+    if (e.offsetX >= w - BORDER_SIZE) {
+      m_pos = e.x;
+      document.addEventListener("mousemove", resize, false);
+    }
+  },
+  false
+);
 
-document.addEventListener("mouseup", function(){
-  document.removeEventListener("mousemove", resize, false);
-}, false);
+document.addEventListener(
+  "mouseup",
+  function () {
+    document.removeEventListener("mousemove", resize, false);
+  },
+  false
+);

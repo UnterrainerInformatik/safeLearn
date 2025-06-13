@@ -1228,12 +1228,12 @@ async function getTopdownMenu(req) {
         : ""
     }
     <div style="padding: 0px; margin: 0px; margin-left: 0px; margin-top: 25px; margin-bottom: -10px; text-align: left; display: flex;">
-      <button class="sl-button" style="height: 32px; margin: 0px;" onclick="openAsPresentation(true)">${lucideIcon(
+      <button class="sl-button" style="height: 32px; margin: 0px;" onclick="openAsPresentation(true, false)">${lucideIcon(
         "Printer"
       )}
       ${lucideIcon("Presentation")}
       </button>
-      <button class="sl-button" style="height: 32px; margin: 0px; margin-left: 6px" onclick="openAsDocument(true)">${lucideIcon(
+      <button class="sl-button" style="height: 32px; margin: 0px; margin-left: 6px" onclick="openAsDocument(false)">${lucideIcon(
         "Printer"
       )}
       ${lucideIcon("ReceiptText")}

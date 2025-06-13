@@ -45,6 +45,13 @@ If you'd like to host your own files, you'll have to fork this repository.
 	* Font-size
 	* Line-spacing
 	* Light-Mode / Dark-Mode
+### Shortcuts
+In view-mode, when visiting your web-page containing the rendered Markdown files, you may use the following keyboard-shortcuts:
+
+| Keys                          | Explanation                                                                                                                   |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| CTRL + ALT + d                | Opens the `print-the-document-as-pdf` view in the same window you are currently in, without opening it in a new tab.          |
+| CTRL + ALT + p                | Opens the `print-the-document-as-presentation` view in the same window you are currently in, without opening it in a new tab. |
 ## Technical Explanation
 The purpose of this repository is to provide a platform for all lecture-notes and interactive material for the teacher and students.
 It hides behind a configurable Keycloak Authorization Server (version >16 as far as I can tell, most current version is recommended) and thus your material is not publicly available, circumventing various license's restrictions.
