@@ -45,7 +45,10 @@
   #markdown-content {
     width: 100% !important;
     margin: 30px !important;
+    margin-bottom: 40px !important;
     margin-left: 50px !important;
+    font-size: 12pt !important;
+    line-height: 1.2 !important;
     padding: 0 !important;
   }
 }
