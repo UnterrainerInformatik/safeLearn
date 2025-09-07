@@ -31,6 +31,7 @@ Mama -> Günter
 Gerald -> Mama
 Günter -> Gerald
 ```
+
 ## Test Mermaid
 ```mermaid
 flowchart TD
@@ -38,7 +39,7 @@ flowchart TD
 	B --> C{Let me think}
 	C -->|One| D[Laptop]
 	C -->|Two| E[iPhone]
-	C -->|Three| F[fa:fa-car Car]
+	C -->|Three| F[Car]
 ```
 
 ## Test Code Tags

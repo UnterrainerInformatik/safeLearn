@@ -379,6 +379,7 @@ export async function preParse(md, req) {
   let r = md;
   r = await removeForbiddenContent(r, req);
   r = await preReplacePlantUml(r, req);
+  r = await preReplaceMermaid(r, req);
   r = preMarkCode(r);
   r = preReplaceObsidianFileLinks(r, req);
   r = preMarkCallouts(r);
@@ -552,8 +553,6 @@ function postprocessFragments(html) {
   return document.body.innerHTML;
 }
 
-
-
 function preReplaceObsidianFileLinks(html, req) {
   const regex = /(?<!\!)\[\[([^\]\n]+)\]\]/g;
 
@@ -597,6 +596,20 @@ function preReplaceObsidianFileLinks(html, req) {
       return match;
     }
   });
+}
+
+export async function preReplaceMermaid(md, req) {
+  let regex = /^\s*```+\s*(mermaid)$/gim;
+  let match;
+  while ((match = regex.exec(md)) !== null) {
+    // PlantUML
+    const start = match.index + match[0].length;
+    const end = md.indexOf("```", start);
+    const mermaid = md.substring(start, end);
+    md = md.substring(0, match.index) + '<pre class="mermaid">' + mermaid + '</pre>' + md.substring(end + 3);
+    regex = /^\s*```+\s*(mermaid)$/gim;
+  }
+  return md;
 }
 
 export async function preReplacePlantUml(md, req) {
@@ -1299,6 +1312,37 @@ async function getSideBar(startPage, req) {
   `;
 }
 
+function getMermaidScriptEntry() {
+  return `<script type="module">
+  import mermaid from "/node_modules/mermaid/dist/mermaid.esm.min.mjs";
+
+  mermaid.initialize({
+    startOnLoad: false,
+    logLevel: 'debug'
+  });
+
+  function decodeEntities(str) {
+    const txt = document.createElement('textarea');
+    txt.innerHTML = str;
+    return txt.value;
+  }
+
+  // wenn Reveal „ready“ ist, oder einfach bei DOMContentLoaded
+  document.addEventListener("DOMContentLoaded", () => {
+    document.querySelectorAll("pre.mermaid").forEach(async (el, i) => {
+      const raw = el.textContent;
+      const code = decodeEntities(raw);
+      try {
+        const { svg } = await mermaid.render("m" + i, code);
+        el.innerHTML = svg;
+      } catch (e) {
+        console.error("Mermaid render failed", e);
+      }
+    });
+  });
+</script>`;
+}
+
 export async function wrapInPage(html, startPage, req) {
   const pre = `
       <!DOCTYPE html>
@@ -1328,6 +1372,7 @@ export async function wrapInPage(html, startPage, req) {
           </div>
         </div>
         <script src="/obsidian-page.js"></script>
+        ${getMermaidScriptEntry()}
         <script lang="javascript">
         initFonts('${JSON.stringify(mainFontsArray)}', '${JSON.stringify(
     navFontsArray
@@ -1362,6 +1407,7 @@ export async function wrapAsDocument(html, req) {
           </div>
         </div>
         <script src="/obsidian-page.js"></script>
+        ${getMermaidScriptEntry()}
         <script lang="javascript">
         initFonts('${JSON.stringify(mainFontsArray)}', '${JSON.stringify(
     navFontsArray
@@ -1430,7 +1476,9 @@ export async function wrapInReveal(reveal, req) {
     <!-- Theme used for syntax highlighting of code -->
     <!-- <link rel="stylesheet" href="lib/css/zenburn.css"> -->
     <!-- <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.13.1/styles/tomorrow.min.css"> -->
-  
+
+    ${getMermaidScriptEntry()}
+
     <!-- Printing and PDF exports -->
     <script>
       var link = document.createElement('link');
