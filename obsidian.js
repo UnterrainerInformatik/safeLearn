@@ -1469,6 +1469,19 @@ export async function wrapInReveal(reveal, req) {
         flex: 1 1 0;
         min-width: 0;
       }
+
+      pre.mermaid {
+        width: fit-content;
+        margin: 0 auto;
+        background-color: #c3c3c3;
+        padding: 1em;
+        border-radius: 6px;
+        text-align: center;
+      }
+      pre.mermaid svg {
+        vertical-align: top;
+      }
+
     </style>
     <link rel="stylesheet" href="/obsidian-page.css">
     <link rel="shortcut icon" href="/assets/favicon.ico" type="image/x-icon" />
