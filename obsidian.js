@@ -1471,7 +1471,7 @@ export async function wrapInReveal(reveal, req) {
       }
 
       pre.mermaid {
-        width: fit-content;
+        width: 90%;
         margin: 0 auto;
         background-color: #c3c3c3;
         padding: 1em;
