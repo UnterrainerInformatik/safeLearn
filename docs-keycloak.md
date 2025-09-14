@@ -3,6 +3,13 @@ Here you find information about the keycloak-setup when you're trying to host it
 [Back](README.md) to the main page.
 ## Keycloak Setup
 In order for this setup to work correctly, you'll have to have a Keycloak-client (private with secret) and standard-authorization-flow enabled (should be enabled anyway).
+```bash
+client-authentication: on
+Authorization: off
+Authentication flow: ['Standard flow', 'Direct access grants']
+...
+and the appropriate URL settings
+```
 You need the following user-attributes of type `string` with mapper to the token.
 You also need to add the user-attributes to the user-profile first (`Realm settings` -> `User profile (Attribute group = none, not user-metadata)`) in order to allow for the addition of data to your users. Be sure to set those to `allow edit and view for User and Admin` so that the application is able to change the values.
 The application uses the following endpoints of the Keycloak-API to do that:
