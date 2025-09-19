@@ -156,6 +156,46 @@ function getStartPage() {
   return url;
 }
 
+// --- SSE Hot Reload ---
+const clients = [];
+app.get('/hot-reload', (req, res) => {
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+  });
+  res.flushHeaders();
+  res.write('\n');
+  clients.push(res);
+
+  req.on('close', () => {
+    const idx = clients.indexOf(res);
+    if (idx !== -1) clients.splice(idx, 1);
+  });
+});
+
+function broadcastReloadSSE() {
+  console.log("Broadcasting reload to", clients.length, "clients");
+  for (const client of clients) {
+    client.write('event: reload\ndata: now\n\n');
+  }
+}
+
+const basePath = process.env.NEXT_PUBLIC_IS_APP_FOLDER ? '/app/' : '.';
+
+// Watch md/ folder and trigger scanFiles on changes if NEXT_AUTOSCAN is true
+const isAutoScan = process.env.NEXT_AUTOSCAN === "true";
+console.log(`AutoScan is set to ${isAutoScan}`);
+if (isAutoScan) {
+  const mdPath = path.join(basePath, "md");
+  const watcher = chokidar.watch(mdPath, { ignoreInitial: true, persistent: true, depth: 99 });
+  watcher.on("all", (event, pathChanged) => {
+    console.log(`[Watcher] Detected ${event} in ${pathChanged}. Triggering scanFiles...`);
+    scanFiles("md/", mdPath);
+    broadcastReloadSSE();
+  });
+}
+
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
@@ -316,26 +356,12 @@ initKeycloak(app).then(() => {
     }
   });
 
-  const basePath = process.env.NEXT_PUBLIC_IS_APP_FOLDER ? '/app/' : '.';
-
   // Initial scan
   scanFiles("md/", path.join(basePath, "md")).then(() => {
     scanFonts(path.join(basePath, "assets")).then(() => {
       app.listen(process.env.NEXT_PUBLIC_PORT, "0.0.0.0");
     });
   });
-
-  // Watch md/ folder and trigger scanFiles on changes if NEXT_AUTOSCAN is true
-  const isAutoScan = process.env.NEXT_AUTOSCAN === "true";
-  console.log(`AutoScan is set to ${isAutoScan}`);
-  if (isAutoScan) {
-    const mdPath = path.join(basePath, "md");
-    const watcher = chokidar.watch(mdPath, { ignoreInitial: true, persistent: true, depth: 99 });
-    watcher.on("all", (event, pathChanged) => {
-      console.log(`[Watcher] Detected ${event} in ${pathChanged}. Triggering scanFiles...`);
-      scanFiles("md/", mdPath);
-    });
-  }
 
   // If file is not found, redirect to the start page.
   app.use((_, res) => res.redirect(getStartPage()));

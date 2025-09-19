@@ -1339,7 +1339,7 @@ function getMermaidScriptEntry() {
     return txt.value;
   }
 
-  // wenn Reveal „ready“ ist, oder einfach bei DOMContentLoaded
+  // If reveal is ready, or simply on DOMContentLoaded
   document.addEventListener("DOMContentLoaded", () => {
     document.querySelectorAll("pre.mermaid").forEach(async (el, i) => {
       const raw = el.textContent;
@@ -1353,6 +1353,51 @@ function getMermaidScriptEntry() {
     });
   });
 </script>`;
+}
+
+function getAutoReloadScript() {
+  return `<script>
+(function() {
+  let scrollY = 0;
+  let slideIndices = null;
+  const es = new EventSource('/hot-reload');
+  es.addEventListener('reload', function() {
+    if (window.Reveal && Reveal.getIndices) {
+      slideIndices = Reveal.getIndices();
+      sessionStorage.setItem("revealSlide", JSON.stringify(slideIndices));
+    } else {
+      scrollY = window.scrollY;
+      sessionStorage.setItem("scrollY", scrollY);
+    }
+    location.reload();
+  });
+
+  window.addEventListener("DOMContentLoaded", function() {
+    // Hide body until slide/scroll is restored
+    document.body.style.display = "none";
+    if (window.Reveal && Reveal.slide) {
+      const saved = sessionStorage.getItem("revealSlide");
+      if (saved) {
+        const idx = JSON.parse(saved);
+        Reveal.slide(idx.h, idx.v || 0);
+        sessionStorage.removeItem("revealSlide");
+        setTimeout(function() {
+          document.body.style.display = "";
+        }, 0); // Reveal.slide is synchronous, but just in case
+      } else {
+        document.body.style.display = "";
+      }
+    } else {
+      const savedY = sessionStorage.getItem("scrollY");
+      if (savedY) {
+        window.scrollTo(0, parseInt(savedY, 10));
+        sessionStorage.removeItem("scrollY");
+      }
+      document.body.style.display = "";
+    }
+  });
+})();
+</script>`
 }
 
 export async function wrapInPage(html, startPage, req) {
@@ -1385,6 +1430,7 @@ export async function wrapInPage(html, startPage, req) {
         </div>
         <script src="/obsidian-page.js"></script>
         ${getMermaidScriptEntry()}
+        ${getAutoReloadScript()}
         <script lang="javascript">
         initFonts('${JSON.stringify(mainFontsArray)}', '${JSON.stringify(
     navFontsArray
@@ -1420,6 +1466,7 @@ export async function wrapAsDocument(html, req) {
         </div>
         <script src="/obsidian-page.js"></script>
         ${getMermaidScriptEntry()}
+        ${getAutoReloadScript()}
         <script lang="javascript">
         initFonts('${JSON.stringify(mainFontsArray)}', '${JSON.stringify(
     navFontsArray
@@ -1503,6 +1550,7 @@ export async function wrapInReveal(reveal, req) {
     <!-- <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.13.1/styles/tomorrow.min.css"> -->
 
     ${getMermaidScriptEntry()}
+    ${getAutoReloadScript()}
 
     <!-- Printing and PDF exports -->
     <script>
