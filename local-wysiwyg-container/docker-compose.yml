@@ -8,6 +8,7 @@ services:
       - ${WEBSERVER_PORT}:${INTERNAL_PORT}
     environment:
       - NEXT_PUBLIC_SERVER_URL=${NEXT_PUBLIC_SERVER_URL}
+      - NEXT_AUTOSCAN=${NEXT_AUTOSCAN}
     volumes:
       - ${LOCAL_DEV_MD_DIR}:/app/md
       - ./keycloak.json:/app/keycloak.json
