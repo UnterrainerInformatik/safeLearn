@@ -1,0 +1,32 @@
+# WYSIWIG 
+If you'd like to run a local container of this server in order to see changes you make on your files on-the-fly, you've come to the right page.
+
+[Back](README.md) to the main page.
+## How to setup your local container
+### Prerequisites
+- Local [Docker](https://docker.com)-installation
+- Some access to the keycloak-server that's being used (may be local, or the standard remote one)
+- Free port `8081` on your local machine (you may change that, but it has to be configured on the keycloak-client as a `valid redirect URL` like `http://localhost:<port>/*`)
+### Installation
+- Clone this repository
+- Copy the contents of the directory `local-wysiwig-container` to your local host
+- Adjust the contents of the `.env` file
+- Adjust the contents of the `keycloak.json` file
+- Run `up.sh` to start your container as a persistent container
+### `.env` File
+
+| Field                  | Example-value                    | Description                                                                                                                                   |
+| ---------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| WEBSERVER_PORT         | 8081                             | The port your local web-server should expose                                                                                                  |
+| NEXT_PUBLIC_SERVER_URL | http://localhost:8081            | This is important for the keycloak-login process. The port should be the same as in WEBSERVER_PORT.                                           |
+| LOCAL_DEV_MD_DIR       | /home/larifari/secureLectures/md | This is the place of the md-directory within the repository you've cloned  to your local machine. This is the place where your MD-files live. |
+| NEXT_AUTOSCAN          | true                             | This switch tells the server to watch for changes in your MD-directory and reload all files, when it detects those.                           |
+### `keycloak.json` File
+This should be self-explanatory for keycloak-users. It's the config file for the keycloak-instance you are using.
+
+| Field           | Explanation                       |
+| --------------- | --------------------------------- |
+| realm           | The realm.                        |
+| auth-server-url | The full URL to the server.       |
+| resource        | The client of your application.   |
+| secret          | The client-secret of your client. |

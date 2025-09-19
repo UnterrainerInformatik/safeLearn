@@ -96,6 +96,8 @@ const app = express();
 app.set("trust proxy", true);
 
 import { scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions, wrapAsDocument } from "./obsidian.js";
+
+import chokidar from "chokidar";
 import { hasSomeRoles } from "./utils.js";
 
 async function sanitizeAndParseMarkdown(data, req) {
@@ -315,11 +317,25 @@ initKeycloak(app).then(() => {
   });
 
   const basePath = process.env.NEXT_PUBLIC_IS_APP_FOLDER ? '/app/' : '.';
+
+  // Initial scan
   scanFiles("md/", path.join(basePath, "md")).then(() => {
     scanFonts(path.join(basePath, "assets")).then(() => {
       app.listen(process.env.NEXT_PUBLIC_PORT, "0.0.0.0");
     });
   });
+
+  // Watch md/ folder and trigger scanFiles on changes if NEXT_AUTOSCAN is true
+  const isAutoScan = process.env.NEXT_AUTOSCAN === "true";
+  console.log(`AutoScan is set to ${isAutoScan}`);
+  if (isAutoScan) {
+    const mdPath = path.join(basePath, "md");
+    const watcher = chokidar.watch(mdPath, { ignoreInitial: true, persistent: true, depth: 99 });
+    watcher.on("all", (event, pathChanged) => {
+      console.log(`[Watcher] Detected ${event} in ${pathChanged}. Triggering scanFiles...`);
+      scanFiles("md/", mdPath);
+    });
+  }
 
   // If file is not found, redirect to the start page.
   app.use((_, res) => res.redirect(getStartPage()));

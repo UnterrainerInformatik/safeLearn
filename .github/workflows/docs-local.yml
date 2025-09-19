@@ -67,6 +67,7 @@ jobs:
             echo NEXT_PUBLIC_PLANTUML_URL=${{ secrets.PLANTUML_URL }} >> site/.env
             echo NEXT_PUBLIC_SERVER_URL=${{ secrets.SERVER_URL }} >> site/.env
             echo NEXT_PUBLIC_IS_APP_FOLDER=true >> site/.env
+            echo NEXT_AUTOSCAN=${{ secrets.AUTOSCAN || 'false' }} >> site/.env
       - name: Touch keycloak.json file
         run: touch site/keycloak.json
       - name: Fill keycloak.json file

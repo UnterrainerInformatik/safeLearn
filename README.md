@@ -2,7 +2,7 @@
 As a teacher you probably have to cover a vast field of expertise and to keep up with changes in this very field, constantly updating your teaching materials. Most of the time your materials are scattered over a number of formats and platforms, which doesn't exactly make things easier.
 
 This project is the attempt to unify all teaching materials using Markdown and Obsidian as an editor while using this site as a reader for the students.
-As a reader for students it has various benefits, such as responsive design allowing the use of a mobile phone when learning, or customizability of the look-and-feel to suit various tastes.
+As a reader for students it has various benefits, such as responsive design allowing the use of a mobile phone when learning, or customization of the look-and-feel to suit various tastes.
 
 See a working version of this project, hosted by myself, here:
 https://safelearn.unterrainer.info
@@ -28,6 +28,7 @@ If you'd like to host your own files, you'll have to fork this repository.
 	* Generate different views on a document to keep exam-questions, answers and testing-questions together in one document.
 * Full Obsidian-flavor Markdown support
 * Switch between teacher- and student-view
+* Local [WYSIWIG Editor Setup](docs-wysiwig) that allows you to see the changes to your documents instantly.
 ### Features for Students
 * Availability
 	* Teaching materials are always up-to-date
@@ -85,6 +86,8 @@ So there are some intricacies you should be aware of when working with it and se
 	  If you'd like to use any other server, set your secret accordingly.
 ## Obsidian Language Extensions
 Here you can find the technical intricacies of the Obsidian-specific language extension implemented in this project [docs](docs-obsidian.md).
+## Local WYSIWIG Container
+Start a container running the server, which is exposing a web-page and constantly scanning for changes in your files [here](docs-wysiwig).
 ## Permissions
 You can specify who is able to read whole files, or only parts of it.
 Here you can find more information about [permissions](docs-permissions).

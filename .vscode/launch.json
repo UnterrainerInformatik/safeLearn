@@ -12,7 +12,10 @@
       "type": "node",
       "request": "launch",
       "name": "Launch Node.js",
-      "program": "${workspaceFolder}/app.js"
+      "program": "${workspaceFolder}/app.js",
+      "env": {
+        "NEXT_AUTOSCAN": "true"
+      }
     }
   ],
   "compounds": [

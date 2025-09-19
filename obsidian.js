@@ -229,7 +229,19 @@ export async function scanFonts(dir, root = dir) {
  * If it's the root dir, dirPrefix should be an empty string.
  */
 export async function scanFiles(prefix, dir, root = dir) {
+  // Reset global data structures before scanning
   dirPrefix = prefix;
+  Object.keys(mdFilesMap).forEach(key => delete mdFilesMap[key]);
+  Object.keys(filesMap).forEach(key => delete filesMap[key]);
+  Object.keys(mdFilesDir).forEach(key => delete mdFilesDir[key]);
+  Object.keys(mdFilesDirOnHdd).forEach(key => delete mdFilesDirOnHdd[key]);
+  Object.keys(mainFonts).forEach(key => delete mainFonts[key]);
+  mainFontsArray.length = 0;
+  Object.keys(navFonts).forEach(key => delete navFonts[key]);
+  navFontsArray.length = 0;
+  contentMap = {};
+  mdFilesDirStructure = {};
+  
   scanFilesInternal(dir, root);
   let mdFiles = await Promise.all(
     Object.keys(mdFilesDir).map(async (file) => {

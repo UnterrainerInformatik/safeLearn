@@ -1,0 +1,14 @@
+version: '3'
+services:
+
+  secure-lectures:
+    image: ${DOCKER_HUB_USER}/${DOCKER_IMAGE_NAME}:latest
+    container_name: secure-lectures
+    restart: unless-stopped
+    ports:
+      - ${WEBSERVER_PORT}:${INTERNAL_PORT}
+    environment:
+      - NEXT_PUBLIC_SERVER_URL=${NEXT_PUBLIC_SERVER_URL}
+    volumes:
+      - ${LOCAL_DEV_MD_DIR}:/app/md
+      - ./keycloak.json:/app/keycloak.json

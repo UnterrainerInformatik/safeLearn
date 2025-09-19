@@ -266,8 +266,8 @@ function init() {
       : {};
     attributes = {
       fs: a.fs || 18,
-      t: a.t || 0,
-      nt: a.nt || 0,
+      t: a.t || 2,
+      nt: a.nt || 1,
       s: a.s || 1.6,
       dm: a.dm || 0,
       sl: a.sl || 1,
