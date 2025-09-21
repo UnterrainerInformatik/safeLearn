@@ -1,8 +1,8 @@
 services:
 
-  secure-lectures:
+  safeLearn:
     image: ${DOCKER_HUB_USER}/${DOCKER_IMAGE_NAME}:latest
-    container_name: secure-lectures
+    container_name: safeLearn
     restart: unless-stopped
     ports:
       - ${WEBSERVER_PORT}:${INTERNAL_PORT}
