@@ -1358,46 +1358,62 @@ function getMermaidScriptEntry() {
 function getAutoReloadScript() {
   return `<script>
 (function() {
-  let scrollY = 0;
-  let slideIndices = null;
   const es = new EventSource('/hot-reload');
+
   es.addEventListener('reload', function() {
     if (window.Reveal && Reveal.getIndices) {
-      slideIndices = Reveal.getIndices();
+      const slideIndices = Reveal.getIndices();
       sessionStorage.setItem("revealSlide", JSON.stringify(slideIndices));
     } else {
-      scrollY = window.scrollY;
-      sessionStorage.setItem("scrollY", scrollY);
+      sessionStorage.setItem("scrollY", window.scrollY);
     }
     location.reload();
   });
 
   window.addEventListener("DOMContentLoaded", function() {
-    // Hide body until slide/scroll is restored
     document.body.style.display = "none";
+
+    const savedSlide = sessionStorage.getItem("revealSlide");
+    const savedScroll = sessionStorage.getItem("scrollY");
+
     if (window.Reveal && Reveal.slide) {
-      const saved = sessionStorage.getItem("revealSlide");
-      if (saved) {
-        const idx = JSON.parse(saved);
-        Reveal.slide(idx.h, idx.v || 0);
-        sessionStorage.removeItem("revealSlide");
-        setTimeout(function() {
+      if (savedSlide) {
+        const idx = JSON.parse(savedSlide);
+        const h = idx.h || 0;
+        const v = idx.v || 0;
+        const f = (typeof idx.f === "number") ? idx.f : 0;
+
+        const restore = () => {
+          Reveal.slide(h, v, f);
+          Reveal.layout();   // neu berechnen
           document.body.style.display = "";
-        }, 0); // Reveal.slide is synchronous, but just in case
+          sessionStorage.removeItem("revealSlide");
+        };
+
+        // Wenn Reveal schon ready ist, sofort
+        if (Reveal.isReady()) {
+          restore();
+        } else {
+          // Sonst auf ready warten
+          Reveal.on('ready', restore, { once: true });
+          // Fallback, falls ready nicht feuert
+          setTimeout(() => {
+            document.body.style.display = "";
+          }, 1000);
+        }
       } else {
         document.body.style.display = "";
       }
     } else {
-      const savedY = sessionStorage.getItem("scrollY");
-      if (savedY) {
-        window.scrollTo(0, parseInt(savedY, 10));
+      if (savedScroll) {
+        window.scrollTo(0, parseInt(savedScroll, 10));
         sessionStorage.removeItem("scrollY");
       }
       document.body.style.display = "";
     }
   });
 })();
-</script>`
+</script>`;
 }
 
 export async function wrapInPage(html, startPage, req) {
