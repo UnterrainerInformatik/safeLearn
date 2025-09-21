@@ -15,12 +15,13 @@ If you'd like to run a local container of this server in order to see changes yo
 - Run `up.sh` to start your container as a persistent container
 ### `.env` File
 
-| Field                  | Example-value                    | Description                                                                                                                                   |
-| ---------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| WEBSERVER_PORT         | 8081                             | The port your local web-server should expose                                                                                                  |
-| NEXT_PUBLIC_SERVER_URL | http://localhost:8081            | This is important for the keycloak-login process. The port should be the same as in WEBSERVER_PORT.                                           |
-| LOCAL_DEV_MD_DIR       | /home/larifari/secureLectures/md | This is the place of the md-directory within the repository you've cloned  to your local machine. This is the place where your MD-files live. |
-| NEXT_AUTOSCAN          | true                             | This switch tells the server to watch for changes in your MD-directory and reload all files, when it detects those.                           |
+| Field             | Example-value                    | Description                                                                                                                                                                                                                                                |
+| ----------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| WEBSERVER_PORT    | 8081                             | The port your local web-server should expose                                                                                                                                                                                                               |
+| PUBLIC_SERVER_URL | http://localhost:8081            | This is important for the keycloak-login process. The port should be the same as in WEBSERVER_PORT.                                                                                                                                                        |
+| PUBLIC_START_URL  | /md/index.md                     | This will open the file `<url>/md/index.md` as the `home`-URL of your site. This file has to exist, so be sure to enter this one correctly.                                                                                                                |
+| LOCAL_DEV_MD_DIR  | /home/larifari/secureLectures/md | This is the place of the md-directory within the repository you've cloned  to your local machine. This is the place where your MD-files live.                                                                                                              |
+| AUTOSCAN          | true                             | This switch enables hot-updating. It tells the server to watch for changes in your MD-directory and reload all files, when it detects those changes.<br>This also enables hot-updating of your opened pages in your browser, if any. This works over SSEs. |
 ### `keycloak.json` File
 This should be self-explanatory for keycloak-users. It's the config file for the keycloak-instance you are using.
 
