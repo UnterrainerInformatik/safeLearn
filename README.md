@@ -28,7 +28,7 @@ If you'd like to host your own files, you'll have to fork this repository.
 	* Generate different views on a document to keep exam-questions, answers and testing-questions together in one document.
 * Full Obsidian-flavor Markdown support
 * Switch between teacher- and student-view
-* Local [WYSIWIG Editor Setup](docs-wysiwig) that allows you to see the changes to your documents instantly.
+* Local [WYSIWIG Editor Setup](docs-wysiwig.md) that allows you to see the changes to your documents instantly.
 ### Features for Students
 * Availability
 	* Teaching materials are always up-to-date
@@ -87,15 +87,15 @@ So there are some intricacies you should be aware of when working with it and se
 ## Obsidian Language Extensions
 Here you can find the technical intricacies of the Obsidian-specific language extension implemented in this project [docs](docs-obsidian.md).
 ## Local WYSIWIG Container
-Start a container running the server, which is exposing a web-page and constantly scanning for changes in your files [here](docs-wysiwig).
+Start a container running the server, which is exposing a web-page and constantly scanning for changes in your files [here](docs-wysiwig.md).
 ## Permissions
 You can specify who is able to read whole files, or only parts of it.
-Here you can find more information about [permissions](docs-permissions).
+Here you can find more information about [permissions](docs-permissions.md).
 ## Technical Details
-If you're interested about the software used behind the scenes or some of the URLs you may use to do stuff, then look [here](docs-technical-details).
+If you're interested about the software used behind the scenes or some of the URLs you may use to do stuff, then look [here](docs-technical-details.md).
 ## Development: Building this Project
-Here you can find information about [building](docs-building) this project.
+Here you can find information about [building](docs-building.md) this project.
 ## Development: Debugging
-Here you can find information about [debugging](docs-debugging) this project when you've decided to help develop it.
+Here you can find information about [debugging](docs-debugging.md) this project when you've decided to help develop it.
 ## Self-Hosting: Keycloak
-If you like to host your own server, you'll need a Keycloak-Server to host your users' credentials that is probably connected to your schools' LDAP in some way. [Here](docs-keycloak) you can find information about that.
+If you like to host your own server, you'll need a Keycloak-Server to host your users' credentials that is probably connected to your schools' LDAP in some way. [Here](docs-keycloak.md) you can find information about that.
