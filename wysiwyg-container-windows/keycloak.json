@@ -1,0 +1,12 @@
+{
+  "realm": "realm",
+  "auth-server-url": "https://yourserver.com/",
+  "ssl-required": "external",
+  "resource": "client",
+  "verify-token-audience": false,
+  "credentials": {
+    "secret": "clien-secret"
+  },
+  "use-resource-role-mappings": true,
+  "confidential-port": 0
+}

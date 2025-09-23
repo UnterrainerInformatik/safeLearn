@@ -1,0 +1,25 @@
+services:
+
+  safeLearn:
+    image: ${DOCKER_HUB_USER}/${DOCKER_IMAGE_NAME}:latest
+    container_name: safeLearn
+    restart: unless-stopped
+    ports:
+      - ${WEBSERVER_PORT}:${INTERNAL_PORT}
+    environment:
+      - NEXT_PUBLIC_SERVER_URL=${PUBLIC_SERVER_URL}
+      - NEXT_PUBLIC_START_PAGE=${PUBLIC_START_PAGE}
+      - NEXT_AUTOSCAN=${AUTOSCAN}
+      # Turn on polling so changes on local windows drives are seen reliably.
+      - CHOKIDAR_USEPOLLING=true
+      - CHOKIDAR_INTERVAL=500
+      - WATCHPACK_POLLING=true
+      - WATCHPACK_POLL_INTERVAL=500
+      - WATCHDOG_FORCE_POLLING=true
+    volumes:
+      - type: bind
+        source: "${LOCAL_DEV_MD_DIR}"
+        target: /app/md
+      - type: bind
+        source: ./keycloak.json
+        target: /app/keycloak.json

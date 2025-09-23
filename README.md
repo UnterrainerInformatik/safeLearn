@@ -28,7 +28,7 @@ If you'd like to host your own files, you'll have to fork this repository.
 	* Generate different views on a document to keep exam-questions, answers and testing-questions together in one document.
 * Full Obsidian-flavor Markdown support
 * Switch between teacher- and student-view
-* Local [WYSIWIG Editor Setup](docs-wysiwig.md) that allows you to see the changes to your documents instantly.
+* Local [WYSIWYG Editor Setup](docs-wysiwyg.md) that allows you to see the changes to your documents instantly.
 ### Features for Students
 * Availability
 	* Teaching materials are always up-to-date
@@ -86,8 +86,8 @@ So there are some intricacies you should be aware of when working with it and se
 	  If you'd like to use any other server, set your secret accordingly.
 ## Obsidian Language Extensions
 Here you can find the technical intricacies of the Obsidian-specific language extension implemented in this project [docs](docs-obsidian.md).
-## Local WYSIWIG Container
-Start a container running the server, which is exposing a web-page and constantly scanning for changes in your files [here](docs-wysiwig.md).
+## Local WYSIWYG Container
+Start a container running the server, which is exposing a web-page and constantly scanning for changes in your files [here](docs-wysiwyg.md).
 ## Permissions
 You can specify who is able to read whole files, or only parts of it.
 Here you can find more information about [permissions](docs-permissions.md).
