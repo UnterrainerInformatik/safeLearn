@@ -18,8 +18,13 @@ services:
       - WATCHDOG_FORCE_POLLING=true
     volumes:
       - type: bind
-        source: "${LOCAL_DEV_MD_DIR}"
+        source: ${LOCAL_DEV_MD_DIR}
         target: /app/md
       - type: bind
         source: ./keycloak.json
         target: /app/keycloak.json
+    develop:
+      watch:
+        - path: ${LOCAL_DEV_MD_DIR}
+          target: /app/md
+          action: sync

@@ -37,4 +37,4 @@ There is a bit of a problem with file mounts on windows / WSL and programs runni
 While you may access `\\wsl$\<distro>\home\<user>\` from your Windows-context and `/mnt/c/utils/` from you WSL context, the file-events are not propagated over this border (and changes propagate slowly).
 On Windows machines you may either choose to...
 - ...fully use WSL, clone and push your repo from there using native WSL-installed tools and use the container and files in the `wysiwyg-container-linux`.
-- ...fully use Windows, clone and push your repo from there using native Windows-installed tools and use the container and files in the `wysiwyg-container-windows` directory. Then you have to use Powershell to start and stop the container.
+- ...fully use Windows, clone and push your repo from there using native Windows-installed tools and use the container and files in the `wysiwyg-container-windows` directory. You still start the container on your WSL-instance in Linux-land. The new docker-desktop has integrated `mutagen` which mirrors the contents of your windows-partition into the container without having to pass so many boundaries, as the filesystem would have to.
