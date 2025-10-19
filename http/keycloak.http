@@ -20,3 +20,90 @@ Authorization: openid password env
 Content-Type: application/json
 
 ###
+
+###
+# @name GET all users
+GET {{keycloakUrl}}/admin/realms/{{realm}}/users
+Authorization: openid password env
+Content-Type: application/json
+
+###
+
+### Benutzer holen, Fortschritt loggen, Liste am Ende ausgeben
+GET {{keycloakUrl}}/admin/realms/{{realm}}/users?max=3
+Authorization: openid password env
+Accept: application/json
+
+###
+
+@targetOu = 4AHIF
+@max = 3000
+### Benutzer abrufen mit Fortschrittsausgabe + reiner Namensliste
+GET {{keycloakUrl}}/admin/realms/{{realm}}/users?max={{max}}
+Authorization: openid password env
+Accept: application/json
+
+> {%
+  console.log("==> Starte Abruf der Benutzer...");
+  const t0 = Date.now();
+
+  // Body ggf. parsen (abhängig von HTTP Yac-Version)
+  let users;
+  if (Array.isArray(response.body)) {
+    users = response.body;
+  } else if (typeof response.body === "string") {
+    try {
+      users = JSON.parse(response.body);
+    } catch (e) {
+      console.error("⚠️ Antwort ist kein gültiges JSON!");
+      console.log(response.body);
+      throw e;
+    }
+  } else {
+    console.error("⚠️ Unerwarteter Typ von response.body:", typeof response.body);
+    users = [];
+  }
+
+  console.log(`==> Abruf fertig: ${users.length} Benutzer (${((Date.now()-t0)/1000).toFixed(1)} s)`);
+
+  const wantOu = "4AHIF";
+  function inTargetOu(u) {
+    if (!wantOu) return true;
+    const dn = u.attributes?.LDAP_ENTRY_DN?.[0] || "";
+    return dn.includes(`,OU=${wantOu},`);
+  }
+
+  const total = users.length;
+  const chunkSize = 100;
+  console.log(`==> Verarbeite Benutzer in Blöcken von ${chunkSize}...`);
+  let processed = 0;
+  const lines = [];
+
+  for (let i = 0; i < total; i += chunkSize) {
+    const chunk = users.slice(i, i + chunkSize);
+    for (const u of chunk) {
+      if (inTargetOu(u)) {
+        const first = (u.firstName ?? "").trim();
+        const last  = (u.lastName  ?? "").trim();
+        const line  = `${first} ${last}`.trim();
+        if (line) lines.push(line);
+      }
+    }
+    processed = Math.min(i + chunkSize, total);
+    console.log(`   ... verarbeitet: ${processed}/${total}`);
+  }
+
+  console.log(`==> Fertig. Gefiltert: ${lines.length} Zeilen.`);
+  if (wantOu) console.log(`==> OU-Filter aktiv: ${wantOu}`);
+
+  lines.sort((a,b) => a.localeCompare(b, "de", { sensitivity: "base" }));
+
+  console.log("\n=== KOPIERBARE LISTE ===");
+  for (const line of lines) {
+    console.log("@@@" + line);
+    console.log("");
+    console.log("@@@");
+  }
+%}
+
+###
