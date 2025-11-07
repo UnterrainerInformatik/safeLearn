@@ -228,8 +228,66 @@ export async function scanFonts(dir, root = dir) {
 /**
  * If it's the root dir, dirPrefix should be an empty string.
  */
+// Persistent snapshot across scans
+let lastFileSnapshot = new Map();
+
+/**
+ * Scans all markdown files recursively and detects added/removed/modified files.
+ * Returns { added, removed, modified } with full paths like "md/subdir/file.md".
+ */
 export async function scanFiles(prefix, dir, root = dir) {
-  // Reset global data structures before scanning
+  const previousSnapshot = new Map(lastFileSnapshot);
+  const newSnapshot = new Map();
+
+  // Recursively collect file mtimes
+  function snapshotDir(d) {
+    const files = fs.readdirSync(d);
+    for (const f of files) {
+      const filePath = path.join(d, f);
+      const stat = fs.statSync(filePath);
+      if (stat.isDirectory()) {
+        // Skip excluded folders
+        const nmods = process.env.NEXT_PUBLIC_IS_APP_FOLDER ? "/app/node_modules" : "node_modules";
+        const slides = process.env.NEXT_PUBLIC_IS_APP_FOLDER ? "/app/slides" : "slides";
+        if (
+          filePath.startsWith(".") ||
+          filePath.startsWith(nmods) ||
+          filePath.startsWith(slides)
+        )
+          continue;
+        snapshotDir(filePath);
+      } else if (path.extname(f) === ".md") {
+        const rel = prefix + path.relative(root, filePath).replace(/\\/g, "/");
+        newSnapshot.set(rel, stat.mtimeMs);
+      }
+    }
+  }
+
+  snapshotDir(dir);
+
+  // Diff detection
+  const added = [];
+  const removed = [];
+  const modified = [];
+
+  for (const [file, mtime] of newSnapshot) {
+    if (!previousSnapshot.has(file)) {
+      added.push(file);
+    } else if (previousSnapshot.get(file) !== mtime) {
+      modified.push(file);
+    }
+  }
+
+  for (const [file] of previousSnapshot) {
+    if (!newSnapshot.has(file)) {
+      removed.push(file);
+    }
+  }
+
+  // Save new snapshot
+  lastFileSnapshot = newSnapshot;
+
+  // Reset old global data (compatibility)
   dirPrefix = prefix;
   Object.keys(mdFilesMap).forEach(key => delete mdFilesMap[key]);
   Object.keys(filesMap).forEach(key => delete filesMap[key]);
@@ -241,8 +299,11 @@ export async function scanFiles(prefix, dir, root = dir) {
   navFontsArray.length = 0;
   contentMap = {};
   mdFilesDirStructure = {};
-  
+
+  // Rebuild maps
   scanFilesInternal(dir, root);
+
+  // Build file metadata
   let mdFiles = await Promise.all(
     Object.keys(mdFilesDir).map(async (file) => {
       const pwe = mdFilesDir[file];
@@ -251,56 +312,46 @@ export async function scanFiles(prefix, dir, root = dir) {
       if (folderArray.length === 1 && folderArray[0] === "") {
         folderArray.pop();
       }
+      const absPath = path.join(dir, file);
+      const relFullPath = prefix + file;
+      const mtime = fs.existsSync(absPath) ? fs.statSync(absPath).mtimeMs : 0;
       return {
         [file]: {
           path: file,
+          fullPath: relFullPath, // <-- new: full md/... path
           pathWithoutExt: pwe,
-          folders: folders,
-          folderArray: folderArray,
+          folders,
+          folderArray,
           depth: folders === "" ? 0 : folders.split("/").length,
           fileName: file.split("/").pop(),
           fileNameWithoutExtension: pwe.split("/").pop().split(".")[0],
           lastFolder: pwe.split("/").slice(-2, -1)[0] || "",
           cssName: makeSafeForCSS(folders),
           permissions: await getPermissionsFor(dirPrefix + file),
+          mtime,
         },
       };
     })
   );
 
+  // Flatten
   mdFiles = mdFiles.reduce((acc, file) => {
     const key = Object.keys(file)[0];
     acc[key] = file[key];
     return acc;
   }, {});
 
-  // Convert to array, sort, and convert back to object
+  // Sort like before
   mdFiles = Object.entries(mdFiles)
     .sort(([keyA, valueA], [keyB, valueB]) => {
-      // Iterate over the folderArray
-      for (
-        let i = 0;
-        i < Math.min(valueA.folderArray.length, valueB.folderArray.length);
-        i++
-      ) {
-        const comp = valueA.folderArray[i].localeCompare(
-          valueB.folderArray[i],
-          undefined,
-          { sensitivity: "base" }
-        );
-        if (comp !== 0) {
-          // If a difference is found, return the comparison result
-          return comp;
-        }
+      for (let i = 0; i < Math.min(valueA.folderArray.length, valueB.folderArray.length); i++) {
+        const comp = valueA.folderArray[i].localeCompare(valueB.folderArray[i], undefined, { sensitivity: "base" });
+        if (comp !== 0) return comp;
       }
-      // If all elements are equal, compare the lengths of the arrays
       if (valueA.folderArray.length !== valueB.folderArray.length) {
         return valueB.folderArray.length - valueA.folderArray.length;
       }
-      // If the folderArrays are equal, compare the name
-      return valueA.fileName.localeCompare(valueB.fileName, undefined, {
-        sensitivity: "base",
-      });
+      return valueA.fileName.localeCompare(valueB.fileName, undefined, { sensitivity: "base" });
     })
     .reduce((acc, [key, value]) => {
       acc[key] = value;
@@ -308,6 +359,8 @@ export async function scanFiles(prefix, dir, root = dir) {
     }, {});
 
   mdFilesDirStructure = mdFiles;
+
+  return { added, removed, modified };
 }
 
 function scanFilesInternal(dir, root = dir) {
@@ -601,7 +654,7 @@ function preReplaceObsidianFileLinks(html, req) {
         }
         f = f.split(0, -3);
       }
-      f = encodeURIComponent(f);
+      //f = encodeURIComponent(f);
       const serverUrl = `${req.protocol}://${req.get("host")}`;
       return `[${alt ? alt : fileName}](${serverUrl}/${dirPrefix + f})`;
     } else {
@@ -1357,18 +1410,80 @@ function getMermaidScriptEntry() {
 
 function getAutoReloadScript() {
   return `<script>
-(function() {
-  const es = new EventSource('/hot-reload');
-
-  es.addEventListener('reload', function() {
-    if (window.Reveal && Reveal.getIndices) {
-      const slideIndices = Reveal.getIndices();
-      sessionStorage.setItem("revealSlide", JSON.stringify(slideIndices));
-    } else {
-      sessionStorage.setItem("scrollY", window.scrollY);
+(function connectSSE() {
+  function normalizeToMdPath(raw) {
+    try {
+      // strip domain if present
+      raw = raw.replace(/^https?:\\/\\/[^/]+/, "");
+      // strip query + hash
+      raw = raw.split("?")[0].split("#")[0];
+      // strip leading slashes
+      raw = raw.replace(/^\\/+/, "");
+      // If already md/... keep it
+      if (raw.startsWith("md/")) return raw;
+      // If it's /md/... after stripping, also ok
+      if (raw.startsWith("/md/")) return raw.slice(1);
+      // If it's a .md at root or elsewhere, coerce to md/<filename>.md
+      if (raw.endsWith(".md")) {
+        const parts = raw.split("/");
+        const fname = parts[parts.length - 1];
+        return "md/" + fname;
+      }
+      return raw; // fallback (non-md pages)
+    } catch {
+      return "md/unknown.md";
     }
-    location.reload();
+  }
+
+  // Prefer Reveal's configured URL (if present), otherwise use pathname
+  const revealUrl = (window.Reveal && typeof Reveal.getConfig === "function" && Reveal.getConfig()?.url) || null;
+  const currentFile = normalizeToMdPath(revealUrl || location.pathname);
+
+  const context = {
+    type: window.Reveal ? 'reveal' : 'page',
+    currentFile: decodeURIComponent(location.pathname.replace(/^\\/+/, ""))
+  };
+
+  const es = new EventSource('/hot-reload?context=' + 
+    encodeURIComponent(JSON.stringify(context))
+  );
+
+
+  es.addEventListener('reload', function(event) {
+    try {
+      const payload = JSON.parse(event.data || '{}');
+      console.log('[SSE] Reload event:', payload);
+
+      // Save position before reload
+      if (window.Reveal && Reveal.getIndices) {
+        const slideIndices = Reveal.getIndices();
+        sessionStorage.setItem("revealSlide", JSON.stringify(slideIndices));
+      } else {
+        sessionStorage.setItem("scrollY", window.scrollY);
+      }
+
+      if (payload.type === 'nav' && !window.Reveal) {
+        location.reload();
+      } else if (payload.type === 'page') {
+        const current = location.pathname.replace(/^\\/+/, "");
+        if (payload.files && payload.files.some(f => current.endsWith(f))) {
+          location.reload();
+        } else {
+          console.log('[SSE] Skipping reload: not affected', { current, files: payload.files });
+        }
+      } else {
+        console.log('[SSE] Skipping reload: not affected', { current, files: payload.files });
+      }
+    } catch (err) {
+      console.error('[SSE] Error parsing reload payload:', err);
+    }
   });
+
+  es.onerror = function(err) {
+    console.warn('[SSE] Connection lost. Reconnecting in 3s...', err);
+    es.close();
+    setTimeout(connectSSE, 3000);
+  };
 
   window.addEventListener("DOMContentLoaded", function() {
     document.body.style.display = "none";
@@ -1385,18 +1500,15 @@ function getAutoReloadScript() {
 
         const restore = () => {
           Reveal.slide(h, v, f);
-          Reveal.layout();   // neu berechnen
+          Reveal.layout();
           document.body.style.display = "";
           sessionStorage.removeItem("revealSlide");
         };
 
-        // Wenn Reveal schon ready ist, sofort
-        if (Reveal.isReady()) {
+        if (Reveal.isReady && Reveal.isReady()) {
           restore();
         } else {
-          // Sonst auf ready warten
-          Reveal.on('ready', restore, { once: true });
-          // Fallback, falls ready nicht feuert
+          Reveal.on && Reveal.on('ready', restore, { once: true });
           setTimeout(() => {
             document.body.style.display = "";
           }, 1000);

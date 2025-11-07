@@ -157,7 +157,9 @@ function getStartPage() {
 }
 
 // --- SSE Hot Reload ---
-const clients = [];
+// Node.js Beispiel
+const clients = new Map();
+
 app.get('/hot-reload', (req, res) => {
   res.set({
     'Content-Type': 'text/event-stream',
@@ -166,19 +168,56 @@ app.get('/hot-reload', (req, res) => {
   });
   res.flushHeaders();
   res.write('\n');
-  clients.push(res);
 
-  req.on('close', () => {
-    const idx = clients.indexOf(res);
-    if (idx !== -1) clients.splice(idx, 1);
-  });
+  const id = Date.now() + Math.random();
+  const context = req.query.context ? JSON.parse(req.query.context) : {};
+  clients.set(id, { res, context });
+
+  req.on('close', () => clients.delete(id));
 });
 
-function broadcastReloadSSE() {
-  console.log("Broadcasting reload to", clients.length, "clients");
-  for (const client of clients) {
-    client.write('event: reload\ndata: now\n\n');
+function broadcastReloadSSE(filesChanged = null) {
+  const isNavChange = filesChanged === null;
+  const total = clients.size || clients.length;
+  console.log(
+    `Broadcasting ${isNavChange ? "full" : "selective"} reload to ${total} clients`
+  );
+
+  let count = 0;
+  for (const [id, { res, context }] of clients) {
+    const currentFile = context?.currentFile || "";
+    let shouldReload = false;
+
+    if (isNavChange) {
+      // Full reload for everyone
+      shouldReload = true;
+    } else {
+      // Reveal presentation: only reload if the open file was changed
+      shouldReload = filesChanged.some(changed =>
+        currentFile.endsWith(changed) || currentFile.includes(changed)
+      );
+    }
+
+    // console.log(`Client ${id} (currentFile: ${currentFile}) - shouldReload: ${shouldReload}`);
+    if (!shouldReload) continue;
+
+    const payload = isNavChange
+      ? { type: "nav" }
+      : { type: "page", files: filesChanged };
+
+    try {
+      res.write(`event: reload\ndata: ${JSON.stringify(payload)}\n\n`);
+      count++;
+    } catch (err) {
+      console.warn(`Client ${id} disconnected, removing from pool.`);
+      try {
+        res.end();
+      } catch (_) {}
+      clients.delete(id);
+    }
   }
+  console.log(`Reload sent to ${count} clients.`);
+  console.log(`Active clients after broadcast: ${clients.size || clients.length}`);
 }
 
 const basePath = process.env.NEXT_PUBLIC_IS_APP_FOLDER ? '/app/' : '.';
@@ -189,10 +228,15 @@ console.log(`AutoScan is set to ${isAutoScan}`);
 if (isAutoScan) {
   const mdPath = path.join(basePath, "md");
   const watcher = chokidar.watch(mdPath, { ignoreInitial: true, persistent: true, depth: 99 });
-  watcher.on("all", (event, pathChanged) => {
+  watcher.on("all", async (event, pathChanged) => {
     console.log(`[Watcher] Detected ${event} in ${pathChanged}. Triggering scanFiles...`);
-    scanFiles("md/", mdPath);
+    const diff = await scanFiles("md/", path.join(basePath, "md"));
+    console.log("File changes:", diff);
+    if (diff.added.length || diff.removed.length) {
     broadcastReloadSSE();
+  } else if (diff.modified.length) {
+    broadcastReloadSSE(diff.modified);
+  }
   });
 }
 
