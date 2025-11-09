@@ -1465,7 +1465,7 @@ function getAutoReloadScript() {
       if (payload.type === 'nav' && !window.Reveal) {
         location.reload();
       } else if (payload.type === 'page') {
-        const current = location.pathname.replace(/^\\/+/, "");
+        const current = decodeURIComponent(location.pathname.replace(/^\\/+/, ""));
         if (payload.files && payload.files.some(f => current.endsWith(f))) {
           location.reload();
         } else {
