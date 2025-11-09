@@ -401,7 +401,7 @@ initKeycloak(app).then(() => {
   });
 
   // Initial scan
-  scanFiles("md/", path.join(basePath, "md")).then(() => {
+  scanFiles("md/", path.join(basePath, "md"), true).then(() => {
     scanFonts(path.join(basePath, "assets")).then(() => {
       app.listen(process.env.NEXT_PUBLIC_PORT, "0.0.0.0");
     });

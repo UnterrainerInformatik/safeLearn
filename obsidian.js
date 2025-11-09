@@ -6,7 +6,6 @@ import { v4 as uuidv4 } from "uuid";
 import { JSDOM } from "jsdom";
 import { hasSomeRoles } from "./utils.js";
 import * as lucideIcons from "lucide-static";
-import { get } from "http";
 
 const internalTags = {
   callout: {
@@ -235,7 +234,7 @@ let lastFileSnapshot = new Map();
  * Scans all markdown files recursively and detects added/removed/modified files.
  * Returns { added, removed, modified } with full paths like "md/subdir/file.md".
  */
-export async function scanFiles(prefix, dir, root = dir) {
+export async function scanFiles(prefix, dir, resetFonts = false, root = dir) {
   const previousSnapshot = new Map(lastFileSnapshot);
   const newSnapshot = new Map();
 
@@ -293,10 +292,12 @@ export async function scanFiles(prefix, dir, root = dir) {
   Object.keys(filesMap).forEach(key => delete filesMap[key]);
   Object.keys(mdFilesDir).forEach(key => delete mdFilesDir[key]);
   Object.keys(mdFilesDirOnHdd).forEach(key => delete mdFilesDirOnHdd[key]);
-  Object.keys(mainFonts).forEach(key => delete mainFonts[key]);
-  mainFontsArray.length = 0;
-  Object.keys(navFonts).forEach(key => delete navFonts[key]);
-  navFontsArray.length = 0;
+  if (resetFonts) {
+    Object.keys(mainFonts).forEach(key => delete mainFonts[key]);
+    mainFontsArray.length = 0;
+    Object.keys(navFonts).forEach(key => delete navFonts[key]);
+    navFontsArray.length = 0;
+  }
   contentMap = {};
   mdFilesDirStructure = {};
 
