@@ -3,6 +3,7 @@
 [[test-fileperms-teachers]]
 [[test-fileperms-4bhif-5bhif-2ahif]]
 [[test-exam-practice-question]]
+[[test - name - with - spaces]]
 ## Caption
 This is a sample text...
 

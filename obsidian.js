@@ -655,9 +655,10 @@ function preReplaceObsidianFileLinks(html, req) {
         }
         f = f.split(0, -3);
       }
-      //f = encodeURIComponent(f);
+      console.log(f);
       const serverUrl = `${req.protocol}://${req.get("host")}`;
-      return `[${alt ? alt : fileName}](${serverUrl}/${dirPrefix + f})`;
+      const url = `${serverUrl}/${encodeURIComponent(dirPrefix + f)}`;
+      return `[${alt ? alt : fileName}](${url})`;
     } else {
       return match;
     }

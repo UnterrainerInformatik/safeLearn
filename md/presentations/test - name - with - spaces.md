@@ -1,0 +1,1 @@
+This file's name contains spaces and should be correctly interpreted when using wiki-links.
