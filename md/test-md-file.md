@@ -21,6 +21,17 @@ Admins only!!!
 Special visibility (4bhif, 5bhif and 4ahif only)
 @@@
 
+### Tests for Time-Sensitive-Permissions
+@@@ teacher[2099-01-01T08:00:00], 4bhif[2099-01-01T08:00:00 to 2099-01-01T12:00:00], 4ahif, examParticipant
+This block demonstrates time-bound permissions. Teachers will see it starting on the morning of 1 Jan 2099, while 4BHIF only sees it until noon. 4AHIF has no timer and always sees it, as well as examParticipant.
+@@@
+@@@ teacher[2025-11-30T15:03:00]
+**Time-Conditional FROM**
+@@@
+@@@ teacher[2025-11-30T15:03:00 to 2025-11-30T15:04:00]
+**Time-Conditional FROM-TO**
+@@@
+
 ## Test PlantUML
 ```plantuml
 [hansi]

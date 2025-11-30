@@ -38,6 +38,23 @@ const internalSubstitutions = {
   },
 };
 
+const VISIBILITY_POLL_INTERVAL_MS = (() => {
+  const raw = Number.parseInt(
+    process.env.PERMISSION_VISIBILITY_INTERVAL_MS ?? "5000",
+    10
+  );
+  if (Number.isNaN(raw)) {
+    return 5000;
+  }
+  return Math.max(1000, raw);
+})();
+
+const timedPermissionEntries = new Map();
+let visibilityInterval = null;
+let visibilityChangeCallback = null;
+
+const inlinePermissionRegex = /^[ \t]*@@@(.*?)\n([\s\S]*?)@@@/gms;
+
 let codeList = [];
 let openNavTreeScript = "";
 
@@ -126,41 +143,269 @@ export const navFonts = {};
 export const navFontsArray = [];
 export let contentMap = {};
 
-export function parseFirstLineForPermissions(line) {
-  const match = line.match(/^\s*@@@(.*)/);
-  let r = null;
-  if (match) {
-    r = [];
-    const s = match[1];
-    s.split(",").forEach((p) => {
-      r.push(p.trim().toLowerCase());
-    });
+function parseLocalDateTime(value) {
+  if (typeof value !== "string") {
+    return null;
   }
-  return r;
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const hasTimezone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(trimmed);
+  if (hasTimezone) {
+    const zoned = new Date(trimmed);
+    return Number.isNaN(zoned.getTime()) ? null : zoned;
+  }
+  const [datePart, timePart] = trimmed.split(/[T ]/);
+  if (!datePart) {
+    const fallback = new Date(trimmed);
+    return Number.isNaN(fallback.getTime()) ? null : fallback;
+  }
+  const [year, month, day] = datePart
+    .split("-")
+    .map((segment) => Number.parseInt(segment, 10));
+  if ([year, month, day].some((segment) => Number.isNaN(segment))) {
+    return null;
+  }
+  let hour = 0;
+  let minute = 0;
+  let second = 0;
+  if (timePart) {
+    const [h, m, s] = timePart.split(":").map((segment) => {
+      if (segment === undefined) return undefined;
+      return Number.parseInt(segment, 10);
+    });
+    if (!Number.isNaN(h)) hour = h;
+    if (!Number.isNaN(m)) minute = m;
+    if (!Number.isNaN(s)) second = s;
+  }
+  const localDate = new Date(year, month - 1, day, hour, minute, second);
+  return Number.isNaN(localDate.getTime()) ? null : localDate;
 }
 
-function getPermissionsFor(path) {
+function parsePermissionWindow(rawWindow) {
+  if (!rawWindow || typeof rawWindow !== "string") {
+    return null;
+  }
+  const windowText = rawWindow.trim();
+  if (!windowText) {
+    return null;
+  }
+  if (/^to\s+/i.test(windowText)) {
+    const endOnly = parseLocalDateTime(windowText.replace(/^to\s+/i, ""));
+    if (!endOnly) return null;
+    return { start: null, end: endOnly.getTime() };
+  }
+  const parts = windowText.split(/\s+to\s+/i);
+  let start = null;
+  let end = null;
+  if (parts.length === 1) {
+    start = parseLocalDateTime(parts[0]);
+  } else if (parts.length >= 2) {
+    start = parseLocalDateTime(parts[0]);
+    end = parseLocalDateTime(parts.slice(1).join(" to "));
+  }
+  if (!start && !end) {
+    return null;
+  }
+  return {
+    start: start ? start.getTime() : null,
+    end: end ? end.getTime() : null,
+  };
+}
+
+function parsePermissionEntry(token) {
+  if (typeof token !== "string") {
+    return null;
+  }
+  const trimmed = token.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const match = trimmed.match(/^(?<role>[^\[\]]+?)(?:\s*\[(?<window>.+)\])?$/);
+  if (!match || !match.groups?.role) {
+    return null;
+  }
+  const role = match.groups.role.trim().toLowerCase();
+  if (!role) {
+    return null;
+  }
+  const window = parsePermissionWindow(match.groups.window);
+  return {
+    role,
+    window,
+  };
+}
+
+function parsePermissionEntries(raw) {
+  if (typeof raw !== "string") {
+    return [];
+  }
+  return raw
+    .split(",")
+    .map((token) => parsePermissionEntry(token))
+    .filter((entry) => entry !== null);
+}
+
+export function parseFirstLineForPermissions(line) {
+  if (typeof line !== "string") {
+    return null;
+  }
+  const match = line.match(/^\s*@@@\s*(.*)/);
+  if (!match) {
+    return null;
+  }
+  const entries = parsePermissionEntries(match[1]);
+  return entries.length > 0 ? entries : [];
+}
+
+function isPermissionEntryActive(entry, referenceTime = Date.now()) {
+  if (!entry) {
+    return false;
+  }
+  if (!entry.window) {
+    return true;
+  }
+  const { start, end } = entry.window;
+  if (start && referenceTime < start) {
+    return false;
+  }
+  if (end && referenceTime > end) {
+    return false;
+  }
+  return true;
+}
+
+export function getActivePermissionRoles(permissions, referenceDate = new Date()) {
+  if (!Array.isArray(permissions) || permissions.length === 0) {
+    return [];
+  }
+  const referenceTime = referenceDate instanceof Date ? referenceDate.getTime() : referenceDate;
+  return permissions
+    .filter((entry) => isPermissionEntryActive(entry, referenceTime))
+    .map((entry) => entry.role);
+}
+
+function hasTimedWindow(entry) {
+  return Boolean(entry?.window && (entry.window.start || entry.window.end));
+}
+
+function extractInlinePermissionEntries(markdown) {
+  if (typeof markdown !== "string" || markdown.length === 0) {
+    return [];
+  }
+  const regex = new RegExp(inlinePermissionRegex);
+  const matches = [];
+  let match;
+  while ((match = regex.exec(markdown)) !== null) {
+    matches.push(parsePermissionEntries(match[1]));
+  }
+  return matches;
+}
+
+function registerTimedPermissionEntries(fileFullPath, sourceKey, entries = []) {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return;
+  }
+  const now = Date.now();
+  entries.forEach((entry, index) => {
+    if (!hasTimedWindow(entry)) {
+      return;
+    }
+    const key = `${fileFullPath}::${sourceKey}::${index}`;
+    timedPermissionEntries.set(key, {
+      file: fileFullPath,
+      entry,
+      wasActive: isPermissionEntryActive(entry, now),
+    });
+  });
+}
+
+async function rebuildTimedPermissionSchedule(filesMeta = []) {
+  timedPermissionEntries.clear();
+  const tasks = filesMeta.map(async (fileMeta) => {
+    if (!fileMeta?.absolutePath) {
+      return;
+    }
+    let content;
+    try {
+      content = await fs.promises.readFile(fileMeta.absolutePath, "utf8");
+    } catch (error) {
+      console.warn(`Unable to read file for timed permissions: ${fileMeta.absolutePath}`, error);
+      return;
+    }
+
+    if (fileMeta.permissions !== null && fileMeta.permissions !== undefined) {
+      registerTimedPermissionEntries(fileMeta.fullPath, "file", fileMeta.permissions);
+    }
+
+    const inlinePermissions = extractInlinePermissionEntries(content);
+    inlinePermissions.forEach((entries, idx) => {
+      registerTimedPermissionEntries(fileMeta.fullPath, `block-${idx}`, entries);
+    });
+  });
+
+  await Promise.allSettled(tasks);
+  ensureVisibilityTimerState();
+}
+
+function ensureVisibilityTimerState() {
+  if (timedPermissionEntries.size === 0) {
+    if (visibilityInterval) {
+      clearInterval(visibilityInterval);
+      visibilityInterval = null;
+    }
+    return;
+  }
+  if (!visibilityInterval) {
+    visibilityInterval = setInterval(runVisibilityChecks, VISIBILITY_POLL_INTERVAL_MS);
+  }
+}
+
+function runVisibilityChecks() {
+  if (timedPermissionEntries.size === 0) {
+    return;
+  }
+  const now = Date.now();
+  const filesToReload = new Set();
+  for (const entry of timedPermissionEntries.values()) {
+    const currentlyActive = isPermissionEntryActive(entry.entry, now);
+    if (entry.wasActive !== currentlyActive) {
+      entry.wasActive = currentlyActive;
+      filesToReload.add(entry.file);
+    }
+  }
+  if (filesToReload.size > 0 && typeof visibilityChangeCallback === "function") {
+    console.log(
+      `[TimedPermissions] Visibility changed for: ${Array.from(filesToReload).join(", ")}`
+    );
+    visibilityChangeCallback(Array.from(filesToReload));
+  }
+}
+
+export function registerVisibilityChangeCallback(callback) {
+  visibilityChangeCallback = typeof callback === "function" ? callback : null;
+}
+
+function getPermissionsFor(filePath) {
   return new Promise((resolve, reject) => {
-    const fileStream = fs.createReadStream(path);
+    const fileStream = fs.createReadStream(filePath);
     const rl = readline.createInterface({
       input: fileStream,
       crlfDelay: Infinity,
     });
 
-    let r;
+    let result = null;
     const lineReader = (line) => {
-      r = parseFirstLineForPermissions(line);
-      if (r === null) {
-        r = [];
-      }
-      // Since we only want the first line, we remove the listener after the first iteration
+      result = parseFirstLineForPermissions(line);
       rl.removeListener("line", lineReader);
+      rl.close();
     };
 
     rl.on("line", lineReader);
 
     rl.on("close", () => {
-      resolve(r);
+      resolve(result);
     });
 
     rl.on("error", (err) => {
@@ -320,6 +565,7 @@ export async function scanFiles(prefix, dir, resetFonts = false, root = dir) {
         [file]: {
           path: file,
           fullPath: relFullPath, // <-- new: full md/... path
+          absolutePath: absPath,
           pathWithoutExt: pwe,
           folders,
           folderArray,
@@ -328,7 +574,7 @@ export async function scanFiles(prefix, dir, resetFonts = false, root = dir) {
           fileNameWithoutExtension: pwe.split("/").pop().split(".")[0],
           lastFolder: pwe.split("/").slice(-2, -1)[0] || "",
           cssName: makeSafeForCSS(folders),
-          permissions: await getPermissionsFor(dirPrefix + file),
+          permissions: await getPermissionsFor(absPath),
           mtime,
         },
       };
@@ -360,6 +606,8 @@ export async function scanFiles(prefix, dir, resetFonts = false, root = dir) {
     }, {});
 
   mdFilesDirStructure = mdFiles;
+
+  await rebuildTimedPermissionSchedule(Object.values(mdFiles));
 
   return { added, removed, modified };
 }
@@ -456,14 +704,24 @@ export async function preParse(md, req) {
 }
 
 async function removeForbiddenContent(md, req) {
-  const regex = /^[ \t]*@@@(.*?)\n([\s\S]*?)@@@/gms;
-  const matches = Array.from(md.matchAll(regex));
+  const regex = new RegExp(inlinePermissionRegex);
+  const matches = [];
+  let match;
+  while ((match = regex.exec(md)) !== null) {
+    matches.push(match);
+  }
   const replacements = await Promise.all(
-    matches.map(([match, perms, content]) => {
-      const permissions = perms.split(",").map((p) => p.trim().toLowerCase());
-      return hasSomeRoles(req, permissions, true).then((r) =>
-        r ? content : ""
-      );
+    matches.map(async ([fullMatch, perms, content]) => {
+      const permissionEntries = parsePermissionEntries(perms);
+      if (permissionEntries.length === 0) {
+        return "";
+      }
+      const activeRoles = getActivePermissionRoles(permissionEntries);
+      if (activeRoles.length === 0) {
+        return "";
+      }
+      const allowed = await hasSomeRoles(req, activeRoles, true);
+      return allowed ? content : "";
     })
   );
   for (let i = 0; i < matches.length; i++) {
@@ -1031,7 +1289,11 @@ async function getDirectoryListing(req) {
   const allFiles = Object.values(mdFilesDirStructure);
   const files = await Promise.all(
     allFiles.map(async (f) => {
-      const hasRole = await hasSomeRoles(req, f.permissions, true);
+      const activeRoles = getActivePermissionRoles(f.permissions);
+      if (f.permissions !== null && f.permissions !== undefined && activeRoles.length === 0) {
+        return null;
+      }
+      const hasRole = await hasSomeRoles(req, activeRoles, true);
       return hasRole ? f : null;
     })
   );

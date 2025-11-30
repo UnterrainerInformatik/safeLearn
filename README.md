@@ -26,6 +26,7 @@ If you'd like to host your own files, you'll have to fork this repository.
 * Customizable content-reading-permission within a document
 	* Hide teacher-notes from students
 	* Generate different views on a document to keep exam-questions, answers and testing-questions together in one document.
+* Time-based visibility windows per role with automatic live reloads when a block or file becomes visible/hidden
 * Full Obsidian-flavor Markdown support
 * Switch between teacher- and student-view
 * Local [WYSIWYG Editor Setup](docs-wysiwyg.md) that allows you to see the changes to your documents instantly.

@@ -60,6 +60,29 @@ Some more text visible to all again.
 ```
 Of course you can use full Obsidian-flavor-markdown within the directives.
 
+### Time-bound visibility
+Every role inside a permission directive may optionally define a visibility window. Append a timestamp in square brackets directly after the role name:
+
+```markdown
+@@@ teacher,4ahif[2025-11-28T08:00:00]
+Visible to teachers immediately and to 4AHIF starting at 28 Nov 2025 08:00.
+@@@
+```
+
+Specify both start and end using `to`:
+
+```markdown
+@@@ teacher, 4bhif[2025-11-28T08:00:00 to 2025-11-28T10:50:00], 4ahif
+4BHIF may read this only during the exam slot. Teachers and 4AHIF are unrestricted.
+@@@
+```
+
+You can also create open-ended windows (`[2025-12-01T08:00:00]`) or hide content after a certain point (`[to 2025-12-01T12:00:00]`).
+
+Timestamps follow ISO 8601 (`YYYY-MM-DDTHH:mm:ss`). Values without an explicit timezone are interpreted in the server's local timezone; append `Z` or an offset if you need UTC or a specific zone.
+
+The server continuously watches these windows. When a block or a whole file becomes visible or hidden, all subscribed clients receive a Server-Sent Events reload signal so the UI stays in sync automatically.
+
 ### File-Content Views
 There are two views.
 ```markdown

@@ -47,11 +47,16 @@ async function getClientRoles(req) {
  */
 async function hasClientRoles(req, clientRoles, all) {
   try {
-    if (
-      clientRoles === undefined ||
-      clientRoles === null ||
-      clientRoles.length == 0
-    ) {
+    const normalizeRole = (role) =>
+      typeof role === "string" ? role.trim().toLowerCase() : "";
+
+    const normalizedRoles = Array.isArray(clientRoles)
+      ? clientRoles
+          .map(normalizeRole)
+          .filter((role) => role.length > 0)
+      : [];
+
+    if (normalizedRoles.length === 0) {
       return true;
     }
     let clientAccess = false;
@@ -67,10 +72,17 @@ async function hasClientRoles(req, clientRoles, all) {
       const a = req.user.accessTokenDecoded.resource_access;
       const r = a[resource];
       if (r) {
+          const availableRoles = Array.isArray(r.roles)
+            ? r.roles.map(normalizeRole)
+            : [];
         if (all) {
-          clientAccess = clientRoles.every((role) => r.roles.includes(role));
+            clientAccess = normalizedRoles.every((role) =>
+              availableRoles.includes(role)
+            );
         } else {
-          clientAccess = clientRoles.some((role) => r.roles.includes(role));
+            clientAccess = normalizedRoles.some((role) =>
+              availableRoles.includes(role)
+            );
         }
       }
     }
@@ -88,17 +100,22 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
   try {
     //console.log("Checking roles", clientRoles, "all", all, "allowOverride", allowOverride);
     // The roles to check are empty. So we return true.
-    if (
-      clientRoles === undefined ||
-      clientRoles === null ||
-      clientRoles.length == 0
-    ) {
+    const normalizeRole = (role) =>
+      typeof role === "string" ? role.trim().toLowerCase() : "";
+
+    let normalizedClientRoles = Array.isArray(clientRoles)
+      ? clientRoles
+          .map(normalizeRole)
+          .filter((role) => role.length > 0)
+      : [];
+
+    if (normalizedClientRoles.length === 0) {
       return true;
     }
 
     let clientAccess = null;
     const attributes = await getUserAttributes(req);
-    const ccr = await getClientRoles(req, clientRoles);
+    const ccr = await getClientRoles(req, normalizedClientRoles);
     // console.log("Client roles", ccr);
     // console.log("Request user rolesCalculated", req.user.rolesCalculated);
     // console.log("attributes", attributes);
@@ -115,16 +132,19 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
     name = name.trim()
     name = name.toLowerCase()
     r[name] = true;
-    const cr = await getClientRoles(req, clientRoles);
+    const cr = await getClientRoles(req, normalizedClientRoles);
     if (cr) {
       for (const role of cr) {
-        r[role] = true;
+        const normalizedRole = normalizeRole(role);
+        if (normalizedRole) {
+          r[normalizedRole] = true;
+        }
       }
     }
-    const clientViews = clientRoles.filter((role) => role.startsWith("#"));
-    clientRoles = clientRoles.filter((role) => !role.startsWith("#"));
-    let isAdmin = r.admin || clientRoles.includes("admin");
-    let isTeacher = r.teacher || clientRoles.includes("teacher");
+    let clientViews = normalizedClientRoles.filter((role) => role.startsWith("#"));
+    normalizedClientRoles = normalizedClientRoles.filter((role) => !role.startsWith("#"));
+    let isAdmin = r.admin || normalizedClientRoles.includes("admin");
+    let isTeacher = r.teacher || normalizedClientRoles.includes("teacher");
     if (isTeacher) {
       r.teachers = true;
     }
@@ -137,11 +157,11 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
     if (isAdmin) {
       clientAccess = true;
     } else {
-      if (clientRoles.length > 0) {
+      if (normalizedClientRoles.length > 0) {
         if (all) {
-          clientAccess = clientRoles.every((role) => r[role]);
+          clientAccess = normalizedClientRoles.every((role) => r[role]);
         } else {
-          clientAccess = clientRoles.some((role) => r[role]);
+          clientAccess = normalizedClientRoles.some((role) => r[role]);
         }
       }
     }

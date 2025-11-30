@@ -95,7 +95,7 @@ const DOMPurify = createDOMPurify(window);
 const app = express();
 app.set("trust proxy", true);
 
-import { scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions, wrapAsDocument } from "./obsidian.js";
+import { scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions, wrapAsDocument, getActivePermissionRoles, registerVisibilityChangeCallback } from "./obsidian.js";
 
 import chokidar from "chokidar";
 import { hasSomeRoles } from "./utils.js";
@@ -109,7 +109,11 @@ async function sanitizeAndParseMarkdown(data, req) {
     const firstLine = d.split("\n")[0];
     const permissions = parseFirstLineForPermissions(firstLine);
     if (permissions !== null) {
-      if (!await hasSomeRoles(req, permissions, true)) {
+      const activeRoles = getActivePermissionRoles(permissions);
+      if (activeRoles.length === 0) {
+        throw new Error("This content is not visible right now.");
+      }
+      if (!await hasSomeRoles(req, activeRoles, true)) {
         throw new Error("You do not have the required permissions to view this content.");
       }
       // Strip the first line since it held the permissions
@@ -219,6 +223,17 @@ function broadcastReloadSSE(filesChanged = null) {
   console.log(`Reload sent to ${count} clients.`);
   console.log(`Active clients after broadcast: ${clients.size || clients.length}`);
 }
+
+registerVisibilityChangeCallback((filesChanged) => {
+  if (Array.isArray(filesChanged) && filesChanged.length > 0) {
+    console.log(
+      `[TimedPermissions] Triggered by files: ${filesChanged.join(", ")}. Broadcasting full reload.`
+    );
+  } else {
+    console.log(`[TimedPermissions] Visibility change detected. Broadcasting full reload.`);
+  }
+  broadcastReloadSSE();
+});
 
 const basePath = process.env.NEXT_PUBLIC_IS_APP_FOLDER ? '/app/' : '.';
 
