@@ -877,6 +877,16 @@ function postprocessFragments(html) {
   return document.body.innerHTML;
 }
 
+function encodePathPreservingSlashes(rawPath) {
+  if (typeof rawPath !== "string" || rawPath.length === 0) {
+    return rawPath ?? "";
+  }
+  return rawPath
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
 function preReplaceObsidianFileLinks(html, req) {
   const regex = /(?<!\!)\[\[([^\]\n]+)\]\]/g;
 
@@ -915,7 +925,8 @@ function preReplaceObsidianFileLinks(html, req) {
       }
       console.log(f);
       const serverUrl = `${req.protocol}://${req.get("host")}`;
-      const url = `${serverUrl}/${encodeURIComponent(dirPrefix + f)}`;
+      const encodedPath = encodePathPreservingSlashes(dirPrefix + f);
+      const url = `${serverUrl}/${encodedPath}`;
       return `[${alt ? alt : fileName}](${url})`;
     } else {
       return match;
