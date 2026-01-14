@@ -1346,7 +1346,7 @@ async function markPathForSelectedPage(req, files) {
     };
     r.path.push(f);
   }
-  // console.log("markPathForSelectedPage", r);
+  console.log("markPathForSelectedPage", r);
   return r;
 }
 
@@ -1382,7 +1382,7 @@ async function getDirectoryListingInternal(path, req, files, folders) {
         const folder = file.folderArray[j];
         html += insertDirFolder(folder, j);
         if (lookupAndMarkPath(folder, currentLevel, path.path)) {
-          openNavTreeScript += `toggleDirList('ff-${folder}-${j}');\n`;
+          openNavTreeScript += `toggleDirList('${getCssHashKey(folder, j)}');\n`;
           currentLevel++;
         }
       }
@@ -1413,19 +1413,33 @@ async function getDirectoryListingInternal(path, req, files, folders) {
   return html;
 }
 
+function hash32(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36);
+}
+
+function getCssHashKey(folder, j) {
+  return `ff-${hash32(folder)}-${j}`;
+}
+
 function insertDirFolder(folder, j) {
   let r = "";
+  const key = getCssHashKey(folder, j);
   r += `<div class="folder" style="margin: 0px; padding: 0px;">`;
-  r += `<div class="folder-name row" onclick="toggleDirList('ff-${folder}-${j}')" style="cursor: pointer;">${indentStringFor(
+  r += `<div class="folder-name row" onclick="toggleDirList('${key}')" style="cursor: pointer;">${indentStringFor(
     j
-  )}${folder}<div class="folder-files ff-${folder}-${j}-chevron" style="
+  )}${folder}<div class="folder-files ${key}-chevron" style="
           position: inline-block;
           top: 1px;
           padding: 0px;
           margin: 0px;
           transition: transform 0.3s ease;
         ">${lucideIcon("ChevronRight", null, "12px")}</div></div>`;
-  r += `<div class="folder-files ff-${folder}-${j}" style="
+  r += `<div class="folder-files ${key}" style="
           opacity: 1;
           padding-top: 0px;
           max-height: 0;
@@ -1435,6 +1449,13 @@ function insertDirFolder(folder, j) {
   return r;
 }
 
+function encodePathPreserveSlashes(path) {
+  return path
+    .split("/")
+    .map(seg => encodeURIComponent(seg))
+    .join("/");
+}
+
 function insertDirLink(file, req, indent, i, files) {
   let r = "";
   let correctedPath = decodeURIComponent(req.path);
@@ -1442,9 +1463,10 @@ function insertDirLink(file, req, indent, i, files) {
     correctedPath = correctedPath.slice(4);
   }
   let highlight = "";
+
   if (file.path === correctedPath) highlight = "highlight";
   r += `<a href="/${
-    dirPrefix + file.path
+    encodePathPreserveSlashes(dirPrefix + file.path)
   }" class="${highlight}">${indentStringFor(
     file.lastFolder === "" ? 0 : indent
   )}${file.fileNameWithoutExtension}</a>`;
