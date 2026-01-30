@@ -1,13 +1,13 @@
-version: '3'
 services:
 
-  test:
+  safeLearn:
     image: ${DOCKER_HUB_USER}/${DOCKER_IMAGE_NAME}:latest
+    container_name: safeLearn
     restart: unless-stopped
     ports:
       - "${WEBSERVER_PORT}:${INTERNAL_PORT}"
-
-networks:
-  default:
-    external:
-      name: proxy_default
+    environment:
+      - TZ=Europe/Vienna
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
