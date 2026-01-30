@@ -2,7 +2,7 @@ services:
 
   safeLearn:
     image: ${DOCKER_HUB_USER}/${DOCKER_IMAGE_NAME}:latest
-    container_name: safeLearn
+    container_name: ${CONTAINER_NAME}
     restart: unless-stopped
     ports:
       - "${WEBSERVER_PORT}:${INTERNAL_PORT}"

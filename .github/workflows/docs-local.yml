@@ -137,6 +137,7 @@ jobs:
         run: touch ./deploy/.env
       - name: Fill .env file for deployment
         run: |
+            echo CONTAINER_NAME=${{ secrets.CONTAINER_NAME || 'safeLearn' }} >> ./deploy/.env
             echo WEBSERVER_PORT=${{ secrets.WEBSERVER_PORT }} >> ./deploy/.env
             echo INTERNAL_PORT=${{ secrets.PORT }} >> ./deploy/.env
             echo DOCKER_HUB_USER=${{ secrets.DOCKER_HUB_USER }} >> ./deploy/.env
