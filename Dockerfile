@@ -1,4 +1,4 @@
-FROM node:22.14-alpine
+FROM node:25.6.0-alpine
 
 # Make app directory in the container.
 RUN mkdir /app
@@ -24,7 +24,7 @@ COPY *.css /app
 WORKDIR /app
 
 # Install dependencies.
-RUN npm install -only=production
+RUN npm install --omit=dev
 
 # Expose the port
 EXPOSE 8080
