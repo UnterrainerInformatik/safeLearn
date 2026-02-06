@@ -7,33 +7,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
-    name: Build & Publish 🚀
-    runs-on: ubuntu-latest
-    env:
-      INPUTPATH: asciidocs
-      OUTPUTPATH: dist
-      SLIDES: true
-      BRANCH: gh-pages
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-      - name: Build
-        uses: quirinecker/asciidoctor-convert-action@main
-        with:
-          slides: ${{ env.SLIDES }}
-          inputPath: ${{ env.INPUTPATH }}
-          outputPath: ${{ env.OUTPUTPATH }}
-      - name: Deploy to GitHub Pages
-        uses: JamesIves/github-pages-deploy-action@releases/v4
-        with:
-          TOKEN: ${{ github.TOKEN }}
-          BRANCH: ${{ env.BRANCH }}
-          FOLDER: ${{ env.OUTPUTPATH }}
   bump:
     name: Get And Bump SemVer 👊
     runs-on: ubuntu-latest
-    needs: [build]
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
