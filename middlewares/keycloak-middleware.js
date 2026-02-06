@@ -1,12 +1,34 @@
 import fs from "fs";
 import session from "express-session";
-import jwt from "jsonwebtoken";
 import passport from "passport";
 import { Issuer, Strategy } from "openid-client";
 
 export let client;
 export let issuerUrl;
 export let keycloakIssuer;
+
+function base64urlToUtf8(str) {
+  // base64url -> base64
+  str = str.replace(/-/g, "+").replace(/_/g, "/");
+  // padding
+  const pad = str.length % 4;
+  if (pad) str += "=".repeat(4 - pad);
+  return Buffer.from(str, "base64").toString("utf8");
+}
+
+export function jwtDecode(token) {
+  if (typeof token !== "string") return null;
+  const parts = token.split(".");
+  if (parts.length < 2) return null;
+
+  try {
+    const header = JSON.parse(base64urlToUtf8(parts[0]));
+    const payload = JSON.parse(base64urlToUtf8(parts[1]));
+    return { header, payload };
+  } catch {
+    return null;
+  }
+}
 
 export async function initKeycloak(app) {
   // Load keycloak.json
@@ -46,10 +68,11 @@ export async function initKeycloak(app) {
       const accessToken = tokenSet.access_token;
       const refreshToken = tokenSet.refresh_token;
       // Decode the ID token to get the user profile
-      const userProfile = jwt.decode(idToken);
+      const id = jwtDecode(idToken);
+      const userProfile = id?.payload;
       // Include the access token in the user profile
       userProfile.accessToken = accessToken;
-      userProfile.accessTokenDecoded = jwt.decode(accessToken);
+      userProfile.accessTokenDecoded = jwtDecode(accessToken)?.payload;
       userProfile.refreshToken = refreshToken;
       userProfile.keycloakConfig = kcConfig;
       done(null, userProfile, { returnTo: req.session.originalUrl });
@@ -137,7 +160,8 @@ export async function refreshAccessToken(req) {
   try {
     const tokenSet = await client.refresh(req.user.refreshToken);
     req.user.accessToken = tokenSet.access_token;
-    req.user.accessTokenDecoded = jwt.decode(tokenSet.access_token);
+    const access = jwtDecode(tokenSet.access_token);
+    req.user.accessTokenDecoded = access?.payload;
     req.user.refreshToken = tokenSet.refresh_token;
     req.user.rolesCalculated = JSON.stringify(getLdapGroups(req));
     // Get updated user information
