@@ -24,6 +24,7 @@ const highlighter = await getHighlighter({
   langs: Object.keys(bundledLanguages),
   themes: [darkTheme, lightTheme]
 });
+
 // Set options
 const markedLight = new Marked();
 markedLight.use({
@@ -99,6 +100,18 @@ import { scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInRevea
 
 import chokidar from "chokidar";
 import { hasSomeRoles } from "./utils.js";
+
+function loadDefaultPrefs() {
+  try {
+    const p = path.join(__dirname, "guest-prefs.json");
+    const raw = fs.readFileSync(p, "utf8");
+    return JSON.parse(raw);
+  } catch (e) {
+    console.warn("Could not load default prefs file.", e.message);
+    return {};
+  }
+}
+const DEFAULT_PREFS = loadDefaultPrefs();
 
 async function sanitizeAndParseMarkdown(data, req) {
   try {
@@ -236,6 +249,8 @@ registerVisibilityChangeCallback((filesChanged) => {
 });
 
 const basePath = process.env.NEXT_PUBLIC_IS_APP_FOLDER ? '/app/' : '.';
+const publicPath = path.join(basePath, "md", "PUBLIC");
+const publicUrl = "/md/PUBLIC";
 
 // Watch md/ folder and trigger scanFiles on changes if NEXT_AUTOSCAN is true
 const isAutoScan = process.env.NEXT_AUTOSCAN === "true";
@@ -254,6 +269,9 @@ if (isAutoScan) {
   }
   });
 }
+
+// Public path...
+app.use(publicUrl, express.static(publicPath, { fallthrough: false }));
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());

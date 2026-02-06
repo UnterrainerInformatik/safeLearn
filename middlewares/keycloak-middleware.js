@@ -234,6 +234,7 @@ export async function getUserAttributes(req, getAll = false) {
       console.error("Error fetching current attributes:", error);
       return {};
     });
+    console.log("current attributes fetched", currentAttributes);
   return currentAttributes;
 }
 

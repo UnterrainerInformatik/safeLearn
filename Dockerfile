@@ -19,6 +19,7 @@ COPY package.json /app
 COPY package-lock.json /app
 COPY *.js /app
 COPY *.css /app
+COPY guest-prefs.json /app
 
 # make app directory as the working directory.
 WORKDIR /app
