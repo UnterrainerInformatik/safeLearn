@@ -74,15 +74,19 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
       - name: Install OpenVPN
+        if: ${{ secrets.NO_VPN != 'true' }}
         run: |
           sudo apt update
           sudo apt install -y openvpn openvpn-systemd-resolved
       - name: Touch OVPN client-config file
+        if: ${{ secrets.NO_VPN != 'true' }}
         run: touch client.ovpn
       - name: Fill OVPN client-config file
+        if: ${{ secrets.NO_VPN != 'true' }}
         run: |
             echo "${{ secrets.VPN_OVPN_FILE }}" >> client.ovpn
       - name: Connect to VPN 🔓
+        if: ${{ secrets.NO_VPN != 'true' }}
         uses: "kota65535/github-openvpn-connect-action@v3"
         with:
           config_file: client.ovpn
