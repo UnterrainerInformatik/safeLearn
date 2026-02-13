@@ -29,11 +29,6 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-      - name: Checkout site
-        uses: actions/checkout@v4
-        with:
-          ref: gh-pages
-          path: site
       - name: Touch .env file
         run: touch site/.env
       - name: Fill .env file

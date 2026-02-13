@@ -2,8 +2,20 @@
 If you'd like to build and install your own instance of this project, you've come to the right page.
 
 [Back](README.md) to the main page.
+
+## Clone the Repository
+- Create a new Repository for your files (private).
+- The main branch has to be named `master` since that's what the build action reacts on
+- Add the appropriate GitHub Actions secrets like described below.
+- Clone it locally
+- Add a second remote: https://github.com/UnterrainerInformatik/safeLearn.git
+- Pull from that
+- Checkout back to your local master-branch
+- To merge the 'unrelated' remote into your local master execute the following: `git merge --no-ff public/master --allow-unrelated-histories`. In this case the SafeLearn-remote is called `public`.
+- Resolve merge conflicts and push.
+- Tag your own remote master branch with `1.0.0` and start the build-script by committing something.
 ## How To Build / Update
-The repository derives from https://github.com/htl-leonding-college/asciidoctor-docker-template and adds functionality to publish the output to a web-server of your liking using DockerHub.
+The repository adds functionality to publish the output to a web-server of your liking using DockerHub.
 It hides (server-side) all pages behind a OIDC token redirecting to an authentication server of your liking (in the default-case it's client on a Keycloak instance linked to our school's AD service, so we never have to maintain the users because the school does this for us).
 
 You will need a web-server of your own and some way of hosting a private docker-image, since your material won't be protected from students in a public one.
