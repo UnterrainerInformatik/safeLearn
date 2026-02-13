@@ -121,6 +121,11 @@ jobs:
             echo INTERNAL_PORT=${{ secrets.PORT }} >> ./deploy/.env
             echo DOCKER_HUB_USER=${{ secrets.DOCKER_HUB_USER }} >> ./deploy/.env
             echo DOCKER_IMAGE_NAME=${{ secrets.DOCKER_IMAGE_NAME }} >> ./deploy/.env
+      - name: Normalize line endings for deploy scripts
+        run: |
+            sudo apt-get update -y
+            sudo apt-get install -y dos2unix
+            find ./deploy -type f -name "*.sh" -exec dos2unix {} \;
       - name: Deploy using SSH 🚛
         uses: UnterrainerInformatik/ssh-deploy-action@v1
         with:
