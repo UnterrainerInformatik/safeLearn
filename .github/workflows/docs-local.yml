@@ -29,6 +29,8 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+      - name: create site directory
+        run: mkdir -p site
       - name: Touch .env file
         run: touch site/.env
       - name: Fill .env file

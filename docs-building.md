@@ -6,6 +6,7 @@ If you'd like to build and install your own instance of this project, you've com
 ## Clone the Repository
 - Create a new Repository for your files (private).
 - The main branch has to be named `master` since that's what the build action reacts on
+- Adjust Actions permissions: `Settings > Actions > General` > `Workflow permissions: Read and write permissions`
 - Add the appropriate GitHub Actions secrets like described below.
 - Clone it locally
 - Add a second remote: https://github.com/UnterrainerInformatik/safeLearn.git
