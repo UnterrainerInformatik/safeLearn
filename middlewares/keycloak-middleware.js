@@ -1,3 +1,4 @@
+import path from "node:path";
 import fs from "fs";
 import session from "express-session";
 import passport from "passport";
@@ -6,6 +7,7 @@ import { Issuer, Strategy } from "openid-client";
 export let client;
 export let issuerUrl;
 export let keycloakIssuer;
+export let default_prefs;
 
 function base64urlToUtf8(str) {
   // base64url -> base64
@@ -27,6 +29,23 @@ export function jwtDecode(token) {
     return { header, payload };
   } catch {
     return null;
+  }
+}
+
+export function initKeycloakMiddleware(baseDir) {
+  default_prefs = loadDefaultPrefs(baseDir);
+}
+
+function loadDefaultPrefs(baseDir) {
+  try {
+    const p = path.join(baseDir, "guest-prefs.json");
+    const raw = fs.readFileSync(p, "utf8");
+    const json = JSON.parse(raw);
+    json.ve = 0; // Disable viewing exam questions for guests by default.
+    return json;
+  } catch (e) {
+    console.warn("Could not load default prefs file.", e.message);
+    return {dm: 0, ve: 0, vt: 0, va: 0};
   }
 }
 
@@ -199,8 +218,29 @@ export function getLdapGroups(req) {
   return r;
 }
 
+function safeParseJson(str) {
+  try { return JSON.parse(str); } catch { return null; }
+}
+
+export async function getPreferences(req) {
+  if (!req?.user) return null;
+
+  // Token config
+  const tokenCfg = req.user?.accessTokenDecoded?.config;
+  const fromToken = tokenCfg ? safeParseJson(tokenCfg) : null;
+  if (fromToken && typeof fromToken === "object") return fromToken;
+
+  // User attributes config
+  const attrs = await getUserAttributes(req);
+  const cfg = attrs?.attributes?.config;
+  const fromAttrs = cfg ? safeParseJson(cfg) : null;
+  if (fromAttrs && typeof fromAttrs === "object") return fromAttrs;
+
+  return default_prefs || {};
+}
+
 export async function getUserAttributes(req, getAll = false) {
-  if (!req || !req.user || !req.user.accessToken ||!req.user.keycloakConfig) {
+  if (!req?.user?.accessToken || !req?.user?.keycloakConfig) {
     return null;
   }
   const keycloakConfig = req.user.keycloakConfig;
@@ -234,7 +274,7 @@ export async function getUserAttributes(req, getAll = false) {
       console.error("Error fetching current attributes:", error);
       return {};
     });
-    console.log("current attributes fetched", currentAttributes);
+    // console.log("current attributes fetched", currentAttributes);
   return currentAttributes;
 }
 

@@ -1,5 +1,5 @@
 import fileNameExtractor from "./middlewares/extract-filename-middleware.js";
-import { initKeycloak, checkAuthenticated, refreshAccessToken, getUserAttributes, setUserAttribute } from "./middlewares/keycloak-middleware.js";
+import { initKeycloakMiddleware, initKeycloak, checkAuthenticated, refreshAccessToken, getUserAttributes, setUserAttribute, getPreferences } from "./middlewares/keycloak-middleware.js";
 
 import express from "express";
 
@@ -89,6 +89,8 @@ import fs from "fs";
 const __dirname = import.meta.dirname;
 
 config();
+initKeycloakMiddleware(__dirname);
+const prefs = await getPreferences(req);
 
 const window = new JSDOM("").window;
 const DOMPurify = createDOMPurify(window);
@@ -100,18 +102,6 @@ import { scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInRevea
 
 import chokidar from "chokidar";
 import { hasSomeRoles } from "./utils.js";
-
-function loadDefaultPrefs() {
-  try {
-    const p = path.join(__dirname, "guest-prefs.json");
-    const raw = fs.readFileSync(p, "utf8");
-    return JSON.parse(raw);
-  } catch (e) {
-    console.warn("Could not load default prefs file.", e.message);
-    return {};
-  }
-}
-const DEFAULT_PREFS = loadDefaultPrefs();
 
 async function sanitizeAndParseMarkdown(data, req) {
   try {
@@ -134,12 +124,8 @@ async function sanitizeAndParseMarkdown(data, req) {
     }
     d = await preParse(d, req);
     
-    let dm = 0;
-    if (req.user.accessTokenDecoded.config) {
-      const a = JSON.parse(req.user.accessTokenDecoded.config);
-      dm = a.dm;
-    }
-    
+    let dm = 0;    
+    dm = prefs.dm;
     const marked = dm == 1 ? markedDark : markedLight;
     let html = await marked.parse(d);
     html = manipulateHtml(html, req);
@@ -271,6 +257,7 @@ if (isAutoScan) {
 }
 
 // Public path...
+console.log(`Serving public files from ${publicPath} at URL ${publicUrl}`);
 app.use(publicUrl, express.static(publicPath, { fallthrough: false }));
 
 app.use(express.urlencoded({ extended: true }));
@@ -292,11 +279,8 @@ initKeycloak(app).then(() => {
     if (req.url === "/" || req.url === "") {
       let startPage = getStartPage();
       getUserAttributes(req).then((attributes) => {
-        if (attributes && attributes.config) {
-          const a = JSON.parse(attributes.config);
-          if (a.sl == 1 && attributes.lastVisitedUrl) {
-            startPage = attributes.lastVisitedUrl;
-          }
+        if (prefs.sl == 1 && attributes.lastVisitedUrl) {
+          startPage = attributes.lastVisitedUrl;
         }
         res.redirect(startPage);
       });

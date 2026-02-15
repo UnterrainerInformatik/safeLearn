@@ -1,5 +1,5 @@
 import fs from "fs";
-import { getUserAttributes } from "./middlewares/keycloak-middleware.js";
+import { getUserAttributes, getPreferences } from "./middlewares/keycloak-middleware.js";
 
 /**
  * hasAllRoles(req, ["teacher", "student", "admin", "gluppy"])
@@ -114,15 +114,6 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
     }
 
     let clientAccess = null;
-    const attributes = await getUserAttributes(req);
-    const ccr = await getClientRoles(req, normalizedClientRoles);
-    // console.log("Client roles", ccr);
-    // console.log("Request user rolesCalculated", req.user.rolesCalculated);
-    // console.log("attributes", attributes);
-    let a = {ve: 0, vt: 0, va: 0};
-    if (attributes?.attributes?.config) {
-      a = JSON.parse(attributes.attributes.config);
-    }
     let r = JSON.parse(req.user.rolesCalculated);
     // console.log("Roles Calculated", r);
     if (r === undefined || r === null) {
@@ -148,7 +139,8 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
     if (isTeacher) {
       r.teachers = true;
     }
-    if ((isAdmin || isTeacher) && allowOverride && a.vt == 0) {
+    const prefs = await getPreferences(req);
+    if ((isAdmin || isTeacher) && allowOverride && prefs.vt == 0) {
       // Downgrade teacher and admin to student.
       isAdmin = false;
       isTeacher = false;
@@ -171,13 +163,13 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
         switch (viewRole) {
           case "exam":
             // For security reasons hardcoded to only allow teachers and admins to view exam-questions.
-            clientAccess = a.ve == 1 && (isAdmin || isTeacher);
+            clientAccess = prefs.ve == 1 && (isAdmin || isTeacher);
             break;
           case "practice":
-            clientAccess = a.ve == 0;
+            clientAccess = prefs.ve == 0;
             break;
           case "answer":
-            clientAccess = a.va == 1;
+            clientAccess = prefs.va == 1;
             break;
         }
       }
@@ -191,12 +183,4 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
     console.error(`Error checking client roles: ${error}`);
     return null;
   }
-}
-
-export function uiConfig(req) {
-  let uiConfig = {};
-  if (req.user.accessTokenDecoded.config) {
-    uiConfig = JSON.parse(req.user.accessTokenDecoded.config);
-  }
-  return uiConfig;
 }
