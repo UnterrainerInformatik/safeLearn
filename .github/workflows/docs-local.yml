@@ -69,10 +69,11 @@ jobs:
   deploy:
     name: Deployment 💻
     runs-on: ubuntu-latest
-    if: ${{ secrets.NO_DEPLOY != 'true' }}
     needs: [docker-build]
     env:
+      NO_DEPLOY: ${{ secrets.NO_DEPLOY }}
       NO_VPN: ${{ secrets.NO_VPN }}
+    if: ${{ env.NO_DEPLOY != 'true' }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
