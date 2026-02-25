@@ -69,6 +69,7 @@ jobs:
   deploy:
     name: Deployment 💻
     runs-on: ubuntu-latest
+    if: ${{ secrets.NO_DEPLOY != 'true' }}
     needs: [docker-build]
     env:
       NO_VPN: ${{ secrets.NO_VPN }}
