@@ -89,8 +89,8 @@ export async function initKeycloak(app) {
     if (req.user) {
       const now = Math.floor(Date.now() / 1000);
       const diff = req.user.accessTokenDecoded.exp - now;
-      if (diff <= 0) {
-        refreshAccessToken(req);
+      if (diff <= 60) {
+        await refreshAccessToken(req);
       } else {
         // console.log("Token still valid for ", diff, " seconds");
       }
@@ -170,7 +170,24 @@ export async function refreshAccessToken(req) {
     req.user = { ...req.user, ...userinfo };
     // console.log("Token refreshed", req.user);
   } catch (err) {
-    console.error("Error refreshing token: ", err);
+    // invalid_grant / Token is not active -> RT expired/rotated/revoked
+    if (err?.error === "invalid_grant") {
+      // kill local auth and require full re-login
+      req.session.needsReauth = true;
+
+      // optional: clear stored tokens
+      if (req.user) {
+        req.user.accessToken = null;
+        req.user.accessTokenDecoded = null;
+        req.user.refreshToken = null;
+      }
+      return null;
+    }
+
+    console.error("Error refreshing token:", err);
+    // for other errors you might also reauth
+    req.session.needsReauth = true;
+    return null;
   }
 }
 
