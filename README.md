@@ -1,4 +1,5 @@
 # SafeLearn Repository
+![](logo-128.png)
 As a teacher you probably have to cover a vast field of expertise and to keep up with changes in this very field, constantly updating your teaching materials. Most of the time your materials are scattered over a number of formats and platforms, which doesn't exactly make things easier.
 
 This project is the attempt to unify all teaching materials using Markdown and Obsidian as an editor while using this site as a reader for the students.
