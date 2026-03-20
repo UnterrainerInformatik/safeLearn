@@ -93,14 +93,15 @@ pre.mermaid svg {
 }
 
 .reveal .obsidian-callout .obsidian-callout-content {
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
+  display: block;
   margin: 0 !important;
   padding: 0 !important;
   min-height: 0;
-  align-self: flex-start;
+  align-self: auto;
+  width: 100%;
+  min-width: 0;
   line-height: 1.2;
+  white-space: normal;
 }
 
 .reveal .obsidian-callout .obsidian-callout-content > :first-child {
@@ -121,4 +122,9 @@ pre.mermaid svg {
   margin-top: 0 !important;
   margin-bottom: 0.12em !important;
   padding-top: 0 !important;
+  white-space: normal;
+}
+
+.reveal .obsidian-callout .obsidian-callout-content code {
+  white-space: normal;
 }

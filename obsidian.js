@@ -1224,7 +1224,12 @@ function replacePreMarkCallouts(html) {
       ls[ls.length - 1] = ls[ls.length - 1].slice(0, -4);
     }
     const calloutRegex = /\[!(.*?)\](.*)/;
-    const [, type, caption] = n.match(calloutRegex) || [];
+    const calloutMatch = n.match(calloutRegex);
+    if (!calloutMatch || !calloutMatch[1]) {
+      return match;
+    }
+    const type = calloutMatch[1].trim();
+    const caption = (calloutMatch[2] || "").trim();
     let content = ls.slice(1).join("\n");
     // The split keeps <br> tokens as elements, which can leave a leading
     // visual line break in callout content. Remove those artifacts.
