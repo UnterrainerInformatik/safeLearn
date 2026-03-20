@@ -1225,7 +1225,10 @@ function replacePreMarkCallouts(html) {
     }
     const calloutRegex = /\[!(.*?)\](.*)/;
     const [, type, caption] = n.match(calloutRegex) || [];
-    const content = ls.slice(1).join("\n");
+    let content = ls.slice(1).join("\n");
+    // The split keeps <br> tokens as elements, which can leave a leading
+    // visual line break in callout content. Remove those artifacts.
+    content = content.replace(/^(?:\s|<br\s*\/?>|<p>\s*<\/p>)+/gi, "");
     let callout = callouts[type.toLowerCase()];
     if (!callout) return match;
     let t = type;
@@ -1921,53 +1924,9 @@ export async function wrapInReveal(reveal, req) {
 
     <style>
       ${getFontImports()}
-      #revealContent img {
-        object-fit: contain;
-        max-width: 50%;
-        max-height: 50%;
-        background-color: #c3c3c3;
-      }
-      pre.shiki {
-        max-width: 90%;
-      }
-      pre.shiki code {
-        max-width: 100%;
-        max-height: 60vh !important;
-      }
-
-      .reveal {
-        font-family: "Lato", serif;
-        font-size: 32px;
-        font-weight: 300;
-      }
-      .side-by-side {
-        display: flex;
-        flex-wrap: nowrap;
-        justify-content: stretch;
-        align-items: flex-start;
-        gap: 2rem;
-        width: 100%;
-      }
-
-      .side-by-side-col {
-        flex: 1 1 0;
-        min-width: 0;
-      }
-
-      pre.mermaid {
-        width: 90%;
-        margin: 0 auto;
-        background-color: #c3c3c3;
-        padding: 1em;
-        border-radius: 6px;
-        text-align: center;
-      }
-      pre.mermaid svg {
-        vertical-align: top;
-      }
-
     </style>
     <link rel="stylesheet" href="/obsidian-page.css">
+    <link rel="stylesheet" href="/css/reveal.css">
     <link rel="shortcut icon" href="/assets/favicon.ico" type="image/x-icon" />
   
     <!-- Theme used for syntax highlighting of code -->
