@@ -3,7 +3,7 @@ Here you find information about the keycloak-setup when you're trying to host it
 [Back](README.md) to the main page.
 ## Keycloak Setup
 In order for this setup to work correctly, you'll have to have a Keycloak-client (private with secret) and standard-authorization-flow enabled (should be enabled anyway).
-```bash
+```yml
 client-authentication: on
 Authorization: off
 Authentication flow: ['Standard flow', 'Direct access grants']

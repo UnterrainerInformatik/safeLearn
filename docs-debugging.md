@@ -24,7 +24,7 @@ The following files are changed or omitted in the build-process:
 | all other files...                | Will be ignored by the build-pipeline.                                                                                                                                                                                                                             |
 ### HttpYac (REST-Tests)
 In order to get those working, you'll have to create a file `httpyac.config.js` with the following contents:
-```bash
+```json
 // Configuration file for HttpYac.
 // A plugin for VSCode.
 module.exports = {
