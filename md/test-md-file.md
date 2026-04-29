@@ -46,6 +46,10 @@ Günter -> Gerald
 
 ## Test Mermaid
 ```mermaid
+---
+config:
+  layout: elk
+---
 flowchart TD
 	A[Christmas] -->|Get money| B(Go shopping)
 	B --> C{Let me think}

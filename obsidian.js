@@ -1685,7 +1685,9 @@ async function getSideBar(startPage, req) {
 function getMermaidScriptEntry() {
   return `<script type="module">
   import mermaid from "/node_modules/mermaid/dist/mermaid.esm.min.mjs";
+  import elkLayouts from "/node_modules/@mermaid-js/layout-elk/dist/mermaid-layout-elk.esm.min.mjs";
 
+  mermaid.registerLayoutLoaders(elkLayouts);
   mermaid.initialize({
     startOnLoad: false,
     logLevel: 'debug'
