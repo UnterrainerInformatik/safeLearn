@@ -42,3 +42,7 @@ docs/slides/revealjs
 .idea/
 *.jar
 *.zip
+
+# Everything the verification harness writes while running:
+# browser profiles and failure screenshots.
+test/.runtime/

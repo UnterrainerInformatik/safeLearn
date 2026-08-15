@@ -5,7 +5,9 @@
   "private": true,
   "scripts": {
     "start": "nodemon ./app.js",
-    "prod": "node -r dotenv/config ./app.js"
+    "prod": "node -r dotenv/config ./app.js",
+    "test": "node --test --test-concurrency=1 \"test/*.test.js\"",
+    "test:headed": "node --test --test-concurrency=1 --env-file=test/headed.env \"test/*.test.js\""
   },
   "dependencies": {
     "@mermaid-js/layout-elk": "^0.2.1",
@@ -30,5 +32,8 @@
     "safe-learn": "file:",
     "shiki": "^1.1.7",
     "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "puppeteer": "^25.7.0"
   }
 }

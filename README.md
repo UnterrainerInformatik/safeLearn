@@ -99,5 +99,7 @@ If you're interested about the software used behind the scenes or some of the UR
 Here you can find information about [building](docs-building.md) this project.
 ## Development: Debugging
 Here you can find information about [debugging](docs-debugging.md) this project when you've decided to help develop it.
+## Development: Testing
+`npm test` starts the server, logs into Keycloak in a real browser and checks that it gets in. Here you can find information about [testing](docs-testing.md) this project.
 ## Self-Hosting: Keycloak
 If you like to host your own server, you'll need a Keycloak-Server to host your users' credentials that is probably connected to your schools' LDAP in some way. [Here](docs-keycloak.md) you can find information about that.

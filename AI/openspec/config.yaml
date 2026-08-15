@@ -1,0 +1,48 @@
+schema: spec-driven
+
+# Project context (optional)
+# This is shown to AI when creating artifacts.
+# Add your tech stack, conventions, style guides, domain knowledge, etc.
+# Example:
+#   context: |
+#     Tech stack: TypeScript, React, Node.js
+#     We use conventional commits
+#     Domain: e-commerce platform
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+operations:
+  archive:
+    guidance:
+      - >-
+        Retire the source proposal file. Changes in this project often originate
+        from a hand-written request in AI/proposals/, recorded as a line
+        "Source proposal: AI/proposals/<file>.md" near the top of the change's
+        proposal.md - the path may be wrapped in backticks, strip them.
+        After the change is archived successfully, read that line
+        and move the referenced file to the archived change directory as
+        source-proposal.md - for example
+        "git mv AI/proposals/install-puppeteer.md
+        AI/openspec/changes/archive/<archived-change-dir>/source-proposal.md".
+        Move it, never delete it: AI/ is not tracked in git yet, so a delete is
+        unrecoverable, and the file is the user's original wording. Moving it
+        out of AI/proposals/ is what stops the session-start hook from offering
+        the same request again.
+      - >-
+        If the change's proposal.md has no "Source proposal:" line, or the
+        referenced file no longer exists, archive normally and change nothing -
+        this is not an error.
+      - >-
+        State the outcome in the archive summary: which file was moved and
+        where it went, or that no source proposal file had to be retired.
