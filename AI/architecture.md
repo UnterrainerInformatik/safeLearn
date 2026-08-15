@@ -71,6 +71,7 @@ PlantUML is an external HTTP service (`NEXT_PUBLIC_PLANTUML_URL`, default `https
 - **Docker** — `Dockerfile` (single stage on `node:25.6.0-alpine`, `npm install --omit=dev`, exposes 8080), `deploy/docker-compose.yml`, and two local WYSIWYG compose variants.
 - **GitHub Actions** — `.github/workflows/docs-local.yml`: version bump, multi-arch Docker build and push, optional OpenVPN hop, SSH deploy.
 - **httpYac** — `http/*.http` request collections with `httpyac.config.cjs` (gitignored) and `httpyac.config-template.cjs` as the template.
+- **Puppeteer** — the project's only `devDependency`. `test/harness.js` starts the application, drives the Keycloak OIDC flow per role and hands back an authenticated page; `test/*.test.js` runs on Node's built-in `node:test` runner via `npm test`. See `docs-testing.md`.
 - **Obsidian** — the authoring tool; `.obsidian/` holds the vault configuration.
 
 ## 3. Features & Functionality
@@ -340,7 +341,7 @@ Recorded as found, without judgment on intent and without changes to the code.
 - **`getPermissionsFor` is called for every Markdown file on every scan**, opening a read stream per file. With `NEXT_AUTOSCAN` enabled, one file change triggers a complete rescan of the tree.
 - **The whole-file permission check is duplicated**: `app.js` re-parses the first line at render time although `scanFiles` already stored `permissions` in `mdFilesDirStructure`.
 - **Mixed comment languages.** A few comments in `obsidian.js` (`preprocessSideBySide`, `postprocessFragments`) and `app.js` are German, while the rest of the codebase is English.
-- **No tests and no type checking.** There is no test script, no test directory and no JSDoc-driven type checking; the source is the only specification of behavior.
+- **Verification is browser-level only, and there is no type checking.** `npm test` runs the Puppeteer harness in `test/`, which starts the server, completes the Keycloak login and asserts on a rendered page. Nothing covers a function in isolation, so a unit of behavior is either exercised through the whole stack — including a live external identity provider — or not at all. There is no JSDoc-driven type checking.
 
 ## 10. Source Documents
 
@@ -353,4 +354,5 @@ Recorded as found, without judgment on intent and without changes to the code.
 | [docs-wysiwyg.md](../docs-wysiwyg.md) | Local WYSIWYG container setup, `.env` and `keycloak.json` fields, the Windows/WSL filesystem-event problem |
 | [docs-building.md](../docs-building.md) | Forking, the full GitHub Actions secret list, build and deployment |
 | [docs-debugging.md](../docs-debugging.md) | Running locally, which files the pipeline replaces, httpYac setup |
+| [docs-testing.md](../docs-testing.md) | The browser verification harness — what `npm test` does, the headed switch, the demo accounts, the environment variables, and the shared-account constraint on checks |
 | [docs-keycloak.md](../docs-keycloak.md) | Keycloak client and realm setup, the `config` and `lastVisitedUrl` user attributes, the account API endpoints |

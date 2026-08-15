@@ -12,7 +12,7 @@ Damit Du Änderungen verifizieren kannst und siehst was Du da eigentlich machst,
   "resource": "safeLearn",
   "verify-token-audience": true,
   "credentials": {
-    "secret": "B83cBfwyOZUQnE3g6L6MO3uzqeEPHDPD"
+    "secret": "<client-secret — see the local keycloak.json, which is gitignored>"
   },
   "use-resource-role-mappings": true,
   "confidential-port": 0

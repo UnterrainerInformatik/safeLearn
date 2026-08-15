@@ -13,6 +13,8 @@ Just do the following:
 * Just press `F5` to start debugging, while the webserver is running in the background
 You can use the built-in debugger now.
 
+To check a change in a real browser instead of by hand, run `npm test`. It starts the server, completes the Keycloak login and verifies that it arrives on an authenticated page — see [testing](docs-testing.md).
+
 The following files are changed or omitted in the build-process:
 
 | FILE                              | DESCRIPTION                                                                                                                                                                                                                                                        |
