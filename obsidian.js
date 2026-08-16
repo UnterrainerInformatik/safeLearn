@@ -1932,7 +1932,6 @@ export async function wrapInReveal(reveal, req) {
     <style>
       ${getFontImports()}
     </style>
-    <link rel="stylesheet" href="/obsidian-page.css">
     <link rel="stylesheet" href="/css/reveal.css">
     <link rel="shortcut icon" href="/assets/favicon.ico" type="image/x-icon" />
   

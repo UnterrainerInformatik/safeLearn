@@ -1,0 +1,106 @@
+{
+  "description": "Which check guards which file. The single source for the coverage record: docs-testing.md points at this file instead of restating it, test/coverage.test.js keeps it honest, and AI/claude/hooks/name-covering-checks.mjs reads it to name the checks when a guarded file is edited. Paths are relative to the repository root.",
+  "checks": {
+    "test/smoke.test.js": {
+      "what": "The harness itself: both roles reach authenticated content, two sessions stay independent in either order, and the two sessions really are different users.",
+      "guards": [
+        "test/harness.js",
+        "app.js",
+        "middlewares/keycloak-middleware.js",
+        "keycloak.json"
+      ],
+      "corpus": [
+        "md/test-perms.md",
+        "md/test-md-file.md"
+      ]
+    },
+    "test/content.test.js": {
+      "what": "Wiring for the content suite: imports every check module so the whole suite runs in one process, and asserts that a run logs in once per role.",
+      "guards": [
+        "test/harness.js",
+        "test/checks/permissions.js",
+        "test/checks/views.js",
+        "test/checks/rendering.js",
+        "test/checks/navigation.js",
+        "test/checks/presentation.js"
+      ],
+      "corpus": []
+    },
+    "test/checks/permissions.js": {
+      "what": "Block-level and whole-file directives in both directions, their effect on the navigation tree, time-bounded windows, and the teacher-to-student downgrade.",
+      "guards": [
+        "utils.js",
+        "obsidian.js",
+        "app.js",
+        "middlewares/keycloak-middleware.js"
+      ],
+      "corpus": [
+        "md/test-perms.md",
+        "md/test-fileperms-teachers.md",
+        "md/test-fileperms-4bhif-5bhif-2ahif.md",
+        "md/test-md-file.md"
+      ]
+    },
+    "test/checks/views.js": {
+      "what": "The #exam, #practice and #answer pseudo-roles, driven through the ve and va preferences.",
+      "guards": [
+        "utils.js",
+        "obsidian.js",
+        "app.js"
+      ],
+      "corpus": [
+        "md/test-exam-practice-question.md"
+      ]
+    },
+    "test/checks/rendering.js": {
+      "what": "Callouts and their collapsible forms, highlighted code, fragment indices, side-by-side columns, the image forms, and the emitted PlantUML and Mermaid markup.",
+      "guards": [
+        "obsidian.js",
+        "app.js",
+        "obsidian-page.js",
+        "css/callouts.css",
+        "css/main.css"
+      ],
+      "corpus": [
+        "md/test-md-file.md",
+        "md/assets/test-local-image.jpg",
+        "md/assets/Pasted image 20240315152828.png"
+      ]
+    },
+    "test/checks/navigation.js": {
+      "what": "Wiki-link resolution including the duplicated basename and the name with spaces, the folder-name edge cases, the table of contents and the navigation tree.",
+      "guards": [
+        "obsidian.js",
+        "app.js"
+      ],
+      "corpus": [
+        "md/test-md-file.md",
+        "md/test-presentation.md",
+        "md/presentations/test-presentation.md",
+        "md/presentations/test - name - with - spaces.md",
+        "md/folder-tests/folder with spaces/Untitled.md",
+        "md/folder-tests/special chars $'&`´!/Untitled.md",
+        "md/folder-tests/a very long folder with spaces oh my god i cannot believe how long it is/Untitled.md"
+      ]
+    },
+    "test/checks/presentation.js": {
+      "what": "The deck built from the source's heading structure, fragments in a deck, the deck's own references including the known-dangling list, and the document view.",
+      "guards": [
+        "obsidian.js",
+        "app.js",
+        "css/reveal.css"
+      ],
+      "corpus": [
+        "md/presentations/test-presentation.md",
+        "md/test-md-file.md"
+      ]
+    },
+    "test/coverage.test.js": {
+      "what": "The coverage record itself: every path it names exists, every test file appears in it, and no entry names a file that is gone.",
+      "guards": [
+        "test/coverage-map.json"
+      ],
+      "corpus": []
+    }
+  }
+}

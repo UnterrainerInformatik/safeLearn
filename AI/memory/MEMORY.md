@@ -11,3 +11,4 @@ Echter Ablageort: `/mnt/data/source/HTL/safeLearn/AI/memory/`
 - [Architektur-Referenz](architecture-doc.md) — `AI/architecture.md` hält Tech-Stack, Features, Component-Map, Pipeline, Permissions und Observations
 - [Proposals-Intake](proposals-autostart.md) — `AI/proposals/` wird beim Session-Start gelistet, Change heißt wie das File, beim Archivieren wandert es ins Change-Archiv
 - [Browser-Verifikation](browser-verification.md) — `npm test` fährt eine Puppeteer-Harness, die sich live gegen die geteilten Demo-Accounts der Keycloak-Demo-Realm einloggt
+- [Content-Verifikations-Suite](content-verification-suite.md) — `npm test` prüft den `md/`-Korpus selbst; nach Änderungen an Renderer, Permissions oder Korpus laufen lassen

@@ -11,6 +11,18 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/AI/claude/hooks/name-covering-checks.mjs\"",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }

@@ -15,6 +15,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -70,12 +71,67 @@ const accounts = {
 /** The roles this harness knows how to log in as. */
 export const knownRoles = Object.keys(accounts);
 
+/**
+ * The hosts a page opened for a content check may talk to: the application
+ * itself and the identity provider. Everything else is refused, so a check
+ * cannot start depending on jsDelivr, Google Fonts or a diagram service by
+ * accident — those are asserted as the addresses the application emitted.
+ */
+const reachableHosts = new Set([
+  new URL(applicationUrl).host,
+  new URL(identityProviderUrl).host,
+]);
+
+/**
+ * The preference block every content check starts from. It is stated in full
+ * rather than inherited, because `POST /userattributes` serializes the whole
+ * request body into one Keycloak attribute: a partial write erases the keys it
+ * omits.
+ *
+ * `sl: 0` keeps `/` from resolving to the shared account's `lastVisitedUrl`.
+ * `vt: 1` is the teacher view; `vt == 0` is what downgrades a teacher to a
+ * student.
+ */
+export const preferenceBaseline = Object.freeze({
+  fs: 18,
+  t: 2,
+  nt: 1,
+  s: 1.6,
+  dm: 0,
+  sl: 0,
+  vt: 1,
+  va: 0,
+  ve: 0,
+});
+
+/** The views the same Markdown source is served in, and how each is addressed. */
+const views = {
+  page: { query: null, root: "#markdown-content" },
+  presentation: { query: "reveal=true", root: "#revealContent" },
+  document: { query: "document=true", root: "#markdown-content" },
+};
+
 // ################### Application lifecycle ###################
 
 /** `null`, or `{ adopted, child, output }` for the instance under test. */
 let server = null;
 let browser = null;
 const openContexts = new Set();
+
+/** Role -> promise of the session shared by every check that asks for it. */
+const sharedSessions = new Map();
+
+/** How many complete OIDC flows this process has walked. */
+let logins = 0;
+
+/**
+ * The number of real logins this run has performed. Every one of them is a
+ * round-trip against a public identity provider shared with other people, so
+ * the count is asserted rather than assumed.
+ */
+export function loginCount() {
+  return logins;
+}
 
 /**
  * Asks the configured port for a response. Any answer counts, including a
@@ -294,14 +350,52 @@ async function logIn(page, role, account) {
 // ################### Sessions ###################
 
 /**
- * Hands back a browser page that has completed the Keycloak login for `role` and
- * is displaying authenticated application content. Starts the application if
- * nothing is listening yet, and throws if the flow ends anywhere else.
+ * Refuses every request to a host that is neither the application nor the
+ * identity provider, and records which hosts were turned away so a check can
+ * report on them.
  *
- * Each role gets its own browser context, so sessions in one run share neither
- * cookies nor storage and the order they are opened in does not matter.
+ * The application's own hot-reload stream is refused too. It is an endless
+ * server-sent-events response, and a page that opens one holds a connection for
+ * as long as it lives. A check walks dozens of pages through one browser page,
+ * so those connections pile up against the browser's per-host connection limit
+ * until navigations start queueing behind them for tens of seconds. The script
+ * that opens the stream is still in the markup and can still be asserted; only
+ * the stream itself is refused.
  */
-export async function openSession(role) {
+async function refuseForeignHosts(page, refused) {
+  await page.setRequestInterception(true);
+  page.on("request", (request) => {
+    const resume = () => request.continue().catch(() => {});
+    const address = request.url();
+    if (/^(data|blob|about|chrome-extension):/i.test(address)) {
+      resume();
+      return;
+    }
+    let parsed;
+    try {
+      parsed = new URL(address);
+    } catch {
+      resume();
+      return;
+    }
+    if (parsed.host === new URL(applicationUrl).host && parsed.pathname === "/hot-reload") {
+      request.abort("blockedbyclient").catch(() => {});
+      return;
+    }
+    if (reachableHosts.has(parsed.host)) {
+      resume();
+      return;
+    }
+    refused.add(parsed.host);
+    request.abort("blockedbyclient").catch(() => {});
+  });
+}
+
+/**
+ * Opens one session: its own browser context, a completed OIDC flow, and a page
+ * on authenticated application content.
+ */
+async function newSession(role, { confineToKnownHosts = false } = {}) {
   const account = accounts[role];
   if (!account) {
     throw new Error(`Unknown role "${role}". Known roles: ${knownRoles.join(", ")}.`);
@@ -316,19 +410,69 @@ export async function openSession(role) {
   page.setDefaultNavigationTimeout(navigationTimeoutMs);
   page.setDefaultTimeout(navigationTimeoutMs);
 
+  const refusedHosts = new Set();
+  if (confineToKnownHosts) await refuseForeignHosts(page, refusedHosts);
+
   try {
+    logins++;
     const identity = await logIn(page, role, account);
     return {
       role,
       username: identity.username,
       page,
       context,
+      refusedHosts,
       close: () => closeSession(context),
     };
   } catch (error) {
     await closeSession(context);
     throw error;
   }
+}
+
+/**
+ * Hands back a browser page that has completed the Keycloak login for `role` and
+ * is displaying authenticated application content. Starts the application if
+ * nothing is listening yet, and throws if the flow ends anywhere else.
+ *
+ * Each role gets its own browser context, so sessions in one run share neither
+ * cookies nor storage and the order they are opened in does not matter. The
+ * session belongs to the caller, who closes it.
+ */
+export async function openSession(role) {
+  return newSession(role);
+}
+
+/**
+ * Hands back the one session this run uses for `role`, logging in on first use.
+ * Released by `shutdown()`, never by the caller: the point of sharing it is that
+ * the number of logins follows from the roles the checks need rather than from
+ * how many files the checks live in.
+ *
+ * Pages of a shared session only reach the application and the identity
+ * provider. Everything a corpus page addresses elsewhere is asserted as the
+ * address that was emitted.
+ */
+export async function sharedSession(role) {
+  if (!accounts[role]) {
+    throw new Error(`Unknown role "${role}". Known roles: ${knownRoles.join(", ")}.`);
+  }
+  let pending = sharedSessions.get(role);
+  if (!pending) {
+    pending = newSession(role, { confineToKnownHosts: true }).then((session) => ({
+      ...session,
+      close() {
+        throw new Error(
+          `The shared ${role} session is released by shutdown(), not by a check. ` +
+            `Use openSession("${role}") if a check needs a session of its own.`
+        );
+      },
+    }));
+    // A failed login must not be remembered as "the" session for this role.
+    pending.catch(() => sharedSessions.delete(role));
+    sharedSessions.set(role, pending);
+  }
+  return pending;
 }
 
 /**
@@ -351,9 +495,282 @@ async function closeSession(context) {
  * if this run started it. An adopted instance is left alone.
  */
 export async function shutdown() {
+  sharedSessions.clear();
   for (const context of [...openContexts]) await closeSession(context);
   await closeBrowser();
   await stopServer();
+}
+
+// ################### Roles ###################
+
+/**
+ * The Keycloak client whose roles count as this application's roles. Read from
+ * `keycloak.json` in the working directory, the same file `utils.js` reads. A
+ * deployment that keeps its configuration elsewhere falls back to the client the
+ * token was issued to.
+ */
+function configuredResource() {
+  try {
+    return JSON.parse(readFileSync("keycloak.json", "utf8")).resource ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The roles a session actually carries, so a check can derive what it is allowed
+ * to see instead of hardcoding the group memberships of an account nobody here
+ * owns.
+ *
+ * The set holds the client roles, the LDAP groups the application resolved
+ * (already renamed `teachers` -> `teacher` and `students` -> `student` by
+ * `getLdapGroups`), and the account's own display name — the three things a
+ * `@@@` directive can address. Values are trimmed and lowercased, the way
+ * `utils.js` normalizes the roles it compares them against.
+ *
+ * `GET /userattributes` answers with the whole user, tokens included. Only the
+ * role set crosses back out of the page.
+ */
+export async function roles(session) {
+  const answer = await session.page.evaluate(
+    async (url, configuredResourceName) => {
+      try {
+        const response = await fetch(url, { credentials: "include" });
+        if (!response.ok) return { error: `the application answered ${response.status}` };
+        const user = await response.json();
+        const token = user?.accessTokenDecoded ?? {};
+        const resource = configuredResourceName || token.azp || null;
+        const clientRoles = resource ? token.resource_access?.[resource]?.roles ?? [] : [];
+        let calculated = {};
+        try {
+          calculated = JSON.parse(user?.rolesCalculated ?? "{}") ?? {};
+        } catch {
+          calculated = {};
+        }
+        return {
+          clientRoles: Array.isArray(clientRoles) ? clientRoles : [],
+          groups: Object.keys(calculated).filter((group) => calculated[group]),
+          name: typeof user?.name === "string" ? user.name : null,
+        };
+      } catch (error) {
+        return { error: String(error) };
+      }
+    },
+    `${applicationUrl}/userattributes`,
+    configuredResource()
+  );
+
+  if (!answer || answer.error) {
+    throw new Error(
+      `Could not read the roles of the ${session.role} session: ${answer?.error ?? "no answer"}.`
+    );
+  }
+
+  const carried = new Set();
+  const add = (value) => {
+    if (typeof value !== "string") return;
+    const normalized = value.trim().toLowerCase();
+    if (normalized) carried.add(normalized);
+  };
+  answer.clientRoles.forEach(add);
+  answer.groups.forEach(add);
+  add(answer.name);
+  return carried;
+}
+
+// ################### Preferences ###################
+
+/** The preference block the application is rendering this session with. */
+async function effectivePreferences(session) {
+  return session.page.evaluate(async (url) => {
+    try {
+      const response = await fetch(url, { credentials: "include" });
+      if (!response.ok) return null;
+      const user = await response.json();
+      const raw = user?.accessTokenDecoded?.config;
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }, `${applicationUrl}/userattributes`);
+}
+
+/**
+ * Puts the session's preferences into a known state and proves they arrived.
+ *
+ * `values` is merged over `preferenceBaseline` and the complete block is
+ * written, because the application stores it as one attribute. Nothing is
+ * restored afterwards: the accounts are shared and two runs cannot take turns,
+ * so the contract is that every check writes what it depends on.
+ */
+export async function setPreferences(session, values = {}) {
+  const unknown = Object.keys(values).filter((key) => !(key in preferenceBaseline));
+  if (unknown.length > 0) {
+    throw new Error(
+      `Unknown preference${unknown.length > 1 ? "s" : ""} ${unknown.join(", ")}. ` +
+        `The application knows ${Object.keys(preferenceBaseline).join(", ")}.`
+    );
+  }
+  const wanted = { ...preferenceBaseline, ...values };
+
+  const written = await session.page.evaluate(
+    async (url, block) => {
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(block),
+        });
+        if (!response.ok) return { error: `the application answered ${response.status}` };
+        const result = await response.json().catch(() => null);
+        if (result && result.success === false) {
+          return { error: "the identity provider refused the write" };
+        }
+        return { ok: true };
+      } catch (error) {
+        return { error: String(error) };
+      }
+    },
+    `${applicationUrl}/userattributes`,
+    wanted
+  );
+  if (written?.error) {
+    throw new Error(
+      `Could not set the preferences of the ${session.role} session: ${written.error}.`
+    );
+  }
+
+  // Reload so the page in hand is the one the new block rendered, then confirm
+  // against the block the application is actually reading.
+  await session.page.reload({ waitUntil: "domcontentloaded" });
+
+  let effective = null;
+  let mismatch = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    effective = await effectivePreferences(session);
+    mismatch = Object.entries(wanted).find(
+      ([key, value]) => Number(effective?.[key]) !== Number(value)
+    );
+    if (!mismatch) return wanted;
+    await delay(250);
+  }
+
+  const [key, value] = mismatch;
+  const inEffect = effective && key in effective ? effective[key] : "nothing";
+  throw new Error(
+    `Preference "${key}" of the ${session.role} session was set to ${value}, ` +
+      `but the application renders with ${inEffect}. The page it would render is not the page this check means.`
+  );
+}
+
+// ################### Rendered pages ###################
+
+/** Percent-encodes each segment, the way the application encodes its own links. */
+function encodeSegments(rawPath) {
+  return rawPath.split("/").map(encodeURIComponent).join("/");
+}
+
+/**
+ * Navigates the session to `pagePath` in `view` and returns once the application
+ * has rendered it.
+ *
+ * Fails — rather than returning an empty result a check could mistake for an
+ * empty page — when the application redirects somewhere else instead, or when
+ * the view's content never appears.
+ */
+export async function render(session, pagePath, { view = "page" } = {}) {
+  const requested = views[view];
+  if (!requested) {
+    throw new Error(
+      `Unknown view "${view}". The application serves ${Object.keys(views).join(", ")}.`
+    );
+  }
+
+  const address =
+    `${applicationUrl}${encodeSegments(pagePath)}` +
+    (requested.query ? `?${requested.query}` : "");
+  await session.page.goto(address, { waitUntil: "domcontentloaded" });
+
+  const landedOn = session.page.url();
+  let landedPath;
+  try {
+    landedPath = decodeURIComponent(new URL(landedOn).pathname);
+  } catch {
+    landedPath = new URL(landedOn).pathname;
+  }
+  if (landedPath !== pagePath) {
+    throw new Error(
+      `${pagePath} as a ${view} did not render for the ${session.role} session: ` +
+        `the application sent it to ${landedOn} instead.`
+    );
+  }
+
+  try {
+    await session.page.waitForSelector(requested.root, { timeout: navigationTimeoutMs });
+  } catch {
+    throw new Error(
+      `${pagePath} as a ${view} never showed its content for the ${session.role} session: ` +
+        `${requested.root} did not appear. The page ended up at ${session.page.url()}.`
+    );
+  }
+
+  const text = await session.page.$eval(requested.root, (element) => element.textContent);
+  return { page: session.page, text, url: session.page.url(), view, path: pagePath };
+}
+
+/**
+ * Every reference the rendered document makes to this application, requested
+ * with the session's own cookies.
+ *
+ * Redirects are followed rather than refused, because that is how a reference
+ * that falls through `express.static` to the catch-all shows itself: it answers
+ * 200 with the start page instead of the file that was asked for.
+ */
+export async function sameOriginReferences(page) {
+  return page.evaluate((origin) => {
+    const collected = new Map();
+    for (const element of document.querySelectorAll("[href], [src]")) {
+      const raw = element.getAttribute("href") ?? element.getAttribute("src");
+      if (!raw || raw.startsWith("#") || /^(data|blob|javascript|mailto|tel):/i.test(raw)) {
+        continue;
+      }
+      let resolved;
+      try {
+        resolved = new URL(raw, document.baseURI);
+      } catch {
+        continue;
+      }
+      if (resolved.origin !== origin) continue;
+      resolved.hash = "";
+      const key = resolved.href;
+      if (collected.has(key)) continue;
+      collected.set(key, {
+        reference: raw,
+        address: key,
+        element: element.tagName.toLowerCase(),
+        rel: element.getAttribute("rel") ?? null,
+      });
+    }
+
+    return Promise.all(
+      [...collected.values()].map(async (entry) => {
+        try {
+          const response = await fetch(entry.address, { credentials: "include" });
+          return {
+            ...entry,
+            status: response.status,
+            contentType: response.headers.get("content-type"),
+            servedFrom: response.url,
+            redirected: response.redirected,
+          };
+        } catch (error) {
+          return { ...entry, status: null, contentType: null, servedFrom: null, redirected: false, error: String(error) };
+        }
+      })
+    );
+  }, new URL(applicationUrl).origin);
 }
 
 // ################### Teardown on interruption ###################
