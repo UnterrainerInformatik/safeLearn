@@ -391,6 +391,30 @@ initKeycloak(app).then(() => {
     checkAuthenticated,
     express.static(path.join(__dirname, "node_modules", "@mermaid-js", "layout-elk", "dist"))
   );
+  // The presentation view's rendering engine, served from the version
+  // package.json declares instead of from a content delivery network. Directory
+  // mounts rather than the four files wrapInReveal names, for the same reason
+  // the mermaid mounts are directories: a bundle addresses further files of its
+  // own once it runs. The derived theme in css/ imports
+  // dist/theme/fonts/league-gothic/league-gothic.css, and that file in turn
+  // addresses the three font files beside it — none of which is named anywhere
+  // in the markup. `plugin/notes` is the plugin's own directory: 5.2.1 carries
+  // the speaker view inside notes.js and fetches nothing beside it, but a
+  // version that goes back to opening speaker-view.html would find it served
+  // rather than redirected to the start page.
+  //
+  // Two mounts scoped to those subdirectories rather than one over
+  // /node_modules, so installing a further dependency does not publish it.
+  app.use(
+    "/node_modules/reveal.js/dist",
+    checkAuthenticated,
+    express.static(path.join(__dirname, "node_modules", "reveal.js", "dist"))
+  );
+  app.use(
+    "/node_modules/reveal.js/plugin/notes",
+    checkAuthenticated,
+    express.static(path.join(__dirname, "node_modules", "reveal.js", "plugin", "notes"))
+  );
 
   // Convert markdown to HTML using marked.
   app.get("/convert", checkAuthenticated, (req, res) => {

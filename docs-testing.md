@@ -128,6 +128,7 @@ Test files live in `test/` and are named `*.test.js`; `node --test` runs them on
 | `setPreferences(session, values)` | Writes the full preference block with `values` merged over the baseline, then confirms the application is rendering with it. Throws naming the preference, the value asked for and the value in effect. |
 | `render(session, path, { view })` | Navigates to `path` as `page`, `presentation` or `document` and returns `{ page, text, url }` once the content is there. Throws — naming the path, the view and where the request ended up — if the application redirected instead. |
 | `sameOriginReferences(page)` | Every `href`/`src` of the rendered document that points at this application, requested with the session's cookies, with the status, content type and where it was finally served from. |
+| `hostsContactedWhile(session, load)` | The hosts the browser actually requested something from while `load` ran, each with the addresses that caused it and its `kind` (`hostKinds.application`, `hostKinds.identityProvider`, `hostKinds.external`). Read off the requests, not off the markup, so a host an `@import` or a `url()` inside a stylesheet pulls in is seen — `sameOriginReferences` cannot see that one. A request is recorded when it is issued, so a refused host is reported too. |
 | `loginCount()` | How many complete OIDC flows this run has walked. |
 
 ### Two rules that are not optional

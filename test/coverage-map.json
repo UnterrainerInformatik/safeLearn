@@ -87,11 +87,13 @@
       ]
     },
     "test/checks/presentation.js": {
-      "what": "The deck built from the source's heading structure, fragments in a deck, the deck's own references including the known-dangling list, and the document view.",
+      "what": "The deck built from the source's heading structure, fragments in a deck, the deck's own references including the known-dangling list, that it contacts no host but the application and the identity provider, that a host a stylesheet asks for is recorded even when refused, and the document view.",
       "guards": [
         "obsidian.js",
         "app.js",
-        "css/reveal.css"
+        "css/reveal.css",
+        "css/reveal-theme-moon.css",
+        "test/harness.js"
       ],
       "corpus": [
         "md/presentations/test-presentation.md",
@@ -99,11 +101,14 @@
       ]
     },
     "test/checks/deployment-surface.js": {
-      "what": "What a running instance publishes over HTTP: that keycloak.json, the application sources and the dependency manifests are not served and a refusal looks like a path with no file behind it, that the assets a page addresses still are, and that every same-origin reference of a rendered page resolves in all three views.",
+      "what": "What a running instance publishes over HTTP: that keycloak.json, the application sources, the dependency manifests and what sits beside a mounted package directory are not served and a refusal looks like a path with no file behind it, that the assets a page addresses still are — including the ones only a stylesheet names — and that every same-origin reference of a rendered page resolves in all three views.",
       "guards": [
         "app.js",
         "middlewares/keycloak-middleware.js",
-        "keycloak.json"
+        "keycloak.json",
+        "assets/main-fonts/Lato.ttf",
+        "assets/main-fonts/Lato-300.ttf",
+        "assets/main-fonts/Lato-700.ttf"
       ],
       "corpus": [
         "md/test-md-file.md"

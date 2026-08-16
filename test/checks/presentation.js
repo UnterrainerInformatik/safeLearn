@@ -5,8 +5,10 @@
  * `md/test-md-file.md` as a document.
  *
  * The deck is asserted on the structure the server renders into `#revealContent`,
- * so nothing here needs Reveal itself — which the application still loads from a
- * content delivery network, and which this run refuses to contact.
+ * so nothing here needs Reveal to have run. Reveal itself is served by the
+ * application out of the version `package.json` declares, which is what the
+ * self-containment check below is about: a deck must reach no host but the
+ * deployment and the identity provider it authenticates against.
  *
  * This is a module, not a test file: `test/content.test.js` imports it.
  */
@@ -16,7 +18,14 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { before, describe, test } from "node:test";
 
-import { render, sameOriginReferences, setPreferences, sharedSession } from "../harness.js";
+import {
+  hostKinds,
+  hostsContactedWhile,
+  render,
+  sameOriginReferences,
+  setPreferences,
+  sharedSession,
+} from "../harness.js";
 
 const projectRoot = path.resolve(import.meta.dirname, "..", "..");
 
@@ -207,28 +216,61 @@ describe("presentation and document", () => {
     );
   });
 
-  test("references to other hosts are asserted as addresses, never fetched", async () => {
-    await render(session, deckPath, { view: "presentation" });
-    const foreign = await session.page.evaluate(
-      (origin) =>
-        [...document.querySelectorAll("[href], [src]")]
-          .map((element) => element.getAttribute("href") ?? element.getAttribute("src"))
-          .filter((reference) => reference && /^https?:\/\//i.test(reference))
-          .filter((reference) => new URL(reference).origin !== origin)
-          .map((reference) => new URL(reference).host),
-      new URL(session.page.url()).origin
+  test("the deck contacts no host but the application and its identity provider", async () => {
+    const contacted = await hostsContactedWhile(session, () =>
+      render(session, deckPath, { view: "presentation" })
     );
 
     assert.ok(
-      foreign.length > 0,
-      "the presentation wrapper still loads Reveal and its fonts from other hosts; if it no longer does, this check has outlived its subject"
+      contacted.some((entry) => entry.kind === hostKinds.application),
+      "a rendered deck should have contacted the application it was requested from; " +
+        "if it contacted nothing at all, this check is watching the wrong thing"
     );
-    for (const host of new Set(foreign)) {
-      assert.ok(
-        session.refusedHosts.has(host),
-        `${host} is addressed by the deck and was fetched instead of being left alone`
-      );
-    }
+
+    const external = contacted.filter((entry) => entry.kind === hostKinds.external);
+    assert.deepEqual(
+      external.map((entry) => `${entry.host} (requested as ${entry.addresses.join(", ")})`),
+      [],
+      "a deck must render out of the deployment alone: everything it needs — engine, styles, " +
+        "plugins, fonts — is served by the application. A host listed here means a lesson depends " +
+        "on that host being reachable, and that opening a deck tells it so."
+    );
+  });
+
+  // ---- 7.3a The recorder the check above reads ----
+
+  test("a host a stylesheet asks for is recorded, refused or not", async () => {
+    // The shape of the defect this check exists for: until Reveal was served by
+    // the deployment, the theme it loaded imported Lato from Google, and no
+    // element on the page named that host — a check reading `href`/`src` saw a
+    // clean page. The import is added here rather than waited for, because the
+    // application no longer emits one.
+    //
+    // The session refuses every host but the two known ones, so the request is
+    // aborted before it leaves this machine and Google is not contacted. That it
+    // is reported anyway is the second half of what is being proven.
+    const address = "https://fonts.googleapis.com/css?family=Lato:300,700";
+    await render(session, deckPath, { view: "presentation" });
+    const contacted = await hostsContactedWhile(session, () =>
+      session.page.evaluate((imported) => {
+        const style = document.createElement("style");
+        style.textContent = `@import url("${imported}");`;
+        document.head.append(style);
+      }, address)
+    );
+
+    const entry = contacted.find((host) => host.host === "fonts.googleapis.com");
+    assert.ok(
+      entry,
+      "a host asked for by an @import inside a stylesheet was not reported. The check above " +
+        "would then pass over exactly the reference it was written for."
+    );
+    assert.equal(entry.kind, hostKinds.external, "a font service is neither the application nor the identity provider");
+    assert.deepEqual(entry.addresses, [address], "the address that caused the request should be reported with the host");
+    assert.ok(
+      session.refusedHosts.has("fonts.googleapis.com"),
+      "the request should have been refused rather than answered — this run does not contact third parties"
+    );
   });
 
   // ---- 7.4 The rules the known-dangling list follows ----

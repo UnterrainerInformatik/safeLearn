@@ -36,8 +36,23 @@ const corpusPath = "/md/test-md-file.md";
  * Application files that sit in the directory `express.static` used to serve,
  * and that no rendered page references. `keycloak.json` has a check of its own
  * below — it is the reason this change exists.
+ *
+ * The last three are inside a package the deployment does serve from: the mounts
+ * for Reveal reach `node_modules/reveal.js/dist` and
+ * `node_modules/reveal.js/plugin/notes`, and nothing above or beside them. They
+ * are here so that widening either mount — to the package root, or to
+ * `/node_modules` — fails a run rather than passing one.
  */
-const notPublished = ["/app.js", "/utils.js", "/obsidian.js", "/package.json", "/package-lock.json"];
+const notPublished = [
+  "/app.js",
+  "/utils.js",
+  "/obsidian.js",
+  "/package.json",
+  "/package-lock.json",
+  "/node_modules/reveal.js/package.json",
+  "/node_modules/reveal.js/js/reveal.js",
+  "/node_modules/reveal.js/plugin/markdown/markdown.js",
+];
 
 /** What a rendered page asks for, and what each answer claims to be. */
 const published = [
@@ -58,6 +73,21 @@ const published = [
     reference: "/node_modules/@mermaid-js/layout-elk/dist/mermaid-layout-elk.esm.min.mjs",
     type: /javascript|ecmascript/i,
   },
+  // What the presentation view loads. `league-gothic.css` is addressed by
+  // nothing on the page: the derived theme in `css/` imports it, and the
+  // reference walk below reads the markup, so this is the only place that would
+  // notice the theme's fonts falling through.
+  { reference: "/node_modules/reveal.js/dist/reveal.js", type: /javascript|ecmascript/i },
+  { reference: "/node_modules/reveal.js/dist/reveal.css", type: /css/i },
+  { reference: "/node_modules/reveal.js/dist/reset.css", type: /css/i },
+  { reference: "/node_modules/reveal.js/dist/theme/fonts/league-gothic/league-gothic.css", type: /css/i },
+  { reference: "/node_modules/reveal.js/plugin/notes/notes.js", type: /javascript|ecmascript/i },
+  // The three weights of Lato the derived theme declares. Addressed from that
+  // stylesheet and from nowhere in any markup, so a page that lost them would
+  // render in a fallback font without anything else here noticing.
+  { reference: "/assets/main-fonts/Lato.ttf", type: /font|ttf|octet-stream/i },
+  { reference: "/assets/main-fonts/Lato-300.ttf", type: /font|ttf|octet-stream/i },
+  { reference: "/assets/main-fonts/Lato-700.ttf", type: /font|ttf|octet-stream/i },
 ];
 
 /** A path no deployment has a file for, used as the shape of "not there". */
@@ -192,9 +222,9 @@ describe("deployment surface", () => {
     assert.equal(refused.contentType, nothing.contentType, "and it should not be served as something else");
   });
 
-  // ---- The application's own sources and manifests ----
+  // ---- The application's own sources and manifests, and what sits beside a mount ----
 
-  test("no application source or dependency manifest is served", async () => {
+  test("no source, manifest or unmounted file of a served package is served", async () => {
     for (const reference of notPublished) {
       const contents = fileBehind(reference);
       const answer = await request(session, reference);

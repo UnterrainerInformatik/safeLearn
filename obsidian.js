@@ -423,6 +423,33 @@ function makeSafeForCSS(name) {
   });
 }
 
+/**
+ * The name a file in one of the font directories is offered under, or `null`
+ * when it is not one of the fonts the picker offers.
+ *
+ * The picker lists one entry per family and the preference stores the user's
+ * choice as an index into that list, so what lands here decides what an already
+ * stored preference points at. Two kinds of file are passed over:
+ *
+ * - anything that is not a `.ttf`: the licence text that ships beside a font is
+ *   not a font.
+ * - a weight variant, written as the family followed by `-` and its numeric
+ *   weight (`Lato-300.ttf`). Those are there for a stylesheet that asks for the
+ *   family and the weight — `css/reveal-theme-moon.css` does, over the same
+ *   files — and offering them would list one family three times and move every
+ *   preference stored behind it.
+ *
+ * `OpenDyslexic3-Regular.ttf` is a family and not a variant: what marks a
+ * variant is the number.
+ */
+function pickerFontName(file) {
+  const extension = path.extname(file);
+  if (extension.toLowerCase() !== ".ttf") return null;
+  const name = path.basename(file, extension);
+  if (/-\d{3}$/.test(name)) return null;
+  return name;
+}
+
 export async function scanFonts(dir, root = dir) {
   const files = fs.readdirSync(dir);
 
@@ -451,13 +478,12 @@ export async function scanFonts(dir, root = dir) {
           const fileName = path.basename(file);
           const relativePath = path.relative(root, filePath);
           const p = relativePath.replace(/\\/g, "/");
-          if (p.startsWith("main-fonts/")) {
-            const fontName = path.basename(file, ".ttf");
+          const fontName = pickerFontName(file);
+          if (fontName && p.startsWith("main-fonts/")) {
             mainFonts[fontName] = "assets/" + p;
             mainFontsArray.push(fontName);
           }
-          if (p.startsWith("nav-fonts/")) {
-            const fontName = path.basename(file, ".ttf");
+          if (fontName && p.startsWith("nav-fonts/")) {
             navFonts[fontName] = "assets/" + p;
             navFontsArray.push(fontName);
           }
@@ -664,13 +690,12 @@ function scanFilesInternal(dir, root = dir) {
           } else {
             filesMap[fileName] = [p];
           }
-          if (p.startsWith("assets/main-fonts/")) {
-            const fontName = path.basename(file, ".ttf");
+          const fontName = pickerFontName(file);
+          if (fontName && p.startsWith("assets/main-fonts/")) {
             mainFonts[fontName] = p;
             mainFontsArray.push(fontName);
           }
-          if (p.startsWith("assets/nav-fonts/")) {
-            const fontName = path.basename(file, ".ttf");
+          if (fontName && p.startsWith("assets/nav-fonts/")) {
             navFonts[fontName] = p;
             navFontsArray.push(fontName);
           }
@@ -1925,31 +1950,23 @@ export async function wrapInReveal(reveal, req) {
   
     <title>${req.file.name}</title>
   
-    <link href='https://fonts.googleapis.com/css?family=Lato:300,700' rel='stylesheet' type='text/css'>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@3.7.0/css/reveal.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@3.7.0/css/theme/moon.css">
+    <!-- Reveal, from the version package.json declares and app.js serves out of
+         node_modules. The theme is this project's derivation of the package's
+         moon.css: the package's own imports Lato from Google, which a deck must
+         not do. Printing needs no stylesheet of its own — reveal.css carries it. -->
+    <link rel="stylesheet" href="/node_modules/reveal.js/dist/reset.css">
+    <link rel="stylesheet" href="/node_modules/reveal.js/dist/reveal.css">
+    <link rel="stylesheet" href="/css/reveal-theme-moon.css">
 
     <style>
       ${getFontImports()}
     </style>
+    <!-- Last, and last on purpose: these are this deck's rules over the theme's. -->
     <link rel="stylesheet" href="/css/reveal.css">
     <link rel="shortcut icon" href="/assets/favicon.ico" type="image/x-icon" />
-  
-    <!-- Theme used for syntax highlighting of code -->
-    <!-- <link rel="stylesheet" href="lib/css/zenburn.css"> -->
-    <!-- <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.13.1/styles/tomorrow.min.css"> -->
 
     ${getMermaidScriptEntry()}
     ${getAutoReloadScript()}
-
-    <!-- Printing and PDF exports -->
-    <script>
-      var link = document.createElement('link');
-      link.rel = 'stylesheet';
-      link.type = 'text/css';
-      link.href = window.location.search.match(/print-pdf/gi) ? 'https://cdn.jsdelivr.net/npm/reveal.js@3.7.0/css/print/pdf.css' : 'https://cdn.jsdelivr.net/npm/reveal.js@3.7.0/css/print/paper.css';
-      document.getElementsByTagName('head')[0].appendChild(link);
-    </script>
   </head>
   
   <body>
@@ -1959,15 +1976,22 @@ export async function wrapInReveal(reveal, req) {
   const post = `
       </div>
     </div>
-    <!--<script src="lib/js/head.min.js"></script>-->
-    <script src="https://cdn.jsdelivr.net/npm/headjs@1.0.3/dist/1.0.0/head.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/reveal.js@3.7.0/js/reveal.min.js"></script>
-  
+    <!-- The engine and the one plugin this deck uses, both from the installed
+         package. A plugin is a script loaded here and named in \`plugins\` below;
+         there is no loader to bootstrap, which is what headjs used to do. -->
+    <script src="/node_modules/reveal.js/dist/reveal.js"></script>
+    <script src="/node_modules/reveal.js/plugin/notes/notes.js"></script>
+
     <script>
-      // More info about config & dependencies:
-      // - https://github.com/hakimel/reveal.js#configuration
-      // - https://github.com/hakimel/reveal.js#dependencies
+      // More info about config & plugins:
+      // - https://revealjs.com/config/
+      // - https://revealjs.com/plugins/
       Reveal.initialize({
+        // The speaker view, opened with "s": a second window showing the
+        // current slide and the <aside class="notes"> of that slide, which the
+        // audience's window does not display.
+        plugins: [ RevealNotes ],
+
         // Display controls in the bottom right corner
         controls: true,
   
@@ -2045,16 +2069,10 @@ export async function wrapInReveal(reveal, req) {
   
         // Stop auto-sliding after user input
         autoSlideStoppable: true,
-  
-        // Use this method for navigation when auto-sliding
-        autoSlideMethod: Reveal.navigateNext,
-  
+
         // Enable slide navigation via mouse wheel
         mouseWheel: true,
-  
-        // Hides the address bar on mobile devices
-        hideAddressBar: true,
-  
+
         // Opens links in an iframe preview overlay
         previewLinks: true,
   
@@ -2069,47 +2087,9 @@ export async function wrapInReveal(reveal, req) {
   
         // Number of slides away from the current that are visible
         viewDistance: 3,
-  
-        // Parallax background image
-        parallaxBackgroundImage: '', // e.g. "'https://s3.amazonaws.com/hakim-static/reveal-js/reveal-parallax-1.jpg'"
-  
-        // Parallax background size
-        parallaxBackgroundSize: '', // CSS syntax, e.g. "2100px 900px"
-  
-        // Number of pixels to move the parallax background per slide
-        // - Calculated automatically unless specified
-        // - Set to 0 to disable movement along an axis
-        parallaxBackgroundHorizontal: null,
-        parallaxBackgroundVertical: null,
-  
-  
+
         // The display mode that will be used to show slides
-        display: 'block',
-  
-        /*
-        multiplex: {
-          // Example values. To generate your own, see the socket.io server instructions.
-          secret: '13652805320794272084', // Obtained from the socket.io server. Gives this (the master) control of the presentation
-          id: '1ea875674b17ca76', // Obtained from socket.io server
-          url: 'https://reveal-js-multiplex-ccjbegmaii.now.sh' // Location of socket.io server
-        },
-        */
-  
-        dependencies: [
-          //{ src: 'https://cdn.jsdelivr.net/npm/reveal.js@3.7.0/plugin/markdown/marked.js' },
-          //{ src: 'https://cdn.jsdelivr.net/npm/reveal.js@3.7.0/plugin/markdown/markdown.js' },
-          { src: 'https://cdn.jsdelivr.net/npm/reveal.js@3.7.0/plugin/notes/notes.js', async: true },
-          //{ src: 'https://cdn.jsdelivr.net/npm/reveal.js@3.7.0/plugin/highlight/highlight.js', async: true, callback: function () { hljs.initHighlightingOnLoad(); } },
-          //{ src: '//cdn.socket.io/socket.io-1.3.5.js', async: true },
-          //{ src: 'plugin/multiplex/master.js', async: true },
-          // and if you want speaker notes
-          //{ src: 'https://cdn.jsdelivr.net/npm/reveal.js@3.7.0/plugin/notes-server/client.js', async: true }
-  
-        ],
-        markdown: {
-          //            renderer: myrenderer,
-          smartypants: true
-        }
+        display: 'block'
       });
       Reveal.configure({
         // PDF Configurations
