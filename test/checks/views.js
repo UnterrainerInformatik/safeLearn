@@ -39,6 +39,26 @@ describe("views", () => {
     return (await render(session, examPage)).text;
   }
 
+  /**
+   * Every read of the exam/practice page goes through here.
+   *
+   * The two directives are one rule and its complement, so a combination that
+   * shows neither variant has to fail as loudly as one that shows both. Asserting
+   * each variant on its own is what let the state that showed neither ship.
+   */
+  function assertExactlyOne(text, expected, situation) {
+    const seen = {
+      exam: text.includes(examVariant),
+      practice: text.includes(practiceVariant),
+    };
+    assert.ok(
+      seen.exam !== seen.practice,
+      `${situation} should see exactly one variant of ${examPage}, ` +
+        `but the page showed ${seen.exam ? "both" : "neither"}.`
+    );
+    assert.ok(seen[expected], `${situation} should see the ${expected} variant of ${examPage}`);
+  }
+
   // ---- 4.1 Exam and practice are mutually exclusive for a teacher ----
 
   test("a teacher with the exam view on sees the exam question and not the practice one", async () => {
@@ -47,22 +67,27 @@ describe("views", () => {
       "this check needs a session the application accepts as a teacher"
     );
     const text = await readWith("teacher", { ve: 1 });
-    assert.ok(text.includes(examVariant), `the teacher should see the exam variant of ${examPage}`);
-    assert.ok(
-      !text.includes(practiceVariant),
-      "the practice variant should be absent while the exam view is on"
-    );
+    assertExactlyOne(text, "exam", "a teacher with the exam view on");
   });
 
   test("a teacher with the exam view off sees the practice question and not the exam one", async () => {
     const text = await readWith("teacher", { ve: 0 });
-    assert.ok(
-      text.includes(practiceVariant),
-      `the teacher should see the practice variant of ${examPage}`
-    );
-    assert.ok(
-      !text.includes(examVariant),
-      "the exam variant should be absent while the exam view is off"
+    assertExactlyOne(text, "practice", "a teacher with the exam view off");
+  });
+
+  test("a teacher reading the page as a student sees what the student sees", async () => {
+    // The exam view is a privilege of the teacher and admin roles, decided after
+    // the student-view downgrade has taken those roles away. A session that has
+    // given the privilege up is shown the practice variant, whatever the exam
+    // preference still holds.
+    const asStudentView = await readWith("teacher", { vt: 0, ve: 1 });
+    assertExactlyOne(asStudentView, "practice", "a teacher with the teacher view off");
+
+    const asStudent = await readWith("student", { ve: 1 });
+    assert.equal(
+      asStudentView,
+      asStudent,
+      "a teacher in the student view should be shown the question a student is shown on the same page"
     );
   });
 
@@ -82,22 +107,11 @@ describe("views", () => {
     }
   });
 
-  test("a student sees the practice question, and setting the exam preference takes it away", async () => {
-    const asStudent = await readWith("student", { ve: 0 });
-    assert.ok(
-      asStudent.includes(practiceVariant),
-      `the student should see the practice variant of ${examPage}`
-    );
-
-    // The `#practice` directive is granted by `ve == 0` alone, with no role in
-    // it, so a student who turns the exam view on loses the practice variant
-    // without gaining the exam one and is left with neither. Asserted as the
-    // behavior that exists; see docs-testing.md.
-    const withExamOn = await readWith("student", { ve: 1 });
-    assert.ok(
-      !withExamOn.includes(practiceVariant),
-      "with the exam preference set, the student loses the practice variant as well"
-    );
+  test("a student keeps the practice question whether the exam preference is set or not", async () => {
+    for (const ve of [0, 1]) {
+      const text = await readWith("student", { ve });
+      assertExactlyOne(text, "practice", `a student with the exam preference set to ${ve}`);
+    }
   });
 
   // ---- 4.3 The answer block ----
@@ -117,10 +131,13 @@ describe("views", () => {
       );
 
       // Both reads were taken with the same baseline for every other key, so the
-      // answer preference is the only thing that changed between them.
-      assert.ok(
-        withAnswers.includes(practiceVariant) && withoutAnswers.includes(practiceVariant),
-        `the rest of ${examPage} should be unaffected by the answer preference`
+      // answer preference is the only thing that changed between them - and the
+      // exam/practice pair stays complementary across both of them.
+      assertExactlyOne(withAnswers, "practice", `a ${role} session with the answer preference on`);
+      assertExactlyOne(
+        withoutAnswers,
+        "practice",
+        `a ${role} session with the answer preference off`
       );
     }
   });

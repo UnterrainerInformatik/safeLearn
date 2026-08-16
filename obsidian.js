@@ -135,7 +135,6 @@ export let dirPrefix = "";
 export const mdFilesMap = {};
 export const filesMap = {};
 export const mdFilesDir = {};
-export const mdFilesDirOnHdd = {};
 export let mdFilesDirStructure = {};
 export const mainFonts = {};
 export const mainFontsArray = [];
@@ -562,7 +561,6 @@ export async function scanFiles(prefix, dir, resetFonts = false, root = dir) {
   Object.keys(mdFilesMap).forEach(key => delete mdFilesMap[key]);
   Object.keys(filesMap).forEach(key => delete filesMap[key]);
   Object.keys(mdFilesDir).forEach(key => delete mdFilesDir[key]);
-  Object.keys(mdFilesDirOnHdd).forEach(key => delete mdFilesDirOnHdd[key]);
   if (resetFonts) {
     Object.keys(mainFonts).forEach(key => delete mainFonts[key]);
     mainFontsArray.length = 0;
@@ -942,11 +940,16 @@ function preReplaceObsidianFileLinks(html, req) {
     if (filePath) {
       let f = filePath[0];
       if (filePath.length > 1) {
+        // A basename that exists in more than one folder is only addressable by
+        // the path that tells the copies apart. That path is emitted whole, the
+        // extension included: the page handler in `app.js` answers a request
+        // because it ends in `.md`, so a link that dropped the extension would
+        // fall through to the catch-all - which is what the single-candidate
+        // line above does too.
         f = filePath.find((path) => path === fileName + ".md");
         if (!f) {
           return match;
         }
-        f = f.split(0, -3);
       }
       console.log(f);
       const serverUrl = `${req.protocol}://${req.get("host")}`;
@@ -1350,7 +1353,11 @@ async function getDirectoryListing(req) {
   openNavTreeScript += "</script>";
   // console.log("openNavTreeScript", openNavTreeScript);
 
-  if (filteredFiles[filteredFiles.length - 1].folders.length > 0) {
+  // A session may be allowed to see no file at all - a container bound to an
+  // empty vault reaches this with an empty set - and then there is no last entry
+  // to ask about and nothing was opened that would have to be closed.
+  const last = filteredFiles[filteredFiles.length - 1];
+  if (last && last.folders.length > 0) {
     r += `</div></div>`;
   }
   return r;

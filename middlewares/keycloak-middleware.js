@@ -4,8 +4,8 @@ import passport from "passport";
 import { Issuer, Strategy } from "openid-client";
 
 export let client;
-export let issuerUrl;
-export let keycloakIssuer;
+let issuerUrl;
+let keycloakIssuer;
 
 function base64urlToUtf8(str) {
   // base64url -> base64
@@ -16,7 +16,7 @@ function base64urlToUtf8(str) {
   return Buffer.from(str, "base64").toString("utf8");
 }
 
-export function jwtDecode(token) {
+function jwtDecode(token) {
   if (typeof token !== "string") return null;
   const parts = token.split(".");
   if (parts.length < 2) return null;

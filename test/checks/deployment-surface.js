@@ -24,6 +24,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { before, describe, test } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { applicationUrl, render, sameOriginReferences, setPreferences, sharedSession } from "../harness.js";
 
@@ -92,6 +93,57 @@ const published = [
 
 /** A path no deployment has a file for, used as the shape of "not there". */
 const absent = "/no-deployment-has-a-file-at-this-path-4f2a7c.json";
+
+/** A context parameter no parser accepts, in the place the endpoint reads one. */
+const uninterpretableContext = "{currentFile:";
+
+/**
+ * Subscribes to the reload stream from this process rather than from the page,
+ * and reports how the subscription behaved.
+ *
+ * It has to be requested from here: the harness refuses that stream inside the
+ * browser on purpose (`test/harness.js`), because an endless response held open
+ * across a walk of dozens of pages piles connections up against the browser's
+ * per-host limit. So the stream is read for its headers and its first write and
+ * then abandoned; nothing it opened outlives the check.
+ *
+ * The endpoint answers before any authentication has happened, so no cookie is
+ * sent with it either — which is the state a hostile client requests it in.
+ */
+async function subscribeToReload(query) {
+  const controller = new AbortController();
+  let response;
+  try {
+    response = await fetch(`${applicationUrl}/hot-reload${query}`, { signal: controller.signal });
+  } catch (error) {
+    controller.abort();
+    return { error: String(error) };
+  }
+
+  const reader = response.body.getReader();
+
+  /** What the stream did next: wrote, was ended by the server, or broke. */
+  const next = (within, whenQuiet) =>
+    Promise.race([
+      reader.read().then(({ done }) => (done ? "ended" : "written"), (error) => `broke: ${error}`),
+      delay(within).then(() => whenQuiet),
+    ]);
+
+  // The handler writes a newline as soon as it has accepted the subscription and
+  // then holds the connection open. A throw past the flushed headers cannot
+  // answer with a status any more — it destroys the socket — so what tells the
+  // two apart is whether the stream is still there a moment after it opened.
+  const opened = await next(2000, "silent");
+  const afterwards = await next(500, "open");
+  controller.abort();
+
+  return {
+    status: response.status,
+    contentType: response.headers.get("content-type"),
+    opened,
+    afterwards,
+  };
+}
 
 /**
  * Requests `reference` from inside the page, so it carries the session's
@@ -236,6 +288,43 @@ describe("deployment surface", () => {
           `it is reachable only because a mount is wider than the pages that need it.`
       );
     }
+  });
+
+  // ---- The one endpoint that answers before authentication ----
+
+  test("the reload subscription treats a context it cannot interpret as an absent one", async () => {
+    const plain = await subscribeToReload("");
+    assert.ok(!plain.error, `/hot-reload could not be subscribed to at all: ${plain.error}`);
+    assert.equal(plain.status, 200, "a subscription without a context should be established");
+    assert.match(
+      plain.contentType ?? "",
+      /event-stream/i,
+      `/hot-reload answered as ${plain.contentType ?? "nothing"} rather than as a stream`
+    );
+    assert.equal(plain.opened, "written", "the subscription should be acknowledged on the stream");
+    assert.equal(plain.afterwards, "open", "and the server should hold it open");
+
+    const malformed = await subscribeToReload(
+      `?context=${encodeURIComponent(uninterpretableContext)}`
+    );
+    assert.ok(!malformed.error, `/hot-reload refused the request outright: ${malformed.error}`);
+    assert.equal(
+      malformed.opened,
+      "written",
+      "a context that cannot be interpreted should not stop the subscription from being acknowledged"
+    );
+    assert.equal(
+      malformed.afterwards,
+      "open",
+      "a client should not be able to make the handler raise by the shape of what it sends: " +
+        "the stream was cut instead of being held open"
+    );
+    assert.equal(
+      malformed.status,
+      plain.status,
+      "a subscription carrying an uninterpretable context should be established exactly as one without it"
+    );
+    assert.equal(malformed.contentType, plain.contentType, "and should be served as the same thing");
   });
 
   // ---- What a rendered page needs ----

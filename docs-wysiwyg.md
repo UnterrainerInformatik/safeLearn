@@ -9,18 +9,18 @@ If you'd like to run a local container of this server in order to see changes yo
 - Free port `8081` on your local machine (you may change that, but it has to be configured on the keycloak-client as a `valid redirect URL` like `http://localhost:<port>/*`)
 ### Installation
 - Clone this repository
-- Copy the contents of the directory `wysiwyg-container-linux` or `wysiwyg` to your local host
+- Copy the contents of the directory `wysiwyg-container-linux` or `wysiwyg-container-windows` to your local host
 - **Windows-Only:** Open Docker-Desktop UI and go to Settings -> Resources -> File Sharing. Add your directory to the shared drives this way (the `\md` subdir).
 - Adjust the contents of the `.env` file
 - Adjust the contents of the `keycloak.json` file
-- Run `./up.sh` on linux or `./up.ps1` on windows to start your container as a persistent container
+- Run `./up.sh` to start your container as a persistent container. Both directories ship that script; the Windows one is started from your WSL instance as well, which is why there is no PowerShell variant.
 ### `.env` File
 
 | Field             | Example-value                    | Description                                                                                                                                                                                                                                                |
 | ----------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | WEBSERVER_PORT    | 8081                             | The port your local web-server should expose                                                                                                                                                                                                               |
 | PUBLIC_SERVER_URL | http://localhost:8081            | This is important for the keycloak-login process. The port should be the same as in WEBSERVER_PORT.                                                                                                                                                        |
-| PUBLIC_START_URL  | /md/index.md                     | This will open the file `<url>/md/index.md` as the `home`-URL of your site. This file has to exist, so be sure to enter this one correctly.                                                                                                                |
+| PUBLIC_START_PAGE | /md/index.md                     | This will open the file `<url>/md/index.md` as the `home`-URL of your site. This file has to exist, so be sure to enter this one correctly.                                                                                                                |
 | LOCAL_DEV_MD_DIR  | /home/larifari/secureLectures/md | This is the place of the md-directory within the repository you've cloned  to your local machine. This is the place where your MD-files live.                                                                                                              |
 | SESSION_SECRET    | a long random string             | The secret the server signs its session cookies with. Any long random value will do — it is only ever compared against itself — but pick your own instead of keeping the placeholder. **The container will not start without it**; it exits with a message naming this variable. Changing it logs you out once.                                     |
 | AUTOSCAN          | true                             | This switch enables hot-updating. It tells the server to watch for changes in your MD-directory and reload all files, when it detects those changes.<br>This also enables hot-updating of your opened pages in your browser, if any. This works over SSEs. |

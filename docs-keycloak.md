@@ -15,9 +15,10 @@ You also need to add the user-attributes to the user-profile first (`Realm setti
 The application uses the following endpoints of the Keycloak-API to do that:
 - `GET {{keycloakUrl}}/realms/{{realm}}/account`
 - `POST {{keycloakUrl}}/realms/{{realm}}/account`
-The user-metadata field `LDAP_ENTRY_DN` will be automatically present because of the LDAP mapper in your Keycloak instance. It will be readable from the `access-token`. So there are no additional setup-steps requried.
+The distinguished name your LDAP federation stores in the user attribute `LDAP_ENTRY_DN` has to arrive in the token under the claim name `ldap`. That is the name the application reads (`getLdapGroups` in `middlewares/keycloak-middleware.js`), and the `OU=` parts of that string are what the class and teacher roles are derived from. An attribute is not a claim, so this needs a mapper of its own — a `User Attribute` mapper on the client's dedicated scope, mapping `LDAP_ENTRY_DN` to the token claim name `ldap` and added to the ID token. Without it the application sees no LDAP groups at all, and every session is a session without a class.
 
 | ATTRIBUTE-NAME                                                                              | TYPE   | DESCRIPTION                                                                                           |
 | ------------------------------------------------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------- |
 | Client -> Client Scopes -> ...-dedicated -> Add Mapper (User Attribute)<br>`config`         | string | Holds several preference-values like dark-mode or not or the preferred font, fontsize or line-height. |
 | Client -> Client Scopes -> ...-dedicated -> Add Mapper (User Attribute)<br>`lastVisitedUrl` | string | Holds the last-visited page of the current user.                                                      |
+| Client -> Client Scopes -> ...-dedicated -> Add Mapper (User Attribute)<br>`LDAP_ENTRY_DN` -> claim `ldap` | string | The distinguished name the LDAP federation fills in. The application reads the claim `ldap` from the ID token and derives the class and teacher roles from its `OU=` parts. |

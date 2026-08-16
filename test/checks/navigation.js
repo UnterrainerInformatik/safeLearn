@@ -2,13 +2,16 @@
  * Link and path resolution, the table of contents and the navigation tree.
  *
  * Reads `md/test-md-file.md`, `md/test-presentation.md`,
- * `md/presentations/test-presentation.md`,
+ * `md/presentations/test-presentation.md`, `md/test-chapter-10.md`,
+ * `md/presentations/test-chapter-10.md`,
  * `md/presentations/test - name - with - spaces.md` and the folders under
  * `md/folder-tests/`.
  *
- * These are the cases that broke before: a basename that exists in two folders,
- * names carrying spaces, and folder names carrying spaces, special characters
- * and excessive length.
+ * These are the cases that broke before: a basename that exists in two folders —
+ * with a digit in the name and without one, because the path that disambiguates
+ * it is built by string surgery whose failure depends on the characters in the
+ * name — names carrying spaces, and folder names carrying spaces, special
+ * characters and excessive length.
  *
  * This is a module, not a test file: `test/content.test.js` imports it.
  */
@@ -26,6 +29,8 @@ const corpusRoot = path.join(projectRoot, "md");
 const corpusPage = "/md/test-md-file.md";
 const duplicatePage = "/md/test-presentation.md";
 const duplicateInFolder = "/md/presentations/test-presentation.md";
+const digitPage = "/md/test-chapter-10.md";
+const digitInFolder = "/md/presentations/test-chapter-10.md";
 const nameWithSpaces = "/md/presentations/test - name - with - spaces.md";
 
 /** Every Markdown file of the corpus, as the path the application serves it on. */
@@ -105,6 +110,59 @@ describe("navigation", () => {
     assert.ok(
       namesake.text.includes("CI-CD"),
       `following the disambiguated link should arrive at ${duplicateInFolder}`
+    );
+  });
+
+  // ---- 6.1a The same, on a name carrying a digit ----
+
+  test("a wiki-link to a duplicated basename carrying a digit addresses that file and nothing else", async () => {
+    await render(session, corpusPage);
+    const emitted = await session.page.evaluate(() =>
+      [...document.querySelectorAll("#markdown-content a")]
+        .map((link) => ({ href: link.getAttribute("href"), text: link.textContent.trim() }))
+        .find((link) => link.text === "test-chapter-10")
+    );
+    assert.ok(emitted, `${corpusPage} should still link to the duplicated basename carrying a digit`);
+
+    const emittedPath = decodeURIComponent(new URL(emitted.href).pathname);
+    // The path that disambiguates a duplicate is built by string surgery, and a
+    // digit is what makes a wrong instrument visible: a name without one comes
+    // back out of the wrong call unharmed, a name with one comes back cut in two.
+    const addressed = emittedPath.split("/").pop();
+    assert.equal(
+      addressed,
+      "test-chapter-10.md",
+      `the link ends in "${addressed}", so it carries a character the name does not — ` +
+        `the emitted path is ${emittedPath}`
+    );
+    assert.equal(
+      emittedPath,
+      digitPage,
+      "the bare name resolves to the copy at the root of the corpus, as it does for the name without a digit"
+    );
+
+    const arrived = await render(session, emittedPath);
+    assert.ok(
+      arrived.text.includes("This is the copy at the root of the corpus"),
+      "following the link should arrive at the intended file, not at the start page"
+    );
+
+    const byPath = await session.page.evaluate(() =>
+      [...document.querySelectorAll("#markdown-content a")].map((link) => link.getAttribute("href"))
+    );
+    const disambiguated = byPath
+      .map((href) => decodeURIComponent(new URL(href, "http://x").pathname))
+      .find((href) => href === digitInFolder);
+    assert.ok(
+      disambiguated,
+      `${digitPage} should link to its namesake by the path that tells them apart, ` +
+        `but links to ${byPath.join(", ")}`
+    );
+
+    const namesake = await render(session, digitInFolder);
+    assert.ok(
+      namesake.text.includes("This is the copy in the presentations folder"),
+      `following the disambiguated link should arrive at ${digitInFolder}`
     );
   });
 

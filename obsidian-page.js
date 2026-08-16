@@ -25,7 +25,7 @@ window.addEventListener(
         openAsPresentation(true, true);
         event.preventDefault();
       }
-      if (event.key === "d" || event.key === "d") {
+      if (event.key === "d" || event.key === "D") {
         console.log("Opening print-document page");
         openAsDocument(true);
         event.preventDefault();

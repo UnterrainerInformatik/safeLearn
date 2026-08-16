@@ -4,6 +4,7 @@
 [[test-fileperms-4bhif-5bhif-2ahif]]
 [[test-exam-practice-question]]
 [[test - name - with - spaces]]
+[[test-chapter-10]]
 ## Caption
 This is a sample text...
 

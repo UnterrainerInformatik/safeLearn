@@ -71,7 +71,7 @@
       ]
     },
     "test/checks/navigation.js": {
-      "what": "Wiki-link resolution including the duplicated basename and the name with spaces, the folder-name edge cases, the table of contents and the navigation tree.",
+      "what": "Wiki-link resolution including the duplicated basename — with a digit in the name and without one — and the name with spaces, the folder-name edge cases, the table of contents and the navigation tree.",
       "guards": [
         "obsidian.js",
         "app.js"
@@ -80,6 +80,8 @@
         "md/test-md-file.md",
         "md/test-presentation.md",
         "md/presentations/test-presentation.md",
+        "md/test-chapter-10.md",
+        "md/presentations/test-chapter-10.md",
         "md/presentations/test - name - with - spaces.md",
         "md/folder-tests/folder with spaces/Untitled.md",
         "md/folder-tests/special chars $'&`´!/Untitled.md",
@@ -87,10 +89,11 @@
       ]
     },
     "test/checks/presentation.js": {
-      "what": "The deck built from the source's heading structure, fragments in a deck, the deck's own references including the known-dangling list, that it contacts no host but the application and the identity provider, that a host a stylesheet asks for is recorded even when refused, and the document view.",
+      "what": "The deck built from the source's heading structure, fragments in a deck, the deck's own references including the known-dangling list, that it contacts no host but the application and the identity provider, that a host a stylesheet asks for is recorded even when refused, the document view, and the documented shortcut into it with the shift key held and without.",
       "guards": [
         "obsidian.js",
         "app.js",
+        "obsidian-page.js",
         "css/reveal.css",
         "css/reveal-theme-moon.css",
         "test/harness.js"
@@ -101,7 +104,7 @@
       ]
     },
     "test/checks/deployment-surface.js": {
-      "what": "What a running instance publishes over HTTP: that keycloak.json, the application sources, the dependency manifests and what sits beside a mounted package directory are not served and a refusal looks like a path with no file behind it, that the assets a page addresses still are — including the ones only a stylesheet names — and that every same-origin reference of a rendered page resolves in all three views.",
+      "what": "What a running instance publishes over HTTP: that keycloak.json, the application sources, the dependency manifests and what sits beside a mounted package directory are not served and a refusal looks like a path with no file behind it, that the assets a page addresses still are — including the ones only a stylesheet names — that every same-origin reference of a rendered page resolves in all three views, and that the one endpoint answering before authentication survives a parameter it cannot interpret.",
       "guards": [
         "app.js",
         "middlewares/keycloak-middleware.js",

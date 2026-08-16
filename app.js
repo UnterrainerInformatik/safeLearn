@@ -179,7 +179,17 @@ app.get('/hot-reload', (req, res) => {
   res.write('\n');
 
   const id = Date.now() + Math.random();
-  const context = req.query.context ? JSON.parse(req.query.context) : {};
+  // This is the one endpoint that answers before any authentication has
+  // happened, so everything a client sends it is treated as hostile. A context
+  // that does not parse is the same thing as no context at all.
+  let context = {};
+  if (req.query.context) {
+    try {
+      context = JSON.parse(req.query.context);
+    } catch {
+      context = {};
+    }
+  }
   clients.set(id, { res, context });
 
   req.on('close', () => clients.delete(id));

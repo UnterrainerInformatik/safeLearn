@@ -17,7 +17,7 @@ If you'd like to host your own files, you'll have to fork this repository.
 ### Features for Teachers
 * One platform for all teaching materials
 * Everything is Markdown
-* Presentations with Reveal.sj
+* Presentations with Reveal.js
 * One Editor (Obsidian) that's...
 	* Cool
 	* Really good

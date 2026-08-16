@@ -2,13 +2,6 @@ import fs from "fs";
 import { getUserAttributes } from "./middlewares/keycloak-middleware.js";
 
 /**
- * hasAllRoles(req, ["teacher", "student", "admin", "gluppy"])
- */
-export async function hasAllRoles(req, clientRoles, allowOverride = false) {
-  return hasRoles(req, clientRoles, true, allowOverride);
-}
-
-/**
  * hasSomeRoles(req, ["teacher", "student", "admin", "gluppy"])
  */
 export async function hasSomeRoles(req, clientRoles, allowOverride = false) {
@@ -161,12 +154,16 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
       for (const view of clientViews) {
         const viewRole = view.substring(1);
         switch (viewRole) {
+          // The exam and the practice case are one rule and its complement, not
+          // two rules over the same preference: every session sees exactly one
+          // of the two variants. An edit to either condition has to be made at
+          // both, or a session ends up seeing neither version of the question.
           case "exam":
             // For security reasons hardcoded to only allow teachers and admins to view exam-questions.
             clientAccess = a.ve == 1 && (isAdmin || isTeacher);
             break;
           case "practice":
-            clientAccess = a.ve == 0;
+            clientAccess = !(a.ve == 1 && (isAdmin || isTeacher));
             break;
           case "answer":
             clientAccess = a.va == 1;
@@ -186,12 +183,4 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
     // knows the least about what the session may read.
     return false;
   }
-}
-
-export function uiConfig(req) {
-  let uiConfig = {};
-  if (req.user.accessTokenDecoded.config) {
-    uiConfig = JSON.parse(req.user.accessTokenDecoded.config);
-  }
-  return uiConfig;
 }

@@ -343,4 +343,50 @@ describe("presentation and document", () => {
       "the document view should show the same session the same content as the page view"
     );
   });
+
+  // ---- 7.6 The documented shortcut into the document view ----
+
+  test("the documented shortcut reaches the document view, shifted and unshifted", async () => {
+    // The handler compares `event.key`, and that is the shifted character while
+    // shift is held. Pressing only the unshifted key would pass against a rule
+    // that never matched the other one — which is the defect this covers — so
+    // the shifted case names the character the browser will report, `D`, rather
+    // than leaving it to the layout to derive one from a held modifier.
+    for (const [withShift, key] of [
+      [false, "d"],
+      [true, "D"],
+    ]) {
+      await render(session, documentPath);
+
+      await session.page.keyboard.down("Control");
+      await session.page.keyboard.down("Alt");
+      if (withShift) await session.page.keyboard.down("Shift");
+      await session.page.keyboard.press(key);
+      if (withShift) await session.page.keyboard.up("Shift");
+      await session.page.keyboard.up("Alt");
+      await session.page.keyboard.up("Control");
+
+      const pressed = `CTRL+ALT+${withShift ? "SHIFT+" : ""}${key.toUpperCase()}`;
+      try {
+        await session.page.waitForFunction(
+          () => new URL(window.location.href).searchParams.get("document") === "true"
+        );
+      } catch {
+        assert.fail(
+          `${pressed} on ${documentPath} did not reach the document view: the page stayed at ` +
+            `${session.page.url()}`
+        );
+      }
+
+      await session.page.waitForSelector("#markdown-content");
+      const shell = await session.page.evaluate(() => ({
+        sidebar: Boolean(document.querySelector("#sidebar")),
+        topbar: Boolean(document.querySelector("#topbar")),
+      }));
+      assert.ok(
+        !shell.sidebar && !shell.topbar,
+        `${pressed} landed on a page that still carries the page shell, so it is not the document view`
+      );
+    }
+  });
 });

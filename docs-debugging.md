@@ -3,7 +3,7 @@ Here you can find help with debugging the project.
 
 [Back](README.md) to the main page.
 ## Debugging
-To test the portions of the web-site that isn't directly connected to the gh-pages generation and Asciidoc conversion, you may want to start it using VSCode.
+To test the web-site, you may want to start it using VSCode.
 Just do the following:
 * clone this repository
 * open it in VSCode
@@ -23,10 +23,12 @@ The following files are changed or omitted in the build-process:
 | .env                              | -> `pipeline`<br>Will be re-generated from scratch during the pipeline-run using Github secrets.<br>Code is located in this repository in the `yml` file of the action.                                                                                            |
 | keycloak.json                     | -> `pipeline`<br>Will be generated from scratch during the pipeline-run using Github secrets.<br>So you're free to place a debugging-file of your own in here. The one that is present connects you to a test-server and will most likely not work with your fork. |
 | package.json<br>package-lock.json | -> 'Dockerfile'<br>These files will be copied during the pipeline-run's Docker-Image generation and used to setup the web-server in the Docker container by running `npm install` afterwards.                                                                      |
-| app.js                            | -> 'Dockerfile'<br>Is the start-file for the NodeJS server and will be copied during the pipeline-run's Docker-Image generation.                                                                                                                                   |
+| app.js<br>*.js<br>*.css           | -> 'Dockerfile'<br>`app.js` is the start-file for the NodeJS server. It is copied together with every other `.js` and `.css` file at the repository root during the pipeline-run's Docker-Image generation.                                                          |
+| md/<br>assets/<br>middlewares/<br>css/           | -> 'Dockerfile'<br>Copied whole into the image, so the corpus, the fonts and images, the middlewares and the stylesheets are part of the deployment.                                                                                                                 |
+| index.html                        | -> 'Dockerfile'<br>Copied as the start page a deployment falls back to when it sets no `START_PAGE`.                                                                                                                                                                |
 | all other files...                | Will be ignored by the build-pipeline.                                                                                                                                                                                                                             |
 ### HttpYac (REST-Tests)
-In order to get those working, you'll have to create a file `httpyac.config.js` with the following contents:
+In order to get those working, you'll have to create a file `httpyac.config.cjs` with the following contents:
 ```json
 // Configuration file for HttpYac.
 // A plugin for VSCode.

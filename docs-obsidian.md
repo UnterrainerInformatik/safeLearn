@@ -76,7 +76,7 @@ Those work on normal image-links, like the standard DM ones and the shortcut-lin
 You may use fragments when starting a presentation.
 Fragments are parts of you page that pop up one after another, step by step, when you're pressing the forward-button you normally press to advance to the next vertical page.
 ### Single Fragment Lines
-You may mark single lines as Fragments. Those lines are denoted by having a `#fragment` in the line above them.
+You may mark single lines as Fragments. Those lines are denoted by having a `##fragment` in the line above them.
 A single line is defined as from the start of a line to the next `newline`, so that may as well span more than a single line when line-breaks are inserted by the browser in order to fit that single line on the screen.
 #### Single Fragment Example
 ```bash
