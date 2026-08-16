@@ -344,6 +344,43 @@ describe("presentation and document", () => {
     );
   });
 
+  // ---- 7.5a One reveal per view ----
+
+  test("the same file becomes visible exactly once as a page, as a document and as a deck", async () => {
+    // Collects the values the property that hides a view takes, in order. A
+    // second script writing it — the state this was written for, where init()
+    // and the hot-reload script both did — shows up as an extra transition
+    // rather than as a page that merely ended up visible somehow. Only changes
+    // to `display` itself count: Reveal writes other properties of the same
+    // attribute while it lays a deck out.
+    const recorder = await session.page.evaluateOnNewDocument(() => {
+      window.__displayWrites = [];
+      new MutationObserver(() => {
+        const display = document.body.style.display;
+        const seen = window.__displayWrites;
+        if (seen[seen.length - 1] !== display) seen.push(display);
+      }).observe(document, { subtree: true, attributes: true, attributeFilter: ["style"] });
+    });
+
+    try {
+      for (const view of ["page", "document", "presentation"]) {
+        await render(session, documentPath, { view });
+        await session.page.waitForFunction(() => document.body.style.display === "", {
+          timeout: 30000,
+        });
+        const written = await session.page.evaluate(() => window.__displayWrites);
+        assert.deepEqual(
+          written.filter((value) => value !== "none"),
+          [""],
+          `${documentPath} as a ${view} should be shown once, by that view's own owner, and with the ` +
+            `value that defers to the stylesheets. The property went through: ${written.join(" -> ")}`
+        );
+      }
+    } finally {
+      await session.page.removeScriptToEvaluateOnNewDocument(recorder.identifier);
+    }
+  });
+
   // ---- 7.6 The documented shortcut into the document view ----
 
   test("the documented shortcut reaches the document view, shifted and unshifted", async () => {

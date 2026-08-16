@@ -259,7 +259,63 @@ async function setParam(key, value) {
 }
 
 let attributes = {};
+
+/**
+ * How long a page view stays hidden waiting for its preferences before showing
+ * itself without them. Seconds rather than milliseconds on purpose: this exists
+ * to survive a request that never answers, not to race a slow one.
+ */
+const revealBoundMs = 5000;
+let pageRevealed = false;
+let revealBound = null;
+
+/**
+ * The one place a page view is shown. `wrapInPage` and `wrapAsDocument` serve
+ * the body hidden so the preferences below — font size, theme, dark mode —
+ * cannot flash in their defaults before the session's own arrive; this is where
+ * that period ends. Nothing else in a page view writes the property, in either
+ * direction: the hot-reload script restores a scroll position and leaves
+ * visibility alone.
+ *
+ * The value is `""` rather than a display mode. It hands the element back to the
+ * stylesheets, which is what a page should do; asserting `block` would overwrite
+ * whatever `css/` says about `body`. That is nothing today, and it is luck
+ * rather than a guarantee.
+ *
+ * The second reason the period exists — a scroll offset saved before a hot
+ * reload — is put back here too, and deliberately after the property is
+ * cleared: a hidden body has no scroll height, so scrolling it would land at the
+ * top. Both statements are one task and the browser paints once, so the first
+ * frame the session sees is already at the restored offset.
+ *
+ * Called twice or more, it does nothing the second time: the preference request
+ * and the bound `init()` arms are two callers, and whichever arrives first is
+ * the one that counts. Clearing that bound is part of revealing, so the two
+ * cannot both show the page and the bound cannot log after a normal load.
+ */
+function revealPage() {
+  if (pageRevealed) return;
+  pageRevealed = true;
+  clearTimeout(revealBound);
+  revealBound = null;
+
+  document.body.style.display = "";
+  window.safeLearnRestorePosition?.();
+}
+
 function init() {
+  // The bound on the hidden period, armed before the request it bounds. A page
+  // shown in the default appearance is a worse page; a page that is never shown
+  // is not a page — so the wait ends either way, and the console says which of
+  // the two happened.
+  revealBound = setTimeout(() => {
+    console.warn(
+      `[bootstrap] Showing this page without the session's preferences: ` +
+        `/userattributes did not answer within ${revealBoundMs} ms.`
+    );
+    revealPage();
+  }, revealBoundMs);
+
   getUserAttributes().then((user) => {
     const a = user.accessTokenDecoded.config
       ? JSON.parse(user.accessTokenDecoded.config)
@@ -276,7 +332,7 @@ function init() {
       ve: a.ve || 0,
     };
     applyAttributes();
-    document.body.style.display = "block";
+    revealPage();
   });
 }
 

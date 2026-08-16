@@ -368,6 +368,41 @@ async function logIn(page, role, account) {
 // ################### Sessions ###################
 
 /**
+ * Paths of the application a session's page is currently made to hang on, by
+ * page. Filled by `whileUnanswered`, read by the interception below.
+ */
+const unanswered = new WeakMap();
+
+/**
+ * Runs `load` with every request the session makes to `pathname` left open —
+ * neither answered nor refused — and releases it afterwards.
+ *
+ * Hanging rather than refusing, because the two are not the same situation for
+ * this application: a refused `/userattributes` rejects the fetch in
+ * `getUserAttributes`, whose `catch` reloads the page, so the page would never
+ * sit still long enough to show what it does while it waits. A request that
+ * never answers is the case a bounded wait exists for.
+ *
+ * Only a session that intercepts requests can do this — `sharedSession` does,
+ * `openSession` does not.
+ */
+export async function whileUnanswered(session, pathname, load) {
+  const paths = unanswered.get(session.page);
+  if (!paths) {
+    throw new Error(
+      `The ${session.role} session does not intercept its requests, so ${pathname} cannot be ` +
+        `left unanswered. Use sharedSession("${session.role}").`
+    );
+  }
+  paths.add(pathname);
+  try {
+    return await load();
+  } finally {
+    paths.delete(pathname);
+  }
+}
+
+/**
  * Refuses every request to a host that is neither the application nor the
  * identity provider, and records which hosts were turned away so a check can
  * report on them.
@@ -382,6 +417,7 @@ async function logIn(page, role, account) {
  */
 async function refuseForeignHosts(page, refused) {
   await page.setRequestInterception(true);
+  unanswered.set(page, new Set());
   page.on("request", (request) => {
     const resume = () => request.continue().catch(() => {});
     const address = request.url();
@@ -400,6 +436,10 @@ async function refuseForeignHosts(page, refused) {
       request.abort("blockedbyclient").catch(() => {});
       return;
     }
+    // Neither continued nor aborted: the request stays open for as long as
+    // `whileUnanswered` holds the path, which is what a request that never
+    // answers looks like from inside the page.
+    if (unanswered.get(page)?.has(parsed.pathname)) return;
     if (reachableHosts.has(parsed.host)) {
       resume();
       return;

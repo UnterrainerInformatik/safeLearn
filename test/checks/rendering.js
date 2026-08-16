@@ -24,7 +24,13 @@ import { before, describe, test } from "node:test";
 
 import pako from "pako";
 
-import { applicationUrl, render, setPreferences, sharedSession } from "../harness.js";
+import {
+  applicationUrl,
+  render,
+  setPreferences,
+  sharedSession,
+  whileUnanswered,
+} from "../harness.js";
 
 const projectRoot = path.resolve(import.meta.dirname, "..", "..");
 const corpusPath = "/md/test-md-file.md";
@@ -104,11 +110,13 @@ describe("rendering", () => {
   /** Puts the session back on the corpus page and waits until it is on screen. */
   async function showCorpus() {
     const rendered = await render(session, corpusPath);
-    // The application serves the body hidden and two scripts reveal it: init()
-    // sets `block` once it has read the preferences, and the hot-reload script
-    // clears the property on DOMContentLoaded. Either counts as visible, and
-    // geometry read before that would be zero everywhere.
-    await session.page.waitForFunction(() => document.body.style.display !== "none", {
+    // A page view is served hidden and shown by one script, init(), once it has
+    // applied this session's preferences — and the value it writes is the empty
+    // string, which hands the element back to the stylesheets. Waiting for that
+    // value rather than for "anything but none" is the difference between
+    // asserting the rule and tolerating whichever script got there first.
+    // Geometry read before it would be zero everywhere.
+    await session.page.waitForFunction(() => document.body.style.display === "", {
       timeout: 30000,
     });
     return rendered;
@@ -467,6 +475,58 @@ describe("rendering", () => {
 
     const ordered = lists.filter((list) => list.tag === "ol" && list.inBlockquote && oneTwoThree(list));
     assert.equal(ordered.length, 1, "the blockquoted ordered list should render as an <ol> with its three items");
+  });
+
+  // ---- 5.9 The bound on the hidden period ----
+
+  test("a page whose preference request never answers is shown anyway, and says why", async () => {
+    /** Everything the page wrote to the console while `load` ran. */
+    async function consoleWhile(load) {
+      const said = [];
+      const collect = (message) => said.push(message.text());
+      session.page.on("console", collect);
+      try {
+        await load();
+      } finally {
+        session.page.off("console", collect);
+      }
+      return said;
+    }
+
+    // The request is left open rather than refused: `getUserAttributes` reloads
+    // the page when its fetch rejects, so a refusal would produce a reload loop
+    // instead of the wait this bound exists for.
+    const whileWaiting = await consoleWhile(() =>
+      whileUnanswered(session, "/userattributes", async () => {
+        await render(session, corpusPath);
+        await session.page.waitForFunction(() => document.body.style.display === "", {
+          timeout: 30000,
+        });
+      })
+    );
+
+    assert.ok(
+      whileWaiting.some((message) => message.includes("/userattributes did not answer")),
+      "a page shown without its preferences should say so where a developer looking at the page " +
+        `can find it. The console said: ${whileWaiting.join(" | ") || "nothing"}`
+    );
+
+    // The other half of the rule: a page that came up normally has nothing to
+    // report, so the bound has to have been cleared rather than merely lost the
+    // race. The wait is longer than the bound itself, or this would pass by
+    // ending before the timer could fire.
+    const whileNormal = await consoleWhile(async () => {
+      await showCorpus();
+      await new Promise((done) => setTimeout(done, 7000));
+    });
+    assert.deepEqual(
+      whileNormal.filter((message) => message.includes("did not answer")),
+      [],
+      "a page whose preferences arrived should not report a bound that fired"
+    );
+
+    const shown = await session.page.evaluate(() => document.body.style.display);
+    assert.equal(shown, "", "the page should still be showing the value its owner wrote");
   });
 
   // ---- Nothing outside the application was needed ----

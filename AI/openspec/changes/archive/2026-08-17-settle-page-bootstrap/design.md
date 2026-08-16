@@ -49,7 +49,11 @@ Reason 1 applies to every page load; reason 2 applies only to the load that foll
 
 `init()` is the only code that knows when the page is *ready to be looked at* — it has applied the preferences that decide how it looks. It sets one value and it is the only writer. The reload script's five writes go away.
 
-Reason 2's restore still has to happen before the reveal, and it can: the restore runs on `DOMContentLoaded`, which precedes the `/userattributes` response in every ordering that matters, since `init()` cannot resolve before the document that contains its `<script>` tag has parsed. Where that is not guaranteed — Reveal's own `ready` event — the deck is the case Decision 3 handles.
+Reason 2's restore still has to happen before the page is seen — and it does not do so on its own. This design first assumed the ordering was free, because `init()` cannot resolve before the document containing its `<script>` tag has parsed, so `DOMContentLoaded` would precede the `/userattributes` response. A run says otherwise. `DOMContentLoaded` also waits for the deferred `<script type="module">` that `getMermaidScriptEntry` emits and for the Mermaid graph it imports, and that outlasts the preference round trip: measured against a running instance, `/userattributes` answered at 289 ms, the body was revealed at 313 ms with the saved offset still in `sessionStorage`, `DOMContentLoaded` fired at 365 ms and the restore scrolled at 370 ms. The deck goes the same way and worse — Reveal reports ready before `DOMContentLoaded`, so the restore lands after the deck is already on screen. Tasks 1.4 and 2.2 hold the numbers.
+
+**So the sequence is performed, not assumed.** The reload script stops hanging the restore off an event of its own and offers it as `window.safeLearnRestorePosition()`; each view's owner calls it as part of revealing. The order inside the owner is *reveal, then restore*, which reads backwards and is not: a hidden body has no scroll height and no slide geometry, so a restore applied before the property is cleared would scroll to the top and lay the deck out against a zero-sized viewport. Both statements sit in one task, and the browser paints once at the end of it, so the first frame a session sees already carries the restored position. That is what the spec asks for — the page is not *shown* before the position has been restored — and it is now a property of the owner rather than of which event fires first.
+
+This also settles half of Decision 5's reconnect repair before it is reached: the reload script no longer registers a `DOMContentLoaded` listener at all, so it cannot accumulate them.
 
 *Alternatives considered.* **The reload script owns it** — it already runs in all three views, including the deck. But it reveals on `DOMContentLoaded`, before preferences are applied, which reintroduces exactly the flash the hidden body exists to prevent. **A third script that waits for both** is the correct shape for a page with a real bootstrap sequence and too much machinery for two scripts. **A CSS-only reveal** (`body:not(.booting)`) still needs someone to remove the class, so it renames the question.
 
@@ -61,7 +65,7 @@ The inline `style="display: none;"` in the wrapper stays: it must be in the mark
 
 ### Decision 3: The deck starts hidden too, and reveals on Reveal's readiness
 
-`wrapInReveal` gets the same inline `display: none`, and reveals when the deck reports ready — the point at which the slide layout is settled and a restored slide index has been applied. The deck does not load `obsidian-page.js` and has no preferences to wait for, so its owner is the deck's own `ready` handler, not `init()`.
+`wrapInReveal` gets the same inline `display: none`, and reveals when the deck reports ready — the point at which the deck has its slides and can be told which one to show. It then restores the saved slide the way Decision 1 describes, in the same task. The deck does not load `obsidian-page.js` and has no preferences to wait for, so its owner is the deck's own readiness, not `init()`.
 
 This is a deliberate second owner for the third view, and it is why the spec speaks of *one owner per view* rather than one owner overall. What must not survive is a script that writes `display` in a view it does not own.
 

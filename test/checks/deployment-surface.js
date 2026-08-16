@@ -327,6 +327,49 @@ describe("deployment surface", () => {
     assert.equal(malformed.contentType, plain.contentType, "and should be served as the same thing");
   });
 
+  test("a page whose reload stream is refused retries with a growing delay", async () => {
+    // The harness refuses that stream inside the browser, so every page of a
+    // shared session is already in the situation this is about: an application
+    // it cannot subscribe to. What is asserted is the shape of the retry, not
+    // that it eventually succeeds.
+    const attempts = [];
+    const record = (request) => {
+      let pathname;
+      try {
+        pathname = new URL(request.url()).pathname;
+      } catch {
+        return;
+      }
+      if (pathname === "/hot-reload") attempts.push(Date.now());
+    };
+
+    session.page.on("request", record);
+    try {
+      await render(session, corpusPath);
+      // Long enough for the first few attempts of a doubling backoff — roughly
+      // one, two and four seconds apart — to have happened.
+      await delay(11000);
+    } finally {
+      session.page.off("request", record);
+    }
+
+    assert.ok(
+      attempts.length >= 4,
+      `a page that cannot reach the reload stream should keep trying, but tried ${attempts.length} ` +
+        `time(s) in eleven seconds`
+    );
+
+    const gaps = attempts.slice(1).map((at, index) => at - attempts[index]);
+    for (let index = 1; index < gaps.length; index++) {
+      assert.ok(
+        gaps[index] > gaps[index - 1] * 1.5,
+        `the delay between attempts should grow, so an application that is down does not collect ` +
+          `one request per open page on a fixed timer for as long as it stays down. ` +
+          `The gaps were: ${gaps.join(" ms, ")} ms`
+      );
+    }
+  });
+
   // ---- What a rendered page needs ----
 
   test("every asset a rendered page addresses is served", async () => {

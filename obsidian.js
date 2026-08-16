@@ -1817,7 +1817,7 @@ function getMermaidScriptEntry() {
 
 function getAutoReloadScript() {
   return `<script>
-(function connectSSE() {
+(function () {
   function normalizeToMdPath(raw) {
     try {
       // strip domain if present
@@ -1851,86 +1851,132 @@ function getAutoReloadScript() {
     currentFile: decodeURIComponent(location.pathname.replace(/^\\/+/, ""))
   };
 
-  const es = new EventSource('/hot-reload?context=' + 
-    encodeURIComponent(JSON.stringify(context))
-  );
+  const address = '/hot-reload?context=' + encodeURIComponent(JSON.stringify(context));
 
+  // A page holds one stream at a time and gives it up when it is put aside. What
+  // that is worth was measured: walking one tab through pages without this, the
+  // server's client map grew by one per page and never shrank, because a page
+  // navigated away from goes into the back/forward cache alive, connection and
+  // all. The fifth page in a row then did not load at all — the browser allows
+  // six connections per host, and the navigation queued behind the five streams
+  // the earlier pages were still holding.
+  //
+  // pagehide and pageshow are the pair that covers that: a document entering the
+  // cache is hidden rather than unloaded, and comes back through pageshow.
+  //
+  // The retry is a doubling backoff rather than a fixed three seconds, so an
+  // application that is down does not collect one request per open page every
+  // three seconds for as long as it stays down. It is reset by a connection that
+  // opens, so a stream that drops once retries promptly.
+  const firstRetryMs = 1000;
+  const longestRetryMs = 60000;
+  let retryMs = firstRetryMs;
+  let retry = null;
+  let es = null;
 
-  es.addEventListener('reload', function(event) {
-    try {
-      const payload = JSON.parse(event.data || '{}');
-      console.log('[SSE] Reload event:', payload);
+  function disconnect() {
+    if (retry !== null) {
+      clearTimeout(retry);
+      retry = null;
+    }
+    if (es) {
+      es.close();
+      es = null;
+    }
+  }
 
-      // Save position before reload
-      if (window.Reveal && Reveal.getIndices) {
-        const slideIndices = Reveal.getIndices();
-        sessionStorage.setItem("revealSlide", JSON.stringify(slideIndices));
-      } else {
-        sessionStorage.setItem("scrollY", window.scrollY);
-      }
+  function connect() {
+    disconnect();
+    es = new EventSource(address);
 
-      if (payload.type === 'nav' && !window.Reveal) {
-        location.reload();
-      } else if (payload.type === 'page') {
-        const current = decodeURIComponent(location.pathname.replace(/^\\/+/, ""));
-        if (payload.files && payload.files.some(f => current.endsWith(f))) {
+    es.addEventListener('open', function() {
+      retryMs = firstRetryMs;
+    });
+
+    es.addEventListener('reload', function(event) {
+      try {
+        const payload = JSON.parse(event.data || '{}');
+        console.log('[SSE] Reload event:', payload);
+
+        // Save position before reload
+        if (window.Reveal && Reveal.getIndices) {
+          const slideIndices = Reveal.getIndices();
+          sessionStorage.setItem("revealSlide", JSON.stringify(slideIndices));
+        } else {
+          sessionStorage.setItem("scrollY", window.scrollY);
+        }
+
+        if (payload.type === 'nav' && !window.Reveal) {
           location.reload();
+        } else if (payload.type === 'page') {
+          const current = decodeURIComponent(location.pathname.replace(/^\\/+/, ""));
+          if (payload.files && payload.files.some(f => current.endsWith(f))) {
+            location.reload();
+          } else {
+            console.log('[SSE] Skipping reload: not affected', { current, files: payload.files });
+          }
         } else {
           console.log('[SSE] Skipping reload: not affected', { current, files: payload.files });
         }
-      } else {
-        console.log('[SSE] Skipping reload: not affected', { current, files: payload.files });
+      } catch (err) {
+        console.error('[SSE] Error parsing reload payload:', err);
       }
-    } catch (err) {
-      console.error('[SSE] Error parsing reload payload:', err);
-    }
+    });
+
+    es.onerror = function(err) {
+      console.warn('[SSE] Connection lost. Reconnecting in ' + retryMs + ' ms.', err);
+      disconnect();
+      retry = setTimeout(connect, retryMs);
+      retryMs = Math.min(retryMs * 2, longestRetryMs);
+    };
+  }
+
+  // Leaving this page — for another one, or into the back/forward cache — gives
+  // the stream up; coming back out of that cache opens a new one. Without the
+  // second half a restored page would be listening to nothing.
+  window.addEventListener("pagehide", disconnect);
+  window.addEventListener("pageshow", function() {
+    if (!es) connect();
   });
 
-  es.onerror = function(err) {
-    console.warn('[SSE] Connection lost. Reconnecting in 3s...', err);
-    es.close();
-    setTimeout(connectSSE, 3000);
+  // Puts back what the page was looking at before a hot reload. Whether a page
+  // is visible is not this script's business in any of the three views — that
+  // belongs to init() in obsidian-page.js and to the deck's own script — but the
+  // two have to happen together, so this is offered as a function the view's
+  // owner calls rather than triggered from an event of its own.
+  //
+  // It is not on DOMContentLoaded because that event is not early: it waits for
+  // the deferred Mermaid module and the graph it imports, and lands after the
+  // preference request has answered and after Reveal reports ready. A restore
+  // hung off it would be applied to a page that is already on screen, which is
+  // the jump the hidden period exists to prevent.
+  //
+  // The caller reveals first and calls this immediately after, in the same task:
+  // a hidden body has no scroll height and no slide geometry, so there would be
+  // nothing to scroll or lay out, and nothing is painted between the two.
+  window.safeLearnRestorePosition = function() {
+    try {
+      if (window.Reveal && Reveal.slide) {
+        const savedSlide = sessionStorage.getItem("revealSlide");
+        if (!savedSlide) return;
+        const idx = JSON.parse(savedSlide);
+        Reveal.slide(idx.h || 0, idx.v || 0, (typeof idx.f === "number") ? idx.f : 0);
+        Reveal.layout();
+        sessionStorage.removeItem("revealSlide");
+        return;
+      }
+      const savedScroll = sessionStorage.getItem("scrollY");
+      if (!savedScroll) return;
+      window.scrollTo(0, parseInt(savedScroll, 10));
+      sessionStorage.removeItem("scrollY");
+    } catch (err) {
+      // A saved position that cannot be read is not a reason to leave the page
+      // hidden: the caller reveals whether this succeeds or not.
+      console.warn('[SSE] Could not restore the saved position:', err);
+    }
   };
 
-  window.addEventListener("DOMContentLoaded", function() {
-    document.body.style.display = "none";
-
-    const savedSlide = sessionStorage.getItem("revealSlide");
-    const savedScroll = sessionStorage.getItem("scrollY");
-
-    if (window.Reveal && Reveal.slide) {
-      if (savedSlide) {
-        const idx = JSON.parse(savedSlide);
-        const h = idx.h || 0;
-        const v = idx.v || 0;
-        const f = (typeof idx.f === "number") ? idx.f : 0;
-
-        const restore = () => {
-          Reveal.slide(h, v, f);
-          Reveal.layout();
-          document.body.style.display = "";
-          sessionStorage.removeItem("revealSlide");
-        };
-
-        if (Reveal.isReady && Reveal.isReady()) {
-          restore();
-        } else {
-          Reveal.on && Reveal.on('ready', restore, { once: true });
-          setTimeout(() => {
-            document.body.style.display = "";
-          }, 1000);
-        }
-      } else {
-        document.body.style.display = "";
-      }
-    } else {
-      if (savedScroll) {
-        window.scrollTo(0, parseInt(savedScroll, 10));
-        sessionStorage.removeItem("scrollY");
-      }
-      document.body.style.display = "";
-    }
-  });
+  connect();
 })();
 </script>`;
 }
@@ -1948,6 +1994,14 @@ export async function wrapInPage(html, startPage, req) {
         <link rel="shortcut icon" href="/assets/favicon.ico" type="image/x-icon" />
         <title>${req.file.name}</title>
       </head>
+      <!-- Hidden from the first byte the browser renders, and inline for that
+           reason: a hide expressed in a stylesheet would only hold once the
+           stylesheet had loaded. What the period is for is the session's own
+           font size, theme and dark mode — init() in obsidian-page.js applies
+           them to the already-parsed document, and until /userattributes answers
+           the page would be showing the defaults. init() ends the period, and it
+           is the only thing that does; wrapAsDocument below serves the body the
+           same way for the same reason. -->
       <body style="display: none;">
         <div id="topbar">${await getTopBar(startPage, req)}</div>
         <div id="wrapper">
@@ -2043,8 +2097,13 @@ export async function wrapInReveal(reveal, req) {
     ${getMermaidScriptEntry()}
     ${getAutoReloadScript()}
   </head>
-  
-  <body>
+
+  <!-- Hidden from the first byte, as in the two page views, and for the second
+       of the two reasons that period exists: a deck restored to the slide it was
+       on before a hot reload would otherwise be seen at slide one first. A deck
+       loads no obsidian-page.js and has no preferences to wait for, so its owner
+       is the script at the end of this body rather than init(). -->
+  <body style="display: none;">
     <div class="reveal" width="100%" height="100%">
       <div class="slides" width="100%" height="100%" id="revealContent">
   `;
@@ -2058,6 +2117,55 @@ export async function wrapInReveal(reveal, req) {
     <script src="/node_modules/reveal.js/plugin/notes/notes.js"></script>
 
     <script>
+      /**
+       * The deck's reveal owner — the counterpart to init() in the two page
+       * views, which a deck does not load. What it waits for is Reveal reporting
+       * ready: the point at which the deck has its slides and can be told which
+       * one to show.
+       *
+       * The slide the deck was on before a hot reload is put back here, in the
+       * same task and after the body is shown, for the reason the reload script
+       * states: a hidden body measures zero in both directions, so neither the
+       * slide geometry nor the scale would come out right. Nothing is painted
+       * between the two, so the deck is first seen on the slide it was left on.
+       *
+       * The value written is the empty string, the same as in a page view and
+       * for the same reason: the stylesheets decide, not this script.
+       *
+       * Called twice or more it does nothing the second time, and clearing the
+       * bound below is part of showing the deck, so the two callers cannot both
+       * reveal it and the bound cannot log after a deck that came up normally.
+       */
+      function showDeck() {
+        if (deckShown) return;
+        deckShown = true;
+        clearTimeout(deckBound);
+        deckBound = null;
+
+        document.body.style.display = "";
+        window.safeLearnRestorePosition?.();
+        // Reveal scales a deck to its viewport, and it computed that scale while
+        // the body still measured zero, so it has to be taken again.
+        if (window.Reveal && Reveal.layout) Reveal.layout();
+      }
+
+      /**
+       * The same bound the page views put on their wait, for the same reason and
+       * in the same order of magnitude. A deck whose engine never reports ready
+       * is broken either way — Reveal.initialize is called inline right below —
+       * but a broken deck that shows its slides unscaled is still worth more
+       * than a black screen.
+       */
+      const deckBoundMs = 5000;
+      let deckShown = false;
+      let deckBound = setTimeout(function () {
+        console.warn(
+          "[bootstrap] Showing this deck without waiting for Reveal: it did not " +
+            "report ready within " + deckBoundMs + " ms."
+        );
+        showDeck();
+      }, deckBoundMs);
+
       // More info about config & plugins:
       // - https://revealjs.com/config/
       // - https://revealjs.com/plugins/
@@ -2165,7 +2273,7 @@ export async function wrapInReveal(reveal, req) {
 
         // The display mode that will be used to show slides
         display: 'block'
-      });
+      }).then(showDeck);
       Reveal.configure({
         // PDF Configurations
         pdfMaxPagesPerSlide: 1

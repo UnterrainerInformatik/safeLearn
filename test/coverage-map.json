@@ -57,13 +57,14 @@
       ]
     },
     "test/checks/rendering.js": {
-      "what": "Callouts and their collapsible forms, highlighted code, fragment indices, side-by-side columns, the image forms, and the emitted PlantUML and Mermaid markup.",
+      "what": "Callouts and their collapsible forms, highlighted code, fragment indices, side-by-side columns, the image forms, and the emitted PlantUML and Mermaid markup. That a page view is shown by its one owner with the value that defers to the stylesheets, and that the wait for it is bounded: a preference request left unanswered still produces a visible page and a console message naming what it waited for, while a page that came up normally reports nothing.",
       "guards": [
         "obsidian.js",
         "app.js",
         "obsidian-page.js",
         "css/callouts.css",
-        "css/main.css"
+        "css/main.css",
+        "test/harness.js"
       ],
       "corpus": [
         "md/test-md-file.md",
@@ -90,7 +91,7 @@
       ]
     },
     "test/checks/presentation.js": {
-      "what": "The deck built from the source's heading structure, fragments in a deck, the deck's own references including the known-dangling list, that it contacts no host but the application and the identity provider, that a host a stylesheet asks for is recorded even when refused, the document view, and the documented shortcut into it with the shift key held and without.",
+      "what": "The deck built from the source's heading structure, fragments in a deck, the deck's own references including the known-dangling list, that it contacts no host but the application and the identity provider, that a host a stylesheet asks for is recorded even when refused, the document view, and the documented shortcut into it with the shift key held and without. That one corpus file opened in all three views becomes visible exactly once in each, by that view's own owner and with the value that defers to the stylesheets - read as the sequence of values the property takes, so a second script writing it fails the run.",
       "guards": [
         "obsidian.js",
         "app.js",
@@ -105,9 +106,10 @@
       ]
     },
     "test/checks/deployment-surface.js": {
-      "what": "What a running instance publishes over HTTP: that keycloak.json, the application sources, the dependency manifests and what sits beside a mounted package directory are not served and a refusal looks like a path with no file behind it, that the assets a page addresses still are — including the ones only a stylesheet names — that every same-origin reference of a rendered page resolves in all three views, and that the one endpoint answering before authentication survives a parameter it cannot interpret.",
+      "what": "What a running instance publishes over HTTP: that keycloak.json, the application sources, the dependency manifests and what sits beside a mounted package directory are not served and a refusal looks like a path with no file behind it, that the assets a page addresses still are — including the ones only a stylesheet names — that every same-origin reference of a rendered page resolves in all three views, and that the one endpoint answering before authentication survives a parameter it cannot interpret. That a page which cannot reach the reload stream keeps trying with a growing delay rather than on a fixed timer.",
       "guards": [
         "app.js",
+        "obsidian.js",
         "middlewares/keycloak-middleware.js",
         "keycloak.json",
         "assets/main-fonts/Lato.ttf",

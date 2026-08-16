@@ -30,8 +30,9 @@ const studentOnlyText = "Only visible to Stu Dent";
 /** Reads the rendered markdown of a page. */
 async function readPage(session, urlPath) {
   await session.page.goto(`${applicationUrl}${urlPath}`, { waitUntil: "domcontentloaded" });
-  // The body stays hidden until the page's own init() runs, so textContent —
-  // innerText would come back empty.
+  // `textContent`, because this returns as soon as the document has parsed and a
+  // page view is served hidden until init() shows it: `innerText` reports what
+  // is rendered, and a hidden body renders nothing.
   return session.page.$eval("#markdown-content", (element) => element.textContent);
 }
 
