@@ -95,6 +95,17 @@ Timestamps follow ISO 8601 (`YYYY-MM-DDTHH:mm:ss`). Values without an explicit t
 
 The server continuously watches these windows. When a block or a whole file becomes visible or hidden, all subscribed clients receive a Server-Sent Events reload signal so the UI stays in sync automatically.
 
+A window on a first-line directive restricts the whole file the same way:
+
+```markdown
+@@@ teacher[2025-11-28T08:00:00 to 2025-11-28T10:50:00]
+
+# Some Document
+Teachers may open this during the exam slot, and nobody at any other time.
+```
+
+When every window in a whole-file directive is shut, no role is active — so the file is hidden from everyone, including the roles it names and from `admin`, which does not short-circuit a closed window. A reader who asks for it anyway is told **This content is not visible right now.**, rather than the **You do not have the required permissions to view this content.** they get for a directive naming roles they simply do not hold. The two messages are deliberately different: the first says come back later, the second says ask someone else. The file is left out of the navigation tree in both cases.
+
 ### File-Content Views
 There are two views.
 ```markdown

@@ -95,10 +95,9 @@ const DOMPurify = createDOMPurify(window);
 const app = express();
 app.set("trust proxy", true);
 
-import { scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions, wrapAsDocument, getActivePermissionRoles, registerVisibilityChangeCallback } from "./obsidian.js";
+import { scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions, wrapAsDocument, resolveFileVisibility, registerVisibilityChangeCallback } from "./obsidian.js";
 
 import chokidar from "chokidar";
-import { hasSomeRoles } from "./utils.js";
 
 async function sanitizeAndParseMarkdown(data, req) {
   try {
@@ -109,12 +108,15 @@ async function sanitizeAndParseMarkdown(data, req) {
     const firstLine = d.split("\n")[0];
     const permissions = parseFirstLineForPermissions(firstLine);
     if (permissions !== null) {
-      const activeRoles = getActivePermissionRoles(permissions);
-      if (activeRoles.length === 0) {
-        throw new Error("This content is not visible right now.");
-      }
-      if (!await hasSomeRoles(req, activeRoles, true)) {
-        throw new Error("You do not have the required permissions to view this content.");
+      // The same rule the navigation tree applies, reached through the one
+      // implementation of it. Only the wording of the refusal belongs here.
+      const { visible, reason } = await resolveFileVisibility(req, permissions);
+      if (!visible) {
+        throw new Error(
+          reason === "outside-window"
+            ? "This content is not visible right now."
+            : "You do not have the required permissions to view this content."
+        );
       }
       // Strip the first line since it held the permissions
       d = d.split("\n").slice(1).join("\n");
