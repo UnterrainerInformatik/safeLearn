@@ -80,4 +80,10 @@ Removing the directive line before parsing (`app.js:120`) is a rendering concern
 
 ## Open Questions
 
-- Whether the empty-file case (`getPermissionsFor` resolving `undefined`) can occur in the corpus at all, or only in a deployment's own `md/`. It is handled either way, but if it cannot occur, the check that a run makes of it has to be built rather than found.
+- ~~Whether the empty-file case (`getPermissionsFor` resolving `undefined`) can occur in the corpus at all, or only in a deployment's own `md/`. It is handled either way, but if it cannot occur, the check that a run makes of it has to be built rather than found.~~
+
+  **Answered during implementation: empty files occur, but they resolve to `null`, not `undefined`.** The corpus holds three zero-byte Markdown files — `Untitled.md` in each of the three `md/folder-tests/` directories. `getPermissionsFor` initialises `result = null` and resolves it when the stream closes; a zero-byte file fires no `line` event at all, so the initial value survives. Verified against one of the three: the `line` handler ran zero times and the promise resolved `null`.
+
+  So `undefined` cannot reach `resolveFileVisibility` from the index. Every entry the metadata build writes carries a `permissions` key, and the only value the reader can produce is `null` or an array. The `undefined` half of the guard is defensive and unexercised — it was already so in `getDirectoryListing`, whose `f.permissions !== undefined` test covered no real case either. It is kept rather than dropped because the function is exported and its two documented callers are not the only ones a fork may add; a caller that parses its own first line and hands over a missing value should be treated as "no directive" rather than crash. Recorded in `docs-testing.md`.
+
+  The `null` path itself is exercised on every run: those three empty files are listed in the navigation tree for every session, which is exactly the "a directive is absent" scenario of the `corpus-index` spec.

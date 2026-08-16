@@ -285,6 +285,41 @@ export function getActivePermissionRoles(permissions, referenceDate = new Date()
     .map((entry) => entry.role);
 }
 
+/**
+ * Decides whether a session may see content addressed by a whole-file
+ * permission directive. This is the one implementation of that rule, and it
+ * exists because two callers ask the same question from different sides:
+ * getDirectoryListing below builds the navigation tree from the index entries
+ * a scan derived, and sanitizeAndParseMarkdown in app.js parses the directive
+ * out of the file it just read. When the rule lived in both of them, an edit
+ * that reached only one - what a closed time window means, how the roles are
+ * tested - let a session see a file in the tree that refuses to open, or hid
+ * one it was allowed to read.
+ *
+ * It takes an already parsed directive rather than a path, because the page
+ * handler, /convert and mdGetToHtml hold content that has no corpus file
+ * behind it. A null or undefined directive means the file names no roles and
+ * every authenticated session may see it.
+ *
+ * Returns { visible: true } or { visible: false, reason } where reason is
+ * "outside-window" when the directive's time windows leave no role active at
+ * all, and "role" when the session simply does not hold one of them. The tree
+ * ignores the reason; the page turns it into its two messages.
+ */
+export async function resolveFileVisibility(req, permissions) {
+  if (permissions === null || permissions === undefined) {
+    return { visible: true };
+  }
+  const activeRoles = getActivePermissionRoles(permissions);
+  if (activeRoles.length === 0) {
+    return { visible: false, reason: "outside-window" };
+  }
+  if (await hasSomeRoles(req, activeRoles, true)) {
+    return { visible: true };
+  }
+  return { visible: false, reason: "role" };
+}
+
 function hasTimedWindow(entry) {
   return Boolean(entry?.window && (entry.window.start || entry.window.end));
 }
@@ -501,6 +536,28 @@ export async function scanFonts(dir, root = dir) {
 let lastFileSnapshot = new Map();
 
 /**
+ * The whole-file permission directive of every file the last scan saw, keyed by
+ * fullPath (the `md/...` form, the same string lastFileSnapshot uses). A scan
+ * rebuilds the index from scratch, and reading the directive back out of every
+ * file meant opening the entire corpus each time - with NEXT_AUTOSCAN on, once
+ * per keystroke-triggered save anywhere under md/. An entry whose mtime still
+ * matches is carried forward instead of read again.
+ *
+ * What this assumes: that mtime moves when the content does. Where it does not
+ * - a filesystem with coarse timestamps, a restore that preserves mtimes - the
+ * carried-forward directive goes stale and the navigation tree disagrees with
+ * the page for that file until the next real change. The page handler reads the
+ * file itself and refuses correctly regardless, so this costs visibility, never
+ * access. The assumption is not new: the watcher's own `modified` list already
+ * rests on exactly this comparison. This extends its reach, it does not
+ * introduce it.
+ *
+ * Rebuilt from the files each scan saw, so a deleted file's entry does not
+ * survive it.
+ */
+let lastFilePermissions = new Map();
+
+/**
  * Scans all markdown files recursively and detects added/removed/modified files.
  * Returns { added, removed, modified } with full paths like "md/subdir/file.md".
  */
@@ -574,6 +631,8 @@ export async function scanFiles(prefix, dir, resetFonts = false, root = dir) {
   scanFilesInternal(dir, root);
 
   // Build file metadata
+  const carriedPermissions = lastFilePermissions;
+  const currentPermissions = new Map();
   let mdFiles = await Promise.all(
     Object.keys(mdFilesDir).map(async (file) => {
       const pwe = mdFilesDir[file];
@@ -585,6 +644,16 @@ export async function scanFiles(prefix, dir, resetFonts = false, root = dir) {
       const absPath = path.join(dir, file);
       const relFullPath = prefix + file;
       const mtime = fs.existsSync(absPath) ? fs.statSync(absPath).mtimeMs : 0;
+      // Carry the directive forward when the file has not moved since the last
+      // scan saw it, and open the file only otherwise. The first scan of a
+      // process finds an empty map and therefore reads everything, which needs
+      // no branch of its own.
+      const carried = carriedPermissions.get(relFullPath);
+      const permissions =
+        carried && carried.mtime === mtime
+          ? carried.permissions
+          : await getPermissionsFor(absPath);
+      currentPermissions.set(relFullPath, { mtime, permissions });
       return {
         [file]: {
           path: file,
@@ -598,12 +667,15 @@ export async function scanFiles(prefix, dir, resetFonts = false, root = dir) {
           fileNameWithoutExtension: pwe.split("/").pop().split(".")[0],
           lastFolder: pwe.split("/").slice(-2, -1)[0] || "",
           cssName: makeSafeForCSS(folders),
-          permissions: await getPermissionsFor(absPath),
+          permissions,
           mtime,
         },
       };
     })
   );
+
+  // Built from the files this scan saw, so a removed file's entry is gone.
+  lastFilePermissions = currentPermissions;
 
   // Flatten
   mdFiles = mdFiles.reduce((acc, file) => {
@@ -1336,12 +1408,8 @@ async function getDirectoryListing(req) {
   const allFiles = Object.values(mdFilesDirStructure);
   const files = await Promise.all(
     allFiles.map(async (f) => {
-      const activeRoles = getActivePermissionRoles(f.permissions);
-      if (f.permissions !== null && f.permissions !== undefined && activeRoles.length === 0) {
-        return null;
-      }
-      const hasRole = await hasSomeRoles(req, activeRoles, true);
-      return hasRole ? f : null;
+      const { visible } = await resolveFileVisibility(req, f.permissions);
+      return visible ? f : null;
     })
   );
   const filteredFiles = files.filter((f) => f !== null);

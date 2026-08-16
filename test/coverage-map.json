@@ -28,7 +28,7 @@
       "corpus": []
     },
     "test/checks/permissions.js": {
-      "what": "Block-level and whole-file directives in both directions, including the admin directive and both plural aliases (teachers and students), their effect on the navigation tree, time-bounded windows, and the teacher-to-student downgrade.",
+      "what": "Block-level and whole-file directives in both directions, including the admin directive and both plural aliases (teachers and students), their effect on the navigation tree, time-bounded windows, and the teacher-to-student downgrade. That the navigation tree and the page a link leads to agree for every file carrying a whole-file directive - the tree read from the rendered sidebar, the page from a direct request, compared against each other rather than against a derived expectation - and that the two refusals stay told apart by their cause. That the same rule reaches Markdown posted to /convert, which has no corpus file behind it.",
       "guards": [
         "utils.js",
         "obsidian.js",
@@ -41,6 +41,7 @@
         "md/test-perms-student-alias.md",
         "md/test-fileperms-teachers.md",
         "md/test-fileperms-4bhif-5bhif-2ahif.md",
+        "md/test-fileperms-window-closed.md",
         "md/test-md-file.md"
       ]
     },

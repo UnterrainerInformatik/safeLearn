@@ -35,10 +35,10 @@ operations:
         source-proposal.md - for example
         "git mv AI/proposals/install-puppeteer.md
         AI/openspec/changes/archive/<archived-change-dir>/source-proposal.md".
-        Move it, never delete it: AI/ is not tracked in git yet, so a delete is
-        unrecoverable, and the file is the user's original wording. Moving it
-        out of AI/proposals/ is what stops the session-start hook from offering
-        the same request again.
+        Move it, never delete it: the file is the user's original wording and
+        belongs to the change's history, where a reader of the archived change
+        can still find it. Moving it out of AI/proposals/ is what stops the
+        session-start hook from offering the same request again.
       - >-
         If the change's proposal.md has no "Source proposal:" line, or the
         referenced file no longer exists, archive normally and change nothing -
