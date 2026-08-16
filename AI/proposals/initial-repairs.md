@@ -5,7 +5,7 @@ Im architecture.md in der section Observations has Du folgende Punkte:
 - express.static liegt auf dem Applikationsverzeichnis (app.js:332). Jeder authentifizierte User kann /app.js, /utils.js, /obsidian.js und — sofern die Datei neben app.js liegt — /keycloak.json samt Client-Secret abrufen. Das Repo selbst ist sauber: Root-keycloak.json ist gitignored, die getrackten wysiwyg-container-*/keycloak.json enthalten nur Platzhalter.
 - Session-Secret ist hartcodiert in keycloak-middleware.js:53, identisch in jedem Deployment aus dieser Quelle. Dazu MemoryStore als Session-Store.
 - /hot-reload ist vor checkAuthenticated registriert und damit unauthentifiziert erreichbar (liefert nur Pfade und Reload-Typ, keinen Inhalt).
-- docs-permissions.md sagt „There is no role student" — getLdapGroups mappt OU Students aber explizit auf student.
+- ~~docs-permissions.md sagt „There is no role student" — getLdapGroups mappt OU Students aber explizit auf student.~~ **Erledigt** durch den Change `harden-role-set-assembly`: docs-permissions.md nennt `student` jetzt als Rolle aus der LDAP-Unit, korrigiert das Mapping `Students` → `student` und dokumentiert `students` als Alias.
 - wrapInReveal verlinkt /obsidian-page.css, das es nicht gibt; jede Präsentation feuert einen Request ins Leere.
 - Dazu cors deklariert aber nie importiert, safe-learn als eigene Dependency, .nvmrc: 20 vs. Dockerfile: node:25.6.0, ein paar tote Exports und sechs weitere Doku/Code-Divergenzen.
 

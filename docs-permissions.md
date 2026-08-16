@@ -12,8 +12,11 @@ Anyone who has even one of these roles assigned will be able to view the documen
 	* `admin`... is a role for testing-purposes, new features, etc...
 	* `teacher`... see everything (except for admin-only). So when you make a document visible to users with the role, let's say `5chif`, then you don't have to specify `teacher`. That is implied.
 	* `teachers`... is an alias of `teacher`. Anyone holding `teacher` also satisfies a directive written in the plural, and anyone without it satisfies neither. The alias is part of the reader's roles, so `@@@ teacher`, `@@@ teachers` and `@@@ teacher, teachers` all address exactly the same people.
-	* You gain a role either by getting the OU= value set by LDAP (`Teachers` gets translated to `teacher` and `Students` to `students`), or by assigning a client-role with that name.
+	* `student`... is a role the code knows but that almost nobody holds — see [Addressing students](#addressing-students) below before you use it in a directive.
+	* `students`... is an alias of `student`. Anyone holding `student` also satisfies a directive written in the plural, and anyone without it satisfies neither. The alias is part of the reader's roles, so `@@@ student`, `@@@ students` and `@@@ student, students` all address exactly the same people — which, in a normal school setup, is nobody.
+	* You gain a role either by getting the OU= value set by LDAP (`Teachers` gets translated to `teacher` and `Students` to `student`), or by assigning a client-role with that name.
 	* The name of the user works as permission-role as well. So in the case of this test-setup here the user 'student' has first-name 'Stu' and last-name 'Dent'; So the viable permission for this user would be `@@@ Stu Dent`.
+		* The built-in role names are reserved. A user whose displayed name is `admin`, `teacher`, `teachers`, `student` or `students` is not addressable by that name and does not gain the role from it — only LDAP or a client-role grants it. Such a collision is written to the server log; rename the account to make the name usable again.
 * Roles are case-insensitive. So putting `@@@ Stu Dent, 4BHIF` is the same as putting `@@@ stu dent, 4bhif`.
 * If the directive is in the first line of the document (the very first line), then it applies to the whole document.
 	* In that case, there is no end-directive.
@@ -21,7 +24,14 @@ Anyone who has even one of these roles assigned will be able to view the documen
 * Documents that are hidden for a viewer will not be visible in the directory-tree on the left as well.
 * If a directory on the left has only files invisible to the viewer, then the entry of that directory will be invisible as well.
 
-There is no role `student`. Students are just users without the `teacher` role.
+### Addressing students
+**Being a student is not a role. It is the absence of the other two.** A student is a user who is neither `admin` nor `teacher`, and that is the normal case — the overwhelming majority of all users.
+
+The role `student` does exist in the code: an LDAP unit `Students` is translated to it, and a client-role of that name grants it. But a school directory does not normally put its pupils into such a unit, so in practice nobody carries it. `@@@ student` and `@@@ students` then address nobody at all.
+
+So do not try to address students positively. Content for everyone who is not a teacher needs **no directive** — by default everyone has access, which is the first rule above. You restrict content *away* from students with `@@@ teacher`; you do not hand it *to* them with `@@@ student`.
+
+The teacher/student view toggle works on exactly this definition: switching to the student view does not give a teacher the `student` role, it takes `teacher`, `teachers` and `admin` away. What remains is a student.
 ### File Restrictions
 Put the security directive on the first line of the document.
 ```markdown

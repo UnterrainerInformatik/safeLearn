@@ -43,55 +43,19 @@ async function getClientRoles(req) {
 }
 
 /**
- * Checks all Keycloak roles of the client for permissions.
+ * The names that belong to a role and to nothing else. The display name is
+ * merged into the same flat set as the roles, so these five have to be kept out
+ * of it: only the identity provider or the LDAP claim may hand them out. Both
+ * plural spellings are listed, because a name has to be refused before the
+ * canonicalization in hasRoles folds `teachers` into `teacher`.
  */
-async function hasClientRoles(req, clientRoles, all) {
-  try {
-    const normalizeRole = (role) =>
-      typeof role === "string" ? role.trim().toLowerCase() : "";
-
-    const normalizedRoles = Array.isArray(clientRoles)
-      ? clientRoles
-          .map(normalizeRole)
-          .filter((role) => role.length > 0)
-      : [];
-
-    if (normalizedRoles.length === 0) {
-      return true;
-    }
-    let clientAccess = false;
-    if (
-      req.user.accessTokenDecoded.resource_access !== undefined &&
-      req.user.accessTokenDecoded.resource_access !== null
-    ) {
-      // Load keycloak.json
-      const keycloakConfig = JSON.parse(
-        fs.readFileSync("keycloak.json", "utf8")
-      );
-      const resource = keycloakConfig.resource;
-      const a = req.user.accessTokenDecoded.resource_access;
-      const r = a[resource];
-      if (r) {
-          const availableRoles = Array.isArray(r.roles)
-            ? r.roles.map(normalizeRole)
-            : [];
-        if (all) {
-            clientAccess = normalizedRoles.every((role) =>
-              availableRoles.includes(role)
-            );
-        } else {
-            clientAccess = normalizedRoles.some((role) =>
-              availableRoles.includes(role)
-            );
-        }
-      }
-    }
-    return clientAccess;
-  } catch (error) {
-    console.error(`Error checking client roles: ${error}`);
-    return null;
-  }
-}
+const namesReservedForRoles = new Set([
+  "admin",
+  "teacher",
+  "teachers",
+  "student",
+  "students",
+]);
 
 /**
  * Fetches all Keycloak roles of the client and all LDAP roles of the user, previously calculated in the Keycloak-middleware and checks for permissions.
@@ -129,8 +93,21 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
     let name = req.user.name
     name = name.trim()
     name = name.toLowerCase()
-    r[name] = true;
-    const cr = await getClientRoles(req, normalizedClientRoles);
+    // Being addressed by name is a documented feature, so the display name
+    // shares this namespace with the roles - and must never be able to stand in
+    // for one. A name equal to a built-in role is dropped here, at the
+    // assignment, so it reaches neither the canonicalization below nor the
+    // admin short-circuit, the student-view downgrade or the exam gate.
+    if (namesReservedForRoles.has(name)) {
+      console.warn(
+        `Display name "${name}" is a reserved role name and was not added to the role set of ` +
+          `${req.user.preferred_username ?? "this session"}. The account keeps every role the ` +
+          `identity provider issued; rename it in Keycloak to make it addressable by name again.`
+      );
+    } else {
+      r[name] = true;
+    }
+    const cr = await getClientRoles(req);
     if (cr) {
       for (const role of cr) {
         const normalizedRole = normalizeRole(role);
@@ -153,6 +130,9 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
     }
     if (r.teacher) {
       r.teachers = true;
+    }
+    if (r.student) {
+      r.students = true;
     }
     let clientViews = normalizedClientRoles.filter((role) => role.startsWith("#"));
     normalizedClientRoles = normalizedClientRoles.filter((role) => !role.startsWith("#"));
@@ -201,7 +181,10 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
     return clientAccess;
   } catch (error) {
     console.error(`Error checking client roles: ${error}`);
-    return null;
+    // Refuse rather than leave the decision open: the success path already
+    // normalizes an undecided result to false, and this is the branch that
+    // knows the least about what the session may read.
+    return false;
   }
 }
 

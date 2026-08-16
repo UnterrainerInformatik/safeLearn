@@ -2,8 +2,9 @@
  * What each session is allowed to see.
  *
  * Reads `md/test-perms.md`, `md/test-perms-teacher-alias.md`,
- * `md/test-fileperms-teachers.md`, `md/test-fileperms-4bhif-5bhif-2ahif.md` and
- * the admin and time-bound blocks of `md/test-md-file.md`.
+ * `md/test-perms-student-alias.md`, `md/test-fileperms-teachers.md`,
+ * `md/test-fileperms-4bhif-5bhif-2ahif.md` and the admin and time-bound blocks
+ * of `md/test-md-file.md`.
  *
  * Every expectation is derived from the roles the session actually carries.
  * Which classes the demo accounts belong to is not documented and not ours to
@@ -21,9 +22,10 @@ import { render, roles, setPreferences, sharedSession } from "../harness.js";
 const permissionsPage = "/md/test-perms.md";
 const timedPage = "/md/test-md-file.md";
 const aliasPage = "/md/test-perms-teacher-alias.md";
+const studentAliasPage = "/md/test-perms-student-alias.md";
 
 /** Every page the checks below read, rendered once per session. */
-const pages = [permissionsPage, timedPage, aliasPage];
+const pages = [permissionsPage, timedPage, aliasPage, studentAliasPage];
 
 /** What the application renders in place of a file the session may not read. */
 const refusal = "You do not have the required permissions to view this content.";
@@ -60,6 +62,29 @@ const aliasPairBlock = {
   granted: "teacher",
   text: "Reached through the role and the alias at once.",
 };
+
+/**
+ * The blocks of `md/test-perms-student-alias.md`. `student` and `students`
+ * address exactly the same readers, in either direction, so all three blocks
+ * are granted by the one role a session can actually carry: `student`.
+ */
+const studentAliasBlocks = [
+  {
+    what: "the block addressed with the plural spelling",
+    role: "students",
+    text: "Reached through the plural student alias.",
+  },
+  {
+    what: "the block addressed with the singular spelling",
+    role: "student",
+    text: "Reached through the singular student role.",
+  },
+  {
+    what: "the block naming the student role and its alias at once",
+    role: "student, students",
+    text: "Reached through the student role and its alias at once.",
+  },
+];
 
 /**
  * The `@@@` blocks addressed by role. `text` is the block's content; the
@@ -170,6 +195,32 @@ describe("permissions", () => {
     });
   }
 
+  // ---- 3.1a Both spellings of the student role ----
+
+  test(`both spellings of the student role address exactly the sessions holding "student" on ${studentAliasPage}`, () => {
+    const exercised = [];
+    for (const role of ["student", "teacher"]) {
+      const holds = carried.get(role).has("student");
+      const allowed = holds || carried.get(role).has("admin");
+      exercised.push(`the ${role} session ${holds ? "holds" : "does not hold"} it`);
+      for (const block of studentAliasBlocks) {
+        assert.equal(
+          rendered(role, studentAliasPage).includes(block.text),
+          allowed,
+          allowed
+            ? `the ${role} session holds "student" and should see ${block.what}, addressed "${block.role}"`
+            : `the ${role} session does not hold "student" and should not see ${block.what}, ` +
+              `addressed "${block.role}", anywhere in ${studentAliasPage}`
+        );
+      }
+    }
+    // Which direction a live login exercises depends on the demo accounts, and
+    // whether they carry `student` is nothing this repository owns. The run
+    // says it out loud, so an account that stops carrying the role shows up
+    // here instead of quietly reducing this check to its negative half.
+    console.log(`      the student alias, exercised against: ${exercised.join(", ")}`);
+  });
+
   test(`the two sessions really do differ on ${permissionsPage}`, () => {
     // Without this, a page that hid everything from everyone would satisfy every
     // "should not see" above.
@@ -269,6 +320,21 @@ describe("permissions", () => {
         !downgradedAlias.text.includes(aliasBlock.text),
         `with the teacher view dropped, ${aliasBlock.what} should be gone from ${aliasPage}`
       );
+      // The downgrade deletes `teacher`, `teachers` and `admin` and nothing
+      // else: it exists to reach the student view, so whatever the session's
+      // own `student` role is, dropping the teacher view leaves it - and its
+      // plural alias - exactly as it was.
+      const holdsStudent = carried.get("teacher").has("student");
+      const downgradedStudent = await render(teacher, studentAliasPage);
+      for (const block of studentAliasBlocks) {
+        assert.equal(
+          downgradedStudent.text.includes(block.text),
+          holdsStudent,
+          `with the teacher view dropped, ${block.what} of ${studentAliasPage} should ` +
+            `${holdsStudent ? "still be visible" : "still be absent"}: the teacher session ` +
+            `${holdsStudent ? "holds" : "does not hold"} "student", and the downgrade does not touch that role`
+        );
+      }
       assert.ok(
         !(await treeEntries(teacher)).includes(teacherFile.path),
         `with the teacher view dropped, ${teacherFile.path} should be gone from the navigation tree`

@@ -220,10 +220,10 @@ After sanitizing, one of three wrappers builds the response: `wrapInPage` (top b
 `utils.js` `hasRoles` assembles one role set per request from three sources:
 
 1. **Keycloak client roles** — `resource_access[<resource>].roles` from the decoded access token, where `<resource>` is read from `keycloak.json`.
-2. **LDAP groups** — `keycloak-middleware.js` `getLdapGroups` extracts every `OU=…` from the user's `ldap` claim, lowercases it, and maps `teachers` → `teacher` and `students` → `student`.
-3. **The user's own name** — the normalized `req.user.name` is added as a role, so `@@@ Stu Dent` addresses one person.
+2. **LDAP groups** — `keycloak-middleware.js` `getLdapGroups` extracts every `OU=…` from the user's `ldap` claim, lowercases it, and maps `teachers` → `teacher` and `students` → `student`. In practice the school directory has no unit that yields `student`: pupils carry their class and nothing else, so a student is a session that holds neither `admin` nor `teacher`. The role is reachable code, not a role anyone holds — the student-view downgrade encodes the same definition by removing roles rather than granting one.
+3. **The user's own name** — the normalized `req.user.name` is added as a role, so `@@@ Stu Dent` addresses one person. Except when it collides with a built-in role: `admin`, `teacher`, `teachers`, `student` and `students` are reserved (`namesReservedForRoles`), and a display name equal to one of them is dropped with a warning instead of entering the set. The name shares this namespace with the roles, so it must never be able to stand in for one; only sources 1 and 2 grant those five.
 
-All comparisons are lowercased and trimmed. `admin` short-circuits to full access. Once the three sources are merged, `hasRoles` canonicalizes the plurals a client role may carry (`teachers` → `teacher`, `students` → `student`) and derives the alias `teachers` from `teacher`. The alias is therefore part of the session's role set before any directive is read, whatever source the role arrived from; the roles a directive names never enter the role set.
+All comparisons are lowercased and trimmed. `admin` short-circuits to full access. Once the three sources are merged, `hasRoles` canonicalizes the plurals a client role may carry (`teachers` → `teacher`, `students` → `student`) and derives the aliases back: `teachers` from `teacher`, `students` from `student`. Both spellings of both roles therefore end up in the set whichever one the role arrived as, before any directive is read; the roles a directive names never enter the role set.
 
 ### The two directive forms
 
@@ -321,7 +321,6 @@ Recorded as found, without judgment on intent and without changes to the code.
 
 ### Documentation and code divergences
 
-- **`docs-permissions.md` states "There is no role `student`"**, but `getLdapGroups` explicitly maps the LDAP OU `Students` to the role `student`. The same file's rule list says the mapping produces `students` (plural), while the code produces the singular.
 - **The LDAP claim name is undocumented.** `docs-keycloak.md` says `LDAP_ENTRY_DN` is present automatically and needs no setup, but `getLdapGroups` reads `req.user.ldap` — a claim that must be named `ldap`, which requires a mapper.
 - **`docs-wysiwyg.md` names the `.env` field `PUBLIC_START_URL`**; both compose files and the tracked `.env` use `PUBLIC_START_PAGE`.
 - **`docs-wysiwyg.md` refers to `./up.ps1` on Windows** and to a directory called `wysiwyg`; the repository ships `wysiwyg-container-windows/` containing `up.sh`.
@@ -359,3 +358,4 @@ Recorded as found, without judgment on intent and without changes to the code.
 | [docs-debugging.md](../docs-debugging.md) | Running locally, which files the pipeline replaces, httpYac setup |
 | [docs-testing.md](../docs-testing.md) | The browser verification harness — what `npm test` does, the headed switch, the demo accounts, the environment variables, and the shared-account constraint on checks |
 | [docs-keycloak.md](../docs-keycloak.md) | Keycloak client and realm setup, the `config` and `lastVisitedUrl` user attributes, the account API endpoints |
+| [docs-development.md](../docs-development.md) | The realm a development instance needs: why the demo realm carries no LDAP and every role is a client role, the demo accounts and the roles they hold, and which accounts would close the coverage gaps `docs-testing.md` records |

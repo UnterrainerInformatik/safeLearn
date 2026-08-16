@@ -101,5 +101,7 @@ Here you can find information about [building](docs-building.md) this project.
 Here you can find information about [debugging](docs-debugging.md) this project when you've decided to help develop it.
 ## Development: Testing
 `npm test` starts the server, logs into Keycloak in a real browser and checks that it gets in. Here you can find information about [testing](docs-testing.md) this project.
+## Development: The Realm You Develop Against
+Which accounts and roles the demo realm needs for the tests to run — and why it deliberately has no LDAP — is described [here](docs-development.md).
 ## Self-Hosting: Keycloak
 If you like to host your own server, you'll need a Keycloak-Server to host your users' credentials that is probably connected to your schools' LDAP in some way. [Here](docs-keycloak.md) you can find information about that.
