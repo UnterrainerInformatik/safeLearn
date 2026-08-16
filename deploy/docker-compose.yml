@@ -8,6 +8,8 @@ services:
       - "${WEBSERVER_PORT}:${INTERNAL_PORT}"
     environment:
       - TZ=Europe/Vienna
+      # Signs the session cookies. The container will not start without it.
+      - SESSION_SECRET=${SESSION_SECRET}
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro

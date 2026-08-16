@@ -19,6 +19,9 @@ COPY package.json /app
 COPY package-lock.json /app
 COPY *.js /app
 COPY *.css /app
+# The start page a deployment falls back to when it sets no START_PAGE. Without
+# it in the image that fallback is redirected to itself.
+COPY index.html /app
 
 # make app directory as the working directory.
 WORKDIR /app

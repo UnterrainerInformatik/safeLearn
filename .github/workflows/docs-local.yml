@@ -41,6 +41,7 @@ jobs:
             echo NEXT_PUBLIC_SERVER_URL=${{ secrets.SERVER_URL }} >> site/.env
             echo NEXT_PUBLIC_IS_APP_FOLDER=true >> site/.env
             echo NEXT_AUTOSCAN=${{ secrets.AUTOSCAN || 'false' }} >> site/.env
+            echo SESSION_SECRET=${{ secrets.SESSION_SECRET }} >> site/.env
       - name: Touch keycloak.json file
         run: touch site/keycloak.json
       - name: Fill keycloak.json file
@@ -135,6 +136,7 @@ jobs:
             echo INTERNAL_PORT=${{ secrets.PORT }} >> ./deploy/.env
             echo DOCKER_HUB_USER=${{ secrets.DOCKER_HUB_USER }} >> ./deploy/.env
             echo DOCKER_IMAGE_NAME=${{ secrets.DOCKER_IMAGE_NAME }} >> ./deploy/.env
+            echo SESSION_SECRET=${{ secrets.SESSION_SECRET }} >> ./deploy/.env
       - name: Normalize line endings for deploy scripts
         run: |
             sudo apt-get update -y

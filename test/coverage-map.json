@@ -22,7 +22,8 @@
         "test/checks/views.js",
         "test/checks/rendering.js",
         "test/checks/navigation.js",
-        "test/checks/presentation.js"
+        "test/checks/presentation.js",
+        "test/checks/deployment-surface.js"
       ],
       "corpus": []
     },
@@ -94,6 +95,17 @@
       ],
       "corpus": [
         "md/presentations/test-presentation.md",
+        "md/test-md-file.md"
+      ]
+    },
+    "test/checks/deployment-surface.js": {
+      "what": "What a running instance publishes over HTTP: that keycloak.json, the application sources and the dependency manifests are not served and a refusal looks like a path with no file behind it, that the assets a page addresses still are, and that every same-origin reference of a rendered page resolves in all three views.",
+      "guards": [
+        "app.js",
+        "middlewares/keycloak-middleware.js",
+        "keycloak.json"
+      ],
+      "corpus": [
         "md/test-md-file.md"
       ]
     },
