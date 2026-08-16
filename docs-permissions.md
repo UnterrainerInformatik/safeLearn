@@ -7,9 +7,11 @@ To restrict the visibility of a whole file or parts of a document's content and 
 Anyone who has even one of these roles assigned will be able to view the document or that part of the document you specified the directive for.
 ### Here are the rules
 * By default everyone has access to a file or document-content.
+* A directive lists the roles that are allowed to read the content. It never grants those roles to whoever reads it. `@@@ admin` is visible to a session that holds `admin` and to nobody else, and the same goes for every other role name.
 * There are some roles that are built in...
 	* `admin`... is a role for testing-purposes, new features, etc...
 	* `teacher`... see everything (except for admin-only). So when you make a document visible to users with the role, let's say `5chif`, then you don't have to specify `teacher`. That is implied.
+	* `teachers`... is an alias of `teacher`. Anyone holding `teacher` also satisfies a directive written in the plural, and anyone without it satisfies neither. The alias is part of the reader's roles, so `@@@ teacher`, `@@@ teachers` and `@@@ teacher, teachers` all address exactly the same people.
 	* You gain a role either by getting the OU= value set by LDAP (`Teachers` gets translated to `teacher` and `Students` to `students`), or by assigning a client-role with that name.
 	* The name of the user works as permission-role as well. So in the case of this test-setup here the user 'student' has first-name 'Stu' and last-name 'Dent'; So the viable permission for this user would be `@@@ Stu Dent`.
 * Roles are case-insensitive. So putting `@@@ Stu Dent, 4BHIF` is the same as putting `@@@ stu dent, 4bhif`.

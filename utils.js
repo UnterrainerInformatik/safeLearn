@@ -115,8 +115,6 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
 
     let clientAccess = null;
     const attributes = await getUserAttributes(req);
-    const ccr = await getClientRoles(req, normalizedClientRoles);
-    // console.log("Client roles", ccr);
     // console.log("Request user rolesCalculated", req.user.rolesCalculated);
     // console.log("attributes", attributes);
     let a = {ve: 0, vt: 0, va: 0};
@@ -141,18 +139,32 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
         }
       }
     }
-    let clientViews = normalizedClientRoles.filter((role) => role.startsWith("#"));
-    normalizedClientRoles = normalizedClientRoles.filter((role) => !role.startsWith("#"));
-    let isAdmin = r.admin || normalizedClientRoles.includes("admin");
-    let isTeacher = r.teacher || normalizedClientRoles.includes("teacher");
-    if (isTeacher) {
+    // The session's role set is complete at this point. Any future source of
+    // roles must be merged above this line, so that the canonicalization and
+    // the alias below cover it too. Nothing below reads the requested roles to
+    // decide which roles the session holds - a directive never grants itself.
+    if (r.teachers) {
+      r.teacher = true;
+      delete r["teachers"];
+    }
+    if (r.students) {
+      r.student = true;
+      delete r["students"];
+    }
+    if (r.teacher) {
       r.teachers = true;
     }
+    let clientViews = normalizedClientRoles.filter((role) => role.startsWith("#"));
+    normalizedClientRoles = normalizedClientRoles.filter((role) => !role.startsWith("#"));
+    let isAdmin = !!r.admin;
+    let isTeacher = !!r.teacher;
     if ((isAdmin || isTeacher) && allowOverride && a.vt == 0) {
       // Downgrade teacher and admin to student.
       isAdmin = false;
       isTeacher = false;
       delete r["teacher"];
+      delete r["teachers"];
+      delete r["admin"];
     }
     if (isAdmin) {
       clientAccess = true;

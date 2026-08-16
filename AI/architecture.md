@@ -223,7 +223,7 @@ After sanitizing, one of three wrappers builds the response: `wrapInPage` (top b
 2. **LDAP groups** — `keycloak-middleware.js` `getLdapGroups` extracts every `OU=…` from the user's `ldap` claim, lowercases it, and maps `teachers` → `teacher` and `students` → `student`.
 3. **The user's own name** — the normalized `req.user.name` is added as a role, so `@@@ Stu Dent` addresses one person.
 
-All comparisons are lowercased and trimmed. `admin` short-circuits to full access. `teacher` additionally gets the alias `teachers`.
+All comparisons are lowercased and trimmed. `admin` short-circuits to full access. Once the three sources are merged, `hasRoles` canonicalizes the plurals a client role may carry (`teachers` → `teacher`, `students` → `student`) and derives the alias `teachers` from `teacher`. The alias is therefore part of the session's role set before any directive is read, whatever source the role arrived from; the roles a directive names never enter the role set.
 
 ### The two directive forms
 
@@ -251,13 +251,13 @@ Three `#`-prefixed roles are not roles at all but view switches, resolved in `ut
 
 | Directive | Visible when |
 | --- | --- |
-| `#exam` | preference `ve == 1` **and** the user is teacher or admin — hardcoded, and not subject to the student-view downgrade |
+| `#exam` | preference `ve == 1` **and** the user is teacher or admin — hardcoded, and read after the student-view downgrade, so a downgraded teacher fails it |
 | `#practice` | preference `ve == 0` |
 | `#answer` | preference `va == 1` |
 
 ### The student-view downgrade
 
-When `allowOverride` is set and the teacher's preference `vt == 0`, `hasRoles` strips `admin` and `teacher` from the role set. That is the mechanism behind the teacher/student toggle in the top bar: a teacher sees exactly what a student sees, including hidden files disappearing from the tree.
+When `allowOverride` is set and the teacher's preference `vt == 0`, `hasRoles` strips `teacher`, its alias `teachers` and `admin` from the role set. That is the mechanism behind the teacher/student toggle in the top bar: a teacher sees exactly what a student sees, including hidden files disappearing from the tree. The strip happens before the view pseudo-roles are resolved, so a downgraded session fails the `#exam` gate as well. Nothing has to be undone when the view is switched back on — the role set is rebuilt from the session on every call.
 
 ### Live reload transport
 
@@ -342,7 +342,6 @@ Recorded as found, without judgment on intent and without changes to the code.
 - **The whole-file permission check is duplicated**: `app.js` re-parses the first line at render time although `scanFiles` already stored `permissions` in `mdFilesDirStructure`.
 - **Mixed comment languages.** A few comments in `obsidian.js` (`preprocessSideBySide`, `postprocessFragments`) and `app.js` are German, while the rest of the codebase is English.
 - **Verification is browser-level only, and there is no type checking.** `npm test` runs the Puppeteer suite in `test/`, which starts the server, completes the Keycloak login and asserts on rendered pages — the `@@@` directives in both directions, the exam/practice/answer views, the render features, the link and folder edge cases, and the presentation and document views. Nothing covers a function in isolation, so a unit of behavior is either exercised through the whole stack — including a live external identity provider — or not at all. There is no JSDoc-driven type checking.
-- **A `@@@ admin` block is visible to every session.** `hasRoles` in `utils.js` computes `isAdmin = r.admin || normalizedClientRoles.includes("admin")`, so the role the *directive* asks for satisfies the check by itself. Both demo accounts see the "Admins only!!!" block of `md/test-md-file.md`. No check asserts on that block; it is recorded in `docs-testing.md` instead.
 - **`#practice` is granted by a preference alone.** `hasRoles` resolves `#practice` as `a.ve == 0` with no role in the rule, so a student who turns the exam view on loses the practice question without gaining the exam one and is left with neither variant.
 - **The hot-reload script and `init()` disagree on how to reveal the body.** `obsidian-page.js` `init()` sets `document.body.style.display = "block"`, while the auto-reload script's `DOMContentLoaded` handler sets it to `none` and then back to `""`. Which value ends up on the element depends on which finishes last.
 - **Each page holds an open server-sent-events connection to `/hot-reload` for its whole life.** A client that walks many pages through one browser tab accumulates them against the browser's per-host connection limit until navigations queue behind them; the verification suite refuses that endpoint for exactly this reason.

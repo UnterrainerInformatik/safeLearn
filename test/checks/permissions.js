@@ -1,9 +1,9 @@
 /**
  * What each session is allowed to see.
  *
- * Reads `md/test-perms.md`, `md/test-fileperms-teachers.md`,
- * `md/test-fileperms-4bhif-5bhif-2ahif.md` and the time-bound blocks of
- * `md/test-md-file.md`.
+ * Reads `md/test-perms.md`, `md/test-perms-teacher-alias.md`,
+ * `md/test-fileperms-teachers.md`, `md/test-fileperms-4bhif-5bhif-2ahif.md` and
+ * the admin and time-bound blocks of `md/test-md-file.md`.
  *
  * Every expectation is derived from the roles the session actually carries.
  * Which classes the demo accounts belong to is not documented and not ours to
@@ -20,24 +20,71 @@ import { render, roles, setPreferences, sharedSession } from "../harness.js";
 
 const permissionsPage = "/md/test-perms.md";
 const timedPage = "/md/test-md-file.md";
+const aliasPage = "/md/test-perms-teacher-alias.md";
+
+/** Every page the checks below read, rendered once per session. */
+const pages = [permissionsPage, timedPage, aliasPage];
 
 /** What the application renders in place of a file the session may not read. */
 const refusal = "You do not have the required permissions to view this content.";
 
+/** The teacher-only block of `md/test-perms.md`, named because 3.5 and 3.6 use it. */
+const teacherBlock = {
+  what: "the teacher block",
+  page: permissionsPage,
+  role: "teacher",
+  text: "Only visible to teachers.",
+};
+
 /**
- * The `@@@` blocks of `md/test-perms.md`. `text` is the block's content; the
+ * The block of `md/test-perms-teacher-alias.md` addressed in the plural. The
+ * alias is a property of the session's role set, not of the directive, so the
+ * role a session has to carry for it is `teacher`.
+ */
+const aliasBlock = {
+  what: "the plural alias block",
+  page: aliasPage,
+  role: "teachers",
+  granted: "teacher",
+  text: "Reached through the plural alias.",
+};
+
+/**
+ * The block of the same file that names the role and its alias together.
+ * Naming both must grant exactly what naming either one alone grants.
+ */
+const aliasPairBlock = {
+  what: "the block naming the role and its alias at once",
+  page: aliasPage,
+  role: "teacher, teachers",
+  granted: "teacher",
+  text: "Reached through the role and the alias at once.",
+};
+
+/**
+ * The `@@@` blocks addressed by role. `text` is the block's content; the
  * sentence that introduces each block stays visible either way and is worded
- * differently, so a match is the block and nothing else.
+ * differently, so a match is the block and nothing else. `granted` names the
+ * role a session must carry when that is not the role the directive writes.
  */
 const blocks = [
-  { what: "the teacher block", role: "teacher", text: "Only visible to teachers." },
-  { what: "the 5bhif group block", role: "5bhif", text: "Only visible to 5BHIF." },
-  { what: "the block addressed to the student by name", role: "stu dent", text: "Only visible to Stu Dent" },
+  teacherBlock,
+  { what: "the 5bhif group block", page: permissionsPage, role: "5bhif", text: "Only visible to 5BHIF." },
+  {
+    what: "the block addressed to the student by name",
+    page: permissionsPage,
+    role: "stu dent",
+    text: "Only visible to Stu Dent",
+  },
   {
     what: "the second teacher block",
+    page: permissionsPage,
     role: "teacher",
     text: "Only visible to users being in teachers AND 5bhif groups.",
   },
+  { what: "the admin block", page: timedPage, role: "admin", text: "Admins only!!!" },
+  aliasBlock,
+  aliasPairBlock,
 ];
 
 /** The files whose first line restricts the whole file. */
@@ -95,27 +142,29 @@ describe("permissions", () => {
       // Everything below depends on the teacher view being on and on the start
       // page not resolving to the account's last visited URL.
       await setPreferences(session, {});
-      shown.set(role, {
-        session,
-        perms: (await render(session, permissionsPage)).text,
-        timed: (await render(session, timedPage)).text,
-      });
+      const text = new Map();
+      for (const page of pages) text.set(page, (await render(session, page)).text);
+      shown.set(role, { session, text });
     }
   });
+
+  /** What `page` rendered to for the session of `role`. */
+  const rendered = (role, page) => shown.get(role).text.get(page);
 
   // ---- 3.1 Block-level directives, both directions per block ----
 
   for (const block of blocks) {
-    test(`${block.what} of ${permissionsPage} appears exactly for the sessions holding "${block.role}"`, () => {
+    const held = block.granted ?? block.role;
+    test(`${block.what} of ${block.page} appears exactly for the sessions holding "${held}"`, () => {
       for (const role of ["student", "teacher"]) {
-        const allowed = carried.get(role).has(block.role) || carried.get(role).has("admin");
-        const text = shown.get(role).perms;
+        const allowed = carried.get(role).has(held) || carried.get(role).has("admin");
+        const text = rendered(role, block.page);
         assert.equal(
           text.includes(block.text),
           allowed,
           allowed
-            ? `the ${role} session holds "${block.role}" and should see ${block.what} of ${permissionsPage}`
-            : `the ${role} session does not hold "${block.role}" and should not see ${block.what} of ${permissionsPage} anywhere in the page`
+            ? `the ${role} session holds "${held}" and should see ${block.what} of ${block.page}`
+            : `the ${role} session does not hold "${held}" and should not see ${block.what} of ${block.page} anywhere in the page`
         );
       }
     });
@@ -125,8 +174,8 @@ describe("permissions", () => {
     // Without this, a page that hid everything from everyone would satisfy every
     // "should not see" above.
     assert.notEqual(
-      shown.get("student").perms,
-      shown.get("teacher").perms,
+      rendered("student", permissionsPage),
+      rendered("teacher", permissionsPage),
       `${permissionsPage} should not render identically for both sessions`
     );
   });
@@ -186,7 +235,7 @@ describe("permissions", () => {
           [...(block.unwindowed ?? []), ...(block.open ?? [])].some((role_) => held.has(role_)) ||
           held.has("admin");
         assert.equal(
-          shown.get(role).timed.includes(block.text),
+          rendered(role, timedPage).includes(block.text),
           granted,
           granted
             ? `the ${role} session holds a role this directive grants without a closed window, so it should see ${block.what}`
@@ -210,8 +259,15 @@ describe("permissions", () => {
       await setPreferences(teacher, { vt: 0 });
       const downgraded = await render(teacher, permissionsPage);
       assert.ok(
-        !downgraded.text.includes(blocks[0].text),
+        !downgraded.text.includes(teacherBlock.text),
         "with the teacher view dropped, the teacher-only block should be gone from the page"
+      );
+      // The alias is stripped along with the role it projects, so the plural
+      // spelling must not outlive the downgrade either.
+      const downgradedAlias = await render(teacher, aliasPage);
+      assert.ok(
+        !downgradedAlias.text.includes(aliasBlock.text),
+        `with the teacher view dropped, ${aliasBlock.what} should be gone from ${aliasPage}`
       );
       assert.ok(
         !(await treeEntries(teacher)).includes(teacherFile.path),
@@ -228,8 +284,13 @@ describe("permissions", () => {
 
     const restored = await render(teacher, permissionsPage);
     assert.ok(
-      restored.text.includes(blocks[0].text),
+      restored.text.includes(teacherBlock.text),
       "with the teacher view back on, the teacher-only block should be visible again"
+    );
+    const restoredAlias = await render(teacher, aliasPage);
+    assert.ok(
+      restoredAlias.text.includes(aliasBlock.text),
+      `with the teacher view back on, ${aliasBlock.what} should be visible again`
     );
     assert.ok(
       (await treeEntries(teacher)).includes(teacherFile.path),
@@ -243,7 +304,7 @@ describe("permissions", () => {
     for (const role of ["student", "teacher"]) {
       assert.equal(
         carried.get(role).has("teacher"),
-        shown.get(role).perms.includes(blocks[0].text),
+        rendered(role, permissionsPage).includes(teacherBlock.text),
         `the harness says the ${role} session ${carried.get(role).has("teacher") ? "holds" : "does not hold"} ` +
           `"teacher", but ${permissionsPage} shows the opposite. One of the two is wrong.`
       );

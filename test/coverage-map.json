@@ -27,7 +27,7 @@
       "corpus": []
     },
     "test/checks/permissions.js": {
-      "what": "Block-level and whole-file directives in both directions, their effect on the navigation tree, time-bounded windows, and the teacher-to-student downgrade.",
+      "what": "Block-level and whole-file directives in both directions, including the admin directive and the plural teachers alias, their effect on the navigation tree, time-bounded windows, and the teacher-to-student downgrade.",
       "guards": [
         "utils.js",
         "obsidian.js",
@@ -36,6 +36,7 @@
       ],
       "corpus": [
         "md/test-perms.md",
+        "md/test-perms-teacher-alias.md",
         "md/test-fileperms-teachers.md",
         "md/test-fileperms-4bhif-5bhif-2ahif.md",
         "md/test-md-file.md"
