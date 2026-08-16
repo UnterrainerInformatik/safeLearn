@@ -7,6 +7,7 @@ Echter Ablageort: `/mnt/data/source/HTL/safeLearn/AI/memory/`
 - [Sprache: Deutsch](language-german.md) — Gerald schreibt auf Deutsch, Antworten ebenfalls auf Deutsch
 - [AI-Ordner-Layout](ai-folder-layout.md) — alles AI-Bezogene liegt unter `AI/`; `.claude`, `openspec` und der Memory-Pfad sind Symlinks dorthin
 - [OpenSpec-Setup](openspec-setup.md) — via Volta installiert, CLI heißt `openspec`, Slash-Commands `/opsx:*`
+- [Archivieren aus AI/ heraus](openspec-archive-from-ai-dir.md) — `openspec archive` bricht vom Repo-Root am Symlink ab; aus `AI/` läuft es durch
 - [Code-Sprache: Englisch](code-language-english.md) — Code, Bezeichner, Kommentare und Docs immer Englisch; Konversation bleibt Deutsch
 - [Architektur-Referenz](architecture-doc.md) — `AI/architecture.md` hält Tech-Stack, Features, Component-Map, Pipeline, Permissions und Observations
 - [Proposals-Intake](proposals-autostart.md) — `AI/proposals/` wird beim Session-Start gelistet, Change heißt wie das File, beim Archivieren wandert es ins Change-Archiv
