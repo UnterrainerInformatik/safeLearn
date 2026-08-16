@@ -10,6 +10,8 @@ services:
       - NEXT_PUBLIC_SERVER_URL=${PUBLIC_SERVER_URL}
       - NEXT_PUBLIC_START_PAGE=${PUBLIC_START_PAGE}
       - NEXT_AUTOSCAN=${AUTOSCAN}
+      # Signs the session cookies. The container will not start without it.
+      - SESSION_SECRET=${SESSION_SECRET}
       # Turn on polling so changes on local windows drives are seen reliably.
       - CHOKIDAR_USEPOLLING=true
       - CHOKIDAR_INTERVAL=500

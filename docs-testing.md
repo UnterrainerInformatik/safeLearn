@@ -29,6 +29,7 @@ One run does the following:
 | `test/checks/rendering.js` | Every callout type and the collapsible forms, highlighted code, fragment indices and their reset at headings, the two- and three-column layouts, the four image forms, and the emitted PlantUML and Mermaid markup. |
 | `test/checks/navigation.js` | Wiki-link resolution including the duplicated basename and the name with spaces, the folder-name edge cases, the table of contents and the navigation tree. |
 | `test/checks/presentation.js` | The deck built from the source's heading structure, fragments in a deck, the deck's own references, and the document view. |
+| `test/checks/deployment-surface.js` | What a running instance publishes over HTTP: that `keycloak.json`, the application's own sources and the dependency manifests are not served and that a refusal looks like a path with no file behind it, that the assets a page addresses still answer, and that every same-origin reference of a rendered page resolves in all three views. |
 | `test/coverage.test.js` | The coverage record. No browser, no login. |
 
 ## Running it
@@ -161,6 +162,8 @@ const knownDangling = [
 A listed entry is **reported** and does not fail the run. An unlisted dangling reference **fails**. And an entry that no longer dangles — because the reference was repaired or removed — **fails too**, so the exception cannot outlive its repair: the change that fixes the reference deletes the line in the same commit. Those three rules are asserted directly, without a browser, so they hold whether or not the list is currently empty.
 
 The list is empty today. It was written for `wrapInReveal`'s `<link rel="stylesheet" href="/obsidian-page.css">`, which addressed a file that does not exist; the working tree no longer emits that link.
+
+It stayed empty when static file serving became an allowlist — every reference the application emits has a mount. That is the reason the reference walk matters more than it used to: `test/checks/deployment-surface.js` runs the same walk over the page, document and presentation views of `md/test-md-file.md`, and it carries no exception list at all. A reference that has no mount is not a 404 — the catch-all in `app.js` answers 200 with the start page — so both walks treat a redirect as a failure. A forgotten mount shows up there first.
 
 ## What the corpus demonstrates but a run cannot assert
 

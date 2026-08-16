@@ -25,8 +25,8 @@ Versions are the ranges declared in `package.json`; the resolved column is the v
 | Component | Declared | Resolved | Where it is used |
 | --- | --- | --- | --- |
 | Node.js | `.nvmrc`: `20` | `Dockerfile`: `node:25.6.0-alpine` | ESM throughout (`"type": "module"`); top-level `await` in `app.js` |
-| `express` | `^4.18.3` | 4.22.1 | `app.js` — the entire HTTP surface, plus `express.static` for assets |
-| `express-session` | `^1.18.0` | 1.19.0 | `middlewares/keycloak-middleware.js` — session with the default `MemoryStore` |
+| `express` | `^4.18.3` | 4.22.1 | `app.js` — the entire HTTP surface, plus one `express.static` mount per served location (see section 5) |
+| `express-session` | `^1.18.0` | 1.19.0 | `middlewares/keycloak-middleware.js` — session with the default `MemoryStore`, secret from `SESSION_SECRET` |
 | `dotenv` | `^16.4.5` | 16.6.1 | `app.js` (`config()`); `npm run prod` also preloads it via `-r dotenv/config` |
 | `nodemon` | `^3.1.5` | 3.1.11 | `npm start` only — development restart-on-change |
 
@@ -49,7 +49,7 @@ Keycloak itself is external. The client configuration is read from `keycloak.jso
 | `@shikijs/transformers` | `^1.1.7` | 1.29.2 | `app.js` — notation transformers for diff, highlight, word-highlight, focus, error-level, plus the two meta transformers |
 | `dompurify` | `^3.0.9` | 3.3.1 | `app.js` — final sanitize before every response |
 | `jsdom` | `^24.0.0` | 24.1.3 | `app.js` (DOMPurify window) and `obsidian.js` (fragment post-processing, Reveal section splitting, table-of-contents building) |
-| `mermaid` | `^11.12.0` | 11.12.2 | Rendered **in the browser**: `obsidian.js` emits a module script importing `/node_modules/mermaid/dist/mermaid.esm.min.mjs` |
+| `mermaid` | `^11.12.0` | 11.12.2 | Rendered **in the browser**: `obsidian.js` emits a module script importing `/node_modules/mermaid/dist/mermaid.esm.min.mjs` and `/node_modules/@mermaid-js/layout-elk/dist/mermaid-layout-elk.esm.min.mjs`. Each package's `dist` directory has a mount of its own in `app.js` — the directory, not the entry file, because mermaid fetches further chunks from `dist/chunks/mermaid.esm.min/` at runtime. The rest of the dependency tree is not served |
 | `reveal.js` | `^5.0.5` | 5.2.1 | Declared but not referenced by the code — the presentation view loads Reveal 3.7.0 from jsDelivr instead (see [Observations](#9-observations)) |
 | `lucide-static` | `^0.357.0` | 0.357.0 | `obsidian.js` — `lucideIcon()` inlines SVG icons into callouts, the nav tree and every toolbar button |
 | `pako` | `^2.1.0` | 2.1.0 | `obsidian.js` — deflates PlantUML source for the PlantUML server URL encoding |
@@ -175,11 +175,12 @@ All content routes sit behind `checkAuthenticated`, which redirects unauthentica
 | GET | `/auth/callback` | none | OIDC redirect target; logs the user in and returns to the originally requested URL |
 | GET | `/logout` | none | Redirects to the Keycloak end-session URL |
 | GET | `/logout/callback` | none | Clears the local session, redirects to `/` |
-| GET | *(everything else)* | required | `express.static` rooted at the application directory; anything unmatched falls through to a redirect to the start page |
+| GET | `/assets/**`, `/css/**`, `/md/**` (non-Markdown), `/obsidian-page.js`, `/logo-{64,128,256,512}.png`, `/index.html`, `/node_modules/mermaid/dist/**`, `/node_modules/@mermaid-js/layout-elk/dist/**` | required | The served set. One mount per location, each one there because a rendered page references it — except `/index.html`, which is there because `getStartPage` falls back to it |
+| GET | *(everything else)* | required | Not served, whether or not a file exists at that path — including `/keycloak.json`, `/app.js`, `/utils.js`, `/obsidian.js` and `/package*.json`. Falls through to a redirect to the start page, the same answer a path with no file behind it gets |
 
 Two security headers are set globally on every response in `app.js`: `X-Frame-Options: SAMEORIGIN` and `Content-Security-Policy: frame-ancestors 'self'`.
 
-Middleware order in `app.js` is load-bearing and reads: body parsers → security headers → `initKeycloak` (session, Passport, refresh, auth routes) → `checkAuthenticated` → root redirect → `fileNameExtractor` → the `.md` handler → `express.static` → `/convert` and `/userattributes` → catch-all redirect.
+Middleware order in `app.js` is load-bearing and reads: body parsers → security headers → `initKeycloak` (session, Passport, refresh, auth routes) → `checkAuthenticated` → root redirect → `fileNameExtractor` → the `.md` handler → the static mounts → `/convert` and `/userattributes` → catch-all redirect. The `.md` handler sitting above the mounts is what keeps whole-file permissions from being bypassed through `/md`.
 
 ## 6. Render Pipeline
 
@@ -270,12 +271,13 @@ When `allowOverride` is set and the teacher's preference `vt == 0`, `hasRoles` s
 | Variable | Read in | Meaning |
 | --- | --- | --- |
 | `NEXT_PUBLIC_PORT` | `app.js` | Listen port (bound on `0.0.0.0`) |
-| `NEXT_PUBLIC_START_PAGE` | `app.js` | Home target; falls back to `/test-md-file.md` |
+| `NEXT_PUBLIC_START_PAGE` | `app.js` | Home target; falls back to `/index.html`, the dummy page at the application root, which has a mount of its own so the fallback is not redirected to itself |
 | `NEXT_PUBLIC_SERVER_URL` | `keycloak-middleware.js` | Public base URL used to build the OIDC redirect URIs; defaults to `http://localhost:8080` |
 | `NEXT_PUBLIC_PLANTUML_URL` | `obsidian.js` | PlantUML render service |
 | `NEXT_PUBLIC_IS_APP_FOLDER` | `app.js`, `obsidian.js` | Switches the base path to `/app/` for in-container operation |
 | `NEXT_AUTOSCAN` | `app.js` | Enables the `chokidar` watcher on `md/` |
 | `PERMISSION_VISIBILITY_INTERVAL_MS` | `obsidian.js` | Visibility poll interval, default 5000 ms, minimum 1000 ms |
+| `SESSION_SECRET` | `keycloak-middleware.js` | Signs the session cookies. **Required** — `initKeycloak` exits at startup when it is missing or empty, with no fallback, so no two deployments share a secret |
 
 `keycloak.json` (realm, auth-server-url, resource, client secret) is read from the working directory at startup. Both it and `.env` are generated by the pipeline from GitHub secrets; the repository's `.gitignore` excludes `/keycloak*` at the root.
 
@@ -313,9 +315,7 @@ Recorded as found, without judgment on intent and without changes to the code.
 
 ### Security-relevant observations
 
-- **`express.static` is rooted at the application directory.** `app.js` serves `path.join(__dirname, "/")`, so any authenticated user can fetch application sources (`/app.js`, `/utils.js`, `/obsidian.js`), `/package.json`, and — where the file is present next to `app.js` — `/keycloak.json`, which holds the OIDC **client secret**. The mermaid client script depends on this same broad static root (`/node_modules/mermaid/…`). Note that the repository itself is clean: root `keycloak.json`/`keycloak-htl.json` are gitignored and untracked, and the two tracked `wysiwyg-container-*/keycloak.json` files contain placeholders only.
-- **The session secret is a hardcoded literal** in `middlewares/keycloak-middleware.js`, identical across every deployment built from this source.
-- **Sessions use `express-session`'s `MemoryStore`.** Sessions do not survive a restart and the store is not intended for production use; with a single container this is consistent but it rules out horizontal scaling.
+- **Sessions are held in `express-session`'s `MemoryStore`, by decision.** Settled by the change `harden-deployment-surface` rather than left open: one container serving one school does not earn a session service to run, back up and monitor. The price is stated where an operator meets it (`docs-building.md`, and a comment at the store itself) — every session is discarded on a restart or a deploy, and a second instance behind a load balancer would not recognize the first one's sessions, so the store has to be replaced before one can be added. The trigger for revisiting it is a second instance, not a version bump.
 - **`/hot-reload` is registered before `checkAuthenticated`** is applied, so the SSE endpoint is reachable without authentication. It emits only file paths and a reload type, never content.
 - **`req.query.context` on `/hot-reload` is `JSON.parse`d without a guard**, so malformed input throws inside the handler.
 

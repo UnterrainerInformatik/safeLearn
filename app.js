@@ -155,7 +155,12 @@ async function mdGetToHtml(url, req) {
 function getStartPage() {
   let url = process.env.NEXT_PUBLIC_START_PAGE;
   if (url === undefined || url === null || url === "") {
-    url = "/test-md-file.md";
+    // The fallback a deployment lands on when it configures no start page, and
+    // the one docs-building.md has always named. It has to be a path the server
+    // actually serves: an unmatched path is answered with the start page, so a
+    // fallback that is not served redirects to itself forever. `/index.html` has
+    // its own mount below for that reason.
+    url = "/index.html";
   }
   return url;
 }
@@ -329,7 +334,63 @@ initKeycloak(app).then(() => {
     }
   });
   
-  app.use(checkAuthenticated, express.static(path.join(__dirname, "/")));
+  // ################### Static assets ###################
+  // An allowlist, not a root. A path is reachable because a rendered page
+  // references it, never because a file happens to sit in the application
+  // directory: serving __dirname published app.js, utils.js, obsidian.js,
+  // package.json and above all keycloak.json, which carries the OIDC client
+  // secret. That file cannot be moved out of the way — initKeycloak reads it
+  // from the working directory, so every deployment has it right here, next to
+  // this file.
+  //
+  // Something newly referenced from a rendered page is not served until it gets
+  // its own mount here — the catch-all below answers it with the start page, the
+  // way it answers a path with no file behind it. Add the narrowest mount that
+  // covers the reference rather than widening one that is already there.
+  app.use("/assets", checkAuthenticated, express.static(path.join(__dirname, "assets")));
+  app.use("/css", checkAuthenticated, express.static(path.join(__dirname, "css")));
+  // Markdown never arrives here: the handler above answers everything with a
+  // .md extension, so whole-file permissions cannot be bypassed through this
+  // mount. What is left of the corpus are the images and other attachments a
+  // page embeds.
+  app.use("/md", checkAuthenticated, express.static(path.join(__dirname, "md")));
+  // Single files need their own handler — `express.static` serves directories.
+  // A file the deployment does not ship falls through to the catch-all instead
+  // of raising, so an unserved path answers the same way wherever it comes from.
+  const serveFile = (fileName) => (req, res, next) => {
+    res.sendFile(path.join(__dirname, fileName), (error) => {
+      if (!error) return;
+      if (res.headersSent) res.end();
+      else next();
+    });
+  };
+  app.get("/obsidian-page.js", checkAuthenticated, serveFile("obsidian-page.js"));
+  // The start page a deployment falls back to when it configures none, which is
+  // why it is served although nothing links to it: `getStartPage` names it, and
+  // a start page that is not served would be redirected to itself.
+  app.get("/index.html", checkAuthenticated, serveFile("index.html"));
+  // The logos, addressed from Markdown rather than from a wrapper: README.md
+  // embeds logo-128.png relative to itself, and README.md is the start page of
+  // more than one deployment. Enumerated rather than matched by a pattern, so
+  // the set stays a list somebody chose.
+  for (const logo of ["logo-64.png", "logo-128.png", "logo-256.png", "logo-512.png"]) {
+    app.get(`/${logo}`, checkAuthenticated, serveFile(logo));
+  }
+  // The two browser-side modules obsidian.js imports for mermaid. Each mount is
+  // the package's dist directory rather than the entry file, because mermaid
+  // fetches further chunks from ./chunks/mermaid.esm.min/ at runtime. The rest
+  // of the dependency tree stays unpublished, so a future dependency shipping a
+  // fixture or a script in its package does not become a URL.
+  app.use(
+    "/node_modules/mermaid/dist",
+    checkAuthenticated,
+    express.static(path.join(__dirname, "node_modules", "mermaid", "dist"))
+  );
+  app.use(
+    "/node_modules/@mermaid-js/layout-elk/dist",
+    checkAuthenticated,
+    express.static(path.join(__dirname, "node_modules", "@mermaid-js", "layout-elk", "dist"))
+  );
 
   // Convert markdown to HTML using marked.
   app.get("/convert", checkAuthenticated, (req, res) => {

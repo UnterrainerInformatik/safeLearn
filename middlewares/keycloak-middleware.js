@@ -46,11 +46,34 @@ export async function initKeycloak(app) {
     post_logout_redirect_uris: [serverUrl + "/logout/callback"],
     response_types: ["code"],
   });
-  // ################### Express Session ###################
+  // The secret that signs session cookies belongs to the deployment, not to
+  // this source. A literal here would be the same in every instance built from
+  // a public repository, which makes the signature worth nothing. There is no
+  // fallback and no development default on purpose: a generated one would start
+  // fine and quietly log everyone out on every restart, so the misconfiguration
+  // would be found by users instead of at startup.
+  const sessionSecret = process.env.SESSION_SECRET;
+  if (!sessionSecret || sessionSecret.trim() === "") {
+    console.error(
+      "SESSION_SECRET is not set, and SafeLearn signs its session cookies with it.\n" +
+        "Set SESSION_SECRET to a long random value in the .env file this deployment reads " +
+        "(/app/.env in the container image, or the .env next to app.js when running from a " +
+        "working tree), or pass it to the container as an environment variable.\n" +
+        "It is only ever compared against itself, so any long random string will do — but it " +
+        "must be different in every deployment, and changing it logs every user out once."
+    );
+    process.exit(1);
+  }
+  // Sessions are held in this process, deliberately. One container serving one
+  // school does not need a session service to run, back up and monitor, and the
+  // price is stated rather than implied: every session is discarded when the
+  // application restarts or is redeployed, and a second instance behind a load
+  // balancer would not recognize the first one's sessions. This store has to be
+  // replaced before a second instance can be added — see docs-building.md.
   var memoryStore = new session.MemoryStore();
   app.use(
     session({
-      secret: "ofwjrfmv348vutm38095v7q83vm597356nb39wq5nv94w5b68wp0459m",
+      secret: sessionSecret,
       resave: false,
       saveUninitialized: true,
       store: memoryStore,

@@ -9,6 +9,7 @@ Just do the following:
 * open it in VSCode
 * open a terminal window
 * `npm install`
+* make sure your `.env` in the repository root carries a `SESSION_SECRET`. The server signs its session cookies with it and refuses to start without one, so `npm run start` exits immediately with a message naming the variable. The `.env` this repository ships holds a placeholder — replace it with any long random string of your own; locally it is only ever compared against itself. Changing it later logs your own browser out once.
 * `npm run start` (the contents of the start-script are located in the `package.json` file)
 * Just press `F5` to start debugging, while the webserver is running in the background
 You can use the built-in debugger now.

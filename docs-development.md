@@ -113,3 +113,17 @@ Because `students` is canonicalized to `student` and the alias is projected back
 Weigh it against what it costs: every account in that list is one more real OIDC round-trip per run against a shared public identity provider. Adding all of them is not free, and the suite asserts its own login count precisely so that cost stays visible.
 
 The gaps that remain because of this are recorded in [testing](docs-testing.md) under *What the corpus demonstrates but a run cannot assert*. Each of those entries expires the moment the account that closes it enters the harness — that file's rule is that an exception must not outlive its repair.
+
+## Adding something the browser has to fetch
+
+The server does not serve the application directory. It serves an allowlist of mounts in `app.js` — `/assets`, `/css`, `/md`, `/obsidian-page.js`, the four `logo-*.png` files, `/index.html` and the two mermaid `dist` directories — and nothing else. That is deliberate: `keycloak.json` carries the OIDC client secret and has to sit next to `app.js` in every deployment, because that is where the application reads it from. A file that is merely present must not become a URL.
+
+So when you add a stylesheet, a script, a font or a browser-side module and reference it from a rendered page, **it will not be served until you give it its own mount**. What you see is not a 404: the catch-all at the bottom of `app.js` redirects anything unmatched to the start page, so the browser gets 200 and a page nobody asked for, and the console complains about a stylesheet that arrived as HTML.
+
+The fix is one line next to the other mounts:
+
+```js
+app.use("/your-prefix", checkAuthenticated, express.static(path.join(__dirname, "your-directory")));
+```
+
+Mount the narrowest thing that covers the reference rather than widening an existing mount, and keep the URL prefix the same as the one the page emits so nothing else has to change. `npm test` catches the omission for you: `test/checks/deployment-surface.js` walks every same-origin reference of a rendered page in all three views and fails on a reference that falls through to the start page.
