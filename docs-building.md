@@ -62,6 +62,10 @@ The server keeps its sessions in the memory of its own process. That is a decisi
 For one school on one container this costs nothing worth a service to run, back up and monitor. The moment a second instance becomes interesting, this is the paragraph to come back to.
 
 If your repository is private, which makes sense, Github will force you to either pay for Github Enterprise, or to have your own, self-hosted Github Runner. Because this repository however is public, the build-action-script refers to the runner as `runs-on: ubuntu-latest`. So in order to use your private self-hosted-runners you'll have to label them `ubuntu-latest` so Github will take care of that. Your runners will have slightly higher priority than the public ones.
+## What The Server Needs To Reach
+Presentations no longer need the public internet. The slide engine, its styles, the notes plugin and the fonts are all served by the deployment itself, out of the packages `npm install` puts into the image, so a classroom whose line is down still gets a deck with its styling, navigation and fragments intact. If your egress policy lists `cdn.jsdelivr.net` or `fonts.googleapis.com` because presentations used to need them, you can drop both.
+
+What still leaves the deployment is the Keycloak server every login goes to, and the PlantUML service (`NEXT_PUBLIC_PLANTUML_URL`) whenever a page holds a PlantUML diagram.
 ## Github Actions Settings
 You'll have to enable write-access for actions by enabling these options:
 ![[Pasted image 20240409164504.png]]

@@ -65,6 +65,11 @@ The display-name will be the file-name bar the extension.
 Feel free to rename the files accordingly, but keep in mind that some TTF-fonts don't like that and will stop working (Dyslexia 3 is such an example, hence the long unwieldy name).
 
 The preferences hold the index to the desired font. So you may move some fonts around when adding some, since they will be loaded in directory-order (mostly alphabetically).
+
+Two kinds of file in those directories are not offered as a font, so that they don't take up an index and move everybody's stored preference:
+
+* Anything that is not a `*.ttf`. A licence text placed next to a font (`Lato-OFL.txt`) is not a font.
+* A weight-variant, written as the family-name, a dash and the numeric weight (`Lato-300.ttf`, `Lato-700.ttf`). Those are there for a stylesheet that asks for the family and the weight itself — the presentation theme does — and not for the picker, which offers families. `OpenDyslexic3-Regular.ttf` is a family and not a variant; what marks a variant is the number.
 ## Print Document as PDF
 You should open your document in the web-browser and then click on the `presentation` button in the upper right corner.
 This should open your document as presentation.

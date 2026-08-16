@@ -74,13 +74,31 @@ export const knownRoles = Object.keys(accounts);
 /**
  * The hosts a page opened for a content check may talk to: the application
  * itself and the identity provider. Everything else is refused, so a check
- * cannot start depending on jsDelivr, Google Fonts or a diagram service by
- * accident — those are asserted as the addresses the application emitted.
+ * cannot start depending on a content delivery network, a font service or a
+ * diagram service by accident — and so `hostsContactedWhile` reports a request
+ * to one of them whether or not it would have been answered.
  */
 const reachableHosts = new Set([
   new URL(applicationUrl).host,
   new URL(identityProviderUrl).host,
 ]);
+
+/**
+ * What a host contacted by a page is to this run. A check reads this instead of
+ * comparing host names, which are configuration and differ per deployment.
+ */
+export const hostKinds = Object.freeze({
+  application: "application",
+  identityProvider: "identity provider",
+  external: "external",
+});
+
+/** Which of the three a host is. */
+function hostKind(host) {
+  if (host === new URL(applicationUrl).host) return hostKinds.application;
+  if (host === new URL(identityProviderUrl).host) return hostKinds.identityProvider;
+  return hostKinds.external;
+}
 
 /**
  * The preference block every content check starts from. It is stated in full
@@ -771,6 +789,63 @@ export async function sameOriginReferences(page) {
       })
     );
   }, new URL(applicationUrl).origin);
+}
+
+/**
+ * The hosts the browser contacted while `load` ran, each with the addresses that
+ * caused it and what the host is to this run (`hostKinds`).
+ *
+ * Read off the browser's requests, not off the document: a stylesheet pulls a
+ * further host in with an `@import` or a `url()` without any element naming it,
+ * and `sameOriginReferences` — which walks `href`/`src` and drops everything
+ * cross-origin — cannot see that. A check that wants to prove a view is
+ * self-contained has to ask what was requested.
+ *
+ * A request is recorded when it is issued, so a host appears whether the answer
+ * arrived, failed or was refused. That is what lets a check fail on a third
+ * party without the third party being reachable — and pages of a shared session
+ * refuse every host but the two above, so it is the only way such a host can be
+ * reported at all.
+ *
+ * `load` is usually a `render(...)`, which returns once the view's content is
+ * there. A stylesheet's own requests can trail that moment, so recording
+ * continues until nothing new has been requested for `quietMs`, and at most
+ * until `timeoutMs` after `load` returned.
+ */
+export async function hostsContactedWhile(session, load, { quietMs = 500, timeoutMs = 5000 } = {}) {
+  const contacted = new Map();
+  let lastRequestAt = Date.now();
+
+  const record = (request) => {
+    const address = request.url();
+    if (/^(data|blob|about|chrome-extension|javascript):/i.test(address)) return;
+    let host;
+    try {
+      host = new URL(address).host;
+    } catch {
+      return;
+    }
+    if (!host) return;
+    lastRequestAt = Date.now();
+    const entry = contacted.get(host) ?? { host, kind: hostKind(host), addresses: new Set() };
+    entry.addresses.add(address);
+    contacted.set(host, entry);
+  };
+
+  session.page.on("request", record);
+  try {
+    await load();
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline && Date.now() - lastRequestAt < quietMs) {
+      await delay(50);
+    }
+  } finally {
+    session.page.off("request", record);
+  }
+
+  return [...contacted.values()]
+    .map((entry) => ({ ...entry, addresses: [...entry.addresses].sort() }))
+    .sort((one, other) => one.host.localeCompare(other.host));
 }
 
 // ################### Teardown on interruption ###################

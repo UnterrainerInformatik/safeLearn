@@ -163,7 +163,7 @@ Wiki-links, file names and folder names in the corpus include the cases that bro
 
 ### Requirement: The presentation and document views are proven structurally
 
-The same source file is served as a page, as a presentation and as a printable document. A check SHALL prove that the presentation view is built from the source's heading structure and that the document view is the content without the page shell.
+The same source file is served as a page, as a presentation and as a printable document. A check SHALL prove that the presentation view is built from the source's heading structure, that it is self-contained, and that the document view is the content without the page shell.
 
 #### Scenario: The deck's structure
 
@@ -176,7 +176,13 @@ The same source file is served as a page, as a presentation and as a printable d
 - **WHEN** the presentation view is rendered
 - **THEN** every stylesheet and script it references from this application resolves and is served as what it claims to be
 - **AND** no such reference falls through to the application's catch-all redirect
-- **AND** references to other hosts are asserted as the addresses that were emitted, without being fetched
+
+#### Scenario: The presentation contacts no third party
+
+- **WHEN** the presentation view is rendered
+- **THEN** the check reads the hosts the browser actually contacted, rather than the addresses the markup names, so a request a stylesheet issued is seen too
+- **AND** the run fails if any host other than the application under test and its identity provider was contacted
+- **AND** the failure names the host and the address that caused the request
 
 #### Scenario: A reference that is known to be broken
 
