@@ -1074,20 +1074,31 @@ export async function placeCursorAtStart() {
 /**
  * Puts the cursor inside `needle` rather than beside it - in Live Preview a tag
  * is shown as its own characters only while the cursor is in it, so "beside"
- * would not exercise the rule at all. The middle of the first occurrence, so no
+ * would not exercise the rule at all. The middle of the occurrence, so no
  * boundary decides the outcome.
+ *
+ * `last` picks the last line holding the needle rather than the first. It exists
+ * for the marker that closes a permission block: `@@@` stands on that line and
+ * on the directive line that opened the block, and the two are shown by
+ * different rules - a check that means the one and reaches the other passes
+ * against a plugin that does nothing to either.
  */
-export async function moveCursorInto(needle) {
-  return withoutEditing(`moving the cursor into ${JSON.stringify(needle)}`, () =>
-    page.evaluate((text) => {
-      const editor = window.app.workspace.activeEditor?.editor;
-      if (!editor) throw new Error("No active editor to place a cursor in.");
-      const lines = editor.getValue().split("\n");
-      const line = lines.findIndex((l) => l.includes(text));
-      if (line === -1) throw new Error(`No line holding ${JSON.stringify(text)}.`);
-      editor.setCursor({ line, ch: lines[line].indexOf(text) + Math.floor(text.length / 2) });
-      (editor.cm ?? editor).focus();
-    }, needle)
+export async function moveCursorInto(needle, { last = false } = {}) {
+  return withoutEditing(`moving the cursor into ${last ? "the last " : ""}${JSON.stringify(needle)}`, () =>
+    page.evaluate(
+      (text, fromTheEnd) => {
+        const editor = window.app.workspace.activeEditor?.editor;
+        if (!editor) throw new Error("No active editor to place a cursor in.");
+        const lines = editor.getValue().split("\n");
+        const holding = lines.flatMap((l, index) => (l.includes(text) ? [index] : []));
+        if (holding.length === 0) throw new Error(`No line holding ${JSON.stringify(text)}.`);
+        const line = fromTheEnd ? holding[holding.length - 1] : holding[0];
+        editor.setCursor({ line, ch: lines[line].indexOf(text) + Math.floor(text.length / 2) });
+        (editor.cm ?? editor).focus();
+      },
+      needle,
+      last
+    )
   );
 }
 

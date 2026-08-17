@@ -1272,6 +1272,94 @@ describe("a directive line is shown as the heading of the block it opens", () =>
     }));
 });
 
+describe("the marker that closes a block is shown as the blank line the frame closes on", () => {
+  test("the closing marker is not on screen while the cursor is elsewhere", async () =>
+    watched("closing-marker-at-rest", async () => {
+      const name = "constructed-closing-marker.md";
+      await writeDocument(name, ["Intro.", "@@@ teacher", "Gated.", "@@@", "After."].join("\n"));
+      const container = await open(name, views.livePreview);
+      await placeCursorAfter("Intro.");
+
+      const atRest = await visibleText(container);
+      assert.ok(
+        !atRest.includes("@@@"),
+        `Neither marker of the block is on screen with the cursor elsewhere: the directive stands ` +
+          `as the heading of the block it opens, and the marker that closes it says nothing the ` +
+          `frame around the block does not already say. On screen: ${JSON.stringify(atRest)}`
+      );
+
+      const floors = await blockBoxes(container, "permission-block-end");
+      assert.equal(
+        floors.length,
+        1,
+        `The block still ends where the document ends it. Taking the marker's characters off the ` +
+          `screen may not take the line they stood on out of the block - a block whose floor went ` +
+          `with them is a box that does not close. Found: ${JSON.stringify(floors.map((box) => box.text))}`
+      );
+      assert.equal(
+        floors[0].text,
+        "",
+        `What stands on that line is nothing: the blank line the frame closes on. Text still there ` +
+          `is a marker that was hidden by the stylesheet rather than replaced, which is the one ` +
+          `outcome that would leave a person backspacing through characters nobody can see.`
+      );
+    }));
+
+  test("the cursor entering the blank line brings the marker back, and changes no text", async () =>
+    watched("cursor-into-closing-marker", async () => {
+      // The other end of the rule the directive line follows, and the reason it
+      // has to be reachable at all: deleting that marker is the only way there
+      // is to open the block up again.
+      const name = "constructed-closing-marker-cursor.md";
+      await writeDocument(name, ["Intro.", "@@@ teacher", "Gated.", "@@@", "After."].join("\n"));
+      const container = await open(name, views.livePreview);
+      await placeCursorAfter("Intro.");
+
+      const moved = await moveCursorInto("@@@", { last: true });
+      assert.equal(
+        moved.changed,
+        false,
+        "Moving the cursor changed the document text. The characters that appear are the ones the " +
+          "document already held; a plugin that wrote them in would be editing a person's file to " +
+          "show it to them."
+      );
+      assert.ok(
+        (await visibleText(container)).includes("@@@"),
+        "The marker's own characters are not on screen while the cursor is in the line, so the " +
+          "block cannot be opened up again by the person who closed it."
+      );
+      assert.equal(
+        (await headings(container)).length,
+        1,
+        "The directive line above is a different line and is still shown as its heading. A cursor " +
+          "in one marker that lifted the other would show the same block's punctuation twice."
+      );
+
+      await placeCursorAfter("After.");
+      assert.ok(
+        !(await visibleText(container)).includes("@@@"),
+        "The marker goes again once the cursor leaves the line, the way the directive line's own " +
+          "characters do."
+      );
+    }));
+
+  test("a block that is never closed keeps its last line", async () =>
+    watched("closing-marker-unclosed", async () => {
+      // `resolveBlocks` ends an unclosed block at the end of the document, so
+      // that block's last line is somebody's text and not punctuation. Hiding it
+      // would take a sentence off the screen because a marker is missing.
+      const name = "constructed-closing-marker-unclosed.md";
+      await writeDocument(name, ["Intro.", "@@@ teacher", "Gated, and never closed."].join("\n"));
+      const container = await open(name, views.livePreview);
+      await placeCursorAfter("Intro.");
+
+      assert.ok(
+        (await visibleText(container)).includes("Gated, and never closed."),
+        "The last line of an unclosed block is text a person wrote, and it stays on screen."
+      );
+    }));
+});
+
 // ################### The frame around what the editor does not render as a line ###################
 
 /**
