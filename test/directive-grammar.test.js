@@ -258,8 +258,8 @@ test("the server reads every directive of the table the way the table says", () 
  * `main.ts` is one module that imports Obsidian and CodeMirror, neither of which
  * exists in a Node process - `obsidian` ships types and no code at all - so it
  * is transpiled with the compiler the plugin builds with and run in a context
- * where those two imports are stubs. Nothing in the module does anything at load
- * time except register a view plugin, which is what the stub is for.
+ * where those two imports are stubs — see `stubModule` for what those stubs
+ * answer and why they answer more than they are asked.
  *
  * The source rather than the built `main.js`: rollup removes what nothing calls,
  * so a bundle would only hold the grammar once the editor uses it, and this
@@ -267,6 +267,32 @@ test("the server reads every directive of the table the way the table says", () 
  * grammar is right. Whether the wiring exists is the Obsidian harness's
  * question, and it asks it against a real Obsidian.
  */
+/**
+ * A stand-in for a module the plugin imports.
+ *
+ * What is named is what the module uses in a way this check has an opinion
+ * about. Everything else answers with a class, and that is the point: a name
+ * that only has to exist for `class X extends Y` to evaluate is not something a
+ * check about a directive grammar should have a say in. Without it, every import
+ * the plugin gains turns this file red for a reason unconnected to what it
+ * asserts - and because a class declaration evaluates its base at load time, the
+ * failure is the whole module and every check in it, not the line that uses the
+ * name. That happened twice while `plugin-hide-tags` and `plugin-insert-commands`
+ * were built, which is why the answer is a rule rather than two more entries.
+ *
+ * Names beginning with `__` are answered with nothing, so that a module system's
+ * own probes - `__esModule` above all - are not told a class is there.
+ */
+function stubModule(named) {
+  return new Proxy(named, {
+    get(target, property) {
+      if (property in target) return target[property];
+      if (typeof property !== "string" || property.startsWith("__")) return undefined;
+      return class {};
+    },
+  });
+}
+
 function pluginGrammar() {
   const dir = resolvePlugin();
   const compiler = path.join(dir, "node_modules", "typescript", "lib", "typescript.js");
@@ -284,19 +310,22 @@ function pluginGrammar() {
     }).outputText;
 
     const stubs = {
-      obsidian: { Plugin: class {} },
-      "@codemirror/view": {
-        Decoration: { mark: () => ({ range: () => ({}) }), line: () => ({ range: () => ({}) }) },
+      obsidian: stubModule({ Plugin: class {} }),
+      "@codemirror/view": stubModule({
+        Decoration: {
+          mark: () => ({ range: () => ({}) }),
+          line: () => ({ range: () => ({}) }),
+          replace: () => ({ range: () => ({}) }),
+        },
         ViewPlugin: { fromClass: () => ({}) },
-        EditorView: class {},
-      },
-      "@codemirror/state": {},
+      }),
+      "@codemirror/state": stubModule({}),
     };
     const context = vm.createContext({
       module: { exports: {} },
       exports: {},
       console,
-      require: (name) => stubs[name] ?? {},
+      require: (name) => stubs[name] ?? stubModule({}),
     });
     vm.runInContext(transpiled, context, { filename: source });
 

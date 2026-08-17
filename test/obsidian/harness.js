@@ -79,6 +79,23 @@ export const markerClasses = Object.freeze([
   "side-by-side-block",
   "side-by-side-end",
   "safelearn-hidden",
+  "safelearn-heading",
+  "safelearn-heading-file",
+  "safelearn-heading-withheld",
+  "safelearn-heading-note",
+  "safelearn-chip",
+  "safelearn-chip-timed",
+  "safelearn-chip-broken",
+  "safelearn-chip-switch",
+  "safelearn-chip-unresolved",
+  "safelearn-chip-discarded",
+  "safelearn-read-block",
+  "safelearn-read-block-start",
+  "safelearn-read-block-end",
+  "safelearn-read-file",
+  "safelearn-columns",
+  "safelearn-columns-host",
+  "safelearn-column",
 ]);
 
 let child = null;
@@ -608,6 +625,291 @@ export async function markers(container) {
 }
 
 /**
+ * Every heading the plugin shows in place of a directive line, in the order they
+ * stand in what is on screen, with the chips each one carries.
+ *
+ * A heading is not a marking on text, so `markers()` cannot report it usefully:
+ * it reads position from `posAtDOM`, and every chip of one heading replaces the
+ * same range and answers with the same offset. What tells the chips apart is the
+ * order they stand in and what each says, and that is what this returns.
+ *
+ * It works in both views, because the point of the heading is that both views
+ * show the same one - a check comparing them has to read them the same way.
+ */
+export async function headings(container) {
+  return page.evaluate((selector) => {
+    const root = document.querySelector(selector);
+    if (!root) return [];
+    return [...root.querySelectorAll(".safelearn-heading")].map((el) => ({
+      kinds: [...el.classList]
+        .filter((name) => name.startsWith("safelearn-heading-"))
+        .map((name) => name.replace("safelearn-heading-", ""))
+        .sort(),
+      note: el.querySelector(".safelearn-heading-note")?.textContent ?? null,
+      chips: [...el.querySelectorAll(".safelearn-chip")].map((chip) => ({
+        text: chip.textContent ?? "",
+        kinds: [...chip.classList]
+          .filter((name) => name.startsWith("safelearn-chip-"))
+          .map((name) => name.replace("safelearn-chip-", ""))
+          .sort(),
+      })),
+    }));
+  }, container);
+}
+
+/**
+ * Every side-by-side block the rendered reading view rebuilt, as the text of its
+ * columns.
+ *
+ * The text rather than the markup: what the requirement is about is that the
+ * parts stand beside one another and are split where the document splits them,
+ * and a check that asserted markup would fail on a change to how a column is
+ * wrapped rather than on the behavior.
+ */
+export async function columns(container) {
+  return page.evaluate((selector) => {
+    const root = document.querySelector(selector);
+    if (!root) return [];
+    return [...root.querySelectorAll(".safelearn-columns")].map((block) =>
+      [...block.querySelectorAll(":scope > .safelearn-column")].map((column) =>
+        (column.innerText ?? "").trim()
+      )
+    );
+  }, container);
+}
+
+/**
+ * Whether the columns of a block are actually beside one another on screen.
+ *
+ * The class alone does not establish it: a stylesheet that failed to load, or a
+ * flex rule that a theme overrode, leaves the same markup stacked - and stacked
+ * is exactly the outcome the requirement exists to rule out. So this reads the
+ * boxes the browser laid out.
+ */
+export async function columnsAreSideBySide(container) {
+  return page.evaluate((selector) => {
+    const root = document.querySelector(selector);
+    const block = root?.querySelector(".safelearn-columns");
+    if (!block) return null;
+    const boxes = [...block.querySelectorAll(":scope > .safelearn-column")].map((column) =>
+      column.getBoundingClientRect()
+    );
+    if (boxes.length < 2) return null;
+    return boxes.every((box, index) => index === 0 || box.left >= boxes[index - 1].right - 1);
+  }, container);
+}
+
+/** The plugin as Obsidian knows it, which is what a command id is prefixed with. */
+export const pluginId = "safelearn-formatter";
+
+/**
+ * Runs one of the plugin's commands the way the command palette runs it, and
+ * reports the document before and after.
+ *
+ * What a command inserts is a statement about a person's file, so it is checked
+ * by reading the file. Calling the plugin's own function instead would assert
+ * that a function does what it does, and say nothing about whether the command
+ * exists, whether Obsidian will run it, or what it does to a real document.
+ */
+export async function runCommand(id, { expectEdit = true } = {}) {
+  const full = id.includes(":") ? id : `${pluginId}:${id}`;
+  doing(`running the command ${JSON.stringify(full)}`);
+  const before = await documentText();
+  const accepted = await page.evaluate((command) => window.app.commands.executeCommandById(command), full);
+  if (!accepted) {
+    throw new Error(
+      `Obsidian did not run ${full}. Either no command of that id is registered, or it declined - ` +
+        `an editor command declines when there is no editor to run in.`
+    );
+  }
+  await settle();
+  const after = await documentText();
+  if (expectEdit && before === after) {
+    throw new Error(
+      `${full} ran and the document is exactly as it was. A command that inserts something and ` +
+        `changes nothing has not been observed doing anything.`
+    );
+  }
+  return { before, after, changed: before !== after };
+}
+
+/**
+ * Every command Obsidian holds for this plugin, as it holds them.
+ *
+ * Read from the application rather than written down here, so that a check
+ * comparing the palette with the context menu compares two things the plugin
+ * produced instead of one thing the plugin produced and one a check remembered.
+ */
+export async function registeredCommands() {
+  return page.evaluate(
+    (prefix) =>
+      Object.values(window.app.commands.commands)
+        .filter((command) => command.id.startsWith(`${prefix}:`))
+        .map((command) => ({ id: command.id, name: command.name })),
+    pluginId
+  );
+}
+
+/**
+ * Opens the editor's context menu the way a right-click opens it, and reports
+ * what stands in it.
+ *
+ * The event is dispatched at the editor rather than the menu being built by
+ * hand: what the requirement is about is that the commands are *reachable* that
+ * way, and a menu assembled in a check would be reachable whether the plugin
+ * subscribed to anything or not.
+ */
+export async function editorMenuItems() {
+  doing("opening the editor's context menu");
+  await page.evaluate(() => {
+    document.querySelector(".menu")?.remove();
+    const content = document.querySelector(".cm-content");
+    if (!content) throw new Error("No editor to open a context menu in.");
+    const box = content.getBoundingClientRect();
+    content.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: Math.round(box.left + 8),
+        clientY: Math.round(box.top + 8),
+      })
+    );
+  });
+  await settle();
+  const items = await page.evaluate(() =>
+    [...document.querySelectorAll(".menu .menu-item .menu-item-title")].map((el) => el.textContent ?? "")
+  );
+  await page.keyboard.press("Escape");
+  await settle();
+  return items;
+}
+
+/**
+ * Answers the dialog a command opened, with the value it asks for.
+ *
+ * It waits for the dialog rather than assuming it is there: a command that opens
+ * nothing would otherwise be reported as one whose dialog was answered.
+ */
+export async function answerColumnCount(value) {
+  doing(`answering the column count with ${JSON.stringify(value)}`);
+  await page.waitForFunction(() => !!document.querySelector(".modal-container input"), { timeout: 10000 });
+  await page.evaluate((columns) => {
+    const input = document.querySelector(".modal-container input");
+    input.value = String(columns);
+    document.querySelector(".modal-container button").click();
+  }, value);
+  await settle();
+}
+
+/**
+ * Answers a dialog that takes a list, with one entry per line.
+ *
+ * Separate from `answerColumnCount` because the two dialogs ask different
+ * things: one takes a number, one takes the class list a person pasted into it,
+ * and a helper that took either would have to guess which field it was looking
+ * at.
+ */
+export async function answerNameList(names) {
+  doing(`answering the name list with ${JSON.stringify(names)}`);
+  await page.waitForFunction(() => !!document.querySelector(".modal-container textarea"), { timeout: 10000 });
+  await page.evaluate((lines) => {
+    document.querySelector(".modal-container textarea").value = lines.join("\n");
+    document.querySelector(".modal-container button").click();
+  }, names);
+  await settle();
+}
+
+/**
+ * What the plugin told the person, in the application's own notices.
+ *
+ * A command that writes a name the server will read as a role is required to
+ * say so, and saying so is the only place that fact is visible at all - so a
+ * check has to be able to read it rather than take it on trust.
+ */
+export async function noticesShown() {
+  return page.evaluate(() =>
+    [...document.querySelectorAll(".notice")].map((notice) => notice.textContent ?? "")
+  );
+}
+
+/** Clears the notices standing, so a check can scope the question to its own action. */
+export async function forgetNotices() {
+  await page.evaluate(() => {
+    for (const notice of [...document.querySelectorAll(".notice")]) notice.remove();
+  });
+}
+
+/** Where the cursor and the selection stand, for asserting where a command left them. */
+export async function cursorPosition() {
+  return page.evaluate(() => {
+    const editor = window.app.workspace.activeEditor?.editor;
+    if (!editor) return null;
+    const from = editor.getCursor("from");
+    const to = editor.getCursor("to");
+    return { from: { line: from.line, ch: from.ch }, to: { line: to.line, ch: to.ch } };
+  });
+}
+
+/**
+ * What the browser actually computed for the first element carrying `className`.
+ *
+ * A frame that is open on one side is a statement about what is drawn, and the
+ * class that is supposed to draw it is not the same thing: a rule that never
+ * loaded, or one a later rule overrode, leaves the class in place and the frame
+ * closed. So the check reads the box, not the markup.
+ */
+export async function styleOf(container, className, properties) {
+  return page.evaluate(
+    (selector, name, wanted) => {
+      const element = document.querySelector(selector)?.querySelector(`.${name}`);
+      if (!element) return null;
+      const style = getComputedStyle(element);
+      return Object.fromEntries(wanted.map((property) => [property, style.getPropertyValue(property)]));
+    },
+    container,
+    className,
+    properties
+  );
+}
+
+/**
+ * The markup of what is on screen, for the one question text cannot answer:
+ * whether taking a tag out of a line left the formatting around it standing.
+ */
+export async function renderedHtml(container) {
+  return page.evaluate((selector) => document.querySelector(selector)?.innerHTML ?? "", container);
+}
+
+/**
+ * Selects from the start of the line holding `from` to the end of the line
+ * holding `to`, without typing anything.
+ *
+ * A selection running across a block has to show the lines it covers - otherwise
+ * a person copies text they cannot see - and that is a different input from a
+ * cursor resting in a line. Neither may be produced by typing, so this reports
+ * the document before and after the way the other cursor actions do.
+ */
+export async function selectAcross(from, to) {
+  return withoutEditing(`selecting from ${JSON.stringify(from)} to ${JSON.stringify(to)}`, () =>
+    page.evaluate(
+      (first, last) => {
+        const editor = window.app.workspace.activeEditor?.editor;
+        if (!editor) throw new Error("No active editor to select in.");
+        const lines = editor.getValue().split("\n");
+        const start = lines.findIndex((line) => line.includes(first));
+        const end = lines.findIndex((line) => line.includes(last));
+        if (start === -1) throw new Error(`No line holding ${JSON.stringify(first)}.`);
+        if (end === -1) throw new Error(`No line holding ${JSON.stringify(last)}.`);
+        editor.setSelection({ line: start, ch: 0 }, { line: end, ch: lines[end].length });
+        editor.focus();
+      },
+      from,
+      to
+    )
+  );
+}
+
+/**
  * Waits for the editor to have finished redecorating.
  *
  * CodeMirror rebuilds on its own schedule and Obsidian layers its own work on
@@ -683,6 +985,23 @@ export async function placeCursorAfter(needle) {
       editor.setCursor({ line, ch: lines[line].length });
       editor.focus();
     }, needle)
+  );
+}
+
+/**
+ * Puts the cursor at the very start of the document.
+ *
+ * The one position no other action here can reach, and the one a command must
+ * not write above when the first line is a directive that gates the file.
+ */
+export async function placeCursorAtStart() {
+  return withoutEditing("placing the cursor at the start of the document", () =>
+    page.evaluate(() => {
+      const editor = window.app.workspace.activeEditor?.editor;
+      if (!editor) throw new Error("No active editor to place a cursor in.");
+      editor.setCursor({ line: 0, ch: 0 });
+      editor.focus();
+    })
   );
 }
 

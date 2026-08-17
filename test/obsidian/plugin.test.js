@@ -9,6 +9,16 @@
  * rewritten in place by `plugin-fix-editor-decorations` rather than deleted, so
  * the coverage they carried is still here.
  *
+ * `plugin-hide-tags` rewrote a further set of them, and for a reason worth
+ * stating: a directive line at rest is no longer made of its own characters, so
+ * every check that compared against that text was saying something the change is
+ * entitled to alter. Two things were done to each, deliberately rather than
+ * until it went green. Where a check was about *which lines* a block covers, it
+ * now asserts the lines. Where it was about what the plugin concluded per entry,
+ * it puts the cursor in the line first - a marking on characters cannot be read
+ * from a line whose characters are not shown, and a check reading it at rest
+ * would find nothing and pass against anything.
+ *
  * A few checks are green before the repair as well. They are not idle: each
  * states a requirement that no single line of the repair produces on its own -
  * a scroll shows the right markings today because the plugin decorates the whole
@@ -25,24 +35,39 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 
 import {
+  answerColumnCount,
+  answerNameList,
   closeExtraViews,
+  columns,
+  columnsAreSideBySide,
   corpusPath,
+  cursorPosition,
   documentText,
+  editorMenuItems,
+  forgetNotices,
   forgetRaised,
+  headings,
+  noticesShown,
   markers,
   moveCursorInto,
   obsidianVersion,
   open,
   placeCursorAfter,
+  placeCursorAtStart,
   plantInRenderedView,
   plantedText,
   provokeError,
   raised,
+  registeredCommands,
+  renderedHtml,
   reveal,
+  runCommand,
   screenshot,
   scrollTo,
+  selectAcross,
   shutdown,
   start,
+  styleOf,
   type,
   vaultPath,
   views,
@@ -83,6 +108,30 @@ function shapeOf(found, kind) {
     .filter((m) => (kind ? m.marker === kind : true))
     .sort((a, b) => (a.from ?? 0) - (b.from ?? 0))
     .map((m) => `L${m.line}C${m.column}:${JSON.stringify(m.text)}`);
+}
+
+/**
+ * Which lines carry a marking of one kind, in order.
+ *
+ * Several checks below are about *which lines* a block covers, and were written
+ * against the text of those lines because the text was there to compare. It is
+ * no longer: a directive line at rest is shown as its heading, so the line that
+ * opens a block reports the heading's text rather than `@@@ teacher`. Asserting
+ * the line numbers says what those checks meant and stops saying something the
+ * change is entitled to alter.
+ */
+function linesWith(found, kind) {
+  return found
+    .filter((m) => m.marker === kind)
+    .map((m) => m.line)
+    .sort((a, b) => a - b);
+}
+
+/** Every heading's chips, as `"<text>" <kinds>`, dropping the positions. */
+function chipsOf(shown) {
+  return shown.flatMap((heading) =>
+    heading.chips.map((chip) => `${JSON.stringify(chip.text)} ${chip.kinds.join(",") || "entry"}`)
+  );
 }
 
 /**
@@ -149,6 +198,12 @@ after(async () => {
 });
 
 describe("the plugin is loaded and decorating", () => {
+  // Re-examined for `plugin-hide-tags` and left alone. It asks whether the
+  // plugin put any of its classes on the document at all, and the answer is not
+  // a statement about what a directive line is made of - the set of classes it
+  // reads through grew, and nothing else about it changed. The same holds for
+  // `a permission block is decorated in the editor` further down: a block's
+  // line markings are what they were, whatever those lines are shown as.
   test("a corpus file in live preview carries the plugin's own markers", async () =>
     watched("loaded", async () => {
       const container = await open(FRAGMENTS, views.livePreview);
@@ -417,8 +472,64 @@ describe("what is marked reflects the document as it is currently shown", () => 
       );
     }));
 
-  test("the cursor entering a tag changes no text and leaves the tag marked", async () =>
+  test("the cursor entering a directive line changes no text and changes what is shown", async () =>
+    watched("cursor-into-directive", async () => {
+      // This check used to say that the cursor changes nothing about what
+      // stands on the line. For a directive line it now changes exactly that,
+      // and that is the point of the change: the line stands as the heading of
+      // the block it opens while nothing is in it, and as its own characters
+      // while the cursor is. What may never change is the document.
+      const name = "constructed-cursor-directive.md";
+      await writeDocument(name, ["Intro.", "@@@ teacher", "Gated.", "@@@"].join("\n"));
+      const container = await open(name, views.livePreview);
+      await placeCursorAfter("Intro.");
+
+      const atRest = await visibleText(container);
+      assert.ok(
+        !atRest.includes("@@@ teacher"),
+        `With the cursor on another line, the directive stands as the heading of its block and ` +
+          `not as its own characters. On screen: ${JSON.stringify(atRest)}`
+      );
+      assert.deepEqual(
+        chipsOf(await headings(container)),
+        ['"teacher" entry'],
+        "What stands there instead names what the directive names."
+      );
+
+      const moved = await moveCursorInto("@@@ teacher");
+      assert.equal(
+        moved.changed,
+        false,
+        "Moving the cursor changed the document text. The characters that appear are the ones the " +
+          "document already held; a plugin that wrote them in would be editing a person's file to " +
+          "show it to them."
+      );
+      assert.ok(
+        (await visibleText(container)).includes("@@@ teacher"),
+        "The line's own characters are not on screen while the cursor is in them, so a person " +
+          "cannot edit the directive they are standing in."
+      );
+      assert.deepEqual(
+        entriesOf(await markers(container)),
+        ['L2C4:"teacher" entry'],
+        "With the line shown as its own characters, its entries carry their markings again - the " +
+          "two states are the heading and what a directive line has always shown, with nothing " +
+          "in between."
+      );
+      assert.deepEqual(
+        await headings(container),
+        [],
+        "The heading is gone while the line it stands for is on screen. Both at once would show " +
+          "the same directive twice."
+      );
+    }));
+
+  test("the cursor entering a fragment changes neither the text nor what is shown", async () =>
     watched("cursor-into-tag", async () => {
+      // The other half of the rule above, and the reason it is stated
+      // separately: only the directive line is replaced. A fragment keeps the
+      // marking `plugin-edit-tag-support` gave it, and the cursor entering it
+      // changes nothing at all.
       const name = "constructed-cursor.md";
       await writeDocument(name, ["Alpha ##fragment beta", "", "Gamma."].join("\n"));
       const container = await open(name, views.livePreview);
@@ -454,8 +565,7 @@ describe("a tag the plugin cannot resolve costs only itself", () => {
       // one is assembled here - see the modified fixture requirement in
       // `plugin-verification`. The first line gates the whole file and has no
       // closing marker; everything below it is ordinary and must be marked
-      // ordinarily. The directive itself gains no marking of its own in this
-      // change - that is `plugin-edit-tag-support`.
+      // ordinarily.
       const name = "constructed-file-directive.md";
       await writeDocument(
         name,
@@ -480,8 +590,8 @@ describe("a tag the plugin cannot resolve costs only itself", () => {
       const found = await markers(container);
 
       assert.deepEqual(
-        shapeOf(found, "permission-block"),
-        [`L3C0:${JSON.stringify("@@@ 4bhif")}`, `L4C0:${JSON.stringify("Gated.")}`, `L5C0:${JSON.stringify("@@@")}`],
+        linesWith(found, "permission-block"),
+        [3, 4, 5],
         "The permission block a person wrote is lines 3 to 5. A file-level directive on line 1 " +
           "has no closing marker and must open no block at all - read as one, it swallows the " +
           "lines above the real block and the marking starts two lines too early."
@@ -536,8 +646,17 @@ describe("a tag the plugin cannot resolve costs only itself", () => {
         ["Intro.", MIXED_DIRECTIVE.replace("]kaputt, ", ""), "Gated.", "@@@"].join("\n")
       );
 
-      const marked = entryKindsOf(await markers(await open(withIt, views.livePreview)));
-      const unaffected = entryKindsOf(await markers(await open(withoutIt, views.livePreview)));
+      // The cursor goes into the directive line in both documents. Per-entry
+      // markings are markings on characters, and a directive line at rest has
+      // none on screen - read without the cursor, both documents would report
+      // an empty list and the check would pass against anything at all.
+      const withItContainer = await open(withIt, views.livePreview);
+      await moveCursorInto("@@@ 4bhif");
+      const marked = entryKindsOf(await markers(withItContainer));
+
+      const withoutItContainer = await open(withoutIt, views.livePreview);
+      await moveCursorInto("@@@ 4bhif");
+      const unaffected = entryKindsOf(await markers(withoutItContainer));
 
       assert.deepEqual(
         marked,
@@ -563,12 +682,8 @@ describe("a tag the plugin cannot resolve costs only itself", () => {
       const found = await markers(container);
 
       assert.deepEqual(
-        shapeOf(found, "permission-block"),
-        [
-          `L6C0:${JSON.stringify("@@@ teacher")}`,
-          `L7C0:${JSON.stringify("Gated.")}`,
-          `L8C0:${JSON.stringify("@@@")}`,
-        ],
+        linesWith(found, "permission-block"),
+        [6, 7, 8],
         "The bare marker on line 2 opens nothing - it names no roles, so there is no block for it " +
           "to be the start of. The block on lines 6 to 8 is the only one in this document."
       );
@@ -593,6 +708,10 @@ describe("a permission directive is marked as the list of entries it is", () => 
       const name = "constructed-directive-entries.md";
       await writeDocument(name, ["Intro.", MIXED_DIRECTIVE, "Gated.", "@@@"].join("\n"));
       const container = await open(name, views.livePreview);
+      // With the cursor in the line, the line stands as its own characters and
+      // carries the per-entry markings. What it stands as while the cursor is
+      // elsewhere is a question of its own, asked further down.
+      await moveCursorInto("@@@ 4bhif");
 
       assert.deepEqual(
         entriesOf(await markers(container)),
@@ -623,22 +742,25 @@ describe("a directive that governs the whole file is marked as doing so", () => 
         ["@@@ teacher", "", "Intro.", "@@@ teacher", "Gated.", "@@@"].join("\n")
       );
       const container = await open(name, views.livePreview);
+      // Both directive lines here carry the same text, which is the point - and
+      // means neither can be singled out by a cursor placed on its text. A
+      // selection running from the first line to the last touches both, so both
+      // stand as their own characters and the comparison is between two
+      // markings rather than between two headings.
+      const selected = await selectAcross("@@@ teacher", "Gated.");
+      assert.equal(selected.changed, false, "Selecting changed the document text.");
       const found = await markers(container);
 
       assert.deepEqual(
-        shapeOf(found, "permission-file"),
-        [`L1C0:${JSON.stringify("@@@ teacher")}`],
+        linesWith(found, "permission-file"),
+        [1],
         "The first line gates the whole document and has no closing marker. That is a different " +
           "promise about a different amount of text than the identical line further down, and the " +
           "two are told apart."
       );
       assert.deepEqual(
-        shapeOf(found, "permission-block"),
-        [
-          `L4C0:${JSON.stringify("@@@ teacher")}`,
-          `L5C0:${JSON.stringify("Gated.")}`,
-          `L6C0:${JSON.stringify("@@@")}`,
-        ],
+        linesWith(found, "permission-block"),
+        [4, 5, 6],
         "The block is lines 4 to 6. The line-1 directive opens no block - read as one it would " +
           "swallow everything below it."
       );
@@ -671,6 +793,9 @@ describe("an entry carrying a time window is distinguishable from one that does 
         ].join("\n")
       );
       const container = await open(name, views.livePreview);
+      // Both directive lines stand as their own characters, so both carry their
+      // per-entry markings and the two can be compared with one another.
+      await selectAcross("Intro.", "Not yet.");
       const marked = entryKindsOf(await markers(container));
 
       assert.deepEqual(
@@ -693,19 +818,21 @@ describe("a window the server discards is marked as discarded", () => {
       const name = "constructed-withheld.md";
       await writeDocument(name, ["Intro.", "@@@ ]kaputt, b[, [c]", "Gated.", "@@@"].join("\n"));
       const container = await open(name, views.livePreview);
-      const found = await markers(container);
 
       assert.deepEqual(
-        shapeOf(found, "permission-withheld"),
-        [`L2C0:${JSON.stringify("@@@ ]kaputt, b[, [c]")}`],
+        linesWith(await markers(container), "permission-withheld"),
+        [2],
         "No token here reads as an entry, so `removeForbiddenContent` replaces the whole block with " +
           "the empty string - it is withheld from every reader including an admin. That is the " +
           "harshest thing a directive can do and the least visible, so it is said at the line."
       );
+
+      await moveCursorInto("]kaputt");
       assert.deepEqual(
-        entriesOf(found),
+        entriesOf(await markers(container)),
         [],
-        "Nothing on this line is an entry the server acts on, so nothing on it is marked as one."
+        "Nothing on this line is an entry the server acts on, so nothing on it is marked as one - " +
+          "with the cursor in the line, where every entry that were one would be marked."
       );
     }));
 
@@ -717,8 +844,8 @@ describe("a window the server discards is marked as discarded", () => {
       const found = await markers(container);
 
       assert.deepEqual(
-        [shapeOf(found, "permission-file"), shapeOf(found, "permission-withheld")],
-        [[`L1C0:${JSON.stringify("@@@ ]kaputt")}`], [`L1C0:${JSON.stringify("@@@ ]kaputt")}`]],
+        [linesWith(found, "permission-file"), linesWith(found, "permission-withheld")],
+        [[1], [1]],
         "The line gates the file and names nothing the server can read, so `resolveFileVisibility` " +
           "reports the file invisible to everyone. Both things are true of it and both are marked."
       );
@@ -733,6 +860,7 @@ describe("a view switch is distinguishable from an address", () => {
       const name = "constructed-view-switches.md";
       await writeDocument(name, ["Intro.", "@@@ #exam, #nonsense, 4bhif", "Gated.", "@@@"].join("\n"));
       const container = await open(name, views.livePreview);
+      await moveCursorInto("#nonsense");
 
       assert.deepEqual(
         entriesOf(await markers(container)),
@@ -817,6 +945,11 @@ describe("the set of decorations is always well-formed", () => {
       );
       forgetRaised();
       const container = await open(name, views.livePreview);
+      // A selection over the whole document touches all three directive lines,
+      // so each stands as its own characters and carries its entry markings.
+      // That is also the shape this check is about: line markings and character
+      // markings meeting at one position, in the state where both exist.
+      await selectAcross("@@@ teacher, 4bhif[gestern]", "Withheld from everyone.");
       const found = await markers(container);
       const errors = raised();
 
@@ -948,31 +1081,870 @@ describe("what is marked is what the server will act on", () => {
     }));
 });
 
-// ################### The reading view, before the editor stops reaching into it ###################
+// ################### A directive line is shown as the heading of its block ###################
+
+describe("a directive line is shown as the heading of the block it opens", () => {
+  test("a touching selection shows the line, a neighbouring cursor does not", async () =>
+    watched("heading-lifted-by-selection", async () => {
+      const name = "constructed-heading-selection.md";
+      await writeDocument(name, ["Above.", "@@@ teacher", "Gated.", "@@@", "Below."].join("\n"));
+      const container = await open(name, views.livePreview);
+
+      await placeCursorAfter("Above.");
+      assert.equal(
+        (await headings(container)).length,
+        1,
+        "The cursor is on the line directly above. That line is not the directive line, and a " +
+          "document whose headings appeared and vanished as the cursor passed by would flicker " +
+          "its way down the page."
+      );
+
+      await placeCursorAfter("Gated.");
+      assert.equal(
+        (await headings(container)).length,
+        1,
+        "The cursor is on the line directly below, which is no more the directive line than the " +
+          "one above it."
+      );
+
+      const selected = await selectAcross("Above.", "Gated.");
+      assert.equal(selected.changed, false, "Selecting changed the document text.");
+      assert.deepEqual(
+        await headings(container),
+        [],
+        "A selection running across the block touches the directive line, so the line stands as " +
+          "its own characters - otherwise a person copies text they cannot see."
+      );
+      assert.ok(
+        (await visibleText(container)).includes("@@@ teacher"),
+        "The selected line's own characters are on screen."
+      );
+    }));
+
+  test("the heading carries each entry as what that entry is", async () =>
+    watched("heading-entries", async () => {
+      const name = "constructed-heading-entries.md";
+      await writeDocument(name, ["Intro.", MIXED_DIRECTIVE, "Gated.", "@@@"].join("\n"));
+      const container = await open(name, views.livePreview);
+      await placeCursorAfter("Intro.");
+
+      assert.deepEqual(
+        chipsOf(await headings(container)),
+        [
+          '"4bhif" entry',
+          '"teacher[2025-11-28T08:00:00]" timed',
+          '"#exam" switch',
+          '"]kaputt" discarded',
+          '"5bhif[gestern]" broken',
+        ],
+        "The heading rebuilds the directive as the list it is, and each entry carries what is " +
+          "true of that entry. `]kaputt` is in it: where the characters are on the page a " +
+          "discarded token is told apart by the marking its neighbours have and it does not, but " +
+          "here they are gone - leaving it out would hide from the author that they wrote " +
+          "something the server throws away."
+      );
+    }));
+
+  test("a time window stands in the heading as it stands in the document", async () =>
+    watched("heading-window-verbatim", async () => {
+      const name = "constructed-heading-window.md";
+      const written = "4bhif[2026-08-01T00:00:00 to 2026-08-20T00:00:00]";
+      await writeDocument(name, ["Intro.", `@@@ ${written}`, "Gated.", "@@@"].join("\n"));
+      const container = await open(name, views.livePreview);
+      await placeCursorAfter("Intro.");
+
+      assert.deepEqual(
+        chipsOf(await headings(container)),
+        [`${JSON.stringify(written)} timed`],
+        "The window is reproduced, not restated. A heading saying `1.-20. August` would claim a " +
+          "reading of it, and the server throws away windows that a readable restatement makes " +
+          "look sound - which is the one thing the plugin exists to show."
+      );
+    }));
+
+  test("a directive nothing can be read from names nobody and says so", async () =>
+    watched("heading-withheld", async () => {
+      const name = "constructed-heading-withheld.md";
+      await writeDocument(name, ["Intro.", "@@@ ]kaputt, b[, [c]", "Gated.", "@@@"].join("\n"));
+      const container = await open(name, views.livePreview);
+      await placeCursorAfter("Intro.");
+      const shown = await headings(container);
+
+      assert.deepEqual(
+        shown.map((heading) => heading.kinds),
+        [["withheld"]],
+        "`removeForbiddenContent` replaces this block with the empty string - no reader sees it, " +
+          "an admin included."
+      );
+      assert.deepEqual(
+        shown[0]?.chips ?? null,
+        [],
+        "A heading naming somebody would claim the opposite of what the server does with the line."
+      );
+      assert.ok(
+        (shown[0]?.note ?? "").trim().length > 0,
+        "And no heading at all would be the one line that disappears without a trace. It says " +
+          "that the block is shown to no reader."
+      );
+    }));
+
+  test("the file-level directive's frame has no lower edge", async () =>
+    watched("file-level-frame", async () => {
+      const name = "constructed-file-frame.md";
+      await writeDocument(name, ["@@@ teacher", "", "Text below it."].join("\n"));
+      const container = await open(name, views.livePreview);
+      await placeCursorAfter("Text below it.");
+
+      const frame = await styleOf(container, "permission-file", [
+        "border-top-width",
+        "border-left-width",
+        "border-right-width",
+        "border-bottom-width",
+      ]);
+      assert.ok(frame, "Nothing on screen carries the file-level marking.");
+      assert.deepEqual(
+        [frame["border-bottom-width"], frame["border-top-width"] === "0px"],
+        ["0px", false],
+        `The line gates the whole file and has no closing marker, so there is no closed region ` +
+          `for a heading to sit on. It is the same box every block gets with its lower edge left ` +
+          `off, and the open side is what says that what it governs does not end. Measured: ` +
+          `${JSON.stringify(frame)}`
+      );
+    }));
+});
+
+// ################### The rendered reading view ###################
 
 describe("the reading view", () => {
   test("the rendered view does not show the tag text", async () =>
     watched("reading-view-tags", async () => {
-      // Recorded rather than designed: the reading view's own repair is
-      // `plugin-render-hide-tags`, and this change only removes the editor's
-      // reach into rendered output. What the post-processor does *by itself* is
-      // written down here first, so that removing the editor's call either
-      // leaves this green or turns it red with the reason visible - rather than
-      // becoming a mystery in the next change.
       const container = await open(FRAGMENTS, views.reading);
       await reveal(container, "Fragmented Text.");
       const shown = await visibleText(container);
 
-      assert.ok(
-        !shown.includes(FRAGMENT),
-        "The rendered reading view still shows the raw tag text. If this turned red when the " +
-          "editor stopped rewriting rendered output, the editor's call was masking a " +
-          "post-processor that does not work on its own - a finding for plugin-render-hide-tags, " +
-          "to be recorded there rather than repaired by restoring the call."
-      );
+      assert.ok(!shown.includes(FRAGMENT), "The rendered reading view still shows the raw tag text.");
       assert.ok(
         !shown.includes("##side-by-side"),
         "The rendered reading view still shows the raw side-by-side markers."
+      );
+    }));
+
+  test("no tag form is shown as its own characters", async () =>
+    watched("reading-view-every-form", async () => {
+      const name = "constructed-reading-every-form.md";
+      await writeDocument(
+        name,
+        [
+          "@@@ teacher",
+          "",
+          "Opening text.",
+          "",
+          "@@@ 4bhif, #answer",
+          "Gated text. ##fragment",
+          "@@@",
+          "",
+          "##side-by-side-start",
+          "Left.",
+          "##separator",
+          "Right.",
+          "##side-by-side-end",
+          "",
+          "Closing text.",
+        ].join("\n")
+      );
+      const container = await open(name, views.reading);
+      await reveal(container, "Closing text.");
+      const shown = await visibleText(container);
+
+      for (const tag of ["@@@", FRAGMENT, "##side-by-side-start", "##side-by-side-end", "##separator"]) {
+        assert.ok(
+          !shown.includes(tag),
+          `The reading view shows ${JSON.stringify(tag)} as its own characters. A tag is an ` +
+            `instruction to the rendering server, not text a reader is meant to read. On screen: ` +
+            `${JSON.stringify(shown)}`
+        );
+      }
+      for (const text of ["Opening text.", "Gated text.", "Left.", "Right.", "Closing text."]) {
+        assert.ok(
+          shown.includes(text),
+          `What the tags govern is gone with them: ${JSON.stringify(text)} is not on screen.`
+        );
+      }
+    }));
+
+  test("a tag is taken out of a line without rebuilding what surrounds it", async () =>
+    watched("reading-view-formatting", async () => {
+      const name = "constructed-reading-formatting.md";
+      await writeDocument(
+        name,
+        ["Alpha **bold** ##fragment and [a link](https://example.org) gamma.", "", "End."].join("\n")
+      );
+      const container = await open(name, views.reading);
+      await reveal(container, "gamma.");
+
+      const html = await renderedHtml(container);
+      assert.ok(
+        html.includes("<strong>bold</strong>"),
+        `The emphasis in the line did not survive the tag being taken out of it. A text node ` +
+          `replaced by a freshly built one loses its place in whatever wrapped it. Rendered: ` +
+          `${JSON.stringify(html)}`
+      );
+      assert.ok(html.includes("</a>"), "The link in the line did not survive either.");
+      assert.ok(
+        !(await visibleText(container)).includes(FRAGMENT),
+        "The tag is still on screen, so nothing was taken out at all."
+      );
+    }));
+
+  test("a section that carries no words is not mistaken for an empty one", async () =>
+    watched("reading-view-wordless-section", async () => {
+      // A section whose lines held nothing but tags has nothing left to show,
+      // and goes. Whether that is the case is a question about the source: a
+      // rendered image, a horizontal rule and a diagram all hold no text at all,
+      // and hiding a section because nothing in it is a word takes content out
+      // of a document to remove a tag that was never in it.
+      const name = "constructed-reading-wordless.md";
+      await writeDocument(
+        name,
+        [
+          "Before.",
+          "",
+          "![a picture](https://example.org/picture.png)",
+          "",
+          "---",
+          "",
+          "@@@ teacher",
+          "Gated.",
+          "@@@",
+          "",
+          "After.",
+        ].join("\n")
+      );
+      const container = await open(name, views.reading);
+      await reveal(container, "After.");
+
+      const html = await renderedHtml(container);
+      assert.ok(
+        html.includes("<img") || html.includes("<video") || html.includes("example.org/picture.png"),
+        `The paragraph holding only an image is gone from the rendered view. Rendered: ` +
+          `${JSON.stringify(html)}`
+      );
+      assert.ok(html.includes("<hr"), "The horizontal rule is gone from the rendered view.");
+      assert.ok(
+        !(await visibleText(container)).includes("@@@"),
+        "And the lines that really did hold nothing but a tag are still gone."
+      );
+    }));
+
+  test("a side-by-side block is shown as columns", async () =>
+    watched("reading-view-columns", async () => {
+      const name = "constructed-reading-columns.md";
+      await writeDocument(
+        name,
+        [
+          "Before the blocks.",
+          "##side-by-side-start",
+          "Left.",
+          "##separator",
+          "Right.",
+          "##side-by-side-end",
+          "",
+          "##side-by-side-start",
+          "One.",
+          "##separator",
+          "Two.",
+          "##separator",
+          "Three.",
+          "##side-by-side-end",
+          "",
+          "After the blocks.",
+        ].join("\n")
+      );
+      const container = await open(name, views.reading);
+      await reveal(container, "After the blocks.");
+
+      assert.deepEqual(
+        await columns(container),
+        [
+          ["Left.", "Right."],
+          ["One.", "Two.", "Three."],
+        ],
+        "Letting the markers vanish and the content run on underneath would leave the reading " +
+          "view saying nothing about the page the server produces, which is what it is for. The " +
+          "block is split where the document splits it, one column per part."
+      );
+      assert.equal(
+        await columnsAreSideBySide(container),
+        true,
+        "The columns carry the class and are stacked on the page anyway - which is the outcome " +
+          "the requirement exists to rule out."
+      );
+      const shown = await visibleText(container);
+      assert.ok(
+        shown.includes("Before the blocks.") && shown.includes("After the blocks."),
+        "The sentence in the same paragraph as an opening marker is not part of the block, and " +
+          `must survive it. On screen: ${JSON.stringify(shown)}`
+      );
+    }));
+
+  test("a block carries its frame and its heading", async () =>
+    watched("reading-view-block", async () => {
+      const name = "constructed-reading-block.md";
+      await writeDocument(
+        name,
+        ["@@@ teacher", "", "Intro.", "", "@@@ 4bhif, #answer", "Gated text.", "@@@", "", "After."].join("\n")
+      );
+      const container = await open(name, views.reading);
+      await reveal(container, "After.");
+
+      assert.deepEqual(
+        chipsOf(await headings(container)),
+        ['"teacher" entry', '"4bhif" entry', '"#answer" switch'],
+        "Both directives are shown as the heading of what they gate - the one that governs the " +
+          "file and the one that opens a block alike."
+      );
+
+      const box = await styleOf(container, "safelearn-read-block-start", ["border-top-width"]);
+      assert.ok(box && box["border-top-width"] !== "0px", `The block has no lid: ${JSON.stringify(box)}`);
+
+      const gate = await styleOf(container, "safelearn-read-file", [
+        "border-top-width",
+        "border-bottom-width",
+      ]);
+      assert.deepEqual(
+        [gate?.["border-bottom-width"], gate?.["border-top-width"] === "0px"],
+        ["0px", false],
+        `The line that gates the file is drawn in the same frame with its lower edge left off, ` +
+          `the way the editor draws it. Measured: ${JSON.stringify(gate)}`
+      );
+    }));
+
+  test("two blocks meeting inside one paragraph both get their heading and their frame", async () =>
+    watched("reading-view-adjacent-blocks", async () => {
+      // The corpus writes them this way: a closing marker and the next
+      // directive on consecutive lines, which Markdown renders as one paragraph.
+      // That one rendered section is the floor of the first block and the lid of
+      // the second, and a rule that asked which block covers it and stopped at
+      // the first answer would give it only one of the two.
+      const name = "constructed-reading-adjacent-blocks.md";
+      await writeDocument(
+        name,
+        [
+          "Intro.",
+          "",
+          "@@@ teacher",
+          "Teacher text.",
+          "@@@",
+          "@@@ 4bhif",
+          "Class text.",
+          "@@@",
+          "",
+          "After.",
+        ].join("\n")
+      );
+      const container = await open(name, views.reading);
+      await reveal(container, "After.");
+
+      assert.deepEqual(
+        chipsOf(await headings(container)),
+        ['"teacher" entry', '"4bhif" entry'],
+        "Both directives are shown as the heading of what they gate."
+      );
+      const shown = await visibleText(container);
+      assert.ok(!shown.includes("@@@"), `A marker is still on screen: ${JSON.stringify(shown)}`);
+      assert.ok(
+        shown.includes("Teacher text.") && shown.includes("Class text."),
+        "And what the two blocks gate is still there."
+      );
+
+      const box = await styleOf(container, "safelearn-read-block", [
+        "border-top-width",
+        "border-bottom-width",
+      ]);
+      assert.ok(
+        box && box["border-top-width"] !== "0px" && box["border-bottom-width"] !== "0px",
+        `The section carries both ends, because it is both. Measured: ${JSON.stringify(box)}`
+      );
+    }));
+
+  test("both views show the same directive the same way", async () =>
+    watched("same-heading-in-both-views", async () => {
+      // The reason the reading view and the editor were settled in one change:
+      // a person switching view may not have to learn twice what they are
+      // looking at, and two builders would be free to drift apart at exactly
+      // the point where they have to agree.
+      const name = "constructed-same-heading.md";
+      await writeDocument(name, ["Intro.", MIXED_DIRECTIVE, "Gated.", "@@@"].join("\n"));
+
+      const editor = await open(name, views.livePreview);
+      await placeCursorAfter("Intro.");
+      const inEditor = chipsOf(await headings(editor));
+
+      const reading = await open(name, views.reading);
+      await reveal(reading, "Gated.");
+      const inReading = chipsOf(await headings(reading));
+
+      assert.ok(inEditor.length > 0, "The editor showed no heading at all, so there is nothing to compare.");
+      assert.deepEqual(
+        inReading,
+        inEditor,
+        "The two views show the same directive with the same entries and the same distinctions."
+      );
+    }));
+});
+
+// ################### The tags the plugin writes ###################
+
+describe("the plugin writes the tags it recognizes", () => {
+  const MARKERS = ["##side-by-side-start", "##side-by-side-end", "##separator"];
+
+  /** Fails on any line that carries a marker together with anything else. */
+  function assertMarkersStandAlone(text) {
+    for (const [index, line] of text.split("\n").entries()) {
+      for (const marker of MARKERS) {
+        if (!line.includes(marker)) continue;
+        assert.equal(
+          line.trim(),
+          marker,
+          `Line ${index + 1} is ${JSON.stringify(line)}. A marker sharing a line with other text ` +
+            `is one the plugin does not mark - \`isMarkerLine\` requires the line to be nothing ` +
+            `but the marker - and the block boundary the server reads then falls inside running ` +
+            `text. A command may not write that.`
+        );
+      }
+    }
+  }
+
+  test("the two-column command writes a block the plugin marks", async () =>
+    watched("insert-two-columns", async () => {
+      const name = "constructed-insert-two.md";
+      await writeDocument(name, ["Intro.", "", "End."].join("\n"));
+      const container = await open(name, views.livePreview);
+      await placeCursorAfter("Intro.");
+      await runCommand("insert-side-by-side");
+
+      const written = await documentText();
+      assert.deepEqual(
+        written.split("\n"),
+        [
+          "Intro.",
+          "##side-by-side-start",
+          "",
+          "##separator",
+          "",
+          "##side-by-side-end",
+          "",
+          "End.",
+        ],
+        "Two columns, each with a line to write in. A separator standing directly above the " +
+          "closing marker is an empty column with no room in it, and a person would have to make " +
+          "that room before they could type."
+      );
+      assertMarkersStandAlone(written);
+
+      const found = await markers(container);
+      assert.ok(
+        found.some((m) => m.marker === "side-by-side-start") &&
+          found.some((m) => m.marker === "side-by-side-separator") &&
+          found.some((m) => m.marker === "side-by-side-end"),
+        `What the command wrote is not marked by the plugin that wrote it. Found: ` +
+          `${JSON.stringify(shapeOf(found))}`
+      );
+    }));
+
+  test("the cursor is left in the column that is waiting to be written in", async () =>
+    watched("insert-cursor", async () => {
+      const name = "constructed-insert-cursor.md";
+      await writeDocument(name, ["Intro.", "", "End."].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Intro.");
+      await runCommand("insert-side-by-side");
+
+      assert.deepEqual(
+        await cursorPosition(),
+        { from: { line: 2, ch: 0 }, to: { line: 2, ch: 0 } },
+        "Line 3 of the document is the first column. A command that leaves the cursor where it " +
+          "was makes a person find the place it just built for them."
+      );
+    }));
+
+  test("a selection is enclosed whole and no separator is written into it", async () =>
+    watched("insert-around-selection", async () => {
+      const name = "constructed-insert-selection.md";
+      await writeDocument(
+        name,
+        ["Alpha paragraph.", "", "Beta paragraph.", "", "End."].join("\n")
+      );
+      await open(name, views.livePreview);
+      const selected = await selectAcross("Alpha paragraph.", "Beta paragraph.");
+      assert.equal(selected.changed, false, "Selecting changed the document text.");
+      await runCommand("insert-side-by-side");
+
+      assert.deepEqual(
+        (await documentText()).split("\n"),
+        [
+          "##side-by-side-start",
+          "Alpha paragraph.",
+          "",
+          "Beta paragraph.",
+          "##separator",
+          "",
+          "##side-by-side-end",
+          "",
+          "End.",
+        ],
+        "Somebody who selected two paragraphs does not want them divided at a place the command " +
+          "guessed. They are enclosed as they were, and the separator stands after them - a line " +
+          "to move rather than a division to undo."
+      );
+      assert.deepEqual(
+        await cursorPosition(),
+        { from: { line: 5, ch: 0 }, to: { line: 5, ch: 0 } },
+        "The cursor is in the empty column, which is the part of the block that is waiting."
+      );
+    }));
+
+  test("the command that asks writes the number of columns it was given", async () =>
+    watched("insert-chosen-columns", async () => {
+      const name = "constructed-insert-columns.md";
+      await writeDocument(name, ["Intro.", "", "End."].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Intro.");
+
+      // The command opens a dialog and writes nothing until it is answered, so
+      // the document is expected to be unchanged when the command returns.
+      await runCommand("insert-side-by-side-columns", { expectEdit: false });
+      await answerColumnCount(4);
+
+      const written = await documentText();
+      assert.equal(
+        written.split("\n").filter((line) => line.trim() === "##separator").length,
+        3,
+        `Four columns are three separators. Written: ${JSON.stringify(written)}`
+      );
+      assertMarkersStandAlone(written);
+    }));
+
+  test("the command that asks refuses a count that is not a side-by-side block", async () =>
+    watched("insert-refused-count", async () => {
+      const name = "constructed-insert-refused.md";
+      await writeDocument(name, ["Intro.", "", "End."].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Intro.");
+
+      const before = await documentText();
+      await runCommand("insert-side-by-side-columns", { expectEdit: false });
+      await answerColumnCount(1);
+
+      assert.equal(
+        await documentText(),
+        before,
+        "One column is not a side-by-side block. Writing the markers anyway would put a tag in a " +
+          "person's document that says nothing, and the plugin would mark it as if it did."
+      );
+    }));
+
+  test("a command invoked in the middle of a line does not leave a marker in it", async () =>
+    watched("insert-mid-line", async () => {
+      const name = "constructed-insert-midline.md";
+      await writeDocument(name, ["Alpha beta gamma.", "", "End."].join("\n"));
+      await open(name, views.livePreview);
+      await moveCursorInto("beta");
+      await runCommand("insert-side-by-side");
+
+      const written = await documentText();
+      assertMarkersStandAlone(written);
+      assert.ok(
+        written.includes("Alpha be\n##side-by-side-start"),
+        `The insertion begins on a line of its own, and what stood before the cursor stays on ` +
+          `the line it was on. Written: ${JSON.stringify(written)}`
+      );
+      assert.ok(
+        written.includes("##side-by-side-end\nta gamma."),
+        `And what stood after the cursor is on a line of its own too, rather than glued to the ` +
+          `closing marker. Written: ${JSON.stringify(written)}`
+      );
+    }));
+
+  test("the fragment marker goes above the whole block, not above the cursor's line", async () =>
+    watched("insert-fragment", async () => {
+      const name = "constructed-insert-fragment.md";
+      await writeDocument(
+        name,
+        ["Intro.", "", "First line.", "Second line.", "Third line.", "", "End."].join("\n")
+      );
+      await open(name, views.livePreview);
+      await moveCursorInto("Second");
+      await runCommand("insert-fragment");
+
+      assert.deepEqual(
+        (await documentText()).split("\n"),
+        ["Intro.", "", "##fragment", "First line.", "Second line.", "Third line.", "", "End."],
+        "The marker written above the cursor's own line would divide the paragraph in two and " +
+          "make a fragment of its second half - which nobody asked for and which is invisible " +
+          "until the deck is opened."
+      );
+      assert.deepEqual(
+        await cursorPosition(),
+        { from: { line: 4, ch: 3 }, to: { line: 4, ch: 3 } },
+        "Everything below the insertion moved down one line, and the person is put back where " +
+          "they were writing rather than at the marker - the same column of the same text, one " +
+          "line further down. The cursor stood in the middle of `Second`, at column 3."
+      );
+    }));
+
+  test("a section is written for each name, in the order they were given", async () =>
+    watched("sections-per-name", async () => {
+      const name = "constructed-sections.md";
+      await writeDocument(name, ["# Chapter", "", "Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      await answerNameList(["Ada Byron", "Stu Dent", "Grace Hopper"]);
+
+      assert.deepEqual(
+        (await documentText()).split("\n"),
+        [
+          "# Chapter",
+          "",
+          "Text.",
+          "@@@ Ada Byron",
+          "## Ada Byron",
+          "",
+          "@@@",
+          "",
+          "@@@ Stu Dent",
+          "## Stu Dent",
+          "",
+          "@@@",
+          "",
+          "@@@ Grace Hopper",
+          "## Grace Hopper",
+          "",
+          "@@@",
+          "",
+        ],
+        "One section per name, in the order the list gave them, each with a line to write in. The " +
+          "heading is one level below `# Chapter`, so the sections stand underneath the chapter " +
+          "they were inserted into."
+      );
+      assert.deepEqual(
+        await cursorPosition(),
+        { from: { line: 5, ch: 0 }, to: { line: 5, ch: 0 } },
+        "The cursor is in the first section, below its heading, where the next thing belongs."
+      );
+    }));
+
+  test("the heading of a generated section stands inside the block", async () =>
+    watched("sections-heading-inside", async () => {
+      // Not a formatting question. `removeForbiddenContent` replaces what stands
+      // *between* the markers and leaves everything outside them for every
+      // reader - so a heading above the block would show every student the names
+      // of all the others, on a page written so that each of them sees only
+      // their own section.
+      const name = "constructed-sections-inside.md";
+      await writeDocument(name, ["# Chapter", "", "Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      await answerNameList(["Ada Byron", "Stu Dent"]);
+
+      const lines = (await documentText()).split("\n");
+      for (const person of ["Ada Byron", "Stu Dent"]) {
+        const opens = lines.indexOf(`@@@ ${person}`);
+        const heading = lines.findIndex((line, index) => index > opens && line.endsWith(` ${person}`));
+        const closes = lines.findIndex((line, index) => index > opens && line.trim() === "@@@");
+
+        assert.ok(opens !== -1, `No block was written for ${person}.`);
+        assert.ok(
+          heading > opens && heading < closes,
+          `${person}'s heading is on line ${heading + 1}, and the block runs from line ` +
+            `${opens + 1} to line ${closes + 1}. A heading outside the block is text the server ` +
+            `shows to every reader, which turns a document of private sections into a class list.`
+        );
+      }
+    }));
+
+  test("the heading level follows the heading above the insertion point", async () =>
+    watched("sections-heading-level", async () => {
+      const deep = "constructed-sections-deep.md";
+      await writeDocument(deep, ["# Chapter", "", "### Exercise", "", "Text.", ""].join("\n"));
+      await open(deep, views.livePreview);
+      await placeCursorAfter("Text.");
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      await answerNameList(["Ada Byron"]);
+
+      assert.ok(
+        (await documentText()).includes("#### Ada Byron"),
+        `The last heading above the insertion point is \`### Exercise\`, so the section's heading ` +
+          `is one level below it. Written: ${JSON.stringify(await documentText())}`
+      );
+
+      const flat = "constructed-sections-flat.md";
+      await writeDocument(flat, ["Text with no heading above it.", ""].join("\n"));
+      await open(flat, views.livePreview);
+      await placeCursorAfter("Text with no heading above it.");
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      await answerNameList(["Ada Byron"]);
+
+      assert.ok(
+        (await documentText()).includes("# Ada Byron"),
+        "With no heading above the insertion point there is no level to go one below, and the " +
+          "sections are the document's top level."
+      );
+    }));
+
+  test("names are trimmed, their spelling kept, and blank lines produce nothing", async () =>
+    watched("sections-name-shape", async () => {
+      const name = "constructed-sections-shape.md";
+      await writeDocument(name, ["# Chapter", "", "Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      await answerNameList(["  Ada Byron  ", "", "   ", "Stu Dent"]);
+
+      const written = await documentText();
+      assert.equal(
+        written.split("\n").filter((line) => line.startsWith("@@@ ")).length,
+        2,
+        `Blank lines in a pasted list are not people. Written: ${JSON.stringify(written)}`
+      );
+      assert.ok(
+        written.includes("@@@ Ada Byron\n") && !written.includes("@@@   Ada Byron"),
+        "A name is trimmed."
+      );
+      assert.ok(
+        !written.includes("ada byron"),
+        "And its spelling is kept. The server's comparison is lowercased anyway, so writing it " +
+          "down in lower case changes nothing about who may read the block - and makes a document " +
+          "full of people's names that nobody wants to read."
+      );
+    }));
+
+  test("a name the server reads as a role is written as given, and named", async () =>
+    watched("sections-reserved-name", async () => {
+      const name = "constructed-sections-reserved.md";
+      await writeDocument(name, ["# Chapter", "", "Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await forgetNotices();
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      await answerNameList(["Students", "Ada Byron"]);
+
+      assert.ok(
+        (await documentText()).includes("@@@ Students"),
+        "The command writes what it was given and corrects nothing."
+      );
+      const reported = await noticesShown();
+      assert.ok(
+        reported.some((notice) => notice.includes("Students")),
+        `\`hasRoles\` drops a display name equal to one of the five reserved ones rather than ` +
+          `adding it, so this section is addressed to the *role* and read by every student in the ` +
+          `school. Nothing in the document says so and no marking can - this command is the one ` +
+          `place in the plugin that knows a person was meant. Reported: ${JSON.stringify(reported)}`
+      );
+    }));
+
+  test("a list with no reserved name is reported about at all", async () =>
+    watched("sections-no-report", async () => {
+      const name = "constructed-sections-quiet.md";
+      await writeDocument(name, ["# Chapter", "", "Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await forgetNotices();
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      await answerNameList(["Ada Byron", "Grace Hopper"]);
+
+      assert.deepEqual(
+        await noticesShown(),
+        [],
+        "A report that appears for every list is a report nobody reads by the third one."
+      );
+    }));
+
+  test("the restricting command encloses a selection and restricts nothing else", async () =>
+    watched("restrict-selection", async () => {
+      const around = "constructed-restrict-selection.md";
+      await writeDocument(around, ["Before.", "", "Secret paragraph.", "", "After."].join("\n"));
+      await open(around, views.livePreview);
+      await selectAcross("Secret paragraph.", "Secret paragraph.");
+      await runCommand("restrict-selection", { expectEdit: false });
+      await answerNameList(["teacher", "Ada Byron"]);
+
+      assert.deepEqual(
+        (await documentText()).split("\n"),
+        ["Before.", "", "@@@ teacher, Ada Byron", "Secret paragraph.", "@@@", "", "After."],
+        "The entries are one directive, and what was selected stands inside it unchanged."
+      );
+
+      const empty = "constructed-restrict-empty.md";
+      await writeDocument(empty, ["Before.", "", "Untouched paragraph.", ""].join("\n"));
+      await open(empty, views.livePreview);
+      await placeCursorAfter("Before.");
+      await runCommand("restrict-selection", { expectEdit: false });
+      await answerNameList(["teacher"]);
+
+      assert.deepEqual(
+        (await documentText()).split("\n"),
+        ["Before.", "@@@ teacher", "", "@@@", "", "Untouched paragraph.", ""],
+        "With nothing selected the command writes an empty block and reaches for no paragraph of " +
+          "its own. A restriction over text nobody pointed at is invisible to the person who " +
+          "wrote it, and shows up as somebody not seeing something they should."
+      );
+    }));
+
+  test("no command pushes a directive off the first line of the document", async () =>
+    watched("insert-never-ungates-a-file", async () => {
+      // A directive gates the whole file by standing on line 1 and by nothing
+      // else. An insertion at the very top pushes it to line 2, and the document
+      // becomes readable by everyone - silently, through a command somebody ran
+      // to add a column or a fragment. That is a permission change nobody asked
+      // for, so it cannot happen.
+      const name = "constructed-insert-gated-file.md";
+      await writeDocument(name, ["@@@ teacher", "Only visible to teachers.", ""].join("\n"));
+      await open(name, views.livePreview);
+
+      await moveCursorInto("Only visible");
+      await runCommand("insert-fragment");
+      assert.equal(
+        (await documentText()).split("\n")[0],
+        "@@@ teacher",
+        "The fragment command walks up to the top of the block the cursor is in, and this block " +
+          "reaches the first line. It stops below the directive rather than above it."
+      );
+
+      await open(name, views.livePreview);
+      await placeCursorAtStart();
+      await runCommand("insert-side-by-side");
+      assert.equal(
+        (await documentText()).split("\n")[0],
+        "@@@ teacher",
+        "And an insertion made with the cursor at the very top of the document goes below the " +
+          "directive, not above it."
+      );
+    }));
+
+  test("every command Obsidian holds for this plugin is in the editor's context menu", async () =>
+    watched("insert-context-menu", async () => {
+      await open(FRAGMENTS, views.livePreview);
+      const commands = await registeredCommands();
+      const items = await editorMenuItems();
+
+      assert.ok(
+        commands.length > 0,
+        "Obsidian holds no commands for this plugin at all, so there is nothing to compare."
+      );
+      assert.deepEqual(
+        commands.filter((command) => !items.some((title) => command.name.endsWith(title))).map((c) => c.id),
+        [],
+        `Every command is offered in both places, because both are built from one list. A command ` +
+          `in the palette and not in the menu reads as the menu being broken rather than as an ` +
+          `entry having been forgotten. In the menu: ${JSON.stringify(items)}`
       );
     }));
 });
