@@ -887,7 +887,8 @@ function preprocessSideBySide(md) {
   const END = "##side-by-side-end";
   const SEP = "##separator";
 
-  // Regex für kompletten Block
+  // The three markers are matched as one block, from start to end, so that a
+  // `##separator` standing on its own outside a block is left where it is.
   const blockRegex = new RegExp(`${START}[\\s\\S]*?${END}`, "g");
 
   return md.replace(blockRegex, (block) => {
@@ -898,7 +899,9 @@ function preprocessSideBySide(md) {
 
     const columns = content.split(SEP).map(col => col.trim());
     
-    // Jede Spalte in divs packen
+    // The blank lines around each column are what keeps it working: the content
+    // is still Markdown at this point, and Markdown inside an HTML block is only
+    // parsed when an empty line separates it from the surrounding tags.
     const htmlColumns = columns.map(col => `<div class="side-by-side-col">\n\n${col}\n\n</div>`);
 
     return `<div class="side-by-side">\n${htmlColumns.join("\n")}\n</div>\n\n`;
@@ -931,12 +934,17 @@ function postprocessFragments(html) {
 
     const childNodes = Array.from(node.childNodes);
     for (let child of childNodes) {
-      // Reset bei h2 oder h3
+      // A fragment index runs within a heading section, not across the page, so
+      // an H2 or H3 starts the numbering again and closes the section that was
+      // open.
       if (child.nodeType === 1 && (child.tagName === "H2" || child.tagName === "H3")) {
         resetFragmentIndex();
       }
 
-      // Fragmentmarker
+      // The comment node preprocessFragments left behind in place of
+      // `##fragment`. Meeting it advances the index and opens the section whose
+      // nodes are wrapped from here on, and it is removed so that it never
+      // reaches the browser.
       if (child.nodeType === 8 && child.nodeValue.trim() === markerValue) {
         fragmentIndex++;
         started = true;
@@ -949,7 +957,10 @@ function postprocessFragments(html) {
         continue;
       }
 
-      // Text-Node
+      // The two branches below differ because a text node has no element of its
+      // own to carry the class, so it is replaced by a span that does. An
+      // element keeps its identity, takes the class and the index itself, and is
+      // walked into so that the markers below it are still found.
       if (child.nodeType === 3 && child.textContent.trim() !== "") {
         const span = document.createElement("span");
         span.classList.add("fragment");
@@ -959,11 +970,10 @@ function postprocessFragments(html) {
         continue;
       }
 
-      // Element-Node
       if (child.nodeType === 1) {
         child.classList.add("fragment");
         child.setAttribute("data-fragment-index", fragmentIndex);
-        walk(child); // Rekursiv in Tiefe gehen
+        walk(child);
       }
     }
   }

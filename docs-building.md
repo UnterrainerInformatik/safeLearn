@@ -77,3 +77,9 @@ What still leaves the deployment is the Keycloak server every login goes to, and
 You'll have to enable write-access for actions by enabling these options:
 ![[Pasted image 20240409164504.png]]
 `Project-Settings -> Actions -> General -> Workflow permissions -> Read and write permissions AND Allow GitHub Actions to create and approve pull requests`.
+## The Source Is English
+The code, its identifiers, its comments and the `docs-*` files are written in English. This project exists to be forked: the person reading `postprocessFragments` for the first time is at another school, and they should be able to find out what it does without translating the only sentence that explains it.
+
+Three things are deliberately exempt, so that meeting another language here tells you nothing is broken. The corpus in `md/` is teaching material and is written in the language it is taught in. Hand-written change requests under `AI/`, and the originals kept beside their archived changes, are the author's own words and stay as they were written. Conversation — issues, pull requests, whatever is said between the people working on this — is whatever those people speak.
+
+Nothing enforces this, and that is a decision rather than an omission. Every cheap check either catches almost nothing or accuses the innocent: a search for German diacritics found one of the eight comments that prompted this section and passed silently over the other seven, a list of German words misses the ones assembled out of loanwords and flags the first English comment that mentions `die()`, and a language classifier is a dependency, a model and a threshold to police eight lines. So the rule is written here and the source is read. Do not go looking for the linter that would have caught it.

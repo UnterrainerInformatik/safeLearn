@@ -168,7 +168,6 @@ function getStartPage() {
 }
 
 // --- SSE Hot Reload ---
-// Node.js Beispiel
 const clients = new Map();
 
 app.get('/hot-reload', (req, res) => {
