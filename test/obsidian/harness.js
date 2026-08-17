@@ -77,6 +77,90 @@ let browser = null;
 let page = null;
 let applicationVersion = null;
 
+// ################### What the renderer raised ###################
+
+/**
+ * Some of what the plugin does wrong is not visible as a wrong result. The
+ * editor's decoration machinery rejects a set whose ranges are out of order by
+ * throwing, and Obsidian catches that throw and logs it - so on screen the
+ * document simply carries no markings at all, which is indistinguishable from a
+ * plugin that correctly found nothing to mark. A check reading only `markers()`
+ * cannot tell those apart; this is what lets it.
+ *
+ * Both channels are subscribed to, because the two are not interchangeable. An
+ * uncaught throw arrives as a page error; a throw Obsidian caught arrives as a
+ * console error, and the ordering defect is the second kind - confirmed by
+ * observation, see the change's `findings.md`. A collector watching only page
+ * errors would report a clean run.
+ *
+ * Each entry carries the document and the action that were in progress, because
+ * a run opens several documents and an error attributed to none of them says
+ * little.
+ */
+const raisedEntries = [];
+let collecting = false;
+let inProgress = { document: null, action: "starting up" };
+
+function record(kind, text) {
+  if (!collecting) return;
+  raisedEntries.push({ kind, text, document: inProgress.document, action: inProgress.action });
+}
+
+/** Names what a later error should be attributed to. Every action below calls it. */
+function doing(action, document = inProgress.document) {
+  inProgress = { document, action };
+}
+
+/**
+ * Everything the renderer raised since the last `forgetRaised()`.
+ *
+ * This throws rather than returning `[]` when nothing is watching, which is the
+ * whole point of the second half of the requirement: a check that asserts no
+ * error occurred must be able to establish that, and an empty array from a
+ * collector that was never subscribed would read exactly the same as an empty
+ * array from a clean run.
+ */
+export function raised() {
+  if (!collecting) {
+    throw new Error(
+      "Nothing is collecting what the renderer raises, so an empty result would mean nothing. " +
+        "`raised()` is only meaningful between `start()` and `shutdown()`."
+    );
+  }
+  return raisedEntries.slice();
+}
+
+/**
+ * Drops what has been collected so far, so a check can scope the question to its
+ * own actions. Obsidian logs its own errors while starting up, and a check
+ * asserting "this document raised nothing" should not fail over them.
+ */
+export function forgetRaised() {
+  const dropped = raisedEntries.length;
+  raisedEntries.length = 0;
+  return dropped;
+}
+
+/**
+ * Raises an error inside the renderer on purpose.
+ *
+ * It exists so a check can establish that the collector above reports a real
+ * error rather than being permanently empty - a broken collector and a clean run
+ * look the same from the outside, which is the failure this whole mechanism is
+ * about. It is thrown from a timer so nothing in the evaluate call catches it,
+ * and logged as well, so both channels are exercised by one call.
+ */
+export async function provokeError(message) {
+  doing(`provoking an error: ${message}`);
+  await page.evaluate((text) => {
+    console.error(`${text} (console)`);
+    setTimeout(() => {
+      throw new Error(`${text} (thrown)`);
+    }, 0);
+  }, message);
+  await settle();
+}
+
 // ################### Locating what the run needs ###################
 
 /**
@@ -255,6 +339,16 @@ export async function start() {
   }
   if (!page) throw new Error("Obsidian is running but exposes no renderer to attach to.");
 
+  // Subscribed before the workspace is even ready, so that an error raised while
+  // the plugin loads is attributed to loading rather than lost.
+  collecting = true;
+  raisedEntries.length = 0;
+  doing("starting up", null);
+  page.on("pageerror", (error) => record("pageerror", error?.stack ?? String(error)));
+  page.on("console", (message) => {
+    if (message.type() === "error") record("console.error", message.text());
+  });
+
   // A window that exists is not a workspace that is ready. The file explorer
   // having something in it is the point at which the vault is actually open.
   await page.waitForFunction(
@@ -276,8 +370,29 @@ export async function start() {
     );
   });
 
+  await dismissModals();
+
   applicationVersion = effectiveVersion(applicationVersion);
   return page;
+}
+
+/**
+ * Puts away anything standing in front of the workspace.
+ *
+ * On a run from a runtime directory that has just been removed, Obsidian brings
+ * up its community-plugins settings by itself, and a modal takes the keyboard.
+ * Typing then goes into a search field instead of the document - and a check
+ * that reads its markings afterwards and finds them unchanged reads that as a
+ * pass. It cost one unexplained failure in a dozen runs before it was caught in
+ * the act by the screenshot a failing check leaves behind.
+ */
+async function dismissModals() {
+  await page.evaluate(() => window.app.setting?.close?.());
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (!(await page.evaluate(() => !!document.querySelector(".modal-container")))) return;
+    await page.keyboard.press("Escape");
+    await settle();
+  }
 }
 
 /**
@@ -310,6 +425,8 @@ export function obsidianVersion() {
 
 export async function shutdown() {
   if (keepOpen) return;
+  collecting = false;
+  raisedEntries.length = 0;
   try {
     await browser?.disconnect();
   } catch {
@@ -344,21 +461,23 @@ const viewState = {
  * plugin decorates live text in one mechanism and rewrites rendered output in
  * another, and a pass in one says nothing about the other.
  */
-export async function open(name, view = views.livePreview) {
+export async function open(name, view = views.livePreview, { beside = false } = {}) {
   const state = viewState[view];
   if (!state) throw new Error(`Unknown view: ${view}. Use one of ${Object.values(views).join(", ")}.`);
+  doing(`opening in ${view}`, name);
 
   await page.evaluate(
-    async (file, wanted) => {
+    async (file, wanted, split) => {
       const target = window.app.vault.getMarkdownFiles().find((f) => f.path === file || f.name === file);
       if (!target) throw new Error(`The vault holds no ${file}.`);
-      const leaf = window.app.workspace.getLeaf(false);
+      const leaf = window.app.workspace.getLeaf(split ? "split" : false);
       await leaf.openFile(target);
       await leaf.setViewState({ type: "markdown", state: { ...leaf.getViewState().state, ...wanted } });
       window.app.workspace.setActiveLeaf(leaf, { focus: true });
     },
     name,
-    state
+    state,
+    beside
   );
 
   const container = view === views.reading ? ".markdown-reading-view" : ".cm-content";
@@ -379,6 +498,7 @@ export async function open(name, view = views.livePreview) {
  * apart. Every check that asserts about a specific tag reveals it first.
  */
 export async function reveal(container, needle) {
+  doing(`revealing ${JSON.stringify(needle)}`);
   if (container === ".cm-content") {
     await page.evaluate((text) => {
       const editor = window.app.workspace.activeEditor?.editor;
@@ -423,20 +543,47 @@ export async function visibleText(container) {
 
 /**
  * Every element carrying one of the plugin's own classes, with the text it
- * covers. A decoration that spans the wrong range shows up here as text that is
- * longer or shorter than the token it belongs to, which is the failure this
- * whole harness exists to make visible.
+ * covers and where in the document it sits. A decoration that spans the wrong
+ * range shows up here as text that is longer or shorter than the token it
+ * belongs to, which is the failure this whole harness exists to make visible.
+ *
+ * The position is not a refinement of the text. "The marking is still on its own
+ * tag after an edit" is not decidable from text alone: a document holding
+ * `##fragment` eleven times reports eleven identical entries, and a marking that
+ * moved to the wrong one of them reads exactly like a marking that stayed. The
+ * offset comes from CodeMirror rather than from counting characters, because
+ * CodeMirror is what placed the element - `posAtDOM` answers the question the
+ * decoration set was built to answer. The reading view has no such mapping, so
+ * there the positions are null rather than guessed.
  */
 export async function markers(container) {
   return page.evaluate(
     (selector, classes) => {
       const root = document.querySelector(selector);
       if (!root) return [];
+      const view = window.app.workspace.activeEditor?.editor?.cm;
+      const locate = (el) => {
+        if (!view || selector !== ".cm-content") return { from: null, to: null, line: null, column: null };
+        try {
+          const from = view.posAtDOM(el);
+          const line = view.state.doc.lineAt(from);
+          return {
+            from,
+            to: from + (el.textContent ?? "").length,
+            line: line.number,
+            column: from - line.from,
+          };
+        } catch {
+          // An element the editor does not own has no position in the document.
+          return { from: null, to: null, line: null, column: null };
+        }
+      };
       return classes.flatMap((cls) =>
         [...root.querySelectorAll(`.${cls}`)].map((el) => ({
           marker: cls,
           text: el.textContent ?? "",
           length: (el.textContent ?? "").length,
+          ...locate(el),
         }))
       );
     },
@@ -446,27 +593,258 @@ export async function markers(container) {
 }
 
 /**
+ * Waits for the editor to have finished redecorating.
+ *
+ * CodeMirror rebuilds on its own schedule and Obsidian layers its own work on
+ * top, so a read taken in the same tick as the action that provoked it reads the
+ * state before the rebuild. Two frames rather than one: the plugin's own
+ * `requestAnimationFrame` work would otherwise land after the read.
+ */
+async function settle() {
+  await page.evaluate(
+    () =>
+      new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+  );
+}
+
+/** The document as the editor currently holds it, for establishing that an action changed nothing. */
+export async function documentText() {
+  return page.evaluate(() => window.app.workspace.activeEditor?.editor?.getValue() ?? null);
+}
+
+/**
+ * Runs an action that is not supposed to touch the text, and reports the
+ * document before and after it.
+ *
+ * The requirement is that marking responds to a cursor move and to a scroll, and
+ * neither may be checked by typing: typing also changes the document, so a check
+ * built on it would pass against an implementation that only ever reacts to text
+ * changes - which is precisely today's defect. So the actions below hand back the
+ * evidence that no text moved, rather than a check having to take it on trust.
+ */
+async function withoutEditing(action, body) {
+  doing(action);
+  const before = await documentText();
+  await body();
+  await settle();
+  const after = await documentText();
+  return { before, after, changed: before !== after };
+}
+
+/**
  * Types at the cursor the way a keyboard does, rather than setting document
  * state. A decoration that follows an edit to the wrong position is a defect
  * about input handling, and assigning the document text would not exercise it.
  */
 export async function type(text) {
+  doing(`typing ${JSON.stringify(text)}`);
+  const before = await documentText();
   await page.keyboard.type(text, { delay: 20 });
-  // CodeMirror decorates on its own schedule; give the update a frame to land.
-  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve())));
+  await settle();
+  const after = await documentText();
+
+  // Established rather than assumed, for the same reason the actions that must
+  // *not* edit report what they did: keystrokes go wherever the focus is, and a
+  // check whose typing never reached the document reads the markings it left
+  // untouched as a pass.
+  if (before === after) {
+    throw new Error(
+      `Typing ${JSON.stringify(text)} left the document exactly as it was. The keystrokes went ` +
+        `somewhere other than the editor - something modal in front of it takes them.`
+    );
+  }
+  return { before, after, changed: true };
 }
 
 /** Puts the cursor at the end of the line holding `needle`, in the editor. */
 export async function placeCursorAfter(needle) {
-  await page.evaluate((text) => {
-    const editor = window.app.workspace.activeEditor?.editor;
-    if (!editor) throw new Error("No active editor to place a cursor in.");
-    const lines = editor.getValue().split("\n");
-    const line = lines.findIndex((l) => l.includes(text));
-    if (line === -1) throw new Error(`No line holding ${JSON.stringify(text)}.`);
-    editor.setCursor({ line, ch: lines[line].length });
-    editor.focus();
-  }, needle);
+  return withoutEditing(`placing the cursor after ${JSON.stringify(needle)}`, () =>
+    page.evaluate((text) => {
+      const editor = window.app.workspace.activeEditor?.editor;
+      if (!editor) throw new Error("No active editor to place a cursor in.");
+      const lines = editor.getValue().split("\n");
+      const line = lines.findIndex((l) => l.includes(text));
+      if (line === -1) throw new Error(`No line holding ${JSON.stringify(text)}.`);
+      editor.setCursor({ line, ch: lines[line].length });
+      editor.focus();
+    }, needle)
+  );
+}
+
+/**
+ * Puts the cursor inside `needle` rather than beside it - in Live Preview a tag
+ * is shown as its own characters only while the cursor is in it, so "beside"
+ * would not exercise the rule at all. The middle of the first occurrence, so no
+ * boundary decides the outcome.
+ */
+export async function moveCursorInto(needle) {
+  return withoutEditing(`moving the cursor into ${JSON.stringify(needle)}`, () =>
+    page.evaluate((text) => {
+      const editor = window.app.workspace.activeEditor?.editor;
+      if (!editor) throw new Error("No active editor to place a cursor in.");
+      const lines = editor.getValue().split("\n");
+      const line = lines.findIndex((l) => l.includes(text));
+      if (line === -1) throw new Error(`No line holding ${JSON.stringify(text)}.`);
+      editor.setCursor({ line, ch: lines[line].indexOf(text) + Math.floor(text.length / 2) });
+      editor.focus();
+    }, needle)
+  );
+}
+
+/**
+ * Scrolls the line holding `needle` into view and touches nothing else.
+ *
+ * Deliberately not `reveal`: that one moves the cursor to the line first, so a
+ * plugin that rebuilds on a cursor move alone would satisfy a check meant for
+ * scrolling. Here the cursor stays where it was, which is what makes the scroll
+ * the only thing that happened.
+ */
+export async function scrollTo(needle) {
+  const result = await withoutEditing(`scrolling to ${JSON.stringify(needle)}`, () =>
+    page.evaluate((text) => {
+      const editor = window.app.workspace.activeEditor?.editor;
+      if (!editor) throw new Error("No active editor to scroll.");
+      const lines = editor.getValue().split("\n");
+      const line = lines.findIndex((l) => l.includes(text));
+      if (line === -1) throw new Error(`No line holding ${JSON.stringify(text)}.`);
+      editor.scrollIntoView({ from: { line, ch: 0 }, to: { line, ch: lines[line].length } }, true);
+    }, needle)
+  );
+  // The scroll is what brings the line into the DOM at all; without waiting for
+  // that, a check reads an absence it caused itself. See `reveal`.
+  //
+  // The editor is asked, rather than the rendered text: in Live Preview a line
+  // holding `[[a-note]]` or a heading is on screen as something that does not
+  // contain those characters at all, so waiting for the source text to appear
+  // waits for something that never will.
+  //
+  // The viewport rather than `visibleRanges`, for the same reason one step
+  // further on: a document rendered mostly as widgets - a corpus file of nested
+  // quotes is one - has almost none of its source in a visible range, because
+  // what replaced it is what is on screen. The viewport is the part of the
+  // document the editor has built at all, which is the question being asked.
+  await page.waitForFunction(
+    (text) => {
+      const editor = window.app.workspace.activeEditor?.editor;
+      const view = editor?.cm;
+      if (!view) return false;
+      const index = editor.getValue().split("\n").findIndex((l) => l.includes(text));
+      if (index === -1) return false;
+      const at = view.state.doc.line(index + 1).from;
+      return view.viewport.from <= at && at <= view.viewport.to;
+    },
+    { timeout: 15000 },
+    needle
+  );
+  await settle();
+  return result;
+}
+
+/**
+ * Closes every open document but one.
+ *
+ * A check that opened a second view beside the first has to put the window back
+ * the way it found it. `markers()` and the rest read the first `.cm-content` in
+ * the document, and with two editors on screen that is whichever one the layout
+ * happens to put first - so a leaf left standing turns the next check into a
+ * question about a different document than it thinks.
+ */
+export async function closeExtraViews() {
+  doing("closing extra views");
+  await page.evaluate(() => {
+    const leaves = window.app.workspace.getLeavesOfType("markdown");
+    for (const leaf of leaves.slice(1)) leaf.detach();
+  });
+  await settle();
+}
+
+// ################### Whether the editor reaches into rendered output ###################
+
+/**
+ * Puts a paragraph of raw text into the rendered reading view, from outside the
+ * plugin, and reports what became of it.
+ *
+ * This is how "the editor does not modify rendered output" is asked as a
+ * question with an answer. The editor's rewrite of the reading view removes tags
+ * from text that carries them, and a view it has already been through carries
+ * none - so running it a second time changes nothing observable, and a check
+ * watching for changes would see none whether the mechanism is there or not.
+ * Text planted after the fact is text the rewrite has not seen: if the editor
+ * reaches into rendered output while a person types, the planted tag is taken
+ * out of it, and if it does not, the text stands as it was left.
+ */
+export async function plantInRenderedView(text) {
+  doing(`planting ${JSON.stringify(text)} in the rendered view`);
+  await page.evaluate((body) => {
+    const view = document.querySelector(".markdown-preview-view");
+    if (!view) throw new Error("No rendered reading view to plant anything in.");
+    const planted = document.createElement("p");
+    planted.className = "harness-planted";
+    planted.textContent = body;
+    view.appendChild(planted);
+  }, text);
+  return text;
+}
+
+/** What the planted paragraph says now, or null if it is no longer there at all. */
+export async function plantedText() {
+  return page.evaluate(() => document.querySelector(".harness-planted")?.textContent ?? null);
+}
+
+// ################### Documents a check constructs ###################
+
+/** Where a run's disposable vault is, so a check can establish what it holds. */
+export function vaultPath() {
+  return vaultDir;
+}
+
+/** Where the corpus is, so a check can establish that it was left alone. */
+export function corpusPath() {
+  return path.join(projectRoot, "md");
+}
+
+/**
+ * Writes a document into the vault this run assembled.
+ *
+ * The corpus cannot absorb test material - `md/` is what the authenticated suite
+ * asserts against - but some behavior only appears in a *combination* of tag
+ * forms that no corpus file happens to carry: a file-level directive with tags
+ * below it, or a fragment at the start of a line inside a block. Those are
+ * written here, into the copy that is rebuilt from scratch every run.
+ *
+ * The path is resolved and checked against the vault before anything is written,
+ * so a check that passes `../../md/test-md-file.md` by mistake is refused rather
+ * than quietly rewriting the corpus. Obsidian creates the file itself, because a
+ * file appearing underneath it is noticed on the file watcher's schedule and a
+ * check would be reading a vault that does not know about it yet.
+ */
+export async function writeDocument(name, text) {
+  const target = path.resolve(vaultDir, name);
+  const inside = path.relative(vaultDir, target);
+  if (inside === "" || inside.startsWith("..") || path.isAbsolute(inside)) {
+    throw new Error(
+      `${name} resolves to ${target}, which is outside the run's vault at ${vaultDir}. A check ` +
+        `may only construct documents inside the disposable vault - the corpus in md/ is what the ` +
+        `authenticated suite asserts against.`
+    );
+  }
+  const vaultRelative = inside.split(path.sep).join("/");
+  doing(`writing ${vaultRelative}`, vaultRelative);
+  await page.evaluate(
+    async (file, body) => {
+      const existing = window.app.vault.getAbstractFileByPath(file);
+      if (existing) await window.app.vault.modify(existing, body);
+      else await window.app.vault.create(file, body);
+    },
+    vaultRelative,
+    text
+  );
+  await page.waitForFunction(
+    (file) => window.app.vault.getMarkdownFiles().some((f) => f.path === file),
+    { timeout: 15000 },
+    vaultRelative
+  );
+  return vaultRelative;
 }
 
 /**
