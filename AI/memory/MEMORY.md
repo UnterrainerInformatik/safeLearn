@@ -13,3 +13,4 @@ Echter Ablageort: `/mnt/data/source/HTL/safeLearn/AI/memory/`
 - [Proposals-Intake](proposals-autostart.md) — `AI/proposals/` wird beim Session-Start gelistet, Change heißt wie das File, beim Archivieren wandert es ins Change-Archiv
 - [Browser-Verifikation](browser-verification.md) — `npm test` fährt eine Puppeteer-Harness, die sich live gegen die geteilten Demo-Accounts der Keycloak-Demo-Realm einloggt
 - [Content-Verifikations-Suite](content-verification-suite.md) — `npm test` prüft den `md/`-Korpus selbst; nach Änderungen an Renderer, Permissions oder Korpus laufen lassen
+- [Plugin-Repo-Link](plugin-repo-link.md) — das Obsidian-Plugin liegt in einem eigenen Repo, erreichbar über den gitignorierten Symlink `AI/plugin`

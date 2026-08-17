@@ -46,3 +46,8 @@ docs/slides/revealjs
 # Everything the verification harness writes while running:
 # browser profiles and failure screenshots.
 test/.runtime/
+
+# The link to the companion Obsidian plugin repository. It is an absolute path
+# into this machine's checkout, so it is set per installation rather than
+# shipped. AI/memory/plugin-repo-link.md says how to recreate it.
+AI/plugin
