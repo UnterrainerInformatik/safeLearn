@@ -37,6 +37,7 @@ import { after, before, describe, test } from "node:test";
 import {
   answerColumnCount,
   answerNameList,
+  blockBoxes,
   closeExtraViews,
   columns,
   columnsAreSideBySide,
@@ -81,6 +82,9 @@ const PSEUDO_ROLES = "test-exam-practice-question.md";
 /** The one form the renderer acts on, and therefore the only one that may be marked. */
 const FRAGMENT = "##fragment";
 
+/** What stands in the editor where a fragment marker's characters are, at rest. */
+const FRAGMENT_ICON = "🔀";
+
 /**
  * Runs a check and, if it fails, leaves an image of what was on screen before
  * rethrowing with the path appended. A defect about what something looks like,
@@ -108,6 +112,22 @@ function shapeOf(found, kind) {
     .filter((m) => (kind ? m.marker === kind : true))
     .sort((a, b) => (a.from ?? 0) - (b.from ?? 0))
     .map((m) => `L${m.line}C${m.column}:${JSON.stringify(m.text)}`);
+}
+
+/**
+ * Where the fragment icons stand, in document order, as `L<line>C<column>`.
+ *
+ * Without the text, because there is none to compare: a fragment at rest is
+ * shown as the icon that replaced its characters, and every icon says the same
+ * thing. What a check about a fragment is asking is *where* it is - the position
+ * comes from `posAtDOM`, so an icon that stayed behind at an offset after an
+ * edit reports a line the tag no longer stands on.
+ */
+function iconsOf(found) {
+  return found
+    .filter((m) => m.marker === "fragment-icon")
+    .sort((a, b) => (a.from ?? 0) - (b.from ?? 0))
+    .map((m) => `L${m.line}C${m.column}`);
 }
 
 /**
@@ -328,42 +348,59 @@ describe("the harness reports what it claims to", () => {
 // ################### A decoration covers exactly the tag it marks ###################
 
 describe("a decoration covers exactly the tag it marks", () => {
-  test("every fragment marking covers the tag and not what follows it", async () =>
+  test("every fragment stands as its icon, and only the tag is gone", async () =>
     watched("fragment-extent", async () => {
       const container = await open(FRAGMENTS, views.livePreview);
       await reveal(container, "Fragmented Text.");
-      const fragments = (await markers(container)).filter((m) => m.marker === "fragment-highlight");
+      const found = await markers(container);
+      const icons = found.filter((m) => m.marker === "fragment-icon");
 
       assert.ok(
-        fragments.length > 0,
-        "No fragment-highlight markers at all. If a decoration range was malformed, the editor " +
-          "may have rejected the whole set - which is the same defect, louder. See the check for " +
-          "a well-formed set."
+        icons.length > 0,
+        "No fragment icons at all. If a decoration range was malformed, the editor may have " +
+          "rejected the whole set - which is the same defect, louder. See the check for a " +
+          "well-formed set."
       );
 
-      const wrong = fragments.filter((m) => m.text !== FRAGMENT);
-      assert.deepEqual(
-        wrong.map((m) => `L${m.line}C${m.column}:${JSON.stringify(m.text)} (${m.length} chars)`),
-        [],
-        `A fragment marking covers something other than ${JSON.stringify(FRAGMENT)}. The extent ` +
-          `has to come from the text that matched: the corpus writes the tag both at the end of a ` +
-          `line and followed by a space, and the space is not part of the tag. ${FRAGMENT} is ` +
-          `${FRAGMENT.length} characters, never ${FRAGMENT.length + 1}.`
+      // The extent used to be readable from the marking's own text. A tag at
+      // rest has none now, so it is read where it is visible instead: the corpus
+      // writes `- ##fragment two`, and a replacement one character too long
+      // takes the space after the tag with it.
+      const shown = await visibleText(container);
+      assert.ok(
+        shown.includes(`${FRAGMENT_ICON} two`),
+        `The corpus writes ${JSON.stringify("- ##fragment two")}, so what stands on that line is ` +
+          `the icon, a space and the word. The extent has to come from the text that matched: ` +
+          `${FRAGMENT} is ${FRAGMENT.length} characters, never ${FRAGMENT.length + 1}. On screen: ` +
+          `${JSON.stringify(shown)}`
+      );
+      assert.ok(
+        !shown.includes(FRAGMENT),
+        `A tag's own characters are on screen with the cursor nowhere near them. On screen: ` +
+          `${JSON.stringify(shown)}`
       );
     }));
 
-  test("a tag ending its line is covered exactly, and the next line is untouched", async () =>
+  test("a tag ending its line is replaced exactly, and the next line is untouched", async () =>
     watched("fragment-end-of-line", async () => {
       const name = "constructed-end-of-line.md";
       await writeDocument(name, ["##fragment", "Text after it.", "", "##fragment"].join("\n"));
       const container = await open(name, views.livePreview);
+      // Off the tags, so both stand at rest. A cursor left at the start of the
+      // document rests in the first one and would show its characters instead.
+      await placeCursorAfter("Text after it.");
 
       assert.deepEqual(
-        shapeOf(await markers(container), "fragment-highlight"),
-        [`L1C0:${JSON.stringify(FRAGMENT)}`, `L4C0:${JSON.stringify(FRAGMENT)}`],
-        "A tag standing at the end of its line is marked from its first character to its last, " +
-          "and nothing on the line after it is marked. A decoration whose end is computed from an " +
+        iconsOf(await markers(container)),
+        ["L1C0", "L4C0"],
+        "A tag standing at the end of its line is replaced from its first character to its last, " +
+          "and nothing on the line after it is. A decoration whose end is computed from an " +
           "assumed spelling of the tag reaches past the line it is on."
+      );
+      assert.ok(
+        (await visibleText(container)).includes("Text after it."),
+        "The line after a tag that ends its own line is still on screen whole. A replacement " +
+          "reaching past the end of its line would swallow the newline and the line below it."
       );
     }));
 });
@@ -376,22 +413,22 @@ describe("a decoration stays on its tag while the document is edited", () => {
       const name = "constructed-typing.md";
       await writeDocument(name, ["Alpha ##fragment beta", "Gamma ##fragment delta"].join("\n"));
       const container = await open(name, views.livePreview);
-      const before = shapeOf(await markers(container), "fragment-highlight");
+      const before = iconsOf(await markers(container));
 
       await placeCursorAfter("Alpha ##fragment beta");
       await type("x");
 
-      const after = shapeOf(await markers(container), "fragment-highlight");
+      const after = iconsOf(await markers(container));
       assert.deepEqual(
         after,
         before,
-        `Typing at the end of a line that carries a tag changed which text is marked. Before: ` +
+        `Typing at the end of a line that carries a tag changed where the tag is marked. Before: ` +
           `${JSON.stringify(before)}. The typed character is not part of the tag and no marking ` +
           `may grow to include it.`
       );
       assert.deepEqual(
         after,
-        [`L1C6:${JSON.stringify(FRAGMENT)}`, `L2C6:${JSON.stringify(FRAGMENT)}`],
+        ["L1C6", "L2C6"],
         "Each tag is marked where it stands, covering itself and nothing else."
       );
     }));
@@ -409,8 +446,8 @@ describe("a decoration stays on its tag while the document is edited", () => {
       await type("\n");
 
       assert.deepEqual(
-        shapeOf(await markers(container), "fragment-highlight"),
-        [`L1C6:${JSON.stringify(FRAGMENT)}`, `L3C6:${JSON.stringify(FRAGMENT)}`],
+        iconsOf(await markers(container)),
+        ["L1C6", "L3C6"],
         "A line was inserted above the second tag, so that tag is now on line 3. A marking that " +
           "still reports line 2 stayed at an offset rather than following its text."
       );
@@ -461,7 +498,7 @@ describe("what is marked reflects the document as it is currently shown", () => 
       assert.equal(marked.changed, false, "Scrolling changed the document text.");
       const found = await markers(container);
       assert.ok(
-        found.some((m) => m.marker === "fragment-highlight" && m.text === FRAGMENT),
+        found.some((m) => m.marker === "fragment-icon" && m.text === FRAGMENT_ICON),
         `The tag in the middle of the block is not marked. Found: ${JSON.stringify(shapeOf(found))}`
       );
       assert.ok(
@@ -524,34 +561,55 @@ describe("what is marked reflects the document as it is currently shown", () => 
       );
     }));
 
-  test("the cursor entering a fragment changes neither the text nor what is shown", async () =>
+  test("the cursor entering a fragment changes no text and changes what is shown", async () =>
     watched("cursor-into-tag", async () => {
-      // The other half of the rule above, and the reason it is stated
-      // separately: only the directive line is replaced. A fragment keeps the
-      // marking `plugin-edit-tag-support` gave it, and the cursor entering it
-      // changes nothing at all.
+      // The same rule as the directive line above, on a tag rather than a line.
+      // This check used to say the opposite - that a fragment keeps its marking
+      // whatever the cursor does - and that is what changed: at rest the tag is
+      // an icon, because ten characters and a frame dominated the sentence the
+      // tag stands in. What may never change is the document.
       const name = "constructed-cursor.md";
       await writeDocument(name, ["Alpha ##fragment beta", "", "Gamma."].join("\n"));
       const container = await open(name, views.livePreview);
+      await placeCursorAfter("Gamma.");
+
+      const atRest = await visibleText(container);
+      assert.ok(
+        !atRest.includes(FRAGMENT),
+        `With the cursor on another line, the tag stands as its icon and not as its own ` +
+          `characters. On screen: ${JSON.stringify(atRest)}`
+      );
+      assert.ok(
+        atRest.includes(`Alpha ${FRAGMENT_ICON} beta`),
+        `What stands in the tag's place is the icon alone, with the words around it untouched. ` +
+          `On screen: ${JSON.stringify(atRest)}`
+      );
 
       const moved = await moveCursorInto(FRAGMENT);
       assert.equal(
         moved.changed,
         false,
-        "Moving the cursor changed the document text, so this check no longer distinguishes a " +
-          "rebuild on a cursor move from a rebuild on an edit."
+        "Moving the cursor changed the document text. The characters that appear are the ones the " +
+          "document already held; a plugin that wrote them in would be editing a person's file to " +
+          "show it to them."
       );
 
       assert.deepEqual(
         shapeOf(await markers(container), "fragment-highlight"),
         [`L1C6:${JSON.stringify(FRAGMENT)}`],
-        "With the cursor inside it, the tag is still marked and its own characters are still " +
-          "there to be edited."
+        "With the cursor inside it, the tag is marked on its own characters, covering itself and " +
+          "nothing else."
       );
       assert.ok(
         (await visibleText(container)).includes(FRAGMENT),
         "The tag's characters are not on screen while the cursor is in them, so a person cannot " +
           "edit the tag they are standing in."
+      );
+      assert.deepEqual(
+        iconsOf(await markers(container)),
+        [],
+        "The icon is gone while the tag it stands for is on screen. Both at once would show the " +
+          "same tag twice."
       );
     }));
 });
@@ -597,8 +655,8 @@ describe("a tag the plugin cannot resolve costs only itself", () => {
           "lines above the real block and the marking starts two lines too early."
       );
       assert.deepEqual(
-        shapeOf(found, "fragment-highlight"),
-        [`L7C0:${JSON.stringify(FRAGMENT)}`],
+        iconsOf(found),
+        ["L7C0"],
         "The fragment below the directive is marked."
       );
       assert.ok(
@@ -620,8 +678,8 @@ describe("a tag the plugin cannot resolve costs only itself", () => {
       const found = await markers(container);
 
       assert.deepEqual(
-        shapeOf(found, "fragment-highlight"),
-        [`L5C0:${JSON.stringify(FRAGMENT)}`],
+        iconsOf(found),
+        ["L5C0"],
         "A block that is never closed must cost itself and nothing else."
       );
       assert.ok(
@@ -688,8 +746,8 @@ describe("a tag the plugin cannot resolve costs only itself", () => {
           "to be the start of. The block on lines 6 to 8 is the only one in this document."
       );
       assert.deepEqual(
-        shapeOf(found, "fragment-highlight"),
-        [`L3C0:${JSON.stringify(FRAGMENT)}`],
+        iconsOf(found),
+        ["L3C0"],
         "The tag after the orphaned marker is marked as it would be in a document without it."
       );
     }));
@@ -911,7 +969,7 @@ describe("the set of decorations is always well-formed", () => {
       );
       assert.ok(
         found.some((m) => m.marker === "permission-block" && m.line === 3) &&
-          found.some((m) => m.marker === "fragment-highlight" && m.line === 3),
+          found.some((m) => m.marker === "fragment-icon" && m.line === 3),
         `Both markings belong on line 3 - the block covers it and the tag stands on it. Found: ` +
           `${JSON.stringify(shapeOf(found))}`
       );
@@ -1019,15 +1077,16 @@ describe("whether something is a tag does not depend on when it is examined", ()
         ["Alpha ##fragment beta", "##fragment", "- ##fragment two", "Gamma."].join("\n")
       );
       const container = await open(name, views.livePreview);
-      const first = shapeOf(await markers(container), "fragment-highlight");
+      const first = iconsOf(await markers(container));
       assert.ok(first.length > 0, "Nothing was marked, so there is nothing to be stable about.");
 
       // Two more examinations, provoked without touching the text: a rebuild
-      // that carries state from the previous one answers differently.
+      // that carries state from the previous one answers differently. Neither
+      // position is inside a tag, so all three stand at rest throughout.
       await moveCursorInto("Gamma.");
-      const second = shapeOf(await markers(container), "fragment-highlight");
+      const second = iconsOf(await markers(container));
       await moveCursorInto("Alpha");
-      const third = shapeOf(await markers(container), "fragment-highlight");
+      const third = iconsOf(await markers(container));
 
       assert.deepEqual(
         [second, third],
@@ -1045,8 +1104,8 @@ describe("whether something is a tag does not depend on when it is examined", ()
       const container = await open(name, views.livePreview);
 
       assert.deepEqual(
-        shapeOf(await markers(container), "fragment-highlight"),
-        [`L1C4:${JSON.stringify(FRAGMENT)}`, `L1C19:${JSON.stringify(FRAGMENT)}`],
+        iconsOf(await markers(container)),
+        ["L1C4", "L1C19"],
         "The renderer acts on every occurrence in a line. A scan that asks where the tag is, " +
           "rather than walking the line, finds only the first - so the second is text the server " +
           "acts on and the person writing it was never shown."
@@ -1071,8 +1130,8 @@ describe("what is marked is what the server will act on", () => {
       const container = await open(name, views.livePreview);
 
       assert.deepEqual(
-        shapeOf(await markers(container), "fragment-highlight"),
-        [`L3C2:${JSON.stringify(FRAGMENT)}`, `L4C0:${JSON.stringify(FRAGMENT)}`],
+        iconsOf(await markers(container)),
+        ["L3C2", "L4C0"],
         "Marked text has to be text the server acts on. `##FRAGMENT` and `##fragment.` are not " +
           "fragments to the server, and marking them tells a person the opposite. `- ##fragment " +
           "two` is one, and leaving it unmarked - or marking the space after it - misinforms in " +
@@ -1209,6 +1268,302 @@ describe("a directive line is shown as the heading of the block it opens", () =>
           `for a heading to sit on. It is the same box every block gets with its lower edge left ` +
           `off, and the open side is what says that what it governs does not end. Measured: ` +
           `${JSON.stringify(frame)}`
+      );
+    }));
+});
+
+// ################### The frame around what the editor does not render as a line ###################
+
+/**
+ * A table, written out once. Its cells carry words rather than letters so that
+ * the element the editor builds for it can be told apart from the lines around
+ * it by what it says.
+ */
+const TABLE = ["| Header | Value |", "| --- | --- |", "| left | right |"];
+
+/**
+ * The same table, typed rather than written into the file.
+ *
+ * Obsidian completes a table while a person types it: the moment the delimiter
+ * row reads as one it inserts the line break itself, lays the columns out and
+ * puts the cursor in the body. Typing `TABLE` verbatim into it produces neither
+ * what was typed nor a table - the two mechanisms write over one another and
+ * what is left is three broken lines. So the check below types the shortest
+ * thing Obsidian's own completion turns into a table: one column, and no
+ * trailing pipe for it to complete twice.
+ */
+const TYPED_TABLE = ["| Header |", "|-|", "| left"].join("\n");
+
+/** Whether an element carrying a block's classes is the one built for the table. */
+const isTheTable = (element) => element.text.includes("Header") && !element.line;
+
+/**
+ * The run of framed elements, as `L<top>..<bottom>` with what each one says.
+ *
+ * Used in the failure messages below rather than in the assertions: a run that
+ * breaks does so at one pair, and the message has to show which.
+ */
+function runOf(boxes) {
+  return boxes.map((box) => `${Math.round(box.top)}..${Math.round(box.bottom)}:${JSON.stringify(box.text)}`);
+}
+
+/** Every pair of neighbours in the run that do not touch, with the gap between them. */
+function gapsIn(boxes) {
+  return boxes
+    .map((box, index) => ({ gap: index === 0 ? 0 : box.top - boxes[index - 1].bottom, box, index }))
+    .filter((pair) => Math.abs(pair.gap) > 1)
+    .map((pair) => `${Math.round(pair.gap)}px above ${JSON.stringify(pair.box.text)}`);
+}
+
+describe("the frame of a block covers every line of the block", () => {
+  test("a table in the middle of a block is inside one unbroken frame", async () =>
+    watched("frame-across-table", async () => {
+      const name = "constructed-frame-table.md";
+      await writeDocument(
+        name,
+        ["Above.", "", "@@@ teacher", "Before it.", "", ...TABLE, "", "After it.", "@@@", "", "Below."].join("\n")
+      );
+      const container = await open(name, views.livePreview);
+      await reveal(container, "Before it.");
+      await placeCursorAfter("Above.");
+
+      const framed = await blockBoxes(container, "permission-block");
+
+      assert.ok(
+        framed.some(isTheTable),
+        `The editor renders the table as an element of its own rather than as lines, and nothing ` +
+          `carrying the block's frame is that element - so the frame stops above the table and ` +
+          `starts again below it. Framed: ${JSON.stringify(runOf(framed))}`
+      );
+      assert.deepEqual(
+        gapsIn(framed),
+        [],
+        `A block is one region, and the elements carrying its frame have to stand against one ` +
+          `another for it to read as one. Framed: ${JSON.stringify(runOf(framed))}`
+      );
+
+      // Idempotence, asked as a question with an answer: a cursor move runs the
+      // pass again over a document nothing changed in. A pass that added on
+      // every run, or one whose observer answered its own writes, would not
+      // hand back the same run twice.
+      await placeCursorAfter("Below.");
+      const again = await blockBoxes(container, "permission-block");
+      assert.deepEqual(
+        again.map((box) => [box.text, Math.round(box.top), Math.round(box.frameLeft)]),
+        framed.map((box) => [box.text, Math.round(box.top), Math.round(box.frameLeft)]),
+        "Running the pass a second time over an unchanged document changed what is framed."
+      );
+    }));
+
+  test("the side edges of that frame stand in one vertical line", async () =>
+    watched("frame-edges-aligned", async () => {
+      const name = "constructed-frame-edges.md";
+      await writeDocument(
+        name,
+        ["Above.", "", "@@@ teacher", "Before it.", "", ...TABLE, "", "After it.", "@@@", "", "Below."].join("\n")
+      );
+      const container = await open(name, views.livePreview);
+      await reveal(container, "Before it.");
+      await placeCursorAfter("Above.");
+
+      const framed = await blockBoxes(container, "permission-block");
+      assert.ok(framed.some(isTheTable), "The table carries no frame, so there are no edges to compare.");
+
+      const edges = framed.map((box) => [Math.round(box.frameLeft), Math.round(box.frameRight)]);
+      assert.deepEqual(
+        [...new Set(edges.map((pair) => pair.join("|")))],
+        [edges[0].join("|")],
+        `The editor lays an element it renders in place of lines out to a width of its own - the ` +
+          `table widget's box is 16px wider on each side than the line above it. A frame whose ` +
+          `edges followed each element's own width would step in and out at every table, and a ` +
+          `boundary that steps is not one a person can read. Measured, against ` +
+          `${JSON.stringify(framed.map((box) => [box.text, Math.round(box.left), Math.round(box.right)]))}`
+      );
+    }));
+
+  test("a block whose whole content is a table is one closed frame", async () =>
+    watched("frame-only-a-table", async () => {
+      const name = "constructed-frame-only-table.md";
+      await writeDocument(
+        name,
+        ["Above.", "", "@@@ teacher", "", ...TABLE, "", "@@@", "", "Below."].join("\n")
+      );
+      const container = await open(name, views.livePreview);
+      await reveal(container, "Above.");
+      await placeCursorAfter("Above.");
+
+      const framed = await blockBoxes(container, "permission-block");
+      assert.ok(
+        framed.some(isTheTable),
+        `Framed: ${JSON.stringify(runOf(framed))}. The block holds nothing but the table, so a ` +
+          `frame that does not reach it is a frame around nothing at all.`
+      );
+      assert.deepEqual(gapsIn(framed), [], `Framed: ${JSON.stringify(runOf(framed))}`);
+
+      assert.ok(
+        framed[0]?.classes.includes("permission-block-start"),
+        `The lid stands on the block's first line, which is where the document opens it. ` +
+          `Framed: ${JSON.stringify(runOf(framed))}`
+      );
+      assert.ok(
+        framed[framed.length - 1]?.classes.includes("permission-block-end"),
+        `And the floor on its last. Framed: ${JSON.stringify(runOf(framed))}`
+      );
+
+      const lid = await styleOf(container, "permission-block-start", ["border-top-width"]);
+      const floor = await styleOf(container, "permission-block-end", ["border-bottom-width"]);
+      assert.notDeepEqual(
+        [lid?.["border-top-width"], floor?.["border-bottom-width"]],
+        ["0px", "0px"],
+        `A class carrying no drawn edge closes nothing. Measured: ${JSON.stringify({ lid, floor })}`
+      );
+    }));
+
+  test("a table inside a side-by-side block is inside the block's region", async () =>
+    watched("frame-side-by-side-table", async () => {
+      const name = "constructed-frame-columns.md";
+      await writeDocument(
+        name,
+        [
+          "Above.",
+          "",
+          "##side-by-side-start",
+          "Left column.",
+          "",
+          ...TABLE,
+          "",
+          "##separator",
+          "Right column.",
+          "##side-by-side-end",
+          "",
+          "Below.",
+        ].join("\n")
+      );
+      const container = await open(name, views.livePreview);
+      await reveal(container, "Left column.");
+      await placeCursorAfter("Above.");
+
+      const inside = await blockBoxes(container, "side-by-side-block");
+      const opens = (await blockBoxes(container, "side-by-side-start"))[0];
+      const closes = (await blockBoxes(container, "side-by-side-end"))[0];
+      const table = inside.find(isTheTable);
+
+      assert.ok(
+        table,
+        `The side-by-side block is drawn the same way the permission block is and breaks the same ` +
+          `way. Framed: ${JSON.stringify(runOf(inside))}`
+      );
+      assert.ok(opens && closes, "The block's own markers carry no region for the table to be inside of.");
+      assert.ok(
+        table.top >= opens.bottom - 1 && table.bottom <= closes.top + 1,
+        `The table stands between the block's markers in the document, so it stands between them ` +
+          `on screen. Measured: ${JSON.stringify({
+            opens: Math.round(opens.bottom),
+            table: [Math.round(table.top), Math.round(table.bottom)],
+            closes: Math.round(closes.top),
+          })}`
+      );
+      assert.deepEqual(gapsIn(inside), [], `Framed: ${JSON.stringify(runOf(inside))}`);
+    }));
+
+  test("a table outside every block carries no frame", async () =>
+    watched("frame-not-added-outside", async () => {
+      const name = "constructed-frame-loose-table.md";
+      await writeDocument(
+        name,
+        ["Above.", "", "@@@ teacher", "Gated.", "@@@", "", ...TABLE, "", "Below."].join("\n")
+      );
+      const container = await open(name, views.livePreview);
+      await reveal(container, "Above.");
+      await placeCursorAfter("Above.");
+
+      for (const kind of ["permission-block", "side-by-side-block"]) {
+        assert.deepEqual(
+          (await blockBoxes(container, kind)).filter(isTheTable).map((box) => box.text),
+          [],
+          `The pass puts on an element what the line it stands for carries, and this table's line ` +
+            `is outside every block. A frame that appeared here would be one the document does ` +
+            `not say, drawn as ${kind}.`
+        );
+      }
+    }));
+
+  test("a table typed into a block is framed, and one left outside by its closing marker is not", async () =>
+    watched("frame-follows-the-document", async () => {
+      const name = "constructed-frame-edited.md";
+      await writeDocument(name, ["Above.", "", "@@@ teacher", "Inside.", "", "@@@", "", "Below."].join("\n"));
+      const container = await open(name, views.livePreview);
+      await reveal(container, "Inside.");
+
+      await placeCursorAfter("Inside.");
+      // The blank line first: a table written straight under a line of text is
+      // that line's paragraph continued, and Markdown renders no table at all -
+      // so without it the check would be about something the editor never built.
+      await type(`\n\n${TYPED_TABLE}`);
+      // And the table is shown as its own characters while the cursor is in it,
+      // so the element the frame has to reach does not exist until the cursor
+      // has left it.
+      await placeCursorAfter("Above.");
+
+      const written = await blockBoxes(container, "permission-block");
+      assert.ok(
+        written.some(isTheTable),
+        `A table typed into a block is inside it from the moment it is written, and a frame that ` +
+          `only reaches it after the document is closed and reopened is not a frame a person ` +
+          `writing can rely on. Framed: ${JSON.stringify(runOf(written))}, in ` +
+          `${JSON.stringify(await documentText())}`
+      );
+
+      // A second document for the second half, rather than typing on in this
+      // one. Typing a table leaves the keyboard inside the element Obsidian
+      // built for it - the cell, not the document - and the next Return goes to
+      // the next row of the table however the cursor is placed beforehand. A
+      // document whose table nobody has typed in does not have that in the way.
+      const closing = "constructed-frame-closed-above.md";
+      await writeDocument(
+        closing,
+        ["Above.", "", "@@@ teacher", "Inside.", "", ...TABLE, "", "@@@", "", "Below."].join("\n")
+      );
+      const second = await open(closing, views.livePreview);
+      await reveal(second, "Inside.");
+
+      // The block is closed above the table now, which puts the table outside
+      // it. The marker further down opens nothing and closes nothing.
+      await placeCursorAfter("Inside.");
+      await type("\n@@@");
+      await placeCursorAfter("Above.");
+
+      const closed = await blockBoxes(second, "permission-block");
+      assert.deepEqual(
+        closed.filter(isTheTable).map((box) => box.text),
+        [],
+        `The block no longer covers the table's line, so the frame may not still be standing on ` +
+          `it. What is removed is what keeps a frame off an element the document stopped gating. ` +
+          `Framed: ${JSON.stringify(runOf(closed))}, in ${JSON.stringify(await documentText())}`
+      );
+    }));
+
+  test("nothing of this reaches the reading view", async () =>
+    watched("frame-not-in-reading-view", async () => {
+      const name = "constructed-frame-reading.md";
+      await writeDocument(
+        name,
+        ["Above.", "", "@@@ teacher", "Before it.", "", ...TABLE, "", "After it.", "@@@", "", "Below."].join("\n")
+      );
+      const container = await open(name, views.reading);
+      await reveal(container, "Before it.");
+
+      const found = await markers(container);
+      assert.deepEqual(
+        found.filter((m) => m.marker.startsWith("permission-") || m.marker.startsWith("side-by-side-")),
+        [],
+        `The reading view puts the frame on rendered sections, where a table is a section like ` +
+          `any other and was never broken. The editor's own classes reaching it would be the ` +
+          `editor modifying rendered output. Found: ${JSON.stringify(found.map((m) => m.marker))}`
+      );
+      assert.ok(
+        found.some((m) => m.marker === "safelearn-read-block"),
+        `And its own frame is still there: ${JSON.stringify([...new Set(found.map((m) => m.marker))])}`
       );
     }));
 });

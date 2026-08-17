@@ -64,6 +64,7 @@ export const views = Object.freeze({
 /** The classes the plugin puts on what it decorates. Its own names, so ours to rely on. */
 export const markerClasses = Object.freeze([
   "fragment-highlight",
+  "fragment-icon",
   "permission-block",
   "permission-block-start",
   "permission-block-end",
@@ -699,6 +700,60 @@ export async function columnsAreSideBySide(container) {
   }, container);
 }
 
+/**
+ * Where a block stands on screen: every element carrying `className`, in the
+ * order they are laid out, with the box the editor gave it and the box the
+ * block's frame is drawn in.
+ *
+ * Two boxes rather than one, because they are not the same question and on some
+ * elements they are not the same rectangle. Live Preview renders a table, a
+ * callout, a diagram, a formula or an embedded note as an element of its own
+ * rather than as a line, and lays it out to a width of its own: a table widget's
+ * box runs 16px wider on each side than the box of the line above it, and its
+ * own horizontal padding puts its content back at exactly the line's width. So
+ * `top`/`bottom`/`left`/`right` are what the editor laid out, and
+ * `frameLeft`/`frameRight` are where the block's side edges are drawn - on the
+ * element's border where it has one, and otherwise inside its own padding, where
+ * a rule that must not hard-code one theme's spacing has to put them.
+ *
+ * A check that compared boxes would report a frame stepping in and out where
+ * none does. One that compared class lists would report a frame closing where
+ * nothing is drawn at all, which is the state this defect leaves behind.
+ *
+ * The coordinates are relative to `.cm-content` rather than to the viewport, so
+ * that a check may scroll between two reads and still compare them.
+ */
+export async function blockBoxes(container, className) {
+  return page.evaluate(
+    (selector, name) => {
+      const root = document.querySelector(selector);
+      if (!root) return [];
+      const origin = root.getBoundingClientRect();
+      const width = (value) => parseFloat(value) || 0;
+      return [...root.querySelectorAll(`.${name}`)]
+        .map((element) => {
+          const box = element.getBoundingClientRect();
+          const style = getComputedStyle(element);
+          const onItsBorder = width(style.borderLeftWidth) > 0;
+          return {
+            line: element.classList.contains("cm-line"),
+            classes: [...element.classList],
+            text: (element.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 40),
+            top: box.top - origin.top,
+            bottom: box.bottom - origin.top,
+            left: box.left - origin.left,
+            right: box.right - origin.left,
+            frameLeft: box.left - origin.left + (onItsBorder ? 0 : width(style.paddingLeft)),
+            frameRight: box.right - origin.left - (onItsBorder ? 0 : width(style.paddingRight)),
+          };
+        })
+        .sort((a, b) => a.top - b.top);
+    },
+    container,
+    className
+  );
+}
+
 /** The plugin as Obsidian knows it, which is what a command id is prefixed with. */
 export const pluginId = "safelearn-formatter";
 
@@ -901,7 +956,7 @@ export async function selectAcross(from, to) {
         if (start === -1) throw new Error(`No line holding ${JSON.stringify(first)}.`);
         if (end === -1) throw new Error(`No line holding ${JSON.stringify(last)}.`);
         editor.setSelection({ line: start, ch: 0 }, { line: end, ch: lines[end].length });
-        editor.focus();
+        (editor.cm ?? editor).focus();
       },
       from,
       to
@@ -973,7 +1028,18 @@ export async function type(text) {
   return { before, after, changed: true };
 }
 
-/** Puts the cursor at the end of the line holding `needle`, in the editor. */
+/**
+ * Puts the cursor at the end of the line holding `needle`, in the editor.
+ *
+ * The focus goes through CodeMirror rather than through Obsidian's editor
+ * wrapper, here and in the three actions below it. `editor.focus()` is the
+ * obvious call and it silently does nothing once the keyboard has been
+ * somewhere the wrapper does not track - typing into a table leaves it that
+ * way, and opening another document does not clear it. Keystrokes then go to
+ * the page body, and a check that typed afterwards read the document as
+ * unchanged, which is indistinguishable from a plugin that ignored the edit.
+ * `cm.focus()` is what the page actually acts on.
+ */
 export async function placeCursorAfter(needle) {
   return withoutEditing(`placing the cursor after ${JSON.stringify(needle)}`, () =>
     page.evaluate((text) => {
@@ -983,7 +1049,7 @@ export async function placeCursorAfter(needle) {
       const line = lines.findIndex((l) => l.includes(text));
       if (line === -1) throw new Error(`No line holding ${JSON.stringify(text)}.`);
       editor.setCursor({ line, ch: lines[line].length });
-      editor.focus();
+      (editor.cm ?? editor).focus();
     }, needle)
   );
 }
@@ -1000,7 +1066,7 @@ export async function placeCursorAtStart() {
       const editor = window.app.workspace.activeEditor?.editor;
       if (!editor) throw new Error("No active editor to place a cursor in.");
       editor.setCursor({ line: 0, ch: 0 });
-      editor.focus();
+      (editor.cm ?? editor).focus();
     })
   );
 }
@@ -1020,7 +1086,7 @@ export async function moveCursorInto(needle) {
       const line = lines.findIndex((l) => l.includes(text));
       if (line === -1) throw new Error(`No line holding ${JSON.stringify(text)}.`);
       editor.setCursor({ line, ch: lines[line].indexOf(text) + Math.floor(text.length / 2) });
-      editor.focus();
+      (editor.cm ?? editor).focus();
     }, needle)
   );
 }

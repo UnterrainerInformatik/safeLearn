@@ -132,6 +132,8 @@ A directive names a list, and the server reads it as one: the text after `@@@` i
 
 A directive on the first line of a document gates the entire file and has no closing marker; every other directive gates the block between itself and its closing marker. These are different promises about different amounts of text, and the plugin SHALL mark the file-level form distinguishably from the block form. The marking SHALL convey that what is governed is the document rather than a region within it.
 
+The distinction SHALL be carried by the shape of the frame — the weight of its edges, and the lower edge the file-level form has nothing to draw. Both forms SHALL be drawn in one colour: a second channel saying what the shape already says has nothing left to say with, and the two frames are the same kind of statement about two amounts of text.
+
 #### Scenario: The first line of a document is a directive
 
 - **WHEN** a document begins with a directive
@@ -141,6 +143,11 @@ A directive on the first line of a document gates the entire file and has no clo
 
 - **WHEN** the identical directive text appears on a line other than the first
 - **THEN** it is marked as opening a block, which is what the server reads it as there
+
+#### Scenario: Both forms stand in one document
+
+- **WHEN** a document carries a file-level directive and a block directive below it
+- **THEN** the two frames are drawn in the same colour, and what tells them apart is that the file-level one is open at the bottom
 
 ### Requirement: An entry carrying a time window is distinguishable from one that does not
 
@@ -229,3 +236,98 @@ While a line is replaced, the per-entry markings of that line SHALL NOT be emitt
 
 - **WHEN** the cursor is on the line directly above or below a replaced directive line
 - **THEN** that directive line is still shown as its heading
+
+### Requirement: The frame of a block covers every line of the block
+
+A block's frame is what tells a person, while they write, that the text inside it is governed — restricted to named readers, or laid out as columns. The frame SHALL cover every line the block covers, whatever the editor renders that line as. Where the editor replaces one or more lines of a block with a rendered element of its own — a table, a callout, a diagram, a formula, an embedded note — the frame SHALL extend across that element as it does across a line of text.
+
+The block's ends SHALL stay where the document puts them: the first line of the block closes the frame at the top and the last line closes it at the bottom, whether or not those lines are rendered as text.
+
+The frame SHALL be one rectangle. Elements the editor renders in place of lines are not laid out to the same width as its line elements, and a frame whose edges follow each element's own width is not a boundary a person can read. The edges SHALL stand in one vertical line for the whole block.
+
+This holds for both kinds of block the plugin draws — the permission block and the side-by-side block — because both make the same statement about the text between their markers.
+
+#### Scenario: A table stands in the middle of a permission block
+
+- **WHEN** a permission block contains a table between two lines of text
+- **THEN** the frame runs unbroken from the block's first line to its last, the table is inside it, and the block's boundary is not readable as ending above the table or beginning below it
+
+#### Scenario: A block contains nothing but a rendered element
+
+- **WHEN** a permission block's only content between its markers is a table, a callout or another element the editor renders in place of lines
+- **THEN** the block is drawn as one closed frame around it
+
+#### Scenario: A side-by-side block contains a table
+
+- **WHEN** a table stands inside a side-by-side block
+- **THEN** the block's region covers it, exactly as it covers the lines of text around it
+
+#### Scenario: The edges of the frame meet elements of differing width
+
+- **WHEN** a block contains both ordinary lines and an element the editor lays out to a different width
+- **THEN** the frame's edges stand in one vertical line over the whole block rather than following each element's own width
+
+#### Scenario: Text outside a block is not framed
+
+- **WHEN** a table, a callout or another rendered element stands outside every block
+- **THEN** it carries no frame
+
+### Requirement: A rendered element inside a block keeps its own appearance
+
+The elements the editor renders in place of lines carry appearances of their own — a callout has its colour and its icon, a table has its borders, an embedded note has its frame. The plugin SHALL add the block's frame around such an element and SHALL NOT otherwise change how it is drawn.
+
+#### Scenario: A callout inside a permission block
+
+- **WHEN** a callout stands inside a permission block
+- **THEN** it is drawn as Obsidian draws a callout, with the block's frame around it
+
+### Requirement: The frame follows the document as the block changes
+
+Which lines a block covers changes as a person writes, and the elements the editor renders in place of lines are built, rebuilt and discarded as that happens — some of them after the edit that caused them. Whatever the frame is applied to SHALL be brought up to date on the same occasions the rest of the marking is: an edit, a cursor move, a change of the visible region, and the arrival of an element the editor renders after the fact.
+
+A block that no longer covers a line SHALL NOT leave a frame behind on it.
+
+#### Scenario: A table is written into an existing block
+
+- **WHEN** a table is typed into a permission block that did not contain one
+- **THEN** the frame covers it, without the document having to be closed and reopened
+
+#### Scenario: A block's closing marker is moved above a table
+
+- **WHEN** a block that contained a table is closed above it, so that the table now stands outside the block
+- **THEN** the table no longer carries the frame
+
+#### Scenario: An element is rendered after the update that produced it
+
+- **WHEN** the editor finishes building a rendered element — a diagram, an embedded note — after the update in which its lines entered the block
+- **THEN** the frame covers it once it is there
+
+### Requirement: A fragment marker is shown as an icon while nothing stands in it
+
+A fragment marker says that what follows it waits for a click in a presentation. It says nothing about the document as a document, and it is written inside lines of ordinary prose. The plugin SHALL show it in the editor as an icon standing in place of the tag's characters, without a frame and without a background, so that the marking takes no more room on the line than what it marks is worth.
+
+The tag's own characters SHALL be shown, and be editable, while the cursor rests in the tag or a selection touches it — the same rule a directive line follows. Nothing SHALL be written into the document to produce either state: the characters that appear are the ones the document already held.
+
+Each fragment SHALL be decided independently of the others. Two fragments on one line are two answers, so that a person editing one is not shown the other as characters.
+
+The icon SHALL be produced by the plugin rather than by the stylesheet alone, so that a stylesheet that does not load cannot take a tag off the page without leaving anything in its place.
+
+#### Scenario: A fragment stands in a line nobody is editing
+
+- **WHEN** a line containing a fragment marker is on screen and neither the cursor nor a selection touches the tag
+- **THEN** the icon stands where the tag's characters are, the tag's characters are not on screen, and the words on either side of it are unchanged — including the space that separated them from the tag
+
+#### Scenario: The cursor is moved into a fragment
+
+- **WHEN** the cursor is placed inside a fragment marker
+- **THEN** the tag's own characters are on screen and editable, the icon is no longer shown for that tag, and the document text is unchanged
+
+#### Scenario: A line carries two fragments and one is edited
+
+- **WHEN** the cursor rests in one of two fragment markers on the same line
+- **THEN** that one is shown as its characters and the other is still shown as its icon
+
+#### Scenario: A fragment ends the line it is on
+
+- **WHEN** a fragment marker stands at the end of its line, with no space or text after it
+- **THEN** what is replaced is the tag and nothing else, and the line that follows is shown whole
