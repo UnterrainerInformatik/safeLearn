@@ -14,3 +14,5 @@ Echter Ablageort: `/mnt/data/source/HTL/safeLearn/AI/memory/`
 - [Browser-Verifikation](browser-verification.md) — `npm test` fährt eine Puppeteer-Harness, die sich live gegen die geteilten Demo-Accounts der Keycloak-Demo-Realm einloggt
 - [Content-Verifikations-Suite](content-verification-suite.md) — `npm test` prüft den `md/`-Korpus selbst; nach Änderungen an Renderer, Permissions oder Korpus laufen lassen
 - [Plugin-Repo-Link](plugin-repo-link.md) — das Obsidian-Plugin liegt in einem eigenen Repo, erreichbar über den gitignorierten Symlink `AI/plugin`
+- [Plugin-Release-Prozedur](plugin-release-process.md) — "mach ein neues Release": Version an drei Stellen, Push, Tag, dann GitHub-Release mit `main.js`, `manifest.json`, `styles.css`
+- [Tag eines Releases umhängen](github-release-tag-move.md) — Tag löschen setzt das GitHub-Release auf Draft; danach `gh release edit --draft=false --latest`
