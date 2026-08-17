@@ -51,3 +51,5 @@ test/.runtime/
 # into this machine's checkout, so it is set per installation rather than
 # shipped. AI/memory/plugin-repo-link.md says how to recreate it.
 AI/plugin
+
+.obsidian/workspace.json

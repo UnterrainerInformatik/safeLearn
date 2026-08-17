@@ -47,6 +47,25 @@ npm run test:headed
 ```
 Identical checks, visible browser window. The switch is the environment variable `SAFELEARN_TEST_HEADED=1`; the script sets it through `test/headed.env` so it works the same way on every platform.
 
+### The second run: the Obsidian plugin
+```bash
+npm run test:obsidian
+```
+A separate run for the companion Obsidian plugin, which gives this project's tags a representation while a teacher writes them. It starts no server, authenticates against nothing, and touches none of the accounts below. It does open a real Obsidian window — there is no headless mode for an Electron application without a virtual display, and requiring one to run a check would be worse than a window that appears for ten seconds.
+
+It needs two things that the other run does not: Obsidian installed, and the plugin checkout reachable. On this repository that checkout is the symlink `AI/plugin`, which is ignored and set per installation. Both locations are environment variables with defaults, and a run that cannot find one says which:
+
+| Variable | Default | What it is |
+| --- | --- | --- |
+| `SAFELEARN_TEST_OBSIDIAN_DIR` | `~/scripts/obsidian` | The directory holding the Obsidian AppImage. The highest version in it is the one that runs, which is how the user's own launcher picks it. |
+| `SAFELEARN_TEST_PLUGIN_DIR` | `AI/plugin` | The plugin checkout. Its `npm run build` is invoked before every run — `main.js` is not committed, and a run against a stale build tests nothing. |
+| `SAFELEARN_TEST_OBSIDIAN_PORT` | `19222` | The debugging port, bound to loopback. |
+| `SAFELEARN_TEST_OBSIDIAN_KEEP_OPEN` | unset | Leaves the window standing after the run, to look at what a failure left behind. |
+
+The run assembles its own vault under `test/.runtime/obsidian/vault/` from the corpus in `md/` — as copies, so a check that types cannot edit what `npm test` asserts against — and points Obsidian at it through an application-data directory of its own. That isolation is the point: this repository is itself a registered Obsidian vault with the plugin linked into it, and a run must not hand back a different pane layout than the one you left. Neither `~/.config/obsidian/` nor this repository's `.obsidian/` is written.
+
+Two things about that vault are worth knowing. Its application-data directory is *not* rebuilt per run, because a fresh one makes Obsidian download its current release before it will start. And restricted mode cannot be switched off by writing a file: `community-plugins.json` lists what would be enabled and Obsidian still loads none of it, so the harness turns it off through the application after the workspace is up.
+
 ## The accounts it uses
 By default the harness authenticates as the public demo accounts of the demo realm, the same ones `README.md` publishes:
 
@@ -149,6 +168,8 @@ Test files live in `test/` and are named `*.test.js`; `node --test` runs them on
 * `AI/claude/hooks/name-covering-checks.mjs` reads it on every `Edit`/`Write` in an assisted session and names the checks covering the edited file. It never runs the suite — a run takes minutes and authenticates against a shared public realm, which is not something to trigger as a side effect of an edit.
 
 A change that adds or removes a check updates the map in the same change.
+
+**The record describes the server suite only.** The Obsidian checks under `test/obsidian/` are deliberately not in it, and there is no linter to find that surprising later. What they guard — `main.ts` and `styles.css` — lives in another repository, reached through a symlink that is absent on a checkout which has not set it up, and `coverage.test.js` asserts unconditionally that every path the record names exists. Recording them would make `npm test` fail for anyone without the plugin, and relaxing that assertion would take away the record's one guarantee. So the cost is stated rather than paid: editing the plugin's sources will not tell you which checks cover them. When the plugin repository has a record of its own, that is where the connection belongs.
 
 ### The known-dangling list
 
