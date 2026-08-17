@@ -120,6 +120,14 @@
         "md/test-md-file.md"
       ]
     },
+    "test/directive-grammar.test.js": {
+      "what": "What a permission directive means, entry by entry: a table of edge-case directive lines read by parseFirstLineForPermissions, covering the permissive cases of parseLocalDateTime that a hand-written mirror gets wrong. It is the oracle the companion plugin's own grammar is held against - the plugin's parseDirectiveEntries reads the same table and has to reach the same conclusion per entry, so a divergence fails here rather than misinforming a person writing a document. Needs no browser, no login and no server; it does need the plugin checkout the AI/plugin symlink points at.",
+      "guards": [
+        "obsidian.js",
+        "utils.js"
+      ],
+      "corpus": []
+    },
     "test/coverage.test.js": {
       "what": "The coverage record itself: every path it names exists, every test file appears in it, and no entry names a file that is gone.",
       "guards": [

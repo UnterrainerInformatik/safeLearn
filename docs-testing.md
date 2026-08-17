@@ -30,7 +30,10 @@ One run does the following:
 | `test/checks/navigation.js` | Wiki-link resolution including the duplicated basename — with a digit in the name and without one — and the name with spaces, the folder-name edge cases, the table of contents and the navigation tree. |
 | `test/checks/presentation.js` | The deck built from the source's heading structure, fragments in a deck, the deck's own references, the document view, and the documented shortcut into it with the shift key held and without. |
 | `test/checks/deployment-surface.js` | What a running instance publishes over HTTP: that `keycloak.json`, the application's own sources and the dependency manifests are not served and that a refusal looks like a path with no file behind it, that the assets a page addresses still answer, that every same-origin reference of a rendered page resolves in all three views, and that `/hot-reload` — the one endpoint that answers before authentication — survives a parameter it cannot interpret. |
+| `test/directive-grammar.test.js` | What a permission directive means, entry by entry: a table of edge-case directive lines read by `parseFirstLineForPermissions`, and the companion plugin's own reading of the same lines held against it. No browser, no login, no server — but it does need the plugin checkout, for the reason below. |
 | `test/coverage.test.js` | The coverage record. No browser, no login. |
+
+`test/directive-grammar.test.js` is the one check in this run that reaches outside the repository. The plugin has to reach the same conclusion about a directive as the server does — that is the whole of what it is for — and its mirror of `parsePermissionEntry`, `parsePermissionWindow` and `parseLocalDateTime` is checked against those functions rather than against a reading of them. It transpiles the plugin's `main.ts` and runs its grammar over the same table. So `npm test` needs the plugin checkout the same way `npm run test:obsidian` does: the symlink `AI/plugin`, or `SAFELEARN_TEST_PLUGIN_DIR`. It does not need Obsidian, and it builds nothing.
 
 ## Running it
 ```bash

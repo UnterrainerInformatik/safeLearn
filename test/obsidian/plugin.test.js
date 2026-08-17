@@ -85,6 +85,60 @@ function shapeOf(found, kind) {
     .map((m) => `L${m.line}C${m.column}:${JSON.stringify(m.text)}`);
 }
 
+/**
+ * Every marked entry of a directive, in document order, with everything said
+ * about it: `L<line>C<column>:"<text>" entry,timed`.
+ *
+ * Two things have to be undone to get there, and neither is the plugin's doing.
+ *
+ * The conclusions about one entry are combined on one range, so the harness
+ * reports the same element once per class it carries; grouping those back
+ * together is what makes "this entry is a switch and nothing else" a thing a
+ * check can state, rather than four separate absences.
+ *
+ * And one marking is not one element. The editor cuts a decoration wherever its
+ * own highlighting starts a token, so `#exam` arrives as `#` and `exam` and
+ * `4bhif[gestern]` as four pieces - each carrying the whole marking, each a span
+ * of its own. Pieces that touch and say the same thing are one marking, and a
+ * check that could not put them back together would be asserting about
+ * Obsidian's tokenizer rather than about what the plugin marked. Two entries
+ * never touch: a comma stands between them.
+ */
+function entriesOf(found) {
+  const elements = new Map();
+  for (const marker of found.filter((m) => m.marker.startsWith("safelearn-entry"))) {
+    const at = elements.get(marker.from) ?? { ...marker, classes: [] };
+    at.classes.push(marker.marker.replace(/^safelearn-entry-?/, "") || "entry");
+    elements.set(marker.from, at);
+  }
+
+  const entries = [];
+  for (const piece of [...elements.values()].sort((a, b) => (a.from ?? 0) - (b.from ?? 0))) {
+    const classes = piece.classes.sort().join(",");
+    const previous = entries[entries.length - 1];
+    if (previous && previous.to === piece.from && previous.classes === classes) {
+      previous.text += piece.text;
+      previous.to = piece.to;
+      continue;
+    }
+    entries.push({ line: piece.line, column: piece.column, text: piece.text, to: piece.to, classes });
+  }
+  return entries.map((e) => `L${e.line}C${e.column}:${JSON.stringify(e.text)} ${e.classes}`);
+}
+
+/** The same, with the positions dropped: what was marked, and as what. */
+function entryKindsOf(found) {
+  return entriesOf(found).map((entry) => entry.replace(/^L\d+C\d+:/, ""));
+}
+
+/**
+ * A directive holding one of everything, used by several checks below. Its
+ * entries sit at columns 4, 11, 41, 48 and 57 of the line - the columns are
+ * written out where they are asserted, because a marking that covers the right
+ * text at the wrong place is exactly the defect this harness exists to catch.
+ */
+const MIXED_DIRECTIVE = "@@@ 4bhif, teacher[2025-11-28T08:00:00], #exam, ]kaputt, 5bhif[gestern]";
+
 before(async () => {
   await start();
   console.log(`    Obsidian ${obsidianVersion()}`);
@@ -468,6 +522,36 @@ describe("a tag the plugin cannot resolve costs only itself", () => {
       );
     }));
 
+  test("an unreadable entry leaves the entries beside it marked as they would be without it", async () =>
+    watched("unreadable-entry", async () => {
+      // The comparison is against the same directive with the offending token
+      // taken out, rather than against a list written down here: what has to
+      // hold is that the neighbours are unaffected, and a hand-written
+      // expectation could be wrong in the same way the code is.
+      const withIt = "constructed-unreadable-entry.md";
+      const withoutIt = "constructed-unreadable-entry-removed.md";
+      await writeDocument(withIt, ["Intro.", MIXED_DIRECTIVE, "Gated.", "@@@"].join("\n"));
+      await writeDocument(
+        withoutIt,
+        ["Intro.", MIXED_DIRECTIVE.replace("]kaputt, ", ""), "Gated.", "@@@"].join("\n")
+      );
+
+      const marked = entryKindsOf(await markers(await open(withIt, views.livePreview)));
+      const unaffected = entryKindsOf(await markers(await open(withoutIt, views.livePreview)));
+
+      assert.deepEqual(
+        marked,
+        unaffected,
+        "One token of a directive that the server cannot read as an entry costs itself and nothing " +
+          "else - the server drops it and goes on reading the rest, and a marking that gave up on " +
+          "the whole line would report a document that grants less than it does."
+      );
+      assert.ok(
+        marked.length === 4,
+        `Four of the five tokens are entries the server acts on. Found: ${JSON.stringify(marked)}`
+      );
+    }));
+
   test("a closing marker with nothing open does not turn what follows into a block", async () =>
     watched("orphaned-closing-marker", async () => {
       const name = "constructed-orphan.md";
@@ -492,6 +576,176 @@ describe("a tag the plugin cannot resolve costs only itself", () => {
         shapeOf(found, "fragment-highlight"),
         [`L3C0:${JSON.stringify(FRAGMENT)}`],
         "The tag after the orphaned marker is marked as it would be in a document without it."
+      );
+    }));
+});
+
+// ################### A directive is marked as the list of entries it is ###################
+
+describe("a permission directive is marked as the list of entries it is", () => {
+  // Every document in this section is constructed rather than taken from the
+  // corpus: some of them are wrong on purpose - a window nobody can read, a
+  // token that is not an entry - and `md/` is what the authenticated suite
+  // asserts is right. They live in the vault this run assembled and nowhere else.
+
+  test("a directive naming several things is marked as several things", async () =>
+    watched("directive-entries", async () => {
+      const name = "constructed-directive-entries.md";
+      await writeDocument(name, ["Intro.", MIXED_DIRECTIVE, "Gated.", "@@@"].join("\n"));
+      const container = await open(name, views.livePreview);
+
+      assert.deepEqual(
+        entriesOf(await markers(container)),
+        [
+          'L2C4:"4bhif" entry',
+          'L2C11:"teacher[2025-11-28T08:00:00]" entry,timed',
+          'L2C41:"#exam" entry,switch',
+          'L2C57:"5bhif[gestern]" broken,entry',
+        ],
+        "The renderer splits the text after @@@ on commas and reads each token on its own, so a " +
+          "directive naming four things is four markings and not one. Each says what is true of that " +
+          "token: the second carries a window the server keeps, the third is a switch rather than an " +
+          "address, the fourth a window the server will throw away. `]kaputt` at column 48 is no " +
+          "entry to the server at all and carries no marking - marking it would say the server acts " +
+          "on it."
+      );
+    }));
+});
+
+// ################### A directive that governs the whole file ###################
+
+describe("a directive that governs the whole file is marked as doing so", () => {
+  test("the first line is marked as gating the file, and the same text later as opening a block", async () =>
+    watched("file-level-directive", async () => {
+      const name = "constructed-file-level-marking.md";
+      await writeDocument(
+        name,
+        ["@@@ teacher", "", "Intro.", "@@@ teacher", "Gated.", "@@@"].join("\n")
+      );
+      const container = await open(name, views.livePreview);
+      const found = await markers(container);
+
+      assert.deepEqual(
+        shapeOf(found, "permission-file"),
+        [`L1C0:${JSON.stringify("@@@ teacher")}`],
+        "The first line gates the whole document and has no closing marker. That is a different " +
+          "promise about a different amount of text than the identical line further down, and the " +
+          "two are told apart."
+      );
+      assert.deepEqual(
+        shapeOf(found, "permission-block"),
+        [
+          `L4C0:${JSON.stringify("@@@ teacher")}`,
+          `L5C0:${JSON.stringify("Gated.")}`,
+          `L6C0:${JSON.stringify("@@@")}`,
+        ],
+        "The block is lines 4 to 6. The line-1 directive opens no block - read as one it would " +
+          "swallow everything below it."
+      );
+      assert.deepEqual(
+        entriesOf(found),
+        ['L1C4:"teacher" entry', 'L4C4:"teacher" entry'],
+        "Both forms name entries, and both have them marked. What differs between the two lines is " +
+          "how far what they gate reaches, which is said by the line and not by the entry."
+      );
+    }));
+});
+
+// ################### A window, and a window the server throws away ###################
+
+describe("an entry carrying a time window is distinguishable from one that does not", () => {
+  test("a window that has closed is marked exactly as one that has not opened", async () =>
+    watched("window-time-independence", async () => {
+      const name = "constructed-windows.md";
+      await writeDocument(
+        name,
+        [
+          "Intro.",
+          "@@@ 4bhif[2000-01-01T00:00:00 to 2000-01-02T00:00:00]",
+          "Long over.",
+          "@@@",
+          "",
+          "@@@ 4bhif[2999-01-01T00:00:00 to 2999-01-02T00:00:00]",
+          "Not yet.",
+          "@@@",
+        ].join("\n")
+      );
+      const container = await open(name, views.livePreview);
+      const marked = entryKindsOf(await markers(container));
+
+      assert.deepEqual(
+        marked,
+        [
+          '"4bhif[2000-01-01T00:00:00 to 2000-01-02T00:00:00]" entry,timed',
+          '"4bhif[2999-01-01T00:00:00 to 2999-01-02T00:00:00]" entry,timed',
+        ],
+        "A window is marked as a window. Whether it happens to be open at the moment of examination " +
+          "is not part of the marking: recognition that changed with the clock would need a timer, " +
+          "would contradict the requirement that the same text examined twice gives the same answer, " +
+          "and would report a state the document does not contain."
+      );
+    }));
+});
+
+describe("a window the server discards is marked as discarded", () => {
+  test("a directive with nothing readable in it is marked as withheld from everyone", async () =>
+    watched("directive-withheld", async () => {
+      const name = "constructed-withheld.md";
+      await writeDocument(name, ["Intro.", "@@@ ]kaputt, b[, [c]", "Gated.", "@@@"].join("\n"));
+      const container = await open(name, views.livePreview);
+      const found = await markers(container);
+
+      assert.deepEqual(
+        shapeOf(found, "permission-withheld"),
+        [`L2C0:${JSON.stringify("@@@ ]kaputt, b[, [c]")}`],
+        "No token here reads as an entry, so `removeForbiddenContent` replaces the whole block with " +
+          "the empty string - it is withheld from every reader including an admin. That is the " +
+          "harshest thing a directive can do and the least visible, so it is said at the line."
+      );
+      assert.deepEqual(
+        entriesOf(found),
+        [],
+        "Nothing on this line is an entry the server acts on, so nothing on it is marked as one."
+      );
+    }));
+
+  test("a file-level directive nothing can be read from is marked as both", async () =>
+    watched("file-level-withheld", async () => {
+      const name = "constructed-file-level-withheld.md";
+      await writeDocument(name, ["@@@ ]kaputt", "", "Text below it."].join("\n"));
+      const container = await open(name, views.livePreview);
+      const found = await markers(container);
+
+      assert.deepEqual(
+        [shapeOf(found, "permission-file"), shapeOf(found, "permission-withheld")],
+        [[`L1C0:${JSON.stringify("@@@ ]kaputt")}`], [`L1C0:${JSON.stringify("@@@ ]kaputt")}`]],
+        "The line gates the file and names nothing the server can read, so `resolveFileVisibility` " +
+          "reports the file invisible to everyone. Both things are true of it and both are marked."
+      );
+    }));
+});
+
+// ################### A switch is not an address ###################
+
+describe("a view switch is distinguishable from an address", () => {
+  test("a switch, a switch that resolves to nothing, and a class are three different markings", async () =>
+    watched("view-switches", async () => {
+      const name = "constructed-view-switches.md";
+      await writeDocument(name, ["Intro.", "@@@ #exam, #nonsense, 4bhif", "Gated.", "@@@"].join("\n"));
+      const container = await open(name, views.livePreview);
+
+      assert.deepEqual(
+        entriesOf(await markers(container)),
+        [
+          'L2C4:"#exam" entry,switch',
+          'L2C11:"#nonsense" entry,switch,unresolved',
+          'L2C22:"4bhif" entry',
+        ],
+        "`#exam` selects between variants of the document and is resolved against the reader's own " +
+          "preferences, not against who they are - marking it like the class beside it would say the " +
+          "document restricts an audience where it selects a variant. `hasRoles` recognizes the " +
+          "prefix more broadly than the three names it resolves, so `#nonsense` is taken out of the " +
+          "role test and then decides nothing at all, which is a third thing to be."
       );
     }));
 });
@@ -532,6 +786,66 @@ describe("the set of decorations is always well-formed", () => {
           found.some((m) => m.marker === "fragment-highlight" && m.line === 3),
         `Both markings belong on line 3 - the block covers it and the tag stands on it. Found: ` +
           `${JSON.stringify(shapeOf(found))}`
+      );
+    }));
+
+  test("entry markings and line markings in one document are all applied", async () =>
+    watched("entry-and-line-markings", async () => {
+      // Every kind of marking this plugin emits, in one document: line markings
+      // for the file-level directive, for a block and for a directive withheld
+      // from everyone, and character-level markings for the entries of each of
+      // those directives and for a fragment at the start of a line inside a
+      // block. The set is handed to the library to sort, because the order it
+      // has to be in is by position *and* by the side each range begins at, and
+      // only the library knows the second - getting it wrong is not a wrong
+      // marking but no markings at all.
+      const name = "constructed-marking-collision.md";
+      await writeDocument(
+        name,
+        [
+          "@@@ teacher, 4bhif[gestern]",
+          "",
+          "@@@ 4bhif, #answer",
+          "##fragment",
+          "Gated text.",
+          "@@@",
+          "",
+          "@@@ ]kaputt",
+          "Withheld from everyone.",
+          "@@@",
+        ].join("\n")
+      );
+      forgetRaised();
+      const container = await open(name, views.livePreview);
+      const found = await markers(container);
+      const errors = raised();
+
+      assert.deepEqual(
+        errors.map((e) => `${e.kind}: ${e.text.split("\n")[0]}`),
+        [],
+        "The editor refused the set of markings. A rejected set is not a degraded result: every " +
+          "marking in the document is lost at once, which reads from the outside exactly like a " +
+          "document with nothing to mark."
+      );
+      assert.deepEqual(
+        entriesOf(found),
+        [
+          'L1C4:"teacher" entry',
+          'L1C13:"4bhif[gestern]" broken,entry',
+          'L3C4:"4bhif" entry',
+          'L3C11:"#answer" entry,switch',
+        ],
+        "Both directives that name something readable have their entries marked, on the line that " +
+          "gates the file and on the line that opens a block alike."
+      );
+      assert.ok(
+        found.some((m) => m.marker === "permission-file" && m.line === 1) &&
+          found.some((m) => m.marker === "permission-block" && m.line === 3) &&
+          found.some((m) => m.marker === "fragment-highlight" && m.line === 4) &&
+          found.some((m) => m.marker === "permission-withheld" && m.line === 8),
+        `Every line marking belongs where it is: line 1 gates the file, line 3 opens a block, line ` +
+          `4 carries a tag at its first character inside that block, line 8 is withheld from ` +
+          `everyone. Found: ${JSON.stringify(shapeOf(found))}`
       );
     }));
 

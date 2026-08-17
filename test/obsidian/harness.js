@@ -65,6 +65,15 @@ export const views = Object.freeze({
 export const markerClasses = Object.freeze([
   "fragment-highlight",
   "permission-block",
+  "permission-block-start",
+  "permission-block-end",
+  "permission-file",
+  "permission-withheld",
+  "safelearn-entry",
+  "safelearn-entry-timed",
+  "safelearn-entry-broken",
+  "safelearn-entry-switch",
+  "safelearn-entry-unresolved",
   "side-by-side-start",
   "side-by-side-separator",
   "side-by-side-block",
@@ -192,8 +201,14 @@ function resolveApplication() {
   return path.join(applicationDir, images[images.length - 1]);
 }
 
-/** The plugin checkout, which is reached through a symlink that is set per installation. */
-function resolvePlugin() {
+/**
+ * The plugin checkout, which is reached through a symlink that is set per
+ * installation. Exported because `test/directive-grammar.test.js` reads the
+ * plugin's grammar out of `main.ts` and has to find the same checkout this
+ * harness builds and loads - two places deciding where the plugin is would be
+ * free to disagree about it.
+ */
+export function resolvePlugin() {
   if (!existsSync(path.join(pluginDir, "package.json"))) {
     throw new Error(
       `No plugin checkout at ${pluginDir}. On this repository that path is the symlink AI/plugin, ` +
