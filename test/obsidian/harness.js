@@ -355,6 +355,11 @@ export function assembleVault() {
     path.join(vaultDir, ".obsidian", "plugins", "safelearn-formatter"),
     "junction"
   );
+  // The plugin's own persisted settings (`data.json`, `saveData`/`loadData`) live inside
+  // the checkout this junction points at, not inside the vault tree just rebuilt above -
+  // a real login done there (manual testing against `tasks.md` #9.5/#11.3) would otherwise
+  // leak into every run after it, since the checkout is linked in rather than copied.
+  rmSync(path.join(path.dirname(built), "data.json"), { force: true });
   writeFileSync(
     path.join(vaultDir, ".obsidian", "community-plugins.json"),
     JSON.stringify(["safelearn-formatter"])
@@ -842,6 +847,27 @@ export async function runCommand(id, { expectEdit = true } = {}) {
 }
 
 /**
+ * Whether a registered command currently reports itself runnable.
+ *
+ * `executeCommandById` calls a command's action directly and is not gated by
+ * `checkCallback` at all - confirmed empirically while writing
+ * `plugin-admin-directory-ui`'s checks: it ran `list-classes` even with
+ * `checkCallback` returning `false`. `checkCallback(true)` ("checking, don't
+ * run") is what the command palette and the hotkey manager actually call to
+ * decide whether to offer a command, so a check about "not shown in the
+ * palette" has to ask this, not whether a direct `executeCommandById` call
+ * was accepted.
+ */
+export async function commandIsAvailable(id) {
+  const full = id.includes(":") ? id : `${pluginId}:${id}`;
+  return page.evaluate((full) => {
+    const command = window.app.commands.commands[full];
+    if (!command) throw new Error(`No command registered with id ${JSON.stringify(full)}.`);
+    return typeof command.checkCallback === "function" ? !!command.checkCallback(true) : true;
+  }, full);
+}
+
+/**
  * Every command Obsidian holds for this plugin, as it holds them.
  *
  * Read from the application rather than written down here, so that a check
@@ -1073,6 +1099,205 @@ export async function answerNameList(names) {
     document.querySelector(".modal-container textarea").value = lines.join("\n");
     document.querySelector(".modal-container button").click();
   }, names);
+  await settle();
+}
+
+/**
+ * The name-list dialog's textarea content, read without changing it - unlike
+ * `answerNameList`, which always overwrites it. For a check that picked a
+ * directory result into the field and wants to read what landed there.
+ */
+export async function nameListTextareaValue() {
+  return page.evaluate(() => document.querySelector(".modal-container textarea")?.value ?? null);
+}
+
+/** Confirms the name-list dialog with whatever the textarea currently holds - the other half of `nameListTextareaValue`. */
+export async function confirmNameList() {
+  doing("confirming the name list with its current contents");
+  await page.evaluate(() => document.querySelector(".modal-container button").click());
+  await settle();
+}
+
+// ################### Directory login and search (plugin-admin-directory-ui) ###################
+
+/**
+ * Puts the running plugin instance into a login state without a real PKCE
+ * round trip or a live safeLearn instance - `9.3` asks for a check that stays
+ * independent of both. Reaches the instance the way Obsidian itself holds it
+ * (`app.plugins.plugins[id]`) and stubs `searchDirectory` directly: it is a
+ * plain instance method, so replacing it shadows the real one without
+ * touching `data.json` or the plugin checkout the vault's plugin folder is
+ * linked to.
+ */
+export async function setDirectoryLoginFixture(entries = []) {
+  doing(`seeding a directory login fixture with ${entries.length} entr${entries.length === 1 ? "y" : "ies"}`);
+  await page.evaluate(
+    ({ id, entries }) => {
+      const plugin = window.app.plugins.plugins[id];
+      if (!plugin) throw new Error(`No running plugin instance at app.plugins.plugins[${JSON.stringify(id)}].`);
+      plugin.data.instanceUrl = "https://safelearn.example.test";
+      plugin.accessToken = "fixture-access-token";
+      plugin.searchDirectory = async (query) => {
+        const normalized = query.trim().toLowerCase();
+        if (!normalized) return entries;
+        return entries.filter(
+          (entry) =>
+            entry.name.toLowerCase().includes(normalized) ||
+            Object.keys(entry.roles).some((role) => role.includes(normalized))
+        );
+      };
+    },
+    { id: pluginId, entries }
+  );
+}
+
+/** Undoes `setDirectoryLoginFixture`, back to "no instance configured" - the state a fresh vault starts in. */
+export async function clearDirectoryLoginFixture() {
+  await page.evaluate((id) => {
+    const plugin = window.app.plugins.plugins[id];
+    if (!plugin) return;
+    plugin.data.instanceUrl = "";
+    plugin.accessToken = null;
+    delete plugin.searchDirectory;
+  }, pluginId);
+}
+
+/** Opens the plugin's own settings tab, the way clicking it in Obsidian's settings window does. */
+export async function openPluginSettings() {
+  doing("opening the plugin's settings tab");
+  await page.evaluate((id) => {
+    // `shouldUsePopout()` decides to open the settings window as a separate
+    // Electron `BrowserWindow` under this run's window/screen conditions -
+    // one Puppeteer, attached only to the main renderer, cannot see or drive.
+    // Forced off so the modal mounts inline in the document instead, which is
+    // the only thing this override changes: the settings tab's own content
+    // and behavior are unaffected either way.
+    window.app.setting.shouldUsePopout = () => false;
+    window.app.setting.open();
+    window.app.setting.openTabById(id);
+  }, pluginId);
+  await page.waitForFunction(() => !!document.querySelector(".vertical-tab-content .setting-item"), {
+    timeout: 10000,
+  });
+  await settle();
+}
+
+export async function closePluginSettings() {
+  await page.evaluate(() => window.app.setting.close());
+  await settle();
+}
+
+/** The name of every setting currently shown in the plugin's settings tab, in DOM order - including ones with no text field, such as "Login". */
+export async function settingsFieldNames() {
+  return page.evaluate(() =>
+    [...document.querySelectorAll(".vertical-tab-content .setting-item")].map(
+      (item) => item.querySelector(".setting-item-name")?.textContent ?? ""
+    )
+  );
+}
+
+/** Every text field the settings tab currently shows, by the label `Setting.setName` gave it. */
+export async function settingsTextFields() {
+  return page.evaluate(() =>
+    [...document.querySelectorAll(".vertical-tab-content .setting-item")].reduce((fields, item) => {
+      const name = item.querySelector(".setting-item-name")?.textContent ?? "";
+      const input = item.querySelector("input[type='text'], input:not([type])");
+      if (input) fields[name] = input.value;
+      return fields;
+    }, {})
+  );
+}
+
+/** Types into one of the settings tab's text fields, found by its `Setting.setName` label, and blurs it. */
+export async function fillSettingsField(label, value) {
+  doing(`setting ${JSON.stringify(label)} to ${JSON.stringify(value)}`);
+  await page.evaluate(
+    ({ label, value }) => {
+      const item = [...document.querySelectorAll(".vertical-tab-content .setting-item")].find(
+        (candidate) => candidate.querySelector(".setting-item-name")?.textContent === label
+      );
+      const input = item?.querySelector("input[type='text'], input:not([type])");
+      if (!input) throw new Error(`No settings field named ${JSON.stringify(label)}.`);
+      input.value = value;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("blur", { bubbles: true }));
+    },
+    { label, value }
+  );
+  await settle();
+}
+
+/** Whether the directory search strip (search input + class dropdown) is rendered above the name-list textarea. */
+export async function directorySearchStripPresent() {
+  return page.evaluate(() => !!document.querySelector(".modal-container .safelearn-directory-search"));
+}
+
+/** Types into the search strip's query field and, if given, chooses a class from its dropdown. */
+export async function searchDirectoryStrip(query, className = "") {
+  doing(`searching the directory for ${JSON.stringify(query)}${className ? ` in ${className}` : ""}`);
+  await page.waitForFunction(() => !!document.querySelector(".modal-container .safelearn-directory-search input"), {
+    timeout: 10000,
+  });
+  // The class dropdown is populated by its own fetch, kicked off when the
+  // strip is built and not necessarily settled yet by the time the input
+  // exists - see `tasks.md` #7.2. Setting a `<select>` to a value it has no
+  // matching `<option>` for yet would silently fall back to the default.
+  if (className) {
+    await page.waitForFunction(
+      () => (document.querySelector(".modal-container .safelearn-directory-class-filter")?.options.length ?? 0) > 1,
+      { timeout: 10000 }
+    );
+  }
+  await page.evaluate(
+    ({ query, className }) => {
+      const strip = document.querySelector(".modal-container .safelearn-directory-search");
+      const input = strip.querySelector("input");
+      input.value = query;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      const select = strip.querySelector("select");
+      if (select && className) {
+        select.value = className;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    },
+    { query, className }
+  );
+  // The strip debounces (~300ms) before it calls the directory client - see
+  // `tasks.md` #7.3. Waited out here rather than reduced in the plugin for a
+  // check's convenience.
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  await settle();
+}
+
+/**
+ * The directory search strip's currently rendered matches, as text - the
+ * plugin renders each as `"${name} — ${roles.join(", ")}"` (`main.ts`
+ * `buildDirectorySearch`), not as a separate name attribute, so a check reads
+ * the same text a person would.
+ */
+export async function directorySearchResults() {
+  return page.evaluate(() =>
+    [...document.querySelectorAll(".modal-container .safelearn-directory-results .safelearn-directory-result")].map(
+      (row) => row.textContent ?? ""
+    )
+  );
+}
+
+/** Clicks the search strip's rendered match whose text starts with `name`. */
+export async function chooseDirectoryResult(name) {
+  doing(`choosing the directory result ${JSON.stringify(name)}`);
+  await page.evaluate((name) => {
+    const rows = [
+      ...document.querySelectorAll(".modal-container .safelearn-directory-results .safelearn-directory-result"),
+    ];
+    const row = rows.find((candidate) => candidate.textContent?.startsWith(name));
+    if (!row) {
+      throw new Error(
+        `No rendered directory result starting with ${JSON.stringify(name)}, got ${JSON.stringify(rows.map((candidate) => candidate.textContent))}.`
+      );
+    }
+    row.click();
+  }, name);
   await settle();
 }
 

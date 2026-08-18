@@ -295,10 +295,6 @@ initKeycloak(app).then(() => {
     }
 
     const query = typeof req.query.q === "string" ? req.query.q.trim() : "";
-    if (!query) {
-      res.json([]);
-      return;
-    }
 
     try {
       const results = await searchDirectory(query);

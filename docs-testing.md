@@ -131,6 +131,27 @@ It is `tools/obsidian-screenshots.mjs` rather than a second harness in `test/obs
 
 It refuses to photograph a document the plugin did not mark. A plugin that failed to load leaves every tag standing as ordinary text, which makes a perfectly good-looking screenshot of the wrong thing — so each shot names the class that has to be on the page before it is taken, and the menu is read back and insisted on rather than merely opened.
 
+### What `test/obsidian/` cannot check: the plugin's own PKCE login
+
+`plugin-admin-directory-ui` gave the plugin its own Authorization Code + PKCE login against Keycloak, completed in the system's default browser and returned through Obsidian's `obsidian://safelearn-formatter-auth` protocol handler. Everything reachable *without* a live login — the settings tab, the search strip and `list-classes` staying gated behind `hasLogin()`, the search/pick/append flow, the class-detection heuristic — is exercised in `test/obsidian/plugin.test.js` against a plugin instance whose directory client and access token are stubbed directly (`setDirectoryLoginFixture`). The round trip itself is not: driving a real OS-level browser through an interactive Keycloak login, and an Electron app's custom URI scheme dispatch delivering the callback back to it, is outside what a CDP-attached Puppeteer session can do.
+
+That round trip has to be checked by hand instead, once per platform, against a safeLearn instance whose realm carries the `safelearn-plugin` client (`tasks.md` §1 — an operator-provisioned, one-time step; nothing about it is automatable, and it has to exist before any of the steps below can be tried at all):
+
+1. Configure the plugin's **safeLearn instance URL** setting to the instance under test.
+2. Click **Log in**. The system's default browser should open directly to that realm's own Keycloak login page — no password field anywhere inside Obsidian.
+3. Log in as a teacher or admin account. The browser should redirect back through `obsidian://safelearn-formatter-auth…`, and Obsidian should come to the front with the settings tab now showing **Log out** in place of **Log in**.
+4. Run **List classes** and confirm the notice lists something plausible.
+5. Open *Restricted section per name…*, confirm the search strip appears, search for a known person, and pick them into the field.
+6. Quit and reopen Obsidian; confirm the login is still held without logging in again (the refresh-token path).
+7. Click **Log out** and confirm the picker and command both disappear again.
+
+| Platform | Checked | Against | Date | Notes |
+| --- | --- | --- | --- | --- |
+| Desktop | ☐ not yet performed | — | — | Needs `tasks.md` §1 (the `safelearn-plugin` Keycloak client) provisioned first. |
+| Mobile (iOS/Android) | ☐ not yet performed | — | — | Needs a device; `window.open`'s behavior there is the one thing `design.md` flags as unverified by construction. |
+
+A safeLearn demo instance is reachable at `safelearn.htl.dev` for whoever performs this; update the table above with what was actually checked, rather than leaving it unstated once it has been.
+
 ## The accounts it uses
 By default the harness authenticates as the public demo accounts of the demo realm, the same ones `README.md` publishes:
 

@@ -202,12 +202,24 @@ function directoryUserRoles(user) {
  * Matches `query` against every directory user's display name or role/group
  * map, case-insensitively, and maps each match down to `{ name, roles }` —
  * nothing else the directory holds for them.
+ *
+ * An empty (or missing) query returns the whole directory mapped the same
+ * way, rather than an empty list: a caller that wants to enumerate every
+ * role/group value the directory currently holds — `plugin-admin-directory-ui`'s
+ * "list classes" — has no substring that is guaranteed to match everyone, and
+ * this endpoint is the only source of that data. The caller is already gated
+ * to a teacher or admin identity above, the same identity that could
+ * reconstruct the same list today by sweeping single-character queries; this
+ * just answers it directly instead.
  */
 export async function searchDirectory(query) {
   const normalizedQuery = query.trim().toLowerCase();
-  if (!normalizedQuery) return [];
 
   const users = await fetchAllDirectoryUsers();
+  if (!normalizedQuery) {
+    return users.map((user) => ({ name: displayName(user), roles: directoryUserRoles(user) }));
+  }
+
   const matches = [];
 
   for (const user of users) {

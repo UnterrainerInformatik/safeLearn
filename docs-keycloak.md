@@ -30,3 +30,23 @@ The distinguished name your LDAP federation stores in the user attribute `LDAP_E
 Create a confidential client with service accounts enabled (e.g. `safelearn-directory-service`), standard flow and direct access grants off — it authenticates as itself, never as a person. On its service account, assign exactly one client role: `view-users` from `realm-management`. Do not assign `manage-users`, `view-groups`, `query-groups`, or any realm-admin role — this identity only ever lists users, never changes them, and never needs Keycloak's native Groups feature, which this application does not use. Record the client id and secret as `DIRECTORY_SERVICE_CLIENT_ID` / `DIRECTORY_SERVICE_CLIENT_SECRET` in every deployment's environment, and in `.env` for local development.
 
 The endpoint verifies its caller by introspecting the bearer token against `{{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/token/introspect`, authenticated with the existing `safeLearn` client's own credentials above — no separate setup for that half. It accepts either source of the teacher/admin role: the `ldap` claim's `OU=` parts (the same mapper described above), if that mapper is also flagged to be added to the **access token** and not only the ID token; or a `teacher`/`admin` client role assigned directly to the account in Keycloak, independent of LDAP. At least one of the two needs to reach the access token for an account to use this endpoint.
+
+## Plugin login client
+
+The Obsidian plugin (`plugin-admin-directory-ui`) authenticates as the person using it, not as a service — it needs its own Authorization Code + PKCE login, separate from both the clients above. It runs entirely on that person's own machine, so unlike the two confidential clients above it cannot hold a secret: anything shipped inside the plugin is readable by whoever installs it. It must therefore be a public client protected by PKCE instead of a secret.
+
+Create a public client with client id `safelearn-plugin` (this project's own convention — the plugin's code has it as a fixed constant, not a setting):
+
+* `Client authentication` off (public, no secret)
+* Standard flow **on**, Direct Access Grants **off** (no password grant), Implicit flow and Service accounts roles off
+* Valid Redirect URIs: `obsidian://safelearn-formatter-auth` (namespaced by the plugin's manifest id) — no Web Origins entry, since the redirect is a full page navigation in the system browser, not a CORS fetch
+* PKCE Code Challenge Method set to `S256` (**required**, not merely allowed)
+* No client roles of its own — what a login is allowed to do comes from the roles already on that person's account, checked the same way the server itself checks them, via the directory search client's introspection above
+
+The PKCE setting has moved around the admin console across Keycloak versions. On older versions it sits under the client's `Advanced` tab → `Advanced Settings`. On newer versions it moved to the client's `Settings` page itself, labeled `PKCE Method` — it stays visible there after creation too, so it can still be changed later through the UI; it was only ever the `Advanced` tab location that stopped applying. If your version has it in neither place, it is always reachable as the client attribute `pkce.code.challenge.method`, independent of the UI entirely:
+
+```bash
+kcadm.sh update clients/$CLIENT_UUID -r safeLearn -s 'attributes."pkce.code.challenge.method"=S256'
+```
+
+(`$CLIENT_UUID` via `kcadm.sh get clients -r safeLearn -q clientId=safelearn-plugin --fields id`.) The same applies over the raw Admin REST API — `GET` the client, add the attribute to the JSON, `PUT` the whole object back; a partial `PUT` would wipe the rest of its configuration, including the redirect URI above.

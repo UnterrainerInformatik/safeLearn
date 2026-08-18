@@ -38,24 +38,34 @@ import {
   answerColumnCount,
   answerNameList,
   blockBoxes,
+  chooseDirectoryResult,
+  clearDirectoryLoginFixture,
   closeExtraViews,
+  closePluginSettings,
   columns,
+  commandIsAvailable,
   columnsAreSideBySide,
+  confirmNameList,
   corpusPath,
   cursorPosition,
   dialogBoxes,
+  directorySearchResults,
+  directorySearchStripPresent,
   documentText,
   editorMenuIcons,
   editorMenuItems,
   editorMenuLayout,
+  fillSettingsField,
   forgetNotices,
   forgetRaised,
   headings,
   noticesShown,
   markers,
   moveCursorInto,
+  nameListTextareaValue,
   obsidianVersion,
   open,
+  openPluginSettings,
   placeCursorAfter,
   placeCursorAtStart,
   plantInRenderedView,
@@ -69,6 +79,10 @@ import {
   screenshot,
   scrollTo,
   selectAcross,
+  setDirectoryLoginFixture,
+  searchDirectoryStrip,
+  settingsFieldNames,
+  settingsTextFields,
   shutdown,
   start,
   styleOf,
@@ -100,6 +114,15 @@ const MENU_COMMAND_NAMES = [
   "Restricted section per name…",
   "Restrict selection…",
 ];
+
+/**
+ * Commands `plugin-admin-directory-ui` registered outside `AUTHORING_COMMANDS`
+ * - read-only, not tied to an editor or a selection, and deliberately not
+ * offered in the context menu the five above share. The menu/palette symmetry
+ * checks below are about that shared list, so these are excluded from them by
+ * name rather than by the tests silently going stale against a sixth entry.
+ */
+const NON_EDITOR_COMMAND_IDS = ["list-classes"];
 
 /** What Obsidian puts in front of a plugin's command in the palette. */
 const PALETTE_PREFIX = "SafeLearn Formatter";
@@ -2464,7 +2487,9 @@ describe("the plugin writes the tags it recognizes", () => {
   test("every command Obsidian holds for this plugin is in the editor's context menu", async () =>
     watched("insert-context-menu", async () => {
       await open(FRAGMENTS, views.livePreview);
-      const commands = await registeredCommands();
+      const commands = (await registeredCommands()).filter(
+        (command) => !NON_EDITOR_COMMAND_IDS.some((id) => command.id.endsWith(`:${id}`))
+      );
       const items = await editorMenuItems();
 
       assert.ok(
@@ -2483,7 +2508,9 @@ describe("the plugin writes the tags it recognizes", () => {
   test("the plugin costs the context menu one entry, with its commands under it", async () =>
     watched("insert-context-menu-nesting", async () => {
       await open(FRAGMENTS, views.livePreview);
-      const commands = await registeredCommands();
+      const commands = (await registeredCommands()).filter(
+        (command) => !NON_EDITOR_COMMAND_IDS.some((id) => command.id.endsWith(`:${id}`))
+      );
       const { topLevel, submenu } = await editorMenuLayout();
 
       assert.deepEqual(
@@ -2532,7 +2559,9 @@ describe("the plugin writes the tags it recognizes", () => {
   test("the command palette holds every command under the name the menu shows", async () =>
     watched("insert-palette-names", async () => {
       await open(FRAGMENTS, views.livePreview);
-      const commands = await registeredCommands();
+      const commands = (await registeredCommands()).filter(
+        (command) => !NON_EDITOR_COMMAND_IDS.some((id) => command.id.endsWith(`:${id}`))
+      );
 
       assert.deepEqual(
         commands.map((command) => command.name.replace(`${PALETTE_PREFIX}: `, "")).sort(),
@@ -2543,6 +2572,278 @@ describe("the plugin writes the tags it recognizes", () => {
           `one surface and not the other, or the list and not the documentation, fails here. In ` +
           `the palette: ${JSON.stringify(commands.map((c) => c.name))}.`
       );
+    }));
+});
+
+// ################### The directory: settings, login gating, search and "list classes" (plugin-admin-directory-ui) ###################
+
+describe("the plugin's settings tab", () => {
+  test("the instance URL field is empty by default and persists a value across reopening the tab", async () =>
+    watched("settings-instance-url", async () => {
+      await openPluginSettings();
+      const before = await settingsTextFields();
+      assert.ok(
+        "safeLearn instance URL" in before,
+        `The settings tab should show a "safeLearn instance URL" field. Found: ${JSON.stringify(Object.keys(before))}`
+      );
+      assert.equal(before["safeLearn instance URL"], "", "The instance URL is empty by default.");
+      await closePluginSettings();
+
+      await openPluginSettings();
+      await fillSettingsField("safeLearn instance URL", "https://safelearn.example.test");
+      await closePluginSettings();
+
+      await openPluginSettings();
+      const after = await settingsTextFields();
+      assert.equal(
+        after["safeLearn instance URL"],
+        "https://safelearn.example.test",
+        "The value just entered should still be there after closing and reopening the settings tab " +
+          "- it is written through `saveData`, not held only in the open tab's own state."
+      );
+
+      // Leaves the setting as it was found: every other check in this file
+      // assumes "no instance configured" is the state a fresh run starts in.
+      await fillSettingsField("safeLearn instance URL", "");
+      await closePluginSettings();
+    }));
+
+  test("Keycloak URL and Realm default to the shared identity provider", async () =>
+    watched("settings-keycloak-defaults", async () => {
+      await openPluginSettings();
+      const fields = await settingsTextFields();
+      assert.equal(
+        fields["Keycloak URL"],
+        "https://auth.unterrainer.info/",
+        "Most installations, including the shared demo realm, should never have to touch this - " +
+          "see `design.md` on why these are settings of their own rather than derived."
+      );
+      assert.equal(fields["Realm"], "safeLearn");
+      await closePluginSettings();
+    }));
+
+  test("no login control is offered while no instance is configured", async () =>
+    watched("settings-no-login-without-instance", async () => {
+      await openPluginSettings();
+      const fields = await settingsTextFields();
+      assert.equal(fields["safeLearn instance URL"], "", "This check assumes no instance is configured.");
+      const names = await settingsFieldNames();
+      assert.ok(
+        !names.includes("Login"),
+        `Logging in depends on a configured instance and stays silent without one - no "Login" ` +
+          `setting should be offered. Settings shown: ${JSON.stringify(names)}`
+      );
+      await closePluginSettings();
+    }));
+});
+
+describe("the directory search strip is gated behind a login", () => {
+  test("with no instance configured, the name-list dialog has no search strip", async () =>
+    watched("directory-gated-no-instance", async () => {
+      await clearDirectoryLoginFixture();
+      const name = "constructed-directory-gated-no-instance.md";
+      await writeDocument(name, ["Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      assert.equal(
+        await directorySearchStripPresent(),
+        false,
+        "With no safeLearn instance configured, the dialog should be exactly what it was before " +
+          "this change: no search strip, no network activity attempted."
+      );
+      await answerNameList(["Ada Byron"]);
+    }));
+
+  test("with an instance configured but no login held, the search strip still is not shown", async () =>
+    watched("directory-gated-no-login", async () => {
+      await clearDirectoryLoginFixture();
+      // Configures the instance without holding a login - `hasLogin()`, not
+      // `instanceUrl()`, is what gates the strip and the command below.
+      await openPluginSettings();
+      await fillSettingsField("safeLearn instance URL", "https://safelearn.example.test");
+      await closePluginSettings();
+
+      const name = "constructed-directory-gated-no-login.md";
+      await writeDocument(name, ["Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("restrict-selection", { expectEdit: false });
+      assert.equal(
+        await directorySearchStripPresent(),
+        false,
+        "Configuration alone is not a login. The strip stays off until a login is actually held."
+      );
+      await answerNameList(["teacher"]);
+
+      await openPluginSettings();
+      await fillSettingsField("safeLearn instance URL", "");
+      await closePluginSettings();
+    }));
+
+  test('"List classes" reports itself unavailable while no login is held', async () =>
+    watched("directory-gated-list-classes", async () => {
+      await clearDirectoryLoginFixture();
+      assert.equal(
+        await commandIsAvailable("list-classes"),
+        false,
+        "`checkCallback(true)` is what the command palette and the hotkey manager actually call " +
+          "to decide whether to offer a command - it should report unavailable while no login is " +
+          "held, per `plugin-directory-auth`'s \"stays silent\" requirement."
+      );
+    }));
+});
+
+describe("the directory search strip", () => {
+  const FIXTURE = [
+    { name: "Ada Byron", roles: { student: true, "5bhif": true } },
+    { name: "Grace Hopper", roles: { student: true, "4ahif": true } },
+    { name: "Stu Dent", roles: { teacher: true, examParticipant: true } },
+  ];
+
+  test("with a login held, the search strip renders matches and appending one adds a line", async () =>
+    watched("directory-search-strip", async () => {
+      await setDirectoryLoginFixture(FIXTURE);
+
+      const name = "constructed-directory-search.md";
+      await writeDocument(name, ["Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      assert.ok(
+        await directorySearchStripPresent(),
+        "With a login held, the search strip should be rendered above the textarea."
+      );
+
+      await searchDirectoryStrip("Ada");
+      const results = await directorySearchResults();
+      assert.deepEqual(
+        results,
+        ["Ada Byron — student, 5bhif"],
+        `Searching for "Ada" should find the one fixture entry whose name matches, rendered with ` +
+          `its roles/groups beside it. Found: ${JSON.stringify(results)}`
+      );
+
+      await chooseDirectoryResult("Ada Byron");
+      const textareaValue = await nameListTextareaValue();
+      assert.ok(
+        (textareaValue ?? "")
+          .split("\n")
+          .map((line) => line.trim())
+          .includes("Ada Byron"),
+        `Choosing a match should append its display name into the textarea, exactly as if it had ` +
+          `been typed. Textarea holds: ${JSON.stringify(textareaValue)}`
+      );
+
+      await confirmNameList();
+      assert.ok(
+        (await documentText()).includes("@@@ Ada Byron"),
+        "The command receives the picked name exactly as it would a typed one."
+      );
+
+      await clearDirectoryLoginFixture();
+    }));
+
+  test("choosing a match does not close the modal - more than one can be added before confirming", async () =>
+    watched("directory-search-strip-multiple", async () => {
+      await setDirectoryLoginFixture(FIXTURE);
+      const name = "constructed-directory-search-multi.md";
+      await writeDocument(name, ["Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+
+      await searchDirectoryStrip("Ada");
+      await chooseDirectoryResult("Ada Byron");
+      assert.ok(
+        await directorySearchStripPresent(),
+        "Choosing a match should not close the dialog - more than one can be added before confirming."
+      );
+
+      await searchDirectoryStrip("Grace");
+      await chooseDirectoryResult("Grace Hopper");
+
+      const value = (await nameListTextareaValue()) ?? "";
+      const lines = value
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line !== "");
+      assert.deepEqual(
+        lines.sort(),
+        ["Ada Byron", "Grace Hopper"].sort(),
+        `Both picks should be on the textarea as separate lines. Textarea holds: ${JSON.stringify(value)}`
+      );
+
+      await confirmNameList();
+      await clearDirectoryLoginFixture();
+    }));
+
+  test("the class filter narrows matches to that class", async () =>
+    watched("directory-search-strip-class-filter", async () => {
+      await setDirectoryLoginFixture(FIXTURE);
+      const name = "constructed-directory-search-class-filter.md";
+      await writeDocument(name, ["Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("restrict-selection", { expectEdit: false });
+      await searchDirectoryStrip("", "5bhif");
+      const results = await directorySearchResults();
+      assert.deepEqual(
+        results,
+        ["Ada Byron — student, 5bhif"],
+        `Filtering to "5bhif" with no text typed should show only the fixture entry holding that ` +
+          `class - the class dropdown is populated from the same fetch "list classes" uses ` +
+          `(\`tasks.md\` #7.2). Found: ${JSON.stringify(results)}`
+      );
+
+      await answerNameList(["teacher"]);
+      await clearDirectoryLoginFixture();
+    }));
+});
+
+describe("the class-detection heuristic", () => {
+  test('"List classes" reports itself available once a login is held', async () =>
+    watched("directory-list-classes-available", async () => {
+      await setDirectoryLoginFixture([{ name: "Ada Byron", roles: { student: true, "5bhif": true } }]);
+      assert.equal(await commandIsAvailable("list-classes"), true);
+      await clearDirectoryLoginFixture();
+    }));
+
+  test('"List classes" treats a non-class marker as a class, the same as an actual one', async () =>
+    watched("directory-list-classes", async () => {
+      await forgetNotices();
+      await setDirectoryLoginFixture([
+        { name: "Ada Byron", roles: { student: true, "5bhif": true } },
+        { name: "Stu Dent", roles: { teacher: true, examParticipant: true, admin: true } },
+      ]);
+
+      await runCommand("list-classes", { expectEdit: false });
+      const notices = await noticesShown();
+      const notice = notices.find((text) => text.startsWith("Classes in the directory:"));
+      assert.ok(notice, `"List classes" should show a notice. Notices shown: ${JSON.stringify(notices)}`);
+
+      // `teacher`, `student` and `admin` are excluded as built-in markers;
+      // `5bhif` and `examParticipant` are not, and the heuristic cannot tell
+      // one from the other - both are shown, which is the accepted
+      // approximation `design.md` documents rather than hides.
+      assert.ok(notice.includes("5bhif"), `Expected "5bhif" in the notice: ${notice}`);
+      assert.ok(
+        notice.includes("examParticipant"),
+        `A non-class marker like "examParticipant" should be listed exactly like an actual class - ` +
+          `the backend has no closed notion of "class" for the plugin to tell them apart. Notice: ${notice}`
+      );
+      assert.ok(
+        !notice.includes("teacher") && !notice.includes("admin"),
+        `The five built-in markers should be excluded. Notice: ${notice}`
+      );
+
+      await forgetNotices();
+      await clearDirectoryLoginFixture();
     }));
 });
 

@@ -177,12 +177,20 @@ describe("directory search", () => {
     );
   });
 
-  // ---- 5.2 An empty query returns an empty list ----
+  // ---- plugin-admin-directory-ui: an empty query returns the whole directory ----
 
-  test("an empty query returns an empty list rather than an error", async () => {
+  test("an empty query returns the whole directory rather than an empty list", async () => {
     const { status, body } = await search(teacherToken, "");
     assert.equal(status, 200, `an empty query should still succeed, got ${status}`);
-    assert.deepEqual(body, [], "an empty query should answer with an empty list");
+    assert.ok(Array.isArray(body), "the response should be a list");
+    assert.ok(
+      body.some((entry) => entry.name === teacherName),
+      `an empty query should include the teacher account, got ${JSON.stringify(body)}`
+    );
+    assert.ok(
+      body.some((entry) => entry.name === studentName),
+      `an empty query should include the student account, got ${JSON.stringify(body)}`
+    );
   });
 
   // ---- A query matching nothing returns an empty list ----
