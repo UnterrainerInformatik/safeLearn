@@ -68,6 +68,21 @@ const startupTimeoutMs = Number(process.env.SAFELEARN_TEST_OBSIDIAN_STARTUP_TIME
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * The section the plugin puts its one context-menu entry in, which is how that
+ * entry is told from Obsidian's own and from other plugins'.
+ */
+const MENU_SECTION = "safelearn";
+
+/** What has to be standing in the submenu for the picture to be worth taking. */
+const MENU_COMMAND_NAMES = [
+  "Side-by-side block",
+  "Side-by-side, n columns…",
+  "Fragment marker",
+  "Restricted section per name…",
+  "Restrict selection…",
+];
+
 // ################### Locating what a run needs ###################
 
 /**
@@ -464,8 +479,11 @@ async function capture(name, { pad = 16, extra = null, only = null, docs = true 
         right = Math.max(right, box.right);
       }
       if (extraSel) {
-        const element = document.querySelector(extraSel);
-        if (element) {
+        // Every match, not the first: an open submenu is a second `.menu`, and
+        // framing only the parent would cut it off at the edge of the picture
+        // with nothing to say so. A selector that matches one element is
+        // unaffected, which is every other caller.
+        for (const element of document.querySelectorAll(extraSel)) {
           const box = element.getBoundingClientRect();
           left = Math.min(left, box.left);
           right = Math.max(right, box.right);
@@ -492,14 +510,20 @@ async function capture(name, { pad = 16, extra = null, only = null, docs = true 
 }
 
 /**
- * Opens the editor's context menu and leaves it standing, which is the whole
- * difference between this and the harness's `editorMenuItems`. The commands are
- * read back and insisted on: a menu that lost them is the picture nobody would
- * notice was wrong.
+ * Opens the editor's context menu, opens the plugin's submenu under it, and
+ * leaves both standing - which is the whole difference between this and the
+ * harness's `editorMenuItems`. The commands are read back and insisted on: a
+ * menu that lost them is the picture nobody would notice was wrong.
+ *
+ * The submenu opens on a hover, and Obsidian does not take a dispatched
+ * `mouseover` for one, so the pointer is really moved onto the entry. The entry
+ * is found by the section the plugin puts it in rather than by `has-submenu`
+ * alone - Obsidian's own *Copy path*, *Paragraph* and *Insert* carry that class
+ * too, and one of theirs comes first in the document.
  */
 async function openEditorMenu() {
   await page.evaluate(() => {
-    document.querySelector(".menu")?.remove();
+    document.querySelectorAll(".menu").forEach((menu) => menu.remove());
     const content = document.querySelector(".cm-content");
     if (!content) throw new Error("No editor to open a context menu in.");
     const box = content.getBoundingClientRect();
@@ -514,21 +538,34 @@ async function openEditorMenu() {
   });
   await sleep(900);
 
+  const parent = await page.evaluate((section) => {
+    const element = document.querySelector(`.menu-item[data-section="${section}"].has-submenu`);
+    if (!element) return null;
+    const box = element.getBoundingClientRect();
+    return { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) };
+  }, MENU_SECTION);
+  if (!parent) {
+    throw new Error(
+      `The editor's context menu holds no entry of the plugin's own - nothing in it carries ` +
+        `data-section="${MENU_SECTION}" and has-submenu. There is no submenu to photograph.`
+    );
+  }
+  // Moved to it rather than jumped at it: a hover is a transition, and the
+  // pointer starting on the entry is not one.
+  await page.mouse.move(parent.x, parent.y - 120);
+  await page.mouse.move(parent.x, parent.y, { steps: 6 });
+  await page.waitForFunction(() => document.querySelectorAll(".menu").length >= 2, { timeout: 5000 });
+  await sleep(400);
+
   const items = await page.evaluate(() =>
     [...document.querySelectorAll(".menu .menu-item .menu-item-title")].map((element) => element.textContent ?? "")
   );
-  const expected = [
-    "Insert side-by-side block",
-    "Insert side-by-side block with a chosen number of columns",
-    "Insert fragment marker",
-    "Insert a restricted section for each name",
-    "Restrict the selection to named readers",
-  ];
-  const missing = expected.filter((title) => !items.includes(title));
+  const missing = MENU_COMMAND_NAMES.filter((title) => !items.includes(title));
   if (missing.length > 0) {
     throw new Error(
-      `The editor's context menu is missing ${JSON.stringify(missing)}. It holds ${JSON.stringify(items)}. ` +
-        `A screenshot of it would document a menu the plugin no longer fills.`
+      `The plugin's submenu is missing ${JSON.stringify(missing)}. The menus hold ` +
+        `${JSON.stringify(items)}. A screenshot of that would document a menu the plugin no ` +
+        `longer fills.`
     );
   }
 }

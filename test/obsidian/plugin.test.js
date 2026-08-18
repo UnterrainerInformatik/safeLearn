@@ -45,7 +45,9 @@ import {
   cursorPosition,
   dialogBoxes,
   documentText,
+  editorMenuIcons,
   editorMenuItems,
+  editorMenuLayout,
   forgetNotices,
   forgetRaised,
   headings,
@@ -76,6 +78,31 @@ import {
   visibleText,
   writeDocument,
 } from "./harness.js";
+
+/** The one entry the plugin contributes to the editor's context menu. */
+const MENU_ENTRY = "SafeLearn";
+
+/** That entry and the five commands under it. */
+const MENU_ENTRY_COUNT = 6;
+
+/**
+ * What the five commands are called, in both surfaces that show them.
+ *
+ * Written down here rather than read from the plugin, because that is what makes
+ * a renaming visible: a name is what somebody reads on screen and what the
+ * documentation and the README table say, and a check that took its expectation
+ * from the same list the menu is built from would agree with any of them.
+ */
+const MENU_COMMAND_NAMES = [
+  "Side-by-side block",
+  "Side-by-side, n columns…",
+  "Fragment marker",
+  "Restricted section per name…",
+  "Restrict selection…",
+];
+
+/** What Obsidian puts in front of a plugin's command in the palette. */
+const PALETTE_PREFIX = "SafeLearn Formatter";
 
 const FRAGMENTS = "test-md-file.md";
 const PSEUDO_ROLES = "test-exam-practice-question.md";
@@ -2450,6 +2477,71 @@ describe("the plugin writes the tags it recognizes", () => {
         `Every command is offered in both places, because both are built from one list. A command ` +
           `in the palette and not in the menu reads as the menu being broken rather than as an ` +
           `entry having been forgotten. In the menu: ${JSON.stringify(items)}`
+      );
+    }));
+
+  test("the plugin costs the context menu one entry, with its commands under it", async () =>
+    watched("insert-context-menu-nesting", async () => {
+      await open(FRAGMENTS, views.livePreview);
+      const commands = await registeredCommands();
+      const { topLevel, submenu } = await editorMenuLayout();
+
+      assert.deepEqual(
+        topLevel,
+        [MENU_ENTRY],
+        `The menu belongs to Obsidian and other plugins fill it too, so what this one costs ` +
+          `somebody who wants none of it is a single line. Five of them, which is what this reads ` +
+          `as when the nesting is gone, is the state the change was made to leave behind.`
+      );
+      assert.deepEqual(
+        commands.filter((command) => !submenu.some((title) => command.name.endsWith(title))).map((c) => c.id),
+        [],
+        `And every command stands under that entry. What Obsidian holds: ` +
+          `${JSON.stringify(commands.map((c) => c.name))}; what stands under the entry: ` +
+          `${JSON.stringify(submenu)}.`
+      );
+      assert.equal(
+        submenu.length,
+        commands.length,
+        `Nothing else stands there either. Under the entry: ${JSON.stringify(submenu)}.`
+      );
+    }));
+
+  test("every entry the plugin puts in the context menu is drawn with an icon", async () =>
+    watched("insert-context-menu-icons", async () => {
+      await open(FRAGMENTS, views.livePreview);
+      const entries = await editorMenuIcons();
+
+      assert.equal(
+        entries.length,
+        MENU_ENTRY_COUNT,
+        `The plugin's entry and its five commands are ${MENU_ENTRY_COUNT} entries between them. ` +
+          `Found ${JSON.stringify(entries.map((entry) => entry.title))}.`
+      );
+      assert.deepEqual(
+        entries.filter((entry) => !entry.icon).map((entry) => entry.title),
+        [],
+        `A menu item is laid out as an icon column and a title beside it, so an entry without one ` +
+          `does not sit further left - it leaves that column empty while its title stands where ` +
+          `the others' do. This is read from the drawn element: a name Obsidian's icon set does ` +
+          `not hold draws nothing and raises nothing, so asking what name was passed in would ` +
+          `not catch it.`
+      );
+    }));
+
+  test("the command palette holds every command under the name the menu shows", async () =>
+    watched("insert-palette-names", async () => {
+      await open(FRAGMENTS, views.livePreview);
+      const commands = await registeredCommands();
+
+      assert.deepEqual(
+        commands.map((command) => command.name.replace(`${PALETTE_PREFIX}: `, "")).sort(),
+        MENU_COMMAND_NAMES.slice().sort(),
+        `One name per command, used wherever it is offered - so these are the words the menu ` +
+          `shows, read here in the other surface that shows them. Obsidian puts the plugin's own ` +
+          `name in front of each, which is what lets them be this short. A renaming that reached ` +
+          `one surface and not the other, or the list and not the documentation, fails here. In ` +
+          `the palette: ${JSON.stringify(commands.map((c) => c.name))}.`
       );
     }));
 });

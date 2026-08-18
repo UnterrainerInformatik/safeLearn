@@ -50,6 +50,29 @@ const applicationPath = process.env.SAFELEARN_OBSIDIAN_APP || defaultApplication
 const port = Number(process.env.SAFELEARN_TEST_OBSIDIAN_PORT || 19222);
 const startupTimeoutMs = Number(process.env.SAFELEARN_TEST_OBSIDIAN_STARTUP_TIMEOUT_MS || 90000);
 
+/**
+ * The window every check is laid out in.
+ *
+ * This is the size puppeteer's `connect` applies by default, so it is what the
+ * checks have always run in; it is named here rather than inherited because
+ * `editorMenuItems` has to widen it and put it back, and a helper cannot restore
+ * a number nobody wrote down. Passed to `connect` explicitly for the same
+ * reason: the two must not be free to disagree.
+ */
+const viewport = Object.freeze({ width: 800, height: 600 });
+
+/**
+ * The height the editor's context menu is read at.
+ *
+ * Obsidian's own editor menu is twenty-odd entries and taller than the window
+ * above, and a menu that does not fit is clamped rather than scrolled - the last
+ * entry in it, which is the plugin's, ends up with two pixels of itself on
+ * screen. A submenu opens on hover, and hovering two pixels is not a check, it
+ * is a coincidence waiting to stop happening. So the window is widened for the
+ * reading and put straight back.
+ */
+const menuHeight = 900;
+
 /** Leaves the window standing after the run, to look at what a failure left behind. */
 const keepOpen = ["1", "true", "yes"].includes(
   String(process.env.SAFELEARN_TEST_OBSIDIAN_KEEP_OPEN).toLowerCase()
@@ -388,7 +411,7 @@ export async function start() {
   const info = await waitForDebugger(deadline);
   applicationVersion = /obsidian\/([\d.]+)/.exec(info["User-Agent"] ?? "")?.[1] ?? "unknown";
 
-  browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${port}` });
+  browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${port}`, defaultViewport: viewport });
   while (Date.now() < deadline) {
     page = (await browser.pages()).find((candidate) => candidate.url().startsWith("app://obsidian.md/"));
     if (page) break;
@@ -836,37 +859,153 @@ export async function registeredCommands() {
 }
 
 /**
- * Opens the editor's context menu the way a right-click opens it, and reports
- * what stands in it.
+ * The section the plugin puts its entry in, which is also how that entry is told
+ * from everybody else's.
  *
- * The event is dispatched at the editor rather than the menu being built by
- * hand: what the requirement is about is that the commands are *reachable* that
- * way, and a menu assembled in a check would be reachable whether the plugin
- * subscribed to anything or not.
+ * Its own name, chosen by the plugin, so it is ours to rely on the way the
+ * marker classes are - and it is the only thing in the menu that says which
+ * entries came from here. Matching on the titles instead would ask what the
+ * commands are called, which is a different question and one the checks below
+ * are supposed to be able to fail on separately.
+ */
+export const menuSection = "safelearn";
+
+/**
+ * Opens the editor's context menu the way a right-click opens it, opens the
+ * plugin's submenu the way a hover opens it, and reports the whole of what
+ * stands in both.
+ *
+ * The context menu is reached by dispatching at the editor rather than by
+ * building a menu here: what the requirement is about is that the commands are
+ * *reachable* that way, and a menu assembled in a check would be reachable
+ * whether the plugin subscribed to anything or not. The submenu is reached the
+ * same way and for the same reason - it opens on a hover, and Obsidian does not
+ * take a dispatched `mouseover` for one, so the pointer is really moved onto the
+ * entry. Its own click is a no-op, so clicking is not the way in.
+ *
+ * The entry is found by its section rather than by `.menu-item.has-submenu`
+ * alone: Obsidian's own *Copy path*, *Paragraph* and *Insert* carry that class
+ * too, and the first match in the document is one of theirs.
+ */
+async function readEditorMenu() {
+  doing("opening the editor's context menu");
+  // Wide enough to hover in - see `menuHeight`. Put back in `finally`, so that a
+  // check failing here does not leave every check after it in a window it did
+  // not ask for.
+  await page.setViewport({ width: viewport.width, height: menuHeight });
+  try {
+    await page.evaluate(() => {
+      document.querySelectorAll(".menu").forEach((menu) => menu.remove());
+      const content = document.querySelector(".cm-content");
+      if (!content) throw new Error("No editor to open a context menu in.");
+      const box = content.getBoundingClientRect();
+      content.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: Math.round(box.left + 8),
+          clientY: Math.round(box.top + 8),
+        })
+      );
+    });
+    await settle();
+
+    const parent = await page.evaluate((section) => {
+      const element = document.querySelector(`.menu-item[data-section="${section}"].has-submenu`);
+      if (!element) return null;
+      const box = element.getBoundingClientRect();
+      return { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) };
+    }, menuSection);
+
+    if (parent) {
+      // Moved to it rather than jumped at it: a hover is a transition, and the
+      // pointer starting on the entry is not one.
+      await page.mouse.move(parent.x, parent.y - 120);
+      await page.mouse.move(parent.x, parent.y, { steps: 6 });
+      await page
+        .waitForFunction(() => document.querySelectorAll(".menu").length >= 2, { timeout: 5000 })
+        .catch(() => {
+          throw new Error(
+            `The plugin's entry in the editor's context menu carries has-submenu, and hovering it ` +
+              `opened no second menu. What is missing is the submenu, not the commands: look at ` +
+              `whether MenuItem.setSubmenu still opens on hover in this Obsidian.`
+          );
+        });
+    }
+    await settle();
+
+    return await page.evaluate((section) => {
+      const menus = [...document.querySelectorAll(".menu")];
+      const describe = (item) => ({
+        title: item.querySelector(".menu-item-title")?.textContent ?? "",
+        // The drawn icon, not the name that was asked for. A name Obsidian's set
+        // does not hold draws nothing and raises nothing, so the element is the
+        // only thing that knows.
+        icon: !!item.querySelector(".menu-item-icon svg"),
+      });
+      const items = (root) => [...root.querySelectorAll(".menu-item")].map(describe);
+
+      const entry = document.querySelector(`.menu-item[data-section="${section}"]`);
+      const owner = entry?.closest(".menu") ?? null;
+      return {
+        topLevel: owner
+          ? [...owner.querySelectorAll(`.menu-item[data-section="${section}"]`)].map(describe)
+          : [],
+        // Nothing under an entry that is not there. Without this an absent
+        // plugin would report every menu on screen as its submenu.
+        submenu: owner ? menus.filter((menu) => menu !== owner).flatMap(items) : [],
+        titles: menus
+          .flatMap((menu) => [...menu.querySelectorAll(".menu-item-title")])
+          .map((element) => element.textContent ?? ""),
+      };
+    }, menuSection);
+  } finally {
+    await page.keyboard.press("Escape");
+    await settle();
+    await page.setViewport({ ...viewport });
+  }
+}
+
+/**
+ * Every title standing in the editor's context menu, wherever in it it stands -
+ * Obsidian's own entries, the plugin's entry, and what is under it.
+ *
+ * Titles with no text are dropped. `command.name.endsWith("")` is true of every
+ * command, so a single menu item without text - from Obsidian, from another
+ * plugin, from an entry that comes to carry only an icon - would let a check
+ * comparing the palette with the menu pass having established nothing.
  */
 export async function editorMenuItems() {
-  doing("opening the editor's context menu");
-  await page.evaluate(() => {
-    document.querySelector(".menu")?.remove();
-    const content = document.querySelector(".cm-content");
-    if (!content) throw new Error("No editor to open a context menu in.");
-    const box = content.getBoundingClientRect();
-    content.dispatchEvent(
-      new MouseEvent("contextmenu", {
-        bubbles: true,
-        cancelable: true,
-        clientX: Math.round(box.left + 8),
-        clientY: Math.round(box.top + 8),
-      })
-    );
-  });
-  await settle();
-  const items = await page.evaluate(() =>
-    [...document.querySelectorAll(".menu .menu-item .menu-item-title")].map((el) => el.textContent ?? "")
-  );
-  await page.keyboard.press("Escape");
-  await settle();
-  return items;
+  const { titles } = await readEditorMenu();
+  return titles.filter((title) => title.length > 0);
+}
+
+/**
+ * What the plugin put in the menu's top level, and what stands under its entry.
+ *
+ * The two are reported apart because that is the claim: one entry among
+ * Obsidian's own, and the commands one level below it. A run where the five have
+ * come back up to the top level reads here as five and none, which is a
+ * different sentence from the menu having lost them.
+ */
+export async function editorMenuLayout() {
+  const { topLevel, submenu } = await readEditorMenu();
+  return {
+    topLevel: topLevel.map((item) => item.title),
+    submenu: submenu.map((item) => item.title),
+  };
+}
+
+/**
+ * Every entry the plugin contributes, and whether each is drawn with an icon.
+ *
+ * Read from the document, because an icon that was asked for is not an icon that
+ * was drawn: `setIcon` with a name Obsidian's set does not hold leaves the icon
+ * column empty and raises nothing at all.
+ */
+export async function editorMenuIcons() {
+  const { topLevel, submenu } = await readEditorMenu();
+  return [...topLevel, ...submenu];
 }
 
 /**

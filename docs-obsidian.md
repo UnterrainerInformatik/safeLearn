@@ -11,17 +11,17 @@ Settings → **Community plugins** → **Browse** → search for `SafeLearn Form
 
 There is nothing to configure. No settings, no account, no network.
 ### It Writes The Tags For You
-Right-click in the editor, or use the command palette. Both hold the same five commands, and each marker lands on a line of its own.
+Right-click in the editor and open **SafeLearn**, or use the command palette, where the same five stand under *SafeLearn Formatter*. Each marker lands on a line of its own.
 
 ![](md/assets/plugin-menu.png)
 
 | Command | What it writes |
 | --- | --- |
-| **Insert side-by-side block** | Two columns. |
-| **…with a chosen number of columns** | Asks how many, defaults to three. |
-| **Insert fragment marker** | `##fragment` above the block the cursor is in. |
-| **Insert a restricted section for each name** | One `@@@` block per name — paste a class list straight in. |
-| **Restrict the selection to named readers** | Wraps what you selected in a directive. |
+| **Side-by-side block** | Two columns. |
+| **Side-by-side, n columns…** | Asks how many, defaults to three. |
+| **Fragment marker** | `##fragment` above the block the cursor is in. |
+| **Restricted section per name…** | One restricted `@@@` block per name — paste a class list straight in. |
+| **Restrict selection…** | Wraps what you selected in a directive. |
 ### It Shows A Restricted Block As A Block
 The `@@@` line stands as the heading of the block it opens, and every entry in it is shown as what it is: a plain chip is a permanent grant, a dashed one carries a time window, a red one is a window the server **cannot read** (it drops the window and grants the block permanently — nothing else anywhere tells you), and an italic one is a view switch rather than an audience.
 
@@ -39,7 +39,7 @@ In the reading view the tags are gone and the headings remain — which is close
 
 ![](md/assets/plugin-permission-reading.png)
 ### It Writes A Section Per Student
-*Insert a restricted section for each name* takes a pasted class list and writes one block per person, each with a heading **inside** the block. A heading above it would stay on the page for everybody, so a document meant to show each student only their own section would show all of them the names of all the others.
+*Restricted section per name…* takes a pasted class list and writes one block per person, each with a heading **inside** the block. A heading above it would stay on the page for everybody, so a document meant to show each student only their own section would show all of them the names of all the others.
 
 ![](md/assets/plugin-per-name-result.png)
 
