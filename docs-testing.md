@@ -70,6 +70,43 @@ The run assembles its own vault under `test/.runtime/obsidian/vault/` from the c
 
 Two things about that vault are worth knowing. Its application-data directory is *not* rebuilt per run, because a fresh one makes Obsidian download its current release before it will start. And restricted mode cannot be switched off by writing a file: `community-plugins.json` lists what would be enabled and Obsidian still loads none of it, so the harness turns it off through the application after the workspace is up.
 
+#### Pointing your own vault at a checkout
+
+The vault the run above assembles is disposable — rebuilt from `md/` every time. Working on the plugin itself wants the opposite: a vault you keep, that shows what you last built rather than whatever Obsidian's community store last published. This is not for somebody who only uses the plugin; that route stays [Installing It](docs-obsidian.md#installing-it). This repository is itself such a vault: `.obsidian/plugins/safelearn-formatter` here is exactly the link described below, pointed at the checkout `AI/plugin` resolves to.
+
+The checkout needs two things before the link means anything: `npm install` once, and `npm run build` at least once. `main.js` is not committed, so a vault linked to a checkout that has never been built loads nothing — and Obsidian gives no error, the plugin simply is not there.
+
+**If the vault is itself a git repository that tracks `.obsidian/plugins/`, do this first, and in this order:**
+
+```bash
+git rm -r --cached .obsidian/plugins/safelearn-formatter
+cat >> .gitignore <<'EOF'
+
+# The link to the safeLearn-formatter plugin checkout. Points at an absolute,
+# per-installation path, so it is set locally rather than committed.
+.obsidian/plugins/safelearn-formatter
+EOF
+git add .gitignore
+git commit -m "untrack and ignore the plugin directory before linking it"
+```
+
+Git follows a junction or a symlink as an ordinary directory. Skip this step and a later `git checkout` or `git pull` in the vault writes *through* the link into the plugin's own working tree — where `styles.css` is source, not build output, so what gets overwritten is work rather than output. Doing this after the link already exists stages the checkout's own files as a set of deletions instead, which is why the order is untrack-and-ignore first, link second.
+
+**Then make the link:**
+
+```bash
+# Linux/macOS
+ln -s /path/to/safeLearn-Obsidian-plugin .obsidian/plugins/safelearn-formatter
+
+# Windows — a junction, not a symbolic link: a directory symlink needs
+# developer mode or an elevated shell, a junction needs neither.
+New-Item -ItemType Junction -Path .obsidian\plugins\safelearn-formatter -Target C:\path\to\safeLearn-Obsidian-plugin
+```
+
+Either way, `ls -la .obsidian/plugins/safelearn-formatter` (or the Windows equivalent) shows a link rather than a directory. `git status` in the vault stays clean through the whole procedure — confirmed on Linux while writing this: it is clean right after untracking, ignoring and linking, stays clean across a rebuild of the plugin, and a `git checkout` in the vault afterwards leaves the checkout's `styles.css` untouched. The Windows junction command above is the one already in use for `.obsidian/plugins/safelearn-formatter` in this repository and in `secureLectures`; it has not separately been walked fresh against this text.
+
+From here, a rebuild is picked up by reloading Obsidian and by nothing else — there is no copy step to remember or forget. That is also the caveat worth keeping in mind: the vault now loads whatever the checkout last built, including a broken build. A vault meant to give a lecture from should hold the released plugin, not a checkout.
+
 #### What a check can ask of the editor
 
 Beyond opening a document and reading what the plugin marked, the harness offers four things that exist for a specific reason. Each is there because a check written without it would pass for the wrong reason.

@@ -10,6 +10,8 @@ It is an Obsidian community plugin with its own repository: [safeLearn-Obsidian-
 Settings → **Community plugins** → **Browse** → search for `SafeLearn Formatter` → **Install**, then **Enable**.
 
 There is nothing to configure. No settings, no account, no network.
+
+Working on the plugin itself rather than using it? [docs-testing.md](docs-testing.md#pointing-your-own-vault-at-a-checkout) has the route that loads a checkout instead.
 ### It Writes The Tags For You
 Right-click in the editor and open **SafeLearn**, or use the command palette, where the same five stand under *SafeLearn Formatter*. Each marker lands on a line of its own.
 
