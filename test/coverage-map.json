@@ -23,6 +23,7 @@
         "test/checks/rendering.js",
         "test/checks/navigation.js",
         "test/checks/presentation.js",
+        "test/checks/directory-search.js",
         "test/checks/deployment-surface.js"
       ],
       "corpus": []
@@ -106,11 +107,12 @@
       ]
     },
     "test/checks/deployment-surface.js": {
-      "what": "What a running instance publishes over HTTP: that keycloak.json, the application sources, the dependency manifests and what sits beside a mounted package directory are not served and a refusal looks like a path with no file behind it, that the assets a page addresses still are — including the ones only a stylesheet names — that every same-origin reference of a rendered page resolves in all three views, and that the one endpoint answering before authentication survives a parameter it cannot interpret. That a page which cannot reach the reload stream keeps trying with a growing delay rather than on a fixed timer.",
+      "what": "What a running instance publishes over HTTP: that keycloak.json, the application sources, the dependency manifests and what sits beside a mounted package directory are not served and a refusal looks like a path with no file behind it, that the assets a page addresses still are — including the ones only a stylesheet names — that every same-origin reference of a rendered page resolves in all three views, and that the one endpoint answering before authentication survives a parameter it cannot interpret. That a page which cannot reach the reload stream keeps trying with a growing delay rather than on a fixed timer. That a self-authenticating route such as the directory search endpoint returns no directory data to a request carrying neither a bearer token nor, distinctly, to one carrying only a valid browser session.",
       "guards": [
         "app.js",
         "obsidian.js",
         "middlewares/keycloak-middleware.js",
+        "middlewares/directory-service.js",
         "keycloak.json",
         "assets/main-fonts/Lato.ttf",
         "assets/main-fonts/Lato-300.ttf",
@@ -119,6 +121,16 @@
       "corpus": [
         "md/test-md-file.md"
       ]
+    },
+    "test/checks/directory-search.js": {
+      "what": "GET /api/admin/directory/search: a teacher token searching by name and by a role/group value that is not a class or teacher/admin, an admin token succeeding without holding teacher, a student token refused, a missing bearer refused, an invalidated (expired/revoked-shaped) token refused indistinguishably from a missing one, a match's response carrying only name and roles, and an empty or unmatched query answering with an empty list rather than an error.",
+      "guards": [
+        "app.js",
+        "middlewares/directory-service.js",
+        "middlewares/keycloak-middleware.js",
+        "test/harness.js"
+      ],
+      "corpus": []
     },
     "test/directive-grammar.test.js": {
       "what": "What a permission directive means, entry by entry: a table of edge-case directive lines read by parseFirstLineForPermissions, covering the permissive cases of parseLocalDateTime that a hand-written mirror gets wrong. It is the oracle the companion plugin's own grammar is held against - the plugin's parseDirectiveEntries reads the same table and has to reach the same conclusion per entry, so a divergence fails here rather than misinforming a person writing a document. Needs no browser, no login and no server; it does need the plugin checkout the AI/plugin symlink points at.",

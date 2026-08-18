@@ -1,5 +1,6 @@
 import fileNameExtractor from "./middlewares/extract-filename-middleware.js";
 import { initKeycloak, checkAuthenticated, refreshAccessToken, getUserAttributes, setUserAttribute } from "./middlewares/keycloak-middleware.js";
+import { verifyCallerIdentity, searchDirectory } from "./middlewares/directory-service.js";
 
 import express from "express";
 
@@ -281,6 +282,33 @@ app.use((req, res, next) => {
 });
 
 initKeycloak(app).then(() => {
+  // Ahead of checkAuthenticated on purpose, and never added to its chain: the
+  // caller here is identified by a bearer token proven fresh against Keycloak's
+  // introspection endpoint (see middlewares/directory-service.js), not by the
+  // browser session checkAuthenticated gates everything else on. Registered
+  // first so no later `app.use(checkAuthenticated)` sits in front of it.
+  app.get("/api/admin/directory/search", async (req, res) => {
+    const identity = await verifyCallerIdentity(req);
+    if (!identity.authorized) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+
+    const query = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    if (!query) {
+      res.json([]);
+      return;
+    }
+
+    try {
+      const results = await searchDirectory(query);
+      res.json(results);
+    } catch (error) {
+      console.error("Directory search failed:", error);
+      res.status(502).json({ error: "Directory search failed" });
+    }
+  });
+
   // Protect all routes and serve them statically after authentication.
   // Order matters when dealing with middleware!
   // For example the next() method will just pass the request on to the next middleware in line.

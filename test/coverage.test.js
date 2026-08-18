@@ -70,6 +70,15 @@ test("the coverage record names no check that is gone", () => {
   }
 });
 
+/**
+ * Checks under `test/checks/` that read no corpus by nature — Keycloak account
+ * and directory data, not `md/` content — so an empty `corpus` is not a check
+ * somebody forgot to fill in. Named here rather than dropping the requirement
+ * for every check in the directory, so a real content check that ends up with
+ * an empty `corpus` still fails loudly.
+ */
+const corpusExemptChecks = new Set(["test/checks/directory-search.js"]);
+
 test("every entry says what it guards and what it reads", () => {
   for (const [check, entry] of Object.entries(map.checks)) {
     assert.ok(
@@ -83,10 +92,12 @@ test("every entry says what it guards and what it reads", () => {
         entry.guards.length > 0,
         `${check} is a content check and should name the source files it guards`
       );
-      assert.ok(
-        entry.corpus.length > 0,
-        `${check} is a content check and should name the corpus files it reads`
-      );
+      if (!corpusExemptChecks.has(check)) {
+        assert.ok(
+          entry.corpus.length > 0,
+          `${check} is a content check and should name the corpus files it reads`
+        );
+      }
     }
   }
 });

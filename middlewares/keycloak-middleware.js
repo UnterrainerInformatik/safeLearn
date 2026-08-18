@@ -5,7 +5,7 @@ import { Issuer, Strategy } from "openid-client";
 
 export let client;
 let issuerUrl;
-let keycloakIssuer;
+export let keycloakIssuer;
 
 function base64urlToUtf8(str) {
   // base64url -> base64
@@ -214,18 +214,21 @@ export async function refreshAccessToken(req) {
   }
 }
 
-export function getLdapGroups(req) {
+/**
+ * Parses the `OU=...` entries out of a raw LDAP claim/attribute string into a
+ * role/group map. Independent of `req` so it can be run against an
+ * introspected token's `ldap` claim or a directory user's `ldap` attribute,
+ * not only the current session's.
+ */
+export function deriveRoles(ldap) {
   let r = {};
-  if (!req || !req.user || !req.user.ldap) {
+  if (!ldap) {
     return r;
   }
-  const ldap = req.user.ldap;
-  // console.log("LDAP-String", ldap)
-  
   // Regular expression to match "OU=..."
   const regex = /OU=[^,]*/gi;
   const matches = ldap.match(regex);
-  
+
   if (matches) {
     // Remove "OU=" from the matches and add them to the object
     matches.forEach(match => {
@@ -235,8 +238,14 @@ export function getLdapGroups(req) {
       r[value] = true;
     });
   }
-  // console.log("LDAP-Groups", r);
   return r;
+}
+
+export function getLdapGroups(req) {
+  if (!req || !req.user || !req.user.ldap) {
+    return {};
+  }
+  return deriveRoles(req.user.ldap);
 }
 
 export async function getUserAttributes(req, getAll = false) {

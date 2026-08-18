@@ -91,6 +91,15 @@ const published = [
   { reference: "/assets/main-fonts/Lato-700.ttf", type: /font|ttf|octet-stream/i },
 ];
 
+/**
+ * Routes that authenticate their own caller instead of joining the
+ * `checkAuthenticated` chain — currently just the directory search endpoint
+ * (`middlewares/directory-service.js`). Named here rather than only in
+ * `app.js`, so a route added to this list without a scenario below is a gap
+ * this file would otherwise not notice on its own.
+ */
+const selfAuthenticatingRoutes = ["/api/admin/directory/search"];
+
 /** A path no deployment has a file for, used as the shape of "not there". */
 const absent = "/no-deployment-has-a-file-at-this-path-4f2a7c.json";
 
@@ -175,6 +184,21 @@ async function request(session, reference, { textLimit = 262144 } = {}) {
     `${applicationUrl}${reference}`,
     textLimit
   );
+}
+
+/**
+ * Requests `reference` from the test process rather than from the page, so no
+ * cookie of any session accompanies it — the shape of a request from a caller
+ * who has proven nothing at all.
+ */
+async function requestUnauthenticated(reference) {
+  try {
+    const response = await fetch(`${applicationUrl}${reference}`);
+    const text = await response.text();
+    return { status: response.status, contentType: response.headers.get("content-type"), text };
+  } catch (error) {
+    return { error: String(error) };
+  }
 }
 
 /**
@@ -286,6 +310,43 @@ describe("deployment surface", () => {
         !answer.text.includes(opening(contents)),
         `${reference} answered with the file itself. Nothing in the application references it, and ` +
           `it is reachable only because a mount is wider than the pages that need it.`
+      );
+    }
+  });
+
+  // ---- Routes that authenticate their own caller ----
+
+  test("an unauthenticated request to a self-authenticating route returns no directory data", async () => {
+    for (const route of selfAuthenticatingRoutes) {
+      const answer = await requestUnauthenticated(`${route}?q=a`);
+      assert.ok(!answer.error, `${route} could not be requested at all: ${answer.error}`);
+      assert.notEqual(
+        answer.status,
+        200,
+        `${route} answered a bare request (no cookie, no bearer token) with 200 — it should be refused`
+      );
+      assert.ok(
+        !/"name"\s*:/.test(answer.text) && !/"roles"\s*:/.test(answer.text),
+        `${route} answered a bare request with something that looks like a directory result: ${answer.text}`
+      );
+    }
+  });
+
+  test("a valid browser session alone is not sufficient for a self-authenticating route", async () => {
+    for (const route of selfAuthenticatingRoutes) {
+      // `session` carries a real, valid teacher session cookie — proof enough
+      // for every other route in this application. This route's own identity
+      // check (a bearer token, introspected) is independent of it on purpose.
+      const answer = await request(session, `${route}?q=a`, { textLimit: 4096 });
+      assert.ok(!answer.error, `${route} could not be requested at all: ${answer.error}`);
+      assert.notEqual(
+        answer.status,
+        200,
+        `${route} answered a request carrying only a session cookie with 200 — it should be refused`
+      );
+      assert.ok(
+        !/"name"\s*:/.test(answer.text) && !/"roles"\s*:/.test(answer.text),
+        `${route} answered a session-only request with something that looks like a directory result: ${answer.text}`
       );
     }
   });

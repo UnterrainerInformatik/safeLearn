@@ -66,6 +66,10 @@ const accounts = {
     username: process.env.SAFELEARN_TEST_TEACHER_USER || "teacher",
     password: process.env.SAFELEARN_TEST_TEACHER_PASSWORD || "teacher",
   },
+  admin: {
+    username: process.env.SAFELEARN_TEST_ADMIN_USER || "admin",
+    password: process.env.SAFELEARN_TEST_ADMIN_PASSWORD || "admin",
+  },
 };
 
 /** The roles this harness knows how to log in as. */
@@ -540,6 +544,42 @@ export async function sharedSession(role) {
 export async function currentUser(session) {
   const identity = await readIdentity(session.page);
   return identity?.username ?? null;
+}
+
+/**
+ * The bearer access token backing `session`, read from inside the page with
+ * its own cookies, the same way `readIdentity` reads a username.
+ *
+ * `readIdentity` deliberately keeps tokens out of test code — until now no
+ * check needed one. The directory-search check does: it exercises a route
+ * that accepts a bearer token instead of a session cookie, and the only token
+ * this harness can hand it is the one already sitting in the session it just
+ * completed a real Authorization Code flow for. This is scoped to that one
+ * need; every other check stays on `readIdentity`.
+ */
+export async function accessToken(session) {
+  return session.page.evaluate(async (url) => {
+    try {
+      const response = await fetch(url, { credentials: "include" });
+      if (!response.ok) return null;
+      const user = await response.json();
+      return typeof user.accessToken === "string" ? user.accessToken : null;
+    } catch {
+      return null;
+    }
+  }, `${applicationUrl}/userattributes`);
+}
+
+/**
+ * The display name Keycloak issued for `session`'s account — `req.user.name`,
+ * read the same way `readIdentity` reads a username. Needed because the
+ * account's username and its display name are not the same string on this
+ * realm (`student` logs in as `student`, but is named "Stu Dent"), so a
+ * directory-search-by-name check needs the name, not the credential.
+ */
+export async function displayName(session) {
+  const identity = await readIdentity(session.page);
+  return identity?.name ?? null;
 }
 
 /** Releases a session. Safe to call more than once. */

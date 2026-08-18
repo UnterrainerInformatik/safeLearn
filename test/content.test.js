@@ -24,6 +24,7 @@ import "./checks/views.js";
 import "./checks/rendering.js";
 import "./checks/navigation.js";
 import "./checks/presentation.js";
+import "./checks/directory-search.js";
 // Last on purpose: its reference walk requests every page the navigation tree
 // links to, and each of those writes `lastVisitedUrl` back to the shared account
 // after the answer has been sent. Nothing that sets a preference may follow it.
