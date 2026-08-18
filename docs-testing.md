@@ -83,6 +83,16 @@ Beyond opening a document and reading what the plugin marked, the harness offers
 
 One more, for a question that has no other answer: `plantInRenderedView(text)` and `plantedText()` put raw text into a rendered reading view from outside the plugin. The requirement that the editor does not write into rendered output cannot be checked by watching for changes, because the rewrite it forbids is idempotent — a view it has already been through carries no tags left to remove. Text planted afterwards is text the rewrite has not seen, so it disappears if the mechanism is there and stands if it is not.
 
+### The third run: the screenshots in the documentation
+```bash
+npm run docs:screenshots
+```
+Not a check. It drives Obsidian the same way the run above does and takes the pictures that [docs-obsidian.md](docs-obsidian.md) and the plugin's own README show, straight from the current sources — nine of them here in `md/assets/plugin-*.png`, ten in the plugin checkout's `assets/`. A picture of a marking that has since changed documents a behaviour the plugin no longer has, and nobody notices; regenerating them is one command so that a change to what a tag looks like ends with the pictures agreeing with it.
+
+It is `tools/obsidian-screenshots.mjs` rather than a second harness in `test/obsidian/`, because a check and a picture want different things out of the application: the vault holds only the five short documents the tool writes and none of `md/`, the theme and font size are fixed so two runs a year apart look alike, the sidebars and the inline title are out of the frame, and the context menu is left standing instead of being read and dismissed. What it does share is where things are — `SAFELEARN_TEST_PLUGIN_DIR` and `SAFELEARN_TEST_OBSIDIAN_DIR` mean exactly what they mean above, so one installation is described once. Two settings are its own: `SAFELEARN_OBSIDIAN_APP` names the application directly, which is what an installed `.exe` or `.app` needs rather than a directory of AppImages, and `SAFELEARN_SCREENSHOT_PORT` (19333) is not the harness's port, so a screenshot run and a check run cannot attach to each other.
+
+It refuses to photograph a document the plugin did not mark. A plugin that failed to load leaves every tag standing as ordinary text, which makes a perfectly good-looking screenshot of the wrong thing — so each shot names the class that has to be on the page before it is taken, and the menu is read back and insisted on rather than merely opened.
+
 ## The accounts it uses
 By default the harness authenticates as the public demo accounts of the demo realm, the same ones `README.md` publishes:
 
