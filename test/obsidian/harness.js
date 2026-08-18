@@ -22,7 +22,7 @@
  * harness uses. What is absent is named rather than waited for.
  */
 
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, execSync, spawn } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -46,6 +46,7 @@ const userDataDir = path.join(runtimeDir, "user-data");
 const pluginDir = process.env.SAFELEARN_TEST_PLUGIN_DIR || path.join(projectRoot, "AI", "plugin");
 const applicationDir =
   process.env.SAFELEARN_TEST_OBSIDIAN_DIR || path.join(os.homedir(), "scripts", "obsidian");
+const applicationPath = process.env.SAFELEARN_OBSIDIAN_APP || defaultApplicationPath();
 const port = Number(process.env.SAFELEARN_TEST_OBSIDIAN_PORT || 19222);
 const startupTimeoutMs = Number(process.env.SAFELEARN_TEST_OBSIDIAN_STARTUP_TIMEOUT_MS || 90000);
 
@@ -191,8 +192,13 @@ export async function provokeError(message) {
 // ################### Locating what the run needs ###################
 
 /**
- * The Obsidian executable, resolved the way the user's own launcher resolves it:
- * the AppImages in one directory, sorted by version, highest wins. Hardcoding a
+ * The Obsidian executable.
+ *
+ * Two shapes, because the installations this is run from have two shapes: a
+ * directory of AppImages, where the highest version wins the way the user's own
+ * launcher picks it, and a single installed executable, which is what the
+ * Windows and macOS installers leave behind. The explicit setting is consulted
+ * first so that neither platform has to pretend to be the other. Hardcoding a
  * version would test something other than what the person on this machine runs.
  *
  * Note what that file is *not*: the version that ends up running. The AppImage
@@ -201,22 +207,30 @@ export async function provokeError(message) {
  * what actually ran, which is the number a failure should be attributed to.
  */
 function resolveApplication() {
-  if (!existsSync(applicationDir)) {
-    throw new Error(
-      `No Obsidian installation at ${applicationDir}. Set SAFELEARN_TEST_OBSIDIAN_DIR to the ` +
-        `directory holding the Obsidian AppImage.`
-    );
+  if (applicationPath && existsSync(applicationPath) && statSync(applicationPath).isFile()) {
+    return applicationPath;
   }
-  const images = readdirSync(applicationDir)
-    .filter((entry) => /\.appimage$/i.test(entry))
-    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  if (images.length === 0) {
-    throw new Error(
-      `${applicationDir} holds no Obsidian AppImage. Set SAFELEARN_TEST_OBSIDIAN_DIR to the ` +
-        `directory holding it.`
-    );
+  if (existsSync(applicationDir) && statSync(applicationDir).isDirectory()) {
+    const images = readdirSync(applicationDir)
+      .filter((entry) => /\.appimage$/i.test(entry))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    if (images.length > 0) return path.join(applicationDir, images[images.length - 1]);
   }
-  return path.join(applicationDir, images[images.length - 1]);
+  throw new Error(
+    `No Obsidian found. Looked for ${applicationPath || "(no default for this platform)"} and for an ` +
+      `AppImage in ${applicationDir}. Set SAFELEARN_OBSIDIAN_APP to the application, or ` +
+      `SAFELEARN_TEST_OBSIDIAN_DIR to the directory holding the AppImages.`
+  );
+}
+
+/** Where each platform's installer puts it, so that the common case needs no setting. */
+function defaultApplicationPath() {
+  if (process.platform === "win32") {
+    const local = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+    return path.join(local, "Programs", "obsidian", "Obsidian.exe");
+  }
+  if (process.platform === "darwin") return "/Applications/Obsidian.app/Contents/MacOS/Obsidian";
+  return null;
 }
 
 /**
@@ -255,8 +269,11 @@ export function buildPlugin() {
         `network and it is not what a person asked for by running a check.`
     );
   }
+  // Through a shell, which is what `execSync` is: on Windows `npm` is `npm.cmd`,
+  // and since Node 24 spawning a `.cmd` directly is refused outright. The command
+  // is a constant, so there is nothing here for a shell to re-interpret.
   try {
-    execFileSync("npm", ["run", "build"], { cwd: dir, encoding: "utf8", stdio: "pipe" });
+    execSync("npm run build", { cwd: dir, encoding: "utf8", stdio: "pipe" });
   } catch (error) {
     const output = [error.stdout, error.stderr].filter(Boolean).join("\n").trim();
     throw new Error(`The plugin did not build:\n${output}`);
@@ -307,7 +324,14 @@ export function assembleVault() {
     cpSync(path.join(corpus, entry), path.join(vaultDir, entry));
   }
 
-  symlinkSync(path.dirname(built), path.join(vaultDir, ".obsidian", "plugins", "safelearn-formatter"));
+  // A junction on Windows, because a directory symlink there needs either
+  // developer mode or elevation and a junction needs neither. The type argument
+  // is ignored on every other platform, so this stays one call.
+  symlinkSync(
+    path.dirname(built),
+    path.join(vaultDir, ".obsidian", "plugins", "safelearn-formatter"),
+    "junction"
+  );
   writeFileSync(
     path.join(vaultDir, ".obsidian", "community-plugins.json"),
     JSON.stringify(["safelearn-formatter"])
@@ -466,10 +490,16 @@ export async function shutdown() {
     // Disconnecting from an application that already died is not a failure.
   }
   if (child) {
-    // SIGTERM is not enough for an AppImage: it runs from its own squashfs mount
-    // and the wrapper outlives a polite request.
     try {
-      process.kill(-child.pid, "SIGKILL");
+      if (process.platform === "win32") {
+        // The launcher spawns the renderer and the GPU process as children of its
+        // own; killing the one this holds leaves a window standing.
+        execFileSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+      } else {
+        // SIGTERM is not enough for an AppImage: it runs from its own squashfs
+        // mount and the wrapper outlives a polite request.
+        process.kill(-child.pid, "SIGKILL");
+      }
     } catch {
       // Already gone.
     }
