@@ -18,3 +18,4 @@ Echter Ablageort: `/mnt/data/source/HTL/safeLearn/AI/memory/`
 - [Tag eines Releases umhängen](github-release-tag-move.md) — Tag löschen setzt das GitHub-Release auf Draft; danach `gh release edit --draft=false --latest`
 - [Zwei Update-Wege ins Obsidian](plugin-update-paths.md) — safeLearn-Vault sieht das Plugin sofort per Symlink, andere Vaults erst wenn Obsidians Index nachzieht (~1 Tag)
 - [Vault-Link unter Windows](plugin-vault-link-windows.md) — der Link auf das Plugin darf nicht eingecheckt werden; auf Windows wird er zur 53-Byte-Datei und jede Store-Installation hängt ewig
+- [secureLectures ist Downstream](securelectures-downstream-role.md) — dort nur Tests entfernen und `md/`-Files ergänzen; jede App-Entscheidung gehört upstream nach safeLearn
