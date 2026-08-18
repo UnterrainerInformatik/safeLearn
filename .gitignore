@@ -47,9 +47,10 @@ docs/slides/revealjs
 # browser profiles and failure screenshots.
 test/.runtime/
 
-# The link to the companion Obsidian plugin repository. It is an absolute path
-# into this machine's checkout, so it is set per installation rather than
-# shipped. AI/memory/plugin-repo-link.md says how to recreate it.
+# The links to the companion Obsidian plugin repository. Both are absolute paths
+# into this machine's checkout, so they are set per installation rather than
+# shipped. AI/memory/plugin-repo-link.md says how to recreate them.
 AI/plugin
+.obsidian/plugins/safelearn-formatter
 
 .obsidian/workspace.json
