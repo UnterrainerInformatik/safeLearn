@@ -870,6 +870,39 @@ export async function editorMenuItems() {
 }
 
 /**
+ * Where the open dialog laid out its field and its confirmation.
+ *
+ * What a dialog claims here is a geometry - that there is space between the two
+ * boxes - and a class name cannot establish one: an element carrying
+ * `modal-button-container` that a theme collapsed to nothing leaves the button
+ * against the lower edge of the field, which is exactly the state the
+ * requirement exists to rule out. So this reads the boxes the browser laid out,
+ * the way `columnsAreSideBySide` does, rather than the classes somebody meant to
+ * lay them out with.
+ *
+ * The field is whichever of the two the dialog carries - a number field or a
+ * textarea - because the field is the one thing the dialogs are entitled to
+ * differ in.
+ */
+export async function dialogBoxes() {
+  await page.waitForFunction(
+    () => !!document.querySelector(".modal-container input, .modal-container textarea"),
+    { timeout: 10000 }
+  );
+  return page.evaluate(() => {
+    const modal = document.querySelector(".modal-container");
+    const field = modal?.querySelector("input, textarea");
+    const button = modal?.querySelector("button");
+    if (!field || !button) return null;
+    const box = (element) => {
+      const rect = element.getBoundingClientRect();
+      return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right };
+    };
+    return { field: box(field), button: box(button) };
+  });
+}
+
+/**
  * Answers the dialog a command opened, with the value it asks for.
  *
  * It waits for the dialog rather than assuming it is there: a command that opens

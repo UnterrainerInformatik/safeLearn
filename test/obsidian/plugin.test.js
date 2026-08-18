@@ -43,6 +43,7 @@ import {
   columnsAreSideBySide,
   corpusPath,
   cursorPosition,
+  dialogBoxes,
   documentText,
   editorMenuItems,
   forgetNotices,
@@ -2084,6 +2085,67 @@ describe("the plugin writes the tags it recognizes", () => {
         before,
         "One column is not a side-by-side block. Writing the markers anyway would put a tag in a " +
           "person's document that says nothing, and the plugin would mark it as if it did."
+      );
+    }));
+
+  // The two checks below ask one question of both dialogs, deliberately in the
+  // same words: a change to one of them cannot leave the other behind quietly.
+  // What they assert is a geometry rather than a class list, because a
+  // `modal-button-container` a theme collapsed to nothing carries the class and
+  // leaves the button against the field all the same.
+  test("the dialog that asks for a count separates its confirmation from its field", async () =>
+    watched("columns-dialog-spacing", async () => {
+      const name = "constructed-columns-dialog.md";
+      await writeDocument(name, ["Intro.", "", "End."].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Intro.");
+
+      await runCommand("insert-side-by-side-columns", { expectEdit: false });
+      const boxes = await dialogBoxes();
+
+      assert.ok(boxes, "The command opened no dialog with a field and a confirmation to measure.");
+      assert.ok(
+        boxes.button.top > boxes.field.bottom,
+        "The confirmation stands below the field and the two do not touch. A button against the " +
+          "lower edge of the field reads as one control with it, and a click aimed at the one " +
+          "lands in the other. No particular distance is asserted - that one is the theme's to " +
+          `choose. Field ${JSON.stringify(boxes.field)}, button ${JSON.stringify(boxes.button)}.`
+      );
+
+      // The button gained an ancestor, not a competitor: `answerColumnCount`
+      // still addresses it as the `button` in `.modal-container`, and what the
+      // count writes is what it always wrote.
+      await answerColumnCount(4);
+      assert.equal(
+        (await documentText()).split("\n").filter((line) => line.trim() === "##separator").length,
+        3,
+        "Laying the dialog out is a statement about the dialog. What the count writes is unchanged."
+      );
+    }));
+
+  test("the dialog that asks for a list separates its confirmation from its field", async () =>
+    watched("name-list-dialog-spacing", async () => {
+      const name = "constructed-names-dialog.md";
+      await writeDocument(name, ["# Chapter", "", "Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      const boxes = await dialogBoxes();
+
+      assert.ok(boxes, "The command opened no dialog with a field and a confirmation to measure.");
+      assert.ok(
+        boxes.button.top > boxes.field.bottom,
+        "The dialog that asks for a list is laid out like the one that asks for a count: the " +
+          "field, and the confirmation below it with space between them. The two ask different " +
+          "things, and the field is where that difference belongs. " +
+          `Field ${JSON.stringify(boxes.field)}, button ${JSON.stringify(boxes.button)}.`
+      );
+
+      await answerNameList(["Ada Byron"]);
+      assert.ok(
+        (await documentText()).includes("@@@ Ada Byron"),
+        "Laying the dialog out changed nothing about the sections the list writes."
       );
     }));
 
