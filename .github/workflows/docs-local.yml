@@ -41,6 +41,8 @@ jobs:
             echo NEXT_PUBLIC_SERVER_URL=${{ secrets.SERVER_URL }} >> site/.env
             echo NEXT_PUBLIC_IS_APP_FOLDER=true >> site/.env
             echo NEXT_AUTOSCAN=${{ secrets.AUTOSCAN || 'false' }} >> site/.env
+            echo DIRECTORY_SERVICE_CLIENT_ID=${{ secrets.DIRECTORY_SERVICE_CLIENT_ID }} >> site/.env
+            echo DIRECTORY_SERVICE_CLIENT_SECRET=${{ secrets.DIRECTORY_SERVICE_CLIENT_SECRET }} >> site/.env
             echo SESSION_SECRET=${{ secrets.SESSION_SECRET }} >> site/.env
       - name: Touch keycloak.json file
         run: touch site/keycloak.json
