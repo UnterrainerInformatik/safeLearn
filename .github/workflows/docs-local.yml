@@ -138,6 +138,8 @@ jobs:
             echo INTERNAL_PORT=${{ secrets.PORT }} >> ./deploy/.env
             echo DOCKER_HUB_USER=${{ secrets.DOCKER_HUB_USER }} >> ./deploy/.env
             echo DOCKER_IMAGE_NAME=${{ secrets.DOCKER_IMAGE_NAME }} >> ./deploy/.env
+            echo DIRECTORY_SERVICE_CLIENT_ID=${{ secrets.DIRECTORY_SERVICE_CLIENT_ID }} >> ./deploy/.env
+            echo DIRECTORY_SERVICE_CLIENT_SECRET=${{ secrets.DIRECTORY_SERVICE_CLIENT_SECRET }} >> ./deploy/.env
             echo SESSION_SECRET=${{ secrets.SESSION_SECRET }} >> ./deploy/.env
       - name: Normalize line endings for deploy scripts
         run: |
