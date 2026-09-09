@@ -8,7 +8,7 @@ metadata:
   modified: 2026-08-15T19:56:20.802Z
 ---
 
-Wenn Gerald "merke Dir das bitte" (oder "commit to memory") sagt, soll der betreffende Sachverhalt als eigenes Markdown-File im Memory-Ordner `/mnt/data/source/HTL/safeLearn/AI/memory/` abgelegt und mit einer Zeile in `MEMORY.md` verlinkt werden.
+Wenn Gerald "merke Dir das bitte" (oder "commit to memory") sagt, soll der betreffende Sachverhalt als eigenes Markdown-File im Memory-Ordner `/home/psilo/source/htl/doc/safeLearn/AI/memory/` abgelegt und mit einer Zeile in `MEMORY.md` verlinkt werden.
 
 **Why:** Er will explizit steuern, was sitzungsübergreifend erhalten bleibt — nicht raten lassen. Der Index `MEMORY.md` (File-Description-Paare) wird zu Sessionbeginn geladen und entscheidet, was nachgeladen wird.
 

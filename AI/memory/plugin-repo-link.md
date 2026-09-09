@@ -7,7 +7,7 @@ metadata:
 
 Zu safeLearn gehört ein zweites Repo: **safeLearn-Obsidian-plugin**, das Obsidian-Community-Plugin `safelearn-formatter` (bei Obsidian bereits registriert, `manifest.json` → id `safelearn-formatter`, Autor `UnterrainerInformatik`). Es gibt den safeLearn-eigenen Tags eine Darstellung im Editor und versteckt sie in der Leseansicht.
 
-**Erreichbar über `AI/plugin`** — ein Symlink auf den Checkout, seit 2026-08-17. Auf der Linux-Maschine zeigt er auf `/mnt/data/source/JAVASCRIPT/safeLearn-Obsidian-plugin`, auf der Windows-Maschine auf `C:\source\java\safeLearn-Obsidian-plugin`. Der Link ist in `.gitignore`, weil der Pfad absolut und pro Installation verschieden ist; in einem frischen Checkout fehlt er und wird von Hand gesetzt:
+**Erreichbar über `AI/plugin`** — ein Symlink auf den Checkout, seit 2026-08-17. Auf der Linux-Maschine zeigt er auf `/home/psilo/source/htl/doc/safeLearn-Obsidian-plugin`, auf der Windows-Maschine auf `C:\source\java\safeLearn-Obsidian-plugin`. Der Link ist in `.gitignore`, weil der Pfad absolut und pro Installation verschieden ist; in einem frischen Checkout fehlt er und wird von Hand gesetzt:
 
 ```
 ln -sfn <pfad-zum-plugin-checkout> AI/plugin

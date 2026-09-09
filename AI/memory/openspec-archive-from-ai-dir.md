@@ -11,7 +11,7 @@ metadata:
 ✖ Error: The archived delta for '<capability>' changed during the final move.
 ```
 
-Die Lösung ist, aus `/mnt/data/source/HTL/safeLearn/AI` heraus zu archivieren. Dann läuft es durch. Alle anderen `openspec`-Kommandos (`list`, `status`, `instructions`, `validate`) funktionieren vom Root aus normal — nur `archive` nicht.
+Die Lösung ist, aus `/home/psilo/source/htl/doc/safeLearn/AI` heraus zu archivieren. Dann läuft es durch. Alle anderen `openspec`-Kommandos (`list`, `status`, `instructions`, `validate`) funktionieren vom Root aus normal — nur `archive` nicht.
 
 **Why:** `openspec` im Repo-Root ist ein Symlink auf `AI/openspec` (siehe [[ai-folder-layout]]). Das Tool löst dadurch zwei Schreibweisen desselben Pfads auf — `changesDir` wird zu `<root>/openspec/changes`, `changeRoot` aber zu `<root>/AI/openspec/changes/<name>`. In `dist/core/archive.js` prüft der finale Move den Fingerprint des archivierten Delta-Specs unter `path.join(archivePath, path.relative(changeDir, source))`. Mit zwei Schreibweisen ergibt `path.relative` einen Pfad, der ins Leere zeigt, der Fingerprint stimmt nicht, und die Operation rollt zurück. Aus `AI/` heraus findet das Tool `AI/openspec` direkt, beide Schreibweisen sind identisch, die Prüfung geht auf.
 

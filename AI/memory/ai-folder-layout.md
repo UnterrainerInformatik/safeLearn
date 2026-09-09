@@ -8,7 +8,7 @@ metadata:
 Gerald will **alles AI-Bezogene im Ordner `AI/`** im Projektwurzelverzeichnis von safeLearn haben. Eingerichtet am 2026-08-15.
 
 ```
-/mnt/data/source/HTL/safeLearn/
+/home/psilo/source/htl/doc/safeLearn/
 ├── AI/
 │   ├── claude/     ← echter Inhalt von .claude (commands, skills)
 │   ├── openspec/   ← echter Inhalt von openspec (specs, changes, config.yaml)
@@ -17,7 +17,7 @@ Gerald will **alles AI-Bezogene im Ordner `AI/`** im Projektwurzelverzeichnis vo
 └── openspec  → AI/openspec    (Symlink)
 ```
 
-Zusätzlich: `/home/psilo/.claude/projects/-mnt-data-source-HTL-safeLearn/memory` → `/mnt/data/source/HTL/safeLearn/AI/memory` (Symlink).
+Zusätzlich: `/home/psilo/.claude/projects/-mnt-data-source-HTL-safeLearn/memory` → `/home/psilo/source/htl/doc/safeLearn/AI/memory` (Symlink).
 
 **Why:** Die drei Pfade sind bei den jeweiligen Tools fest verdrahtet und nicht konfigurierbar — `OPENSPEC_ROOT_DIR`/`OPENSPEC_DIR_NAME` sind hartcodierte Konstanten im Paket (keine Env-Variablen), Claude Code sucht Commands/Skills unter `<projekt>/.claude`, und den Memory-Pfad gibt der Harness vor. Symlinks sind die einzige Möglichkeit, Geralds Ein-Ordner-Wunsch zu erfüllen, ohne die Tools zu brechen.
 
