@@ -35,19 +35,25 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 
 import {
+  accessTokenFor,
+  agePendingLogins,
   answerColumnCount,
   answerNameList,
   blockBoxes,
+  callSearchDirectory,
   chooseDirectoryResult,
   clearDirectoryLoginFixture,
+  clickLoginButton,
   closeExtraViews,
   closePluginSettings,
   columns,
   commandIsAvailable,
   columnsAreSideBySide,
+  completeRealLogin,
   confirmNameList,
   corpusPath,
   cursorPosition,
+  deliverAuthCallback,
   dialogBoxes,
   directorySearchResults,
   directorySearchStripPresent,
@@ -58,7 +64,13 @@ import {
   fillSettingsField,
   forgetNotices,
   forgetRaised,
+  forgetLogin,
   headings,
+  loginAnswers,
+  loginSetting,
+  loginState,
+  loginStatusBar,
+  loginTokenFigures,
   noticesShown,
   markers,
   moveCursorInto,
@@ -67,6 +79,7 @@ import {
   open,
   openPluginSettings,
   placeCursorAfter,
+  pendingLoginCount,
   placeCursorAtStart,
   plantInRenderedView,
   plantedText,
@@ -74,20 +87,27 @@ import {
   raised,
   registeredCommands,
   renderedHtml,
+  refreshLoginNow,
+  restart,
   reveal,
   runCommand,
   screenshot,
   scrollTo,
+  seedLoginFacts,
   selectAcross,
   setDirectoryLoginFixture,
   searchDirectoryStrip,
   settingsFieldNames,
   settingsTextFields,
   shutdown,
+  startLoginWithoutBrowser,
   start,
+  storedPluginData,
   styleOf,
   type,
   vaultPath,
+  waitForLoginState,
+  waitForPendingLoginCount,
   views,
   visibleText,
   writeDocument,
@@ -2881,5 +2901,756 @@ describe("the editor does not modify rendered output", () => {
       } finally {
         await closeExtraViews();
       }
+    }));
+});
+
+
+// ################### The login's five states (plugin-login-state) ###################
+
+/**
+ * The instance a check configures when it needs one configured.
+ *
+ * Nothing is ever fetched from it. Every state below is reached through the
+ * plugin's own facts or through the identity provider, and the instance URL is
+ * only ever the thing whose presence decides whether the plugin is allowed to
+ * say anything at all - `plugin-directory-auth`'s silence rule.
+ */
+const INSTANCE = "https://safelearn.example.test";
+
+/** A host that is not routed to, so a request to it hangs instead of failing - RFC 5737 keeps this range for exactly that. */
+const UNROUTED = "https://192.0.2.1/";
+
+/** A host on this machine with nothing listening, so a request to it fails at once, and fails to connect rather than being refused by a realm. */
+const NOTHING_LISTENING = "https://127.0.0.1:1/";
+
+/**
+ * What `auth.unterrainer.info` answers for this realm, read out of a real
+ * exchange in this suite (`the realm's own figures`, below) and written down so
+ * the lifetime a login in progress gets is a known number rather than a guessed
+ * one. `docs-keycloak.md` carries the same two figures.
+ *
+ * The refresh figure doubles as Keycloak's own default for SSO Session Idle,
+ * which is what the plugin seeds a fresh installation with - so the seed is
+ * right for this realm, and the check below is what would say so if it stopped
+ * being.
+ */
+const REALM_ACCESS_TOKEN_SECONDS = 300;
+const REALM_REFRESH_TOKEN_SECONDS = 1800;
+
+/** Only the plugin's own notices - Obsidian and other plugins raise their own, and none of them are what a check here asked about. */
+const ours = (notices) => notices.filter((notice) => notice.startsWith("SafeLearn:"));
+
+describe("the login is in exactly one of five named states", () => {
+  test("no identity held and none being obtained reads as not logged in", async () =>
+    watched("login-state-logged-out", async () => {
+      await forgetLogin();
+      await seedLoginFacts({ instanceUrl: INSTANCE });
+      assert.equal(
+        (await loginState()).name,
+        "logged-out",
+        "A configured instance with no token, nothing in flight and nothing failed is the one " +
+          "state the plugin starts a fresh vault in."
+      );
+    }));
+
+  test("a login started and not concluded reads as logging in, and names since when and against which instance", async () =>
+    watched("login-state-logging-in", async () => {
+      await forgetLogin();
+      await seedLoginFacts({
+        instanceUrl: INSTANCE,
+        pending: [{ state: "in-flight", expiresInSeconds: 600, startedSecondsAgo: 30 }],
+      });
+
+      const state = await loginState();
+      assert.equal(state.name, "logging-in");
+      assert.equal(
+        state.instanceUrl,
+        INSTANCE,
+        "`plugin-login-state` asks which instance a login in progress is running against, and one " +
+          "vault can be pointed at a different one than the next."
+      );
+      assert.ok(
+        typeof state.startedAt === "number" && state.startedAt <= Date.now(),
+        `A login in progress has to name when it was started; it carries ${JSON.stringify(state.startedAt)}.`
+      );
+
+      await openPluginSettings();
+      const shown = await loginSetting();
+      assert.equal(shown.state, "logging-in");
+      assert.ok(
+        shown.description.includes(INSTANCE),
+        `What is shown has to name the instance, not only hold it. It says: ${JSON.stringify(shown.description)}`
+      );
+      assert.match(
+        shown.description,
+        /\d{1,2}[:.]\d{2}/,
+        `What is shown has to name when the login was started. It says: ${JSON.stringify(shown.description)}`
+      );
+      await closePluginSettings();
+      await forgetLogin();
+    }));
+
+  test("an identity carrying the directory role reads as logged in, and names who", async () =>
+    watched("login-state-logged-in", async () => {
+      await forgetLogin();
+      await seedLoginFacts({
+        instanceUrl: INSTANCE,
+        accessToken: accessTokenFor({ name: "Ada Byron", username: "ada", roles: ["teacher"] }),
+      });
+
+      const state = await loginState();
+      assert.equal(state.name, "logged-in");
+      assert.equal(state.account, "Ada Byron", "Either logged-in state has to name who is logged in.");
+
+      await openPluginSettings();
+      const shown = await loginSetting();
+      assert.ok(
+        shown.description.includes("Ada Byron"),
+        `What is shown has to name who. It says: ${JSON.stringify(shown.description)}`
+      );
+      await closePluginSettings();
+      await forgetLogin();
+    }));
+
+  test("an identity carrying neither role is its own state, distinct from both of the others", async () =>
+    watched("login-state-without-role", async () => {
+      await forgetLogin();
+      await seedLoginFacts({
+        instanceUrl: INSTANCE,
+        accessToken: accessTokenFor({ name: "Bob Student", username: "bob", roles: ["student"] }),
+      });
+
+      const state = await loginState();
+      assert.equal(
+        state.name,
+        "logged-in-without-role",
+        "A token carrying neither teacher nor admin is a situation of its own - the directory will " +
+          "answer such a caller with nothing, and reading that as either being logged in or being " +
+          "logged out is what leaves a person with no way to tell what is wrong."
+      );
+      assert.equal(state.account, "Bob Student");
+      assert.notEqual(state.name, "logged-in");
+      assert.notEqual(state.name, "logged-out");
+      await forgetLogin();
+    }));
+
+  test("an attempt that concluded without an identity reads as failed, and stays so until another is started", async () =>
+    watched("login-state-failed", async () => {
+      await forgetLogin();
+      await seedLoginFacts({ instanceUrl: INSTANCE, lastFailure: { kind: "cancelled" } });
+
+      const state = await loginState();
+      assert.equal(state.name, "login-failed");
+      assert.equal(state.cause.kind, "cancelled", "A failure names its cause, and the cause is a tag.");
+      assert.equal(
+        (await loginState()).name,
+        "login-failed",
+        "Reading the state is not what ends a failure - it stays until a further attempt is started."
+      );
+
+      await startLoginWithoutBrowser();
+      assert.equal(
+        (await loginState()).name,
+        "logging-in",
+        "Starting a further attempt is what ends it."
+      );
+      await forgetLogin();
+    }));
+});
+
+describe("the state is readable without the settings being open", () => {
+  test("a state reached with the settings closed is readable from the status bar", async () =>
+    watched("login-status-bar", async () => {
+      await closePluginSettings();
+      await forgetLogin();
+      await seedLoginFacts({
+        instanceUrl: INSTANCE,
+        accessToken: accessTokenFor({ name: "Ada Byron", roles: ["teacher"] }),
+      });
+
+      const item = await loginStatusBar();
+      assert.ok(
+        item,
+        "A login concludes minutes after the click that started it, and by then the settings are " +
+          "shut. With them shut there is no status-bar item carrying the state at all."
+      );
+      assert.equal(item.state, "logged-in");
+      assert.ok(
+        item.text.includes("SafeLearn"),
+        `The item has to say whose state it is; it says ${JSON.stringify(item.text)}.`
+      );
+      await forgetLogin();
+    }));
+
+  test("nothing about the login is shown anywhere while no instance is configured", async () =>
+    watched("login-silent-without-instance", async () => {
+      await closePluginSettings();
+      await forgetLogin();
+
+      assert.equal(
+        await loginStatusBar(),
+        null,
+        "`plugin-directory-auth` asks for absence and not for an item saying \"not logged in\": a " +
+          "vault that was never pointed at a safeLearn instance has nothing to be logged in to."
+      );
+
+      await openPluginSettings();
+      assert.equal(await loginSetting(), null);
+      assert.ok(!(await settingsFieldNames()).includes("Login"));
+      await closePluginSettings();
+    }));
+
+  test("clearing the instance takes the status-bar item away again", async () =>
+    watched("login-status-bar-removed", async () => {
+      await forgetLogin();
+      await seedLoginFacts({ instanceUrl: INSTANCE });
+      assert.ok(await loginStatusBar(), "With an instance configured there should be an item to take away.");
+
+      await seedLoginFacts({ instanceUrl: "" });
+      assert.equal(
+        await loginStatusBar(),
+        null,
+        "The silence rule is not only about how a vault starts - a setting that is cleared has to " +
+          "take back what depended on it."
+      );
+    }));
+});
+
+describe("a change of state is announced once", () => {
+  test("a login that succeeds is announced once, and a renewal that changes nothing is not announced at all", async () =>
+    watched("login-announced-success", async () => {
+      await forgetLogin();
+      await seedLoginFacts({ instanceUrl: INSTANCE });
+      const token = accessTokenFor({ name: "Ada Byron", roles: ["teacher"] });
+
+      await forgetNotices();
+      await seedLoginFacts({ accessToken: token });
+      const announced = ours(await noticesShown());
+      assert.equal(announced.length, 1, `Expected one notice, got ${JSON.stringify(announced)}.`);
+      assert.ok(announced[0].includes("Ada Byron"));
+
+      await forgetNotices();
+      await seedLoginFacts({ accessToken: token });
+      assert.deepEqual(
+        ours(await noticesShown()),
+        [],
+        "A background renewal that leaves the state exactly where it was is the common case, and " +
+          "announcing it is how a notice stops being worth reading."
+      );
+      await forgetLogin();
+    }));
+
+  test("a failure is announced once with its cause, and repeating the identical failure announces nothing further", async () =>
+    watched("login-announced-failure", async () => {
+      await forgetLogin();
+      await seedLoginFacts({ instanceUrl: INSTANCE });
+
+      await forgetNotices();
+      await seedLoginFacts({ lastFailure: { kind: "provider-refused", status: 400 } });
+      const first = ours(await noticesShown());
+      assert.equal(first.length, 1, `Expected one notice, got ${JSON.stringify(first)}.`);
+      assert.ok(
+        first[0].includes("400"),
+        `The announcement has to name the cause, and this cause carries a status: ${JSON.stringify(first[0])}`
+      );
+
+      await forgetNotices();
+      await seedLoginFacts({ lastFailure: { kind: "provider-refused", status: 400 } });
+      assert.deepEqual(ours(await noticesShown()), [], "The same failure again is not news.");
+
+      await forgetNotices();
+      await seedLoginFacts({ lastFailure: { kind: "cancelled" } });
+      assert.equal(
+        ours(await noticesShown()).length,
+        1,
+        "A different cause under the same state name is a different thing to know, and is announced."
+      );
+      await forgetLogin();
+    }));
+});
+
+describe("a failed login names what the plugin itself observed", () => {
+  test("a host that nothing answers on is told apart from a realm that refused", async () =>
+    watched("login-cause-unreachable", async () => {
+      await forgetLogin();
+      await seedLoginFacts({
+        instanceUrl: INSTANCE,
+        keycloakUrl: NOTHING_LISTENING,
+        refreshToken: "not-a-real-refresh-token",
+      });
+
+      assert.equal(await refreshLoginNow(), false);
+      const state = await loginState();
+      assert.equal(state.name, "login-failed");
+      assert.equal(
+        state.cause.kind,
+        "unreachable",
+        "Nothing answered at all. That is the one observation separating a host which is not there " +
+          `from a realm which refused, and this is what it came back as: ${JSON.stringify(state.cause)}`
+      );
+      await forgetLogin();
+    }));
+
+  test("a realm that is not there is told apart from a provider that refused", async () =>
+    watched("login-cause-unresolvable", async () => {
+      await forgetLogin();
+      await seedLoginFacts({
+        instanceUrl: INSTANCE,
+        realm: "no-such-realm-in-this-keycloak",
+        refreshToken: "not-a-real-refresh-token",
+      });
+
+      assert.equal(await refreshLoginNow(), false);
+      const state = await loginState();
+      assert.equal(
+        state.cause.kind,
+        "endpoint-unresolvable",
+        "Keycloak has no such path to serve and answers 404. Telling somebody the provider refused " +
+          `them when the realm name is misspelt sends them looking in the wrong place: ${JSON.stringify(state.cause)}`
+      );
+      await forgetLogin();
+    }));
+
+  test("a refusal from the identity provider carries the status it refused with", async () =>
+    watched("login-cause-refused", async () => {
+      await forgetLogin();
+      await seedLoginFacts({ instanceUrl: INSTANCE, refreshToken: "not-a-real-refresh-token" });
+
+      assert.equal(await refreshLoginNow(), false);
+      const state = await loginState();
+      assert.equal(state.cause.kind, "provider-refused");
+      assert.equal(
+        state.cause.status,
+        400,
+        "The realm answers a refresh token it never issued with 400, and the status is the whole of " +
+          "what distinguishes one refusal from another."
+      );
+
+      await openPluginSettings();
+      const shown = await loginSetting();
+      assert.ok(
+        shown.description.includes("400"),
+        "`plugin-login-state` asks that a cause be readable where the state is read, and not only " +
+          `in a developer log. The settings tab says: ${JSON.stringify(shown.description)}`
+      );
+      await closePluginSettings();
+      await forgetLogin();
+    }));
+
+  test("the three surfaces render one cause at three lengths, and none of them is asserted on as prose", async () =>
+    watched("login-cause-three-lengths", async () => {
+      await forgetLogin();
+      await seedLoginFacts({ instanceUrl: INSTANCE, lastFailure: { kind: "no-callback" } });
+
+      const state = await loginState();
+      assert.equal(state.cause.kind, "no-callback", "The tag is what a check asserts on.");
+
+      const item = await loginStatusBar();
+      await openPluginSettings();
+      const shown = await loginSetting();
+      await closePluginSettings();
+
+      assert.ok(item.text.length > 0 && item.label.length > item.text.length, "The status bar carries the shortest form, and its label a longer one.");
+      assert.ok(
+        shown.description.length > item.label.length,
+        "The settings tab is the one surface with room for what to do about it, so it is the longest " +
+          `of the three. Status bar: ${JSON.stringify(item.text)}; label: ${JSON.stringify(item.label)}; ` +
+          `settings: ${JSON.stringify(shown.description)}`
+      );
+      await forgetLogin();
+    }));
+});
+
+describe("what is shown never differentiates the server's refusal", () => {
+  test("the directory role is read from the plugin's own token and from nothing else", async () =>
+    watched("login-role-from-own-token", async () => {
+      await forgetLogin();
+      await seedLoginFacts({
+        instanceUrl: INSTANCE,
+        accessToken: accessTokenFor({ name: "Ada Byron", roles: ["teacher"] }),
+      });
+      assert.deepEqual(await loginAnswers(), { hasLogin: true, hasDirectoryRole: true });
+
+      await seedLoginFacts({ accessToken: accessTokenFor({ name: "Bob Student", roles: ["student"] }) });
+      assert.deepEqual(
+        await loginAnswers(),
+        { hasLogin: true, hasDirectoryRole: false },
+        "Nothing was asked of any server between those two lines. The claims of the token the plugin " +
+          "holds are the whole of what decides this, which is why the fifth state does not undo what " +
+          "`directory-search` makes indistinguishable."
+      );
+      await forgetLogin();
+    }));
+
+  test("a refused directory request leaves the shown state untouched, on either of the two grounds", async () =>
+    watched("login-refusal-changes-nothing", async () => {
+      // A real refusal, and one that says nothing about which ground it rests
+      // on: a host that answers, and answers this path with a status. Which is
+      // exactly what the safeLearn server does to a caller it will not serve.
+      const refusing = "https://auth.unterrainer.info";
+
+      for (const [who, roles] of [
+        ["a caller holding the role", ["teacher"]],
+        ["a caller holding neither role", ["student"]],
+      ]) {
+        await forgetLogin();
+        await seedLoginFacts({
+          instanceUrl: refusing,
+          accessToken: accessTokenFor({ name: "Ada Byron", roles }),
+        });
+        const before = await loginState();
+
+        assert.deepEqual(
+          await callSearchDirectory(""),
+          [],
+          `\`searchDirectory\` has to answer every refusal with an empty list - ${who} got something else.`
+        );
+        assert.deepEqual(
+          await loginState(),
+          before,
+          `The shown state moved when the directory refused ${who}. Nothing the server answers may ` +
+            `reach the login state, or the two refusals stop being indistinguishable.`
+        );
+      }
+      await forgetLogin();
+    }));
+});
+
+describe("a callback that belongs to another window", () => {
+  test("a callback this window did not start is reported here, and no identity comes of it", async () =>
+    watched("login-callback-other-window", async () => {
+      await forgetLogin();
+      await seedLoginFacts({ instanceUrl: INSTANCE });
+      await forgetNotices();
+
+      await deliverAuthCallback({ state: "a-state-this-window-never-sent", code: "irrelevant" });
+
+      const state = await loginState();
+      assert.equal(state.name, "login-failed");
+      assert.equal(
+        state.cause.kind,
+        "another-window",
+        "The window a callback lands in is the one window that knows what became of that login, and " +
+          "before this it was the one that said nothing."
+      );
+      assert.equal((await loginAnswers()).hasLogin, false, "It must complete no login it did not start.");
+      assert.equal(ours(await noticesShown()).length, 1);
+      await forgetLogin();
+    }));
+
+  test("a callback whose state matches but which carries no code is reported as its own cause", async () =>
+    watched("login-callback-no-code", async () => {
+      await forgetLogin();
+      await seedLoginFacts({ instanceUrl: INSTANCE });
+      const { state } = await startLoginWithoutBrowser();
+
+      await deliverAuthCallback({ state });
+
+      const after = await loginState();
+      assert.equal(after.name, "login-failed");
+      assert.equal(after.cause.kind, "no-code");
+      assert.equal((await loginAnswers()).hasLogin, false);
+      await forgetLogin();
+    }));
+
+  test("a stray callback leaves a login of this window's own still in progress, and claims nothing about where it went", async () =>
+    watched("login-callback-while-waiting", async () => {
+      await forgetLogin();
+      await seedLoginFacts({ instanceUrl: INSTANCE });
+      await startLoginWithoutBrowser();
+      await forgetNotices();
+
+      await deliverAuthCallback({ state: "belongs-to-some-other-vault", code: "irrelevant" });
+
+      assert.equal(
+        (await loginState()).name,
+        "logging-in",
+        "This window is still waiting on a login of its own, and a callback for somebody else's is " +
+          "no news about it."
+      );
+      assert.equal(
+        ours(await noticesShown()).length,
+        1,
+        "The observation is still this window's to report - a state that outranks it is not a reason " +
+          "to swallow it."
+      );
+      await forgetLogin();
+    }));
+});
+
+describe("a login in progress expires on its own", () => {
+  test("a login nobody comes back from ends by itself, with nothing clicked and nothing retained", async () =>
+    watched("login-expires", async () => {
+      await forgetLogin();
+      await seedLoginFacts({ instanceUrl: INSTANCE });
+      await startLoginWithoutBrowser();
+      assert.equal((await loginState()).name, "logging-in");
+
+      await agePendingLogins();
+      const state = await waitForLoginState("login-failed");
+
+      assert.equal(
+        state.cause.kind,
+        "no-callback",
+        "The cause has to name that nothing came back, which is the one thing this window observed."
+      );
+      await waitForPendingLoginCount(0, { timeout: 10000 });
+      assert.equal(
+        await pendingLoginCount(),
+        0,
+        "`plugin-login-state` says nothing is retained for a login past that point. The state reads " +
+          "as failed the moment the lifetime passes; dropping the entry is the timer's, a tick later."
+      );
+      await forgetLogin();
+    }));
+
+  test("a callback for a login already given up on is reported as that, and yields no identity", async () =>
+    watched("login-callback-after-expiry", async () => {
+      await forgetLogin();
+      await seedLoginFacts({ instanceUrl: INSTANCE });
+      const { state } = await startLoginWithoutBrowser();
+      await agePendingLogins();
+      await waitForLoginState("login-failed");
+
+      await deliverAuthCallback({ state, code: "arrived-too-late" });
+
+      const after = await loginState();
+      assert.equal(
+        after.cause.kind,
+        "no-longer-pending",
+        "This window remembers giving that login up, so it can say so rather than reporting it as " +
+          `somebody else's: ${JSON.stringify(after.cause)}`
+      );
+      assert.equal((await loginAnswers()).hasLogin, false);
+      await forgetLogin();
+    }));
+});
+
+describe("retrying is reachable from every state, and a login in progress can be ended", () => {
+  test("starting again is offered on a failed login, without logging out or reconfiguring first", async () =>
+    watched("login-retry-from-failed", async () => {
+      await forgetLogin();
+      await seedLoginFacts({ instanceUrl: INSTANCE, lastFailure: { kind: "cancelled" } });
+
+      await openPluginSettings();
+      const shown = await loginSetting();
+      assert.equal(shown.state, "login-failed");
+      assert.ok(
+        shown.buttons.includes("Log in"),
+        `A failed login is retried from where it failed. The block offers ${JSON.stringify(shown.buttons)}.`
+      );
+
+      await clickLoginButton("Log in");
+      assert.equal((await loginState()).name, "logging-in");
+      await closePluginSettings();
+      await forgetLogin();
+    }));
+
+  test("a login in progress offers both ending it and starting again, and starting again leaves exactly one", async () =>
+    watched("login-cancel-and-supersede", async () => {
+      await forgetLogin();
+      await seedLoginFacts({ instanceUrl: INSTANCE });
+      await startLoginWithoutBrowser();
+      assert.equal(await pendingLoginCount(), 1);
+
+      await startLoginWithoutBrowser();
+      assert.equal(
+        await pendingLoginCount(),
+        1,
+        "Starting again supersedes the login already in flight rather than adding to it - two " +
+          "entries waiting on two browser tabs is a state nobody could read."
+      );
+
+      await openPluginSettings();
+      const shown = await loginSetting();
+      assert.deepEqual(
+        shown.buttons,
+        ["Cancel", "Start again"],
+        `Both have to be reachable from a login in progress. The block offers ${JSON.stringify(shown.buttons)}.`
+      );
+
+      await clickLoginButton("Cancel");
+      const after = await loginState();
+      assert.equal(after.name, "login-failed");
+      assert.equal(after.cause.kind, "cancelled");
+      assert.equal(await pendingLoginCount(), 0);
+      await closePluginSettings();
+      await forgetLogin();
+    }));
+
+  test("a login that concludes while the settings tab is open redraws that tab", async () =>
+    watched("login-redraws-open-settings", async () => {
+      await forgetLogin();
+      await seedLoginFacts({ instanceUrl: INSTANCE });
+      await openPluginSettings();
+      assert.ok((await loginSetting()).buttons.includes("Log in"));
+
+      await seedLoginFacts({ accessToken: accessTokenFor({ name: "Ada Byron", roles: ["teacher"] }) });
+
+      const shown = await loginSetting();
+      assert.equal(
+        shown.state,
+        "logged-in",
+        "A login is started from this tab, so this tab is what a person is looking at when the " +
+          "callback lands. Left as it was, it goes on offering \"Log in\" after a login that in fact " +
+          "succeeded - which is the defect this whole change began at."
+      );
+      assert.ok(shown.buttons.includes("Log out"));
+      await closePluginSettings();
+      await forgetLogin();
+    }));
+});
+
+// ################### What a restart does, and what the realm answers ###################
+
+/**
+ * Everything below restarts the application, so it is last in this file.
+ *
+ * A restart rebuilds the vault and reloads the plugin, which is the only way in
+ * to what `onload` does - by the time any check exists, it has already run. It
+ * also means a check placed after these would find a vault none of the earlier
+ * ones had written to, so none are.
+ */
+describe("a stored login is restored as a login in progress", () => {
+  test("the interval before the renewal concludes reads as logging in, and the start was not held up", async () =>
+    watched("login-restore-in-progress", async () => {
+      // Pointed at a host nothing routes to, so the renewal is still in flight
+      // when the application is up. Anything that answers - or refuses - would
+      // be over before a check could look, and a check that read the state a
+      // moment too late would pass against a plugin that shows nothing at all.
+      await restart({
+        pluginData: {
+          instanceUrl: INSTANCE,
+          keycloakUrl: UNROUTED,
+          realm: "safeLearn",
+          refreshToken: "a-refresh-token-held-when-it-last-ran",
+          refreshTokenLifetimeSeconds: REALM_REFRESH_TOKEN_SECONDS,
+        },
+      });
+
+      // `start()` waits for the workspace and for the plugin to have loaded, so
+      // reaching this line at all is what "the start was not held up" means:
+      // the application is up while the renewal has not concluded.
+      const state = await loginState();
+      assert.equal(
+        state.name,
+        "logging-in",
+        "`onload` fires the renewal without awaiting it, deliberately - and for the whole of that " +
+          "interval the plugin used to read exactly as not logged in, with nothing redrawing when it " +
+          `landed. It reads as ${JSON.stringify(state)}.`
+      );
+
+      const item = await loginStatusBar();
+      assert.equal(item?.state, "logging-in", "And it is readable without opening anything.");
+    }));
+
+  test("when the renewal concludes the state follows it, everywhere, with nobody having acted", async () =>
+    watched("login-restore-concludes", async () => {
+      await restart({
+        pluginData: {
+          instanceUrl: INSTANCE,
+          keycloakUrl: "https://auth.unterrainer.info/",
+          realm: "safeLearn",
+          refreshToken: "a-refresh-token-the-realm-never-issued",
+          refreshTokenLifetimeSeconds: REALM_REFRESH_TOKEN_SECONDS,
+        },
+      });
+
+      const state = await waitForLoginState("login-failed");
+      assert.equal(
+        state.cause.kind,
+        "provider-refused",
+        `A refresh token the realm will not accept is a refusal, and it carries the status it ` +
+          `refused with: ${JSON.stringify(state.cause)}`
+      );
+
+      const item = await loginStatusBar();
+      assert.equal(
+        item?.state,
+        "login-failed",
+        "Every place showing the login shows the new state, without a person having acted - which is " +
+          "the half of this the single redraw at the end of the callback never covered."
+      );
+      assert.equal(
+        (await loginAnswers()).hasLogin,
+        false,
+        "An identity that cannot be renewed is treated as not logged in, and nothing that depends " +
+          "on it is offered until a login succeeds again."
+      );
+    }));
+});
+
+describe("the realm's own figure for how long a login may take", () => {
+  test("a fresh installation carries the seed until a realm has answered", async () =>
+    watched("login-lifetime-seed", async () => {
+      await restart();
+      assert.equal(
+        storedPluginData(),
+        null,
+        "This check is about a fresh installation, and a fresh one has written no `data.json` yet."
+      );
+
+      // Writing any setting is what puts the file on disk for the first time,
+      // and what it carries then is the seed.
+      await openPluginSettings();
+      await fillSettingsField("safeLearn instance URL", INSTANCE);
+      await closePluginSettings();
+
+      const stored = storedPluginData();
+      assert.equal(
+        stored.refreshTokenLifetimeSeconds,
+        REALM_REFRESH_TOKEN_SECONDS,
+        "Nothing has answered yet, so a login in progress is given Keycloak's own default for " +
+          "`refresh_expires_in` - the realm's SSO Session Idle, thirty minutes out of the box. A " +
+          "wrong seed costs exactly one attempt, and only the very first one."
+      );
+    }));
+
+  test("a real login against the configured realm completes, and what the realm answered is kept", async () =>
+    watched("login-lifetime-from-realm", async () => {
+      await restart();
+      await seedLoginFacts({ instanceUrl: INSTANCE });
+
+      // The plugin starts the login, so the verifier, the challenge and the
+      // `state` are its own; the harness only walks the realm's login form and
+      // hands the answer back through the protocol handler. The exchange, the
+      // tokens and what goes to `data.json` are the plugin's throughout.
+      await completeRealLogin();
+      await waitForLoginState("logged-in");
+
+      assert.equal(
+        (await loginAnswers()).hasLogin,
+        true,
+        "The plugin holds proof of identity obtained through that exchange, without having handled " +
+          "the password that produced it."
+      );
+
+      const figures = await loginTokenFigures();
+      assert.equal(
+        figures.refreshTokenLifetimeSeconds,
+        REALM_REFRESH_TOKEN_SECONDS,
+        "This is the figure a login in progress is given to conclude in, and it comes from the realm " +
+          "rather than from a constant in the plugin. If the realm's Session Idle has been changed, " +
+          "this is where it shows - update REALM_REFRESH_TOKEN_SECONDS here and the same figure in " +
+          `docs-keycloak.md. The realm now answers ${figures.refreshTokenLifetimeSeconds}.`
+      );
+      assert.equal(
+        figures.accessTokenLifetimeSeconds,
+        REALM_ACCESS_TOKEN_SECONDS,
+        "Recorded for the same reason, though nothing derives from it: it is what tells somebody " +
+          "reading `docs-keycloak.md` that the two lifetimes are five minutes and thirty, and not " +
+          `the other way round. The realm now answers ${figures.accessTokenLifetimeSeconds}.`
+      );
+
+      const stored = storedPluginData();
+      assert.ok(
+        stored.refreshToken,
+        "The refresh token is what survives a restart, and it is the only token written to disk."
+      );
+      assert.equal(
+        stored.refreshTokenLifetimeSeconds,
+        REALM_REFRESH_TOKEN_SECONDS,
+        "It is kept beside the refresh token it describes, so the next start knows it too."
+      );
     }));
 });

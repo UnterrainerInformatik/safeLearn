@@ -23,7 +23,7 @@
  */
 
 import { execFileSync, execSync, spawn } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -401,11 +401,20 @@ async function waitForDebugger(deadline) {
  * The port binds to loopback. The renderer is picked by its URL rather than by
  * being first: an Electron application exposes more than one target and their
  * order is not a contract.
+ *
+ * `pluginData` is what the plugin should find in its `data.json` when it loads.
+ * It is the only way to reach the state a restart puts the plugin in - an
+ * identity held when it last ran, renewed in the background while Obsidian is
+ * already up - because that state is decided in `onload` and is over before any
+ * check could ask. Written after `assembleVault`, which removes the file.
  */
-export async function start() {
+export async function start({ pluginData = null } = {}) {
   const application = resolveApplication();
   buildPlugin();
   assembleVault();
+  if (pluginData) {
+    writeFileSync(path.join(resolvePlugin(), "data.json"), JSON.stringify(pluginData, null, 2));
+  }
 
   child = spawn(application, [`--remote-debugging-port=${port}`, `--user-data-dir=${userDataDir}`], {
     stdio: ["ignore", "pipe", "pipe"],
@@ -508,8 +517,11 @@ export function obsidianVersion() {
   return applicationVersion;
 }
 
-export async function shutdown() {
-  if (keepOpen) return;
+export async function shutdown({ force = false } = {}) {
+  // `force` is `restart()`'s: leaving the window standing is a way to look at
+  // what a failure left behind at the end of a run, not a reason for two
+  // applications to fight over one debugging port in the middle of one.
+  if (keepOpen && !force) return;
   collecting = false;
   raisedEntries.length = 0;
   try {
@@ -536,6 +548,22 @@ export async function shutdown() {
   browser = null;
   page = null;
   child = null;
+}
+
+/**
+ * Stops the application and brings it up again, optionally with something in
+ * the plugin's `data.json`.
+ *
+ * A check that asks what the plugin does while it starts has no other way in:
+ * `onload` has already run by the time a check exists. Everything a run holds -
+ * the vault, the built plugin, the application data - is rebuilt or reused
+ * exactly as it is on a first `start()`, so what comes back is a run and not a
+ * patched-up one.
+ */
+export async function restart(options = {}) {
+  doing("restarting the application", null);
+  await shutdown({ force: true });
+  return start(options);
 }
 
 // ################### Reading what the plugin did ###################
@@ -1160,6 +1188,487 @@ export async function clearDirectoryLoginFixture() {
     plugin.accessToken = null;
     delete plugin.searchDirectory;
   }, pluginId);
+}
+
+// ################### The login's state (plugin-login-state) ###################
+
+/**
+ * An access token carrying exactly the claims a check wants it to.
+ *
+ * The plugin reads its own token locally and never verifies it - that is the
+ * whole point of `accessTokenResourceRoles`, and it is what separates *logged
+ * in* from *logged in without the directory role* without any request having
+ * been refused. So a check can hand it one, and the two logged-in states become
+ * reachable without a realm, an account or a network.
+ *
+ * Unsigned on purpose: a signature would be a claim this makes about a token
+ * nothing here verifies, and the third segment being nonsense is what says so.
+ */
+export function accessTokenFor({ name = null, username = null, roles = [] } = {}) {
+  const encode = (value) =>
+    Buffer.from(JSON.stringify(value)).toString("base64url");
+  const payload = { resource_access: { safeLearn: { roles } } };
+  if (name) payload.name = name;
+  if (username) payload.preferred_username = username;
+  return `${encode({ alg: "none", typ: "JWT" })}.${encode(payload)}.not-a-signature`;
+}
+
+/**
+ * Which of the five states the plugin says it is in, and its particulars.
+ *
+ * Read from the derivation itself rather than from what a surface rendered: the
+ * surfaces are checked separately, and a check reading a state off the words a
+ * surface used would break on every rewording of them.
+ */
+export async function loginState() {
+  return page.evaluate((id) => {
+    const plugin = window.app.plugins.plugins[id];
+    if (!plugin) throw new Error(`No running plugin instance at app.plugins.plugins[${JSON.stringify(id)}].`);
+    if (typeof plugin.loginState !== "function") {
+      throw new Error("The running plugin has no `loginState()`. Looked for it on the instance Obsidian holds.");
+    }
+    return plugin.loginState();
+  }, pluginId);
+}
+
+/**
+ * Puts the plugin into a situation, by setting the facts its state is derived
+ * from and then telling it they changed.
+ *
+ * Every field is optional and only what is named is touched, so a check says
+ * what its situation is and nothing else. `pending` is given in seconds from
+ * now, which is how a check reaches both a login in progress and one that has
+ * outlived its lifetime without waiting for either.
+ */
+export async function seedLoginFacts({
+  instanceUrl = undefined,
+  keycloakUrl = undefined,
+  realm = undefined,
+  accessToken = undefined,
+  refreshToken = undefined,
+  refreshTokenLifetimeSeconds = undefined,
+  lastFailure = undefined,
+  pending = undefined,
+} = {}) {
+  doing(`seeding the login facts ${JSON.stringify({ instanceUrl, lastFailure, pending })}`);
+  await page.evaluate(
+    ({ id, instanceUrl, keycloakUrl, realm, accessToken, refreshToken, refreshTokenLifetimeSeconds, lastFailure, pending }) => {
+      const plugin = window.app.plugins.plugins[id];
+      if (!plugin) throw new Error(`No running plugin instance at app.plugins.plugins[${JSON.stringify(id)}].`);
+      if (instanceUrl !== undefined) plugin.data.instanceUrl = instanceUrl;
+      if (keycloakUrl !== undefined) plugin.data.keycloakUrl = keycloakUrl;
+      if (realm !== undefined) plugin.data.realm = realm;
+      if (refreshToken !== undefined) plugin.data.refreshToken = refreshToken;
+      if (refreshTokenLifetimeSeconds !== undefined) {
+        plugin.data.refreshTokenLifetimeSeconds = refreshTokenLifetimeSeconds;
+      }
+      if (accessToken !== undefined) {
+        plugin.accessToken = accessToken;
+        plugin.accessTokenExpiresAt = accessToken ? Date.now() + 3600_000 : 0;
+      }
+      if (lastFailure !== undefined) plugin.lastFailure = lastFailure;
+      if (pending !== undefined) {
+        plugin.pendingLogins.clear();
+        for (const entry of pending) {
+          plugin.pendingLogins.set(entry.state, {
+            verifier: entry.verifier ?? "seeded-verifier",
+            startedAt: Date.now() - (entry.startedSecondsAgo ?? 0) * 1000,
+            expiresAt: Date.now() + entry.expiresInSeconds * 1000,
+            instanceUrl: plugin.instanceUrl(),
+          });
+        }
+      }
+      plugin.notifyLoginStateChanged();
+    },
+    { id: pluginId, instanceUrl, keycloakUrl, realm, accessToken, refreshToken, refreshTokenLifetimeSeconds, lastFailure, pending }
+  );
+  await settle();
+}
+
+/** Back to the state a fresh vault starts in: no instance, no identity, nothing in flight, nothing failed. */
+export async function forgetLogin() {
+  await page.evaluate((id) => {
+    const plugin = window.app.plugins.plugins[id];
+    if (!plugin) return;
+    plugin.data.instanceUrl = "";
+    plugin.data.keycloakUrl = "https://auth.unterrainer.info/";
+    plugin.data.realm = "safeLearn";
+    plugin.accessToken = null;
+    plugin.accessTokenExpiresAt = 0;
+    plugin.data.refreshToken = null;
+    plugin.lastFailure = null;
+    plugin.pendingLogins.clear();
+    plugin.concludedLogins.clear();
+    delete plugin.searchDirectory;
+    plugin.notifyLoginStateChanged();
+  }, pluginId);
+  await settle();
+}
+
+/** How many logins the plugin is waiting on, which is what "starting again supersedes" is asserted against. */
+export async function pendingLoginCount() {
+  return page.evaluate((id) => window.app.plugins.plugins[id].pendingLogins.size, pluginId);
+}
+
+/**
+ * Starts a real login, without the browser.
+ *
+ * `login()` ends in `window.open`, which on this platform hands the URL to the
+ * system's default browser - a check must not open one, and the authorization
+ * page is not what any check here is about. The polyfill is replaced for the
+ * duration of the call and put back, and the URL it was given is handed to the
+ * check, which is also the only way to read the `state` the login was started
+ * under - the value a callback has to carry to belong to it.
+ */
+export async function startLoginWithoutBrowser() {
+  doing("starting a login with the browser held back");
+  const opened = await withBrowserHeldBack(() =>
+    page.evaluate(async (id) => {
+      const plugin = window.app.plugins.plugins[id];
+      if (!plugin) throw new Error(`No running plugin instance at app.plugins.plugins[${JSON.stringify(id)}].`);
+      await plugin.login();
+    }, pluginId)
+  );
+  if (opened.length !== 1) {
+    throw new Error(
+      `\`login()\` opened ${opened.length} authorization URLs where it should open exactly one. ` +
+        `None is what a login that failed before it started looks like.`
+    );
+  }
+  return { url: opened[0], state: new URL(opened[0]).searchParams.get("state") };
+}
+
+/**
+ * Runs something that may end in `window.open`, and hands back what it would
+ * have opened instead of opening it.
+ *
+ * `login()` ends in Obsidian's `window.open` polyfill, which on every platform
+ * hands the URL to the system's default browser. A check must not open one -
+ * the authorization page is nothing any check here is about, and a run that
+ * throws browser windows at whoever started it is a run nobody starts twice.
+ * The polyfill goes back afterwards whatever happened in between.
+ */
+async function withBrowserHeldBack(body) {
+  await page.evaluate(() => {
+    window.__safelearnOpened = [];
+    window.__safelearnRealOpen = window.open;
+    window.open = (target) => {
+      window.__safelearnOpened.push(String(target));
+      return null;
+    };
+  });
+  try {
+    await body();
+    await settle();
+    return await page.evaluate(() => window.__safelearnOpened.slice());
+  } finally {
+    await page.evaluate(() => {
+      window.open = window.__safelearnRealOpen;
+      delete window.__safelearnRealOpen;
+      delete window.__safelearnOpened;
+    });
+  }
+}
+
+/**
+ * Delivers an `obsidian://` callback the way Obsidian itself delivers one.
+ *
+ * `registerObsidianProtocolHandler` lands in `app.workspace.protocolHandler`,
+ * and `dispatch` is what Obsidian's own URL handling calls: it reads `action`
+ * off the single object it is passed, looks the handler up and calls it with
+ * that object. So this goes along the same path an `obsidian://` URL would,
+ * rather than reaching around it to the plugin's method - which is the point,
+ * since three of the behaviours checked here are about what the handler does
+ * with a callback it was not expecting.
+ *
+ * It takes one argument and not two; called with the action separately it
+ * silently does nothing, which is a way for a check to pass against anything.
+ * That is why this call lives here and not in each check.
+ */
+export async function deliverAuthCallback(params = {}) {
+  doing(`delivering an auth callback ${JSON.stringify(params)}`);
+  const action = `${pluginId}-auth`;
+  await page.evaluate(
+    ({ action, params }) => {
+      const handlers = window.app.workspace?.protocolHandler?.handlers;
+      if (!handlers || typeof handlers.get !== "function") {
+        throw new Error(
+          "Obsidian exposes no `app.workspace.protocolHandler.handlers`. That is where a registered " +
+            "`obsidian://` handler was found on 1.13.7; a version that keeps it elsewhere needs this looked up again."
+        );
+      }
+      if (!handlers.has(action)) {
+        throw new Error(
+          `No \`obsidian://\` handler registered for ${JSON.stringify(action)}. Registered: ` +
+            `${JSON.stringify([...handlers.keys()])}.`
+        );
+      }
+      window.app.workspace.protocolHandler.dispatch({ action, ...params });
+    },
+    { action, params }
+  );
+  await settle();
+}
+
+/**
+ * The status-bar item the plugin carries its state in, or `null` where it has
+ * none - which is a state of its own, and the one `plugin-directory-auth`'s
+ * silence rule is about.
+ */
+export async function loginStatusBar() {
+  return page.evaluate(() => {
+    const item = document.querySelector(".status-bar .safelearn-login-status");
+    if (!item) return null;
+    return {
+      text: item.textContent ?? "",
+      state: item.dataset.safelearnLoginState ?? null,
+      label: item.getAttribute("aria-label") ?? "",
+    };
+  });
+}
+
+/** What the plugin's settings tab currently says about the login: its description, its state, and the buttons it offers. */
+export async function loginSetting() {
+  return page.evaluate(() => {
+    const item = document.querySelector(".vertical-tab-content .safelearn-login-setting");
+    if (!item) return null;
+    return {
+      description: item.querySelector(".setting-item-description")?.textContent ?? "",
+      state: item.dataset.safelearnLoginState ?? null,
+      buttons: [...item.querySelectorAll(".setting-item-control button")].map((button) => button.textContent ?? ""),
+    };
+  });
+}
+
+/** Clicks one of the login block's buttons, by the text on it, and hands back whatever that click would have opened a browser on. */
+export async function clickLoginButton(label) {
+  doing(`clicking the login button ${JSON.stringify(label)}`);
+  return withBrowserHeldBack(() =>
+    page.evaluate((label) => {
+      const item = document.querySelector(".vertical-tab-content .safelearn-login-setting");
+      const buttons = [...(item?.querySelectorAll(".setting-item-control button") ?? [])];
+      const button = buttons.find((candidate) => candidate.textContent === label);
+      if (!button) {
+        throw new Error(
+          `The login block offers no button called ${JSON.stringify(label)}. It offers ` +
+            `${JSON.stringify(buttons.map((candidate) => candidate.textContent))}.`
+        );
+      }
+      button.click();
+    }, label)
+  );
+}
+
+/**
+ * Waits until the plugin's state has the given name, and says what it looked
+ * for when it does not arrive.
+ *
+ * A state that arrives on a timer or after a request cannot be read the instant
+ * a check asks for it, and a check that read it once and found the old one
+ * would report a repair as broken. `plugin-verification` asks that a check
+ * which cannot reach a state fail naming what it wanted - a timeout that says
+ * only "timed out" is the empty pass this exists to prevent.
+ */
+export async function waitForLoginState(name, { timeout = 10000 } = {}) {
+  doing(`waiting for the login state to be ${JSON.stringify(name)}`);
+  const deadline = Date.now() + timeout;
+  let last = null;
+  while (Date.now() < deadline) {
+    last = await loginState();
+    if (last?.name === name) return last;
+    await sleep(100);
+  }
+  throw new Error(
+    `The login state never became ${JSON.stringify(name)} within ${timeout}ms. It is ` +
+      `${JSON.stringify(last)}.`
+  );
+}
+
+/** Asks the plugin the two questions everything that makes a call asks, so a check can hold them against the state it shows. */
+export async function loginAnswers() {
+  return page.evaluate((id) => {
+    const plugin = window.app.plugins.plugins[id];
+    return { hasLogin: plugin.hasLogin(), hasDirectoryRole: plugin.hasDirectoryRole() };
+  }, pluginId);
+}
+
+/** Renews the access token now, the way `ensureAccessToken` does before every directory call, and says whether it worked. */
+export async function refreshLoginNow() {
+  doing("renewing the access token");
+  const renewed = await page.evaluate((id) => window.app.plugins.plugins[id].refreshAccessToken(), pluginId);
+  await settle();
+  return renewed;
+}
+
+/** Calls the real `searchDirectory`, so a check can ask what a refusal does to the shown state. */
+export async function callSearchDirectory(query = "") {
+  doing(`asking the directory for ${JSON.stringify(query)}`);
+  const found = await page.evaluate(
+    ({ id, query }) => window.app.plugins.plugins[id].searchDirectory(query),
+    { id: pluginId, query }
+  );
+  await settle();
+  return found;
+}
+
+/**
+ * Puts every login in progress past its lifetime, without waiting for it.
+ *
+ * The lifetime a login gets is the realm's figure for a refresh token - half an
+ * hour on this project's own realm - and a check cannot sit through it. What it
+ * moves is the clock the plugin reads, not the mechanism: the timer still finds
+ * the entry, ends it and records the cause, which is the behaviour under test.
+ */
+export async function agePendingLogins() {
+  doing("putting every login in progress past its lifetime");
+  const aged = await page.evaluate((id) => {
+    const plugin = window.app.plugins.plugins[id];
+    let count = 0;
+    for (const pending of plugin.pendingLogins.values()) {
+      pending.expiresAt = Date.now() - 1000;
+      count += 1;
+    }
+    return count;
+  }, pluginId);
+  if (aged === 0) {
+    throw new Error("No login was in progress to put past its lifetime, so nothing here could expire.");
+  }
+  return aged;
+}
+
+/** The two lifetimes the realm answered with on the exchange the plugin last completed, in seconds. */
+export async function loginTokenFigures() {
+  return page.evaluate((id) => {
+    const plugin = window.app.plugins.plugins[id];
+    return {
+      refreshTokenLifetimeSeconds: plugin.data.refreshTokenLifetimeSeconds,
+      // `applyTokenResponse` keeps `expires_in` only as the moment it lands on,
+      // and takes thirty seconds off it so a token is renewed before it dies.
+      // Both are put back here, which is the nearest a check gets to the number
+      // the realm actually sent without asking the realm a second question.
+      accessTokenLifetimeSeconds: Math.round((plugin.accessTokenExpiresAt - Date.now()) / 1000) + 30,
+    };
+  }, pluginId);
+}
+
+// ################### A real login, against the realm the plugin is pointed at ###################
+
+/**
+ * The account a real login is completed as.
+ *
+ * The same names `test/harness.js` reads, so one installation is configured
+ * once - see `docs-testing.md`. This is the only thing in this file that needs
+ * an account at all, and it needs it for the two behaviours that cannot be
+ * reached any other way: what the realm answers for a refresh token's lifetime,
+ * and a login that actually completes from one end to the other.
+ */
+const teacherAccount = Object.freeze({
+  username: process.env.SAFELEARN_TEST_TEACHER_USER || "teacher",
+  password: process.env.SAFELEARN_TEST_TEACHER_PASSWORD || "teacher",
+});
+
+/**
+ * Completes a real login, end to end, as the plugin itself would.
+ *
+ * The plugin starts it, so the verifier, the challenge and the `state` are its
+ * own; this walks the realm's own login form in Node's `fetch` and hands the
+ * authorization code back through the same protocol handler an `obsidian://`
+ * callback arrives on. What the plugin does with it - the exchange, the tokens,
+ * what it writes to `data.json` - is untouched, which is the point: this
+ * delivers a browser's answer, it does not stand in for the plugin.
+ *
+ * `docs-testing.md` says the round trip is out of reach for a CDP-attached
+ * Puppeteer session, and that stays true of driving the *system* browser
+ * through it. This does not: the login form is HTML and a redirect is a header.
+ */
+export async function completeRealLogin(account = teacherAccount) {
+  doing(`completing a real login as ${JSON.stringify(account.username)}`);
+  const { url, state } = await startLoginWithoutBrowser();
+  const code = await authorizationCodeFor(url, account);
+  await deliverAuthCallback({ state, code });
+  return { state, code };
+}
+
+/** Walks the realm's own login form and reads the authorization code out of where it redirects to. */
+async function authorizationCodeFor(authorizationUrl, account) {
+  const jar = new Map();
+  const keep = (response) => {
+    for (const header of response.headers.getSetCookie?.() ?? []) {
+      const [pair] = header.split(";");
+      const equals = pair.indexOf("=");
+      if (equals > 0) jar.set(pair.slice(0, equals).trim(), pair.slice(equals + 1).trim());
+    }
+  };
+  const cookie = () => [...jar].map(([name, value]) => `${name}=${value}`).join("; ");
+
+  // Not named `page`: that is the Puppeteer page this whole file is written
+  // around, and shadowing it here would be one rename away from a real defect.
+  const loginPage = await fetch(authorizationUrl, { redirect: "manual" });
+  keep(loginPage);
+  if (loginPage.status !== 200) {
+    throw new Error(
+      `The realm answered ${loginPage.status} for the authorization URL the plugin built, so there ` +
+        `was no login form to fill in. The URL was ${authorizationUrl}.`
+    );
+  }
+  const form = /<form[^>]*\saction="([^"]+)"/i.exec(await loginPage.text())?.[1]?.replace(/&amp;/g, "&");
+  if (!form) {
+    throw new Error(
+      "The realm's login page carried no form to post to. Either it is not the login page, or the " +
+        "session is already established and it went straight to the redirect - which this cannot use."
+    );
+  }
+
+  const submitted = await fetch(form, {
+    method: "POST",
+    redirect: "manual",
+    headers: { "content-type": "application/x-www-form-urlencoded", cookie: cookie() },
+    body: new URLSearchParams({
+      username: account.username,
+      password: account.password,
+      credentialId: "",
+    }).toString(),
+  });
+  const location = submitted.headers.get("location") ?? "";
+  const code = /[?&]code=([^&]+)/.exec(location)?.[1];
+  if (!code) {
+    throw new Error(
+      `The realm did not redirect to a callback carrying an authorization code. It answered ` +
+        `${submitted.status} and sent to ${JSON.stringify(location)}. A 200 here is the login form ` +
+        `again, which is what a wrong password looks like - see SAFELEARN_TEST_TEACHER_USER and ` +
+        `SAFELEARN_TEST_TEACHER_PASSWORD in docs-testing.md.`
+    );
+  }
+  return decodeURIComponent(code);
+}
+
+/**
+ * Waits until the plugin is waiting on the given number of logins.
+ *
+ * Separate from `waitForLoginState` because the two answer different questions
+ * a tick apart: a login past its lifetime reads as failed the moment it is
+ * asked, and is dropped when the timer next comes round. A check about what is
+ * retained has to wait for the second of those, not the first.
+ */
+export async function waitForPendingLoginCount(expected, { timeout = 10000 } = {}) {
+  doing(`waiting for ${expected} login(s) to be in progress`);
+  const deadline = Date.now() + timeout;
+  let last = null;
+  while (Date.now() < deadline) {
+    last = await pendingLoginCount();
+    if (last === expected) return last;
+    await sleep(100);
+  }
+  throw new Error(
+    `The plugin was still waiting on ${last} login(s) after ${timeout}ms, where it should be waiting on ${expected}.`
+  );
+}
+
+/** What the plugin has actually written to its `data.json`, read off disk rather than out of the instance. */
+export function storedPluginData() {
+  const file = path.join(resolvePlugin(), "data.json");
+  if (!existsSync(file)) return null;
+  return JSON.parse(readFileSync(file, "utf8"));
 }
 
 /** Opens the plugin's own settings tab, the way clicking it in Obsidian's settings window does. */
