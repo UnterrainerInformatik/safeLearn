@@ -141,6 +141,16 @@ jobs:
             echo DIRECTORY_SERVICE_CLIENT_ID=${{ secrets.DIRECTORY_SERVICE_CLIENT_ID }} >> ./deploy/.env
             echo DIRECTORY_SERVICE_CLIENT_SECRET=${{ secrets.DIRECTORY_SERVICE_CLIENT_SECRET }} >> ./deploy/.env
             echo SESSION_SECRET=${{ secrets.SESSION_SECRET }} >> ./deploy/.env
+            # The dedicated confidential client that GET /api/admin/directory/search
+            # authenticates as when it queries Keycloak's Admin REST API — never
+            # the caller's own credentials (docs-keycloak.md, "Directory search
+            # client"). Injected into the running container's environment rather
+            # than written into the image's .env above: that image is pushed to a
+            # registry, and a secret baked into a layer outlives every rotation of
+            # it. Without both values the endpoint answers 502 for every caller —
+            # test/deployment-config.test.js is what makes that visible here.
+            echo DIRECTORY_SERVICE_CLIENT_ID=${{ secrets.DIRECTORY_SERVICE_CLIENT_ID }} >> ./deploy/.env
+            echo DIRECTORY_SERVICE_CLIENT_SECRET=${{ secrets.DIRECTORY_SERVICE_CLIENT_SECRET }} >> ./deploy/.env
       - name: Normalize line endings for deploy scripts
         run: |
             sudo apt-get update -y

@@ -145,6 +145,48 @@ async function fetchClientRoleNames(userId, token, resource) {
   return Array.isArray(clientMappings) ? clientMappings.map((mapping) => mapping.name) : [];
 }
 
+/**
+ * Keycloak's admin user list is paginated, and asking for no page is not
+ * asking for all of them: `GET users` without `max` answers at most
+ * `Constants.DEFAULT_MAX_RESULTS` (100) users, and says nothing about there
+ * being more. A realm larger than one page would silently become a directory
+ * of whichever 100 users came first — every class beyond them missing from the
+ * dropdown, and everyone beyond them unfindable by a search that reports no
+ * match rather than a truncation. So pages are asked for explicitly until one
+ * comes back short.
+ */
+const directoryPageSize = 100;
+
+/** At most this many role-mappings lookups are in flight at once. */
+const roleLookupConcurrency = 8;
+
+/** `Promise.all(items.map(...))`, but never more than `limit` of them in flight. Results keep `items`' order. */
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let next = 0;
+  const workers = new Array(Math.min(limit, items.length)).fill(null).map(async () => {
+    for (;;) {
+      const index = next++;
+      if (index >= items.length) return;
+      results[index] = await mapper(items[index]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+async function fetchDirectoryUserPage(first, token) {
+  const url = `${adminApiBaseUrl()}users?briefRepresentation=false&first=${first}&max=${directoryPageSize}`;
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    throw new Error(`Keycloak admin user search answered with status ${response.status}`);
+  }
+  const page = await response.json();
+  return Array.isArray(page) ? page : [];
+}
+
 async function fetchAllDirectoryUsers() {
   const now = Date.now();
   if (directoryUsersCache && now - directoryUsersCachedAt < directoryCacheTtlMs) {
@@ -153,21 +195,24 @@ async function fetchAllDirectoryUsers() {
 
   const token = await getDirectoryServiceToken();
   const resource = readKeycloakConfig().resource;
-  const url = `${adminApiBaseUrl()}users?briefRepresentation=false`;
-  const response = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!response.ok) {
-    throw new Error(`Keycloak admin user search answered with status ${response.status}`);
-  }
-  const users = await response.json();
 
-  directoryUsersCache = await Promise.all(
-    users.map(async (user) => ({
-      ...user,
-      clientRoleNames: await fetchClientRoleNames(user.id, token, resource),
-    }))
-  );
+  const users = [];
+  for (;;) {
+    const page = await fetchDirectoryUserPage(users.length, token);
+    users.push(...page);
+    if (page.length < directoryPageSize) break;
+  }
+
+  // One role-mappings call per user, since Keycloak offers no bulk form of it.
+  // All of them at once was survivable while the list above was capped at a
+  // single page; against a realm of several hundred it would open that many
+  // sockets to Keycloak in one breath, and the failure that produces is a
+  // directory that intermittently comes back empty. A small pool keeps the
+  // fetch concurrent without that.
+  directoryUsersCache = await mapWithConcurrency(users, roleLookupConcurrency, async (user) => ({
+    ...user,
+    clientRoleNames: await fetchClientRoleNames(user.id, token, resource),
+  }));
   directoryUsersCachedAt = now;
   return directoryUsersCache;
 }

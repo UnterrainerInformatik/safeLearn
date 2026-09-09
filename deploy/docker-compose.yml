@@ -10,6 +10,15 @@ services:
       - TZ=Europe/Vienna
       # Signs the session cookies. The container will not start without it.
       - SESSION_SECRET=${SESSION_SECRET}
+      # The dedicated Keycloak client GET /api/admin/directory/search
+      # authenticates as to query the Admin REST API — never the caller's own
+      # credentials. It reaches the container here rather than through the image's
+      # baked-in .env on purpose: the image is pushed to a registry, and a secret
+      # in a layer outlives every rotation of it. Absent, the endpoint answers 502
+      # for every caller and the Obsidian plugin's directory features simply go
+      # quiet, which is deliberately indistinguishable from not being logged in.
+      - DIRECTORY_SERVICE_CLIENT_ID=${DIRECTORY_SERVICE_CLIENT_ID}
+      - DIRECTORY_SERVICE_CLIENT_SECRET=${DIRECTORY_SERVICE_CLIENT_SECRET}
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro

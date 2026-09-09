@@ -146,6 +146,17 @@
         "test/coverage-map.json"
       ],
       "corpus": []
+    },
+    "test/deployment-config.test.js": {
+      "what": "That every environment variable the application reads reaches a deployed instance through one of the two channels a deployment has - the image's own .env, written by the workflow and baked in by the Dockerfile, or the container's environment, written to deploy/.env and interpolated by docker-compose.yml - and that neither channel is wired up only halfway. Added after DIRECTORY_SERVICE_CLIENT_ID/_SECRET were read by the directory-search endpoint for two changes while nothing in the pipeline set them.",
+      "guards": [
+        ".github/workflows/docs-local.yml",
+        "deploy/docker-compose.yml",
+        "Dockerfile",
+        "middlewares/directory-service.js",
+        "app.js"
+      ],
+      "corpus": []
     }
   }
 }
