@@ -175,7 +175,7 @@ async function mapWithConcurrency(items, limit, mapper) {
   return results;
 }
 
-async function fetchDirectoryUserPage(first, token) {
+export async function fetchDirectoryUserPage(first, token) {
   const url = `${adminApiBaseUrl()}users?briefRepresentation=false&first=${first}&max=${directoryPageSize}`;
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
@@ -187,6 +187,23 @@ async function fetchDirectoryUserPage(first, token) {
   return Array.isArray(page) ? page : [];
 }
 
+/**
+ * Every user across every page, asked for explicitly until one page comes
+ * back short of `directoryPageSize` — split out from `fetchAllDirectoryUsers`
+ * so this loop (the pagination fix itself) can be tested without also
+ * exercising the service-account token grant, which does not go through
+ * `fetch` and so cannot be stubbed the same way.
+ */
+export async function fetchAllUserPages(token) {
+  const users = [];
+  for (;;) {
+    const page = await fetchDirectoryUserPage(users.length, token);
+    users.push(...page);
+    if (page.length < directoryPageSize) break;
+  }
+  return users;
+}
+
 async function fetchAllDirectoryUsers() {
   const now = Date.now();
   if (directoryUsersCache && now - directoryUsersCachedAt < directoryCacheTtlMs) {
@@ -195,13 +212,7 @@ async function fetchAllDirectoryUsers() {
 
   const token = await getDirectoryServiceToken();
   const resource = readKeycloakConfig().resource;
-
-  const users = [];
-  for (;;) {
-    const page = await fetchDirectoryUserPage(users.length, token);
-    users.push(...page);
-    if (page.length < directoryPageSize) break;
-  }
+  const users = await fetchAllUserPages(token);
 
   // One role-mappings call per user, since Keycloak offers no bulk form of it.
   // All of them at once was survivable while the list above was capped at a

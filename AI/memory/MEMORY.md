@@ -20,3 +20,5 @@ Echter Ablageort: `/home/psilo/source/htl/doc/safeLearn/AI/memory/`
 - [Vault-Link unter Windows](plugin-vault-link-windows.md) — der Link auf das Plugin darf nicht eingecheckt werden; auf Windows wird er zur 53-Byte-Datei und jede Store-Installation hängt ewig
 - [secureLectures ist Downstream](securelectures-downstream-role.md) — dort nur Tests entfernen und `md/`-Files ergänzen; jede App-Entscheidung gehört upstream nach safeLearn
 - [Kontext vor Entscheidungsfragen](decision-questions-need-context.md) — erst den Mechanismus belegen, dann erst Optionen anbieten
+- [Directory-Service-Credentials ungültig](directory-service-credentials-invalid.md) — lokales `.env` gibt `invalid_client` gegen die echte Keycloak-Realm; `/api/admin/directory/search` antwortet immer mit 502
+- [git mv durch den openspec-Symlink](git-mv-through-openspec-symlink.md) — Ziel muss `AI/openspec/...` heißen, nicht `openspec/...`, sonst korrumpiert `git mv` den Index

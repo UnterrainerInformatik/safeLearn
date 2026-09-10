@@ -147,6 +147,13 @@
       ],
       "corpus": []
     },
+    "test/directory-service.test.js": {
+      "what": "A regression guard for the Keycloak admin-API pagination fix: fetchAllUserPages keeps asking for pages until one comes back short, rather than silently stopping at the first (a directory larger than one page going quietly missing past the 100th user). Stubs fetch; needs no live realm, no browser, no login.",
+      "guards": [
+        "middlewares/directory-service.js"
+      ],
+      "corpus": []
+    },
     "test/deployment-config.test.js": {
       "what": "That every environment variable the application reads reaches a deployed instance through one of the two channels a deployment has - the image's own .env, written by the workflow and baked in by the Dockerfile, or the container's environment, written to deploy/.env and interpolated by docker-compose.yml - and that neither channel is wired up only halfway. Added after DIRECTORY_SERVICE_CLIENT_ID/_SECRET were read by the directory-search endpoint for two changes while nothing in the pipeline set them.",
       "guards": [

@@ -36,12 +36,14 @@ import { after, before, describe, test } from "node:test";
 
 import {
   accessTokenFor,
+  addSelectedDirectoryResults,
   agePendingLogins,
   answerColumnCount,
   answerNameList,
   blockBoxes,
   callSearchDirectory,
-  chooseDirectoryResult,
+  checkDirectoryClass,
+  checkDirectoryResults,
   clearDirectoryLoginFixture,
   clickLoginButton,
   closeExtraViews,
@@ -55,8 +57,10 @@ import {
   cursorPosition,
   deliverAuthCallback,
   dialogBoxes,
+  directoryClassOptions,
   directorySearchResults,
   directorySearchStripPresent,
+  directoryStatus,
   documentText,
   editorMenuIcons,
   editorMenuItems,
@@ -75,6 +79,7 @@ import {
   markers,
   moveCursorInto,
   nameListTextareaValue,
+  narrowDirectoryClassFilter,
   obsidianVersion,
   open,
   openPluginSettings,
@@ -2747,15 +2752,16 @@ describe("the directory search strip", () => {
           `its roles/groups beside it. Found: ${JSON.stringify(results)}`
       );
 
-      await chooseDirectoryResult("Ada Byron");
+      await checkDirectoryResults(["Ada Byron"]);
+      await addSelectedDirectoryResults();
       const textareaValue = await nameListTextareaValue();
       assert.ok(
         (textareaValue ?? "")
           .split("\n")
           .map((line) => line.trim())
           .includes("Ada Byron"),
-        `Choosing a match should append its display name into the textarea, exactly as if it had ` +
-          `been typed. Textarea holds: ${JSON.stringify(textareaValue)}`
+        `Marking a match and clicking "Add selected" should append its display name into the ` +
+          `textarea, exactly as if it had been typed. Textarea holds: ${JSON.stringify(textareaValue)}`
       );
 
       await confirmNameList();
@@ -2778,14 +2784,16 @@ describe("the directory search strip", () => {
       await runCommand("insert-sections-per-name", { expectEdit: false });
 
       await searchDirectoryStrip("Ada");
-      await chooseDirectoryResult("Ada Byron");
+      await checkDirectoryResults(["Ada Byron"]);
+      await addSelectedDirectoryResults();
       assert.ok(
         await directorySearchStripPresent(),
-        "Choosing a match should not close the dialog - more than one can be added before confirming."
+        "Adding a match should not close the dialog - more than one can be added before confirming."
       );
 
       await searchDirectoryStrip("Grace");
-      await chooseDirectoryResult("Grace Hopper");
+      await checkDirectoryResults(["Grace Hopper"]);
+      await addSelectedDirectoryResults();
 
       const value = (await nameListTextareaValue()) ?? "";
       const lines = value
@@ -2811,14 +2819,201 @@ describe("the directory search strip", () => {
       await placeCursorAfter("Text.");
 
       await runCommand("restrict-selection", { expectEdit: false });
-      await searchDirectoryStrip("", "5bhif");
+      await searchDirectoryStrip("", ["5bhif"]);
       const results = await directorySearchResults();
       assert.deepEqual(
         results,
         ["Ada Byron — student, 5bhif"],
         `Filtering to "5bhif" with no text typed should show only the fixture entry holding that ` +
-          `class - the class dropdown is populated from the same fetch "list classes" uses ` +
+          `class - the class list is populated from the same fetch "list classes" uses ` +
           `(\`tasks.md\` #7.2). Found: ${JSON.stringify(results)}`
+      );
+
+      await answerNameList(["teacher"]);
+      await clearDirectoryLoginFixture();
+    }));
+
+  test("filtering by more than one checked class returns the union of both classes' matches", async () =>
+    watched("directory-search-strip-multi-class-union", async () => {
+      await setDirectoryLoginFixture(FIXTURE);
+      const name = "constructed-directory-search-multi-class-union.md";
+      await writeDocument(name, ["Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("restrict-selection", { expectEdit: false });
+      await searchDirectoryStrip("", ["5bhif", "4ahif"]);
+      const results = await directorySearchResults();
+      assert.deepEqual(
+        results.slice().sort(),
+        ["Ada Byron — student, 5bhif", "Grace Hopper — student, 4ahif"].sort(),
+        `Checking both "5bhif" and "4ahif" should show the union of both classes' matches, one ` +
+          `\`searchDirectory\` call per checked class - not just the last one checked. Found: ${JSON.stringify(results)}`
+      );
+
+      await answerNameList(["teacher"]);
+      await clearDirectoryLoginFixture();
+    }));
+
+  test("typing into the class filter narrows the offered class rows", async () =>
+    watched("directory-search-strip-class-filter-narrows", async () => {
+      await setDirectoryLoginFixture(FIXTURE);
+      const name = "constructed-directory-search-class-filter-narrows.md";
+      await writeDocument(name, ["Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("restrict-selection", { expectEdit: false });
+      await narrowDirectoryClassFilter("");
+      const before = await directoryClassOptions();
+      assert.deepEqual(
+        before.slice().sort(),
+        ["4ahif", "5bhif", "examParticipant"].sort(),
+        `With nothing typed, every class-like value should be offered. Found: ${JSON.stringify(before)}`
+      );
+
+      await narrowDirectoryClassFilter("5b");
+      const narrowed = await directoryClassOptions();
+      assert.deepEqual(
+        narrowed,
+        ["5bhif"],
+        `Typing "5b" should narrow the offered rows to those matching, the same way typing narrows ` +
+          `student matches. Found: ${JSON.stringify(narrowed)}`
+      );
+
+      await answerNameList(["teacher"]);
+      await clearDirectoryLoginFixture();
+    }));
+
+  test("marking several results and clicking Add selected takes them all over in one action", async () =>
+    watched("directory-search-strip-add-selected", async () => {
+      await setDirectoryLoginFixture(FIXTURE);
+      const name = "constructed-directory-search-add-selected.md";
+      await writeDocument(name, ["Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      // The student picker (`insert-sections-per-name`) and the teacher picker
+      // (`restrict-selection`) both build the same strip - one search that
+      // matches more than one fixture entry exercises both without a search
+      // in between, per the spec's "same set of results" scenario.
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      await searchDirectoryStrip("");
+      await checkDirectoryResults(["Ada Byron", "Grace Hopper"]);
+      await addSelectedDirectoryResults();
+
+      const value = (await nameListTextareaValue()) ?? "";
+      const lines = value
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line !== "");
+      assert.deepEqual(
+        lines.sort(),
+        ["Ada Byron", "Grace Hopper"].sort(),
+        `Marking two results and clicking "Add selected" once should take both over together, ` +
+          `without a search in between. Textarea holds: ${JSON.stringify(value)}`
+      );
+
+      await confirmNameList();
+      await clearDirectoryLoginFixture();
+    }));
+
+  test("an unreachable directory is shown before any query is typed", async () =>
+    watched("directory-status-unreachable-on-open", async () => {
+      await setDirectoryLoginFixture([], { outcome: "unreachable" });
+      const name = "constructed-directory-status-unreachable.md";
+      await writeDocument(name, ["Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      assert.equal(
+        await directoryStatus(),
+        "The directory could not be reached.",
+        "An unreachable instance should be shown as soon as the strip is built, before a query is typed."
+      );
+
+      await answerNameList(["teacher"]);
+      await clearDirectoryLoginFixture();
+    }));
+
+  test("a reachable directory shows nothing about connectivity", async () =>
+    watched("directory-status-ok-on-open", async () => {
+      await setDirectoryLoginFixture(FIXTURE);
+      const name = "constructed-directory-status-ok.md";
+      await writeDocument(name, ["Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      assert.equal(
+        await directoryStatus(),
+        null,
+        "A reachable directory should show nothing about connectivity, and the picker should be " +
+          "usable immediately."
+      );
+
+      await answerNameList(["teacher"]);
+      await clearDirectoryLoginFixture();
+    }));
+
+  test("a search that fails at the server is shown, distinct from an empty match and from unreachable", async () =>
+    watched("directory-status-failed-after-search", async () => {
+      await setDirectoryLoginFixture(FIXTURE);
+      const name = "constructed-directory-status-failed.md";
+      await writeDocument(name, ["Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      await searchDirectoryStrip("Ada");
+      assert.equal(
+        await directoryStatus(),
+        null,
+        "The strip opened reachable and the first search succeeded - nothing should be shown yet."
+      );
+      const beforeFailure = await directorySearchResults();
+
+      // A picker opened reachable can still have a later search fail - the
+      // fixture is re-seeded mid-session, as a real instance going down
+      // between two searches would leave it.
+      await setDirectoryLoginFixture(FIXTURE, { outcome: "failed" });
+      await searchDirectoryStrip("Grace");
+      assert.equal(
+        await directoryStatus(),
+        "The directory search failed.",
+        "A search that fails at the server should be shown as what it is, not as an empty match."
+      );
+      assert.deepEqual(
+        await directorySearchResults(),
+        beforeFailure,
+        "A failed search is additive information, not a wipe of what an earlier, successful search " +
+          "already found."
+      );
+
+      await answerNameList(["teacher"]);
+      await clearDirectoryLoginFixture();
+    }));
+
+  test("a refused request stays indistinguishable from not being logged in", async () =>
+    watched("directory-status-refused", async () => {
+      await setDirectoryLoginFixture(FIXTURE, { outcome: "refused" });
+      const name = "constructed-directory-status-refused.md";
+      await writeDocument(name, ["Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      assert.equal(
+        await directoryStatus(),
+        null,
+        "A refusal (403, or its equivalent no-instance/no-token cases) should show nothing - " +
+          "`plugin-login-state`'s existing boundary, unchanged here."
+      );
+      assert.deepEqual(
+        await directorySearchResults(),
+        [],
+        "A refused search should render no results, exactly as it always has."
       );
 
       await answerNameList(["teacher"]);
@@ -3285,8 +3480,13 @@ describe("what is shown never differentiates the server's refusal", () => {
   test("a refused directory request leaves the shown state untouched, on either of the two grounds", async () =>
     watched("login-refusal-changes-nothing", async () => {
       // A real refusal, and one that says nothing about which ground it rests
-      // on: a host that answers, and answers this path with a status. Which is
-      // exactly what the safeLearn server does to a caller it will not serve.
+      // on: a host that answers, and answers this path with a status. This is
+      // Keycloak's own host, not the safeLearn app - it has no such route and
+      // answers `/api/admin/directory/search` with a 404, which
+      // `plugin-directory-multi-select`'s outcome classification reads as
+      // `"failed"` rather than `"refused"` (that is reserved for a `403` from
+      // the safeLearn app itself). Either way `entries` is empty and, per this
+      // check, neither moves `loginState()`.
       const refusing = "https://auth.unterrainer.info";
 
       for (const [who, roles] of [
@@ -3302,8 +3502,8 @@ describe("what is shown never differentiates the server's refusal", () => {
 
         assert.deepEqual(
           await callSearchDirectory(""),
-          [],
-          `\`searchDirectory\` has to answer every refusal with an empty list - ${who} got something else.`
+          { outcome: "failed", entries: [] },
+          `\`searchDirectory\` has to answer every refusal with no entries - ${who} got something else.`
         );
         assert.deepEqual(
           await loginState(),

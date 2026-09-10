@@ -1156,26 +1156,34 @@ export async function confirmNameList() {
  * plain instance method, so replacing it shadows the real one without
  * touching `data.json` or the plugin checkout the vault's plugin folder is
  * linked to.
+ *
+ * `outcome` seeds `"unreachable"` or `"failed"` instead of the default
+ * `"ok"` (`plugin-directory-multi-select` `tasks.md` #5.2, for the
+ * reachability checks in `plugin.test.js` #7) - `entries` is then ignored,
+ * matching what the real `searchDirectory` returns for either.
  */
-export async function setDirectoryLoginFixture(entries = []) {
+export async function setDirectoryLoginFixture(entries = [], { outcome = "ok" } = {}) {
   doing(`seeding a directory login fixture with ${entries.length} entr${entries.length === 1 ? "y" : "ies"}`);
   await page.evaluate(
-    ({ id, entries }) => {
+    ({ id, entries, outcome }) => {
       const plugin = window.app.plugins.plugins[id];
       if (!plugin) throw new Error(`No running plugin instance at app.plugins.plugins[${JSON.stringify(id)}].`);
       plugin.data.instanceUrl = "https://safelearn.example.test";
       plugin.accessToken = "fixture-access-token";
       plugin.searchDirectory = async (query) => {
+        if (outcome !== "ok") return { outcome, entries: [] };
         const normalized = query.trim().toLowerCase();
-        if (!normalized) return entries;
-        return entries.filter(
-          (entry) =>
-            entry.name.toLowerCase().includes(normalized) ||
-            Object.keys(entry.roles).some((role) => role.includes(normalized))
-        );
+        const matches = !normalized
+          ? entries
+          : entries.filter(
+              (entry) =>
+                entry.name.toLowerCase().includes(normalized) ||
+                Object.keys(entry.roles).some((role) => role.includes(normalized))
+            );
+        return { outcome: "ok", entries: matches };
       };
     },
-    { id: pluginId, entries }
+    { id: pluginId, entries, outcome }
   );
 }
 
@@ -1736,44 +1744,101 @@ export async function fillSettingsField(label, value) {
   await settle();
 }
 
-/** Whether the directory search strip (search input + class dropdown) is rendered above the name-list textarea. */
+/** Whether the directory search strip (search input, class filter, results) is rendered above the name-list textarea. */
 export async function directorySearchStripPresent() {
   return page.evaluate(() => !!document.querySelector(".modal-container .safelearn-directory-search"));
 }
 
-/** Types into the search strip's query field and, if given, chooses a class from its dropdown. */
-export async function searchDirectoryStrip(query, className = "") {
-  doing(`searching the directory for ${JSON.stringify(query)}${className ? ` in ${className}` : ""}`);
+/**
+ * Types into the class filter's own narrowing text input and waits out its
+ * debounce (`tasks.md` #3.1, the same shape the query input already uses).
+ * Separate from checking a class so `plugin.test.js` #7.2 can assert on the
+ * narrowed row list without also checking one.
+ */
+export async function narrowDirectoryClassFilter(text) {
+  doing(`narrowing the class filter to ${JSON.stringify(text)}`);
+  // The class list is populated by its own fetch, kicked off when the strip
+  // is built and not necessarily settled yet by the time the input exists -
+  // see `tasks.md` #7.2 of the prior change. A directory with no class-like
+  // values renders no rows at all, so this gives up rather than hanging.
+  await page
+    .waitForFunction(
+      () =>
+        document.querySelectorAll(".modal-container .safelearn-directory-class-options .safelearn-directory-class-option")
+          .length > 0,
+      { timeout: 5000 }
+    )
+    .catch(() => {});
+  await page.evaluate((text) => {
+    const input = document.querySelector(".modal-container .safelearn-directory-class-filter");
+    if (!input) throw new Error("No class filter input rendered in the directory search strip.");
+    input.value = text;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }, text);
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  await settle();
+}
+
+/** The class names currently rendered as checkbox rows, in the order they are laid out. */
+export async function directoryClassOptions() {
+  return page.evaluate(() =>
+    [...document.querySelectorAll(".modal-container .safelearn-directory-class-options .safelearn-directory-class-option")].map(
+      (row) => row.textContent?.trim() ?? ""
+    )
+  );
+}
+
+/** Checks (or, with `checked: false`, unchecks) the class option row named `className`, which re-runs the search. */
+export async function checkDirectoryClass(className, { checked = true } = {}) {
+  doing(`${checked ? "checking" : "unchecking"} the class filter ${JSON.stringify(className)}`);
+  await page.evaluate(
+    ({ className, checked }) => {
+      const rows = [
+        ...document.querySelectorAll(".modal-container .safelearn-directory-class-options .safelearn-directory-class-option"),
+      ];
+      const row = rows.find((candidate) => candidate.textContent?.trim() === className);
+      if (!row) {
+        throw new Error(
+          `No class option rendered for ${JSON.stringify(className)}, got ${JSON.stringify(rows.map((candidate) => candidate.textContent))}.`
+        );
+      }
+      const checkbox = row.querySelector("input[type=checkbox]");
+      checkbox.checked = checked;
+      checkbox.dispatchEvent(new Event("change", { bubbles: true }));
+    },
+    { className, checked }
+  );
+  await settle();
+}
+
+/**
+ * Types into the search strip's query field and, for each of `classNames`,
+ * narrows the class filter to it and checks its row - replacing the single
+ * `<select>` value this used to set. Each class is narrowed to by its own
+ * name in turn so a name that is a substring of another (e.g. "1AHIF" inside
+ * a longer class list) still resolves to exactly one rendered row.
+ */
+export async function searchDirectoryStrip(query, classNames = []) {
+  doing(
+    `searching the directory for ${JSON.stringify(query)}${classNames.length > 0 ? ` in ${classNames.join(", ")}` : ""}`
+  );
   await page.waitForFunction(() => !!document.querySelector(".modal-container .safelearn-directory-search input"), {
     timeout: 10000,
   });
-  // The class dropdown is populated by its own fetch, kicked off when the
-  // strip is built and not necessarily settled yet by the time the input
-  // exists - see `tasks.md` #7.2. Setting a `<select>` to a value it has no
-  // matching `<option>` for yet would silently fall back to the default.
-  if (className) {
-    await page.waitForFunction(
-      () => (document.querySelector(".modal-container .safelearn-directory-class-filter")?.options.length ?? 0) > 1,
-      { timeout: 10000 }
-    );
+
+  for (const className of classNames) {
+    await narrowDirectoryClassFilter(className);
+    await checkDirectoryClass(className);
   }
-  await page.evaluate(
-    ({ query, className }) => {
-      const strip = document.querySelector(".modal-container .safelearn-directory-search");
-      const input = strip.querySelector("input");
-      input.value = query;
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      const select = strip.querySelector("select");
-      if (select && className) {
-        select.value = className;
-        select.dispatchEvent(new Event("change", { bubbles: true }));
-      }
-    },
-    { query, className }
-  );
+
+  await page.evaluate((query) => {
+    const input = document.querySelector(".modal-container .safelearn-directory-search-query");
+    input.value = query;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }, query);
   // The strip debounces (~300ms) before it calls the directory client - see
-  // `tasks.md` #7.3. Waited out here rather than reduced in the plugin for a
-  // check's convenience.
+  // `tasks.md` #7.3 of the prior change. Waited out here rather than reduced
+  // in the plugin for a check's convenience.
   await new Promise((resolve) => setTimeout(resolve, 500));
   await settle();
 }
@@ -1782,7 +1847,8 @@ export async function searchDirectoryStrip(query, className = "") {
  * The directory search strip's currently rendered matches, as text - the
  * plugin renders each as `"${name} — ${roles.join(", ")}"` (`main.ts`
  * `buildDirectorySearch`), not as a separate name attribute, so a check reads
- * the same text a person would.
+ * the same text a person would. The row's own checkbox contributes nothing to
+ * `textContent`, so this needs no change for it.
  */
 export async function directorySearchResults() {
   return page.evaluate(() =>
@@ -1792,22 +1858,67 @@ export async function directorySearchResults() {
   );
 }
 
-/** Clicks the search strip's rendered match whose text starts with `name`. */
-export async function chooseDirectoryResult(name) {
-  doing(`choosing the directory result ${JSON.stringify(name)}`);
-  await page.evaluate((name) => {
-    const rows = [
-      ...document.querySelectorAll(".modal-container .safelearn-directory-results .safelearn-directory-result"),
-    ];
-    const row = rows.find((candidate) => candidate.textContent?.startsWith(name));
-    if (!row) {
-      throw new Error(
-        `No rendered directory result starting with ${JSON.stringify(name)}, got ${JSON.stringify(rows.map((candidate) => candidate.textContent))}.`
-      );
-    }
-    row.click();
-  }, name);
+/**
+ * Checks (or, with `checked: false`, unchecks) the rendered result rows whose
+ * text starts with each of `names` - replacing `chooseDirectoryResult`'s
+ * single click-to-append now that a result is marked rather than taken
+ * immediately (`tasks.md` #6.2). Marking several and then calling
+ * `addSelectedDirectoryResults()` is the new one-action equivalent.
+ */
+export async function checkDirectoryResults(names, { checked = true } = {}) {
+  doing(`${checked ? "checking" : "unchecking"} the directory results ${JSON.stringify(names)}`);
+  await page.evaluate(
+    ({ names, checked }) => {
+      const rows = [
+        ...document.querySelectorAll(".modal-container .safelearn-directory-results .safelearn-directory-result"),
+      ];
+      for (const name of names) {
+        const row = rows.find((candidate) => candidate.textContent?.startsWith(name));
+        if (!row) {
+          throw new Error(
+            `No rendered directory result starting with ${JSON.stringify(name)}, got ${JSON.stringify(rows.map((candidate) => candidate.textContent))}.`
+          );
+        }
+        const checkbox = row.querySelector("input[type=checkbox]");
+        checkbox.checked = checked;
+        checkbox.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    },
+    { names, checked }
+  );
   await settle();
+}
+
+/** Clicks the search strip's "Add selected" control, taking over every currently checked result in one action. */
+export async function addSelectedDirectoryResults() {
+  doing("clicking the directory search strip's Add selected control");
+  await page.evaluate(() => {
+    const control = document.querySelector(".modal-container .safelearn-directory-add-selected");
+    if (!control) throw new Error("No Add selected control rendered in the directory search strip.");
+    control.click();
+  });
+  await settle();
+}
+
+/**
+ * The search strip's reachability status: `null` while it is hidden (an
+ * `"ok"` or `"refused"` outcome), or its text while shown (`"unreachable"` or
+ * `"failed"`) - `tasks.md` #6.3, for the reachability checks in
+ * `plugin.test.js` #7.
+ *
+ * The initial status comes from the one `classLikeValues()` fetch made when
+ * the strip is built, which is still in flight in the same tick the strip's
+ * elements are created - see `design.md`. Waited out here with a fixed delay
+ * rather than a condition, since "still hidden" (the `"ok"`/`"refused"` case)
+ * has no event of its own to wait for.
+ */
+export async function directoryStatus() {
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  return page.evaluate(() => {
+    const status = document.querySelector(".modal-container .safelearn-directory-status");
+    if (!status || status.hidden) return null;
+    return status.textContent ?? "";
+  });
 }
 
 /**
