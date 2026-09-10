@@ -98,6 +98,11 @@ export async function initKeycloak(app) {
       userProfile.accessTokenDecoded = jwtDecode(accessToken)?.payload;
       userProfile.refreshToken = refreshToken;
       userProfile.keycloakConfig = kcConfig;
+      // hasRoles() in utils.js reads req.user.rolesCalculated unconditionally
+      // and JSON.parse(undefined) throws, so this has to exist from the first
+      // request onward - it must not wait for the near-expiry refresh in
+      // refreshAccessToken() to compute it for the first time.
+      userProfile.rolesCalculated = JSON.stringify(deriveRoles(userProfile.ldap));
       done(null, userProfile, { returnTo: req.session.originalUrl });
     })
   );
