@@ -147,7 +147,7 @@ const MENU_COMMAND_NAMES = [
  * checks below are about that shared list, so these are excluded from them by
  * name rather than by the tests silently going stale against a sixth entry.
  */
-const NON_EDITOR_COMMAND_IDS = ["list-classes"];
+const NON_EDITOR_COMMAND_IDS = ["list-classes", "show-directory-info"];
 
 /** What Obsidian puts in front of a plugin's command in the palette. */
 const PALETTE_PREFIX = "SafeLearn Formatter";
@@ -2647,6 +2647,35 @@ describe("the plugin's settings tab", () => {
       await closePluginSettings();
     }));
 
+  test("Server client id defaults to this project's own convention and persists a custom value", async () =>
+    watched("settings-server-client-id", async () => {
+      await openPluginSettings();
+      const before = await settingsTextFields();
+      assert.equal(
+        before["Server client id"],
+        "safeLearn",
+        "Defaults to this project's own `keycloak.json` resource, matching the reference deployment " +
+          "- see `design.md` on why this is a setting of its own rather than assumed."
+      );
+      await closePluginSettings();
+
+      await openPluginSettings();
+      await fillSettingsField("Server client id", "secureLectures");
+      await closePluginSettings();
+
+      await openPluginSettings();
+      const after = await settingsTextFields();
+      assert.equal(
+        after["Server client id"],
+        "secureLectures",
+        "The value just entered should still be there after closing and reopening the settings tab."
+      );
+
+      // Leaves the setting as it was found, per this file's own convention.
+      await fillSettingsField("Server client id", "safeLearn");
+      await closePluginSettings();
+    }));
+
   test("no login control is offered while no instance is configured", async () =>
     watched("settings-no-login-without-instance", async () => {
       await openPluginSettings();
@@ -3473,6 +3502,34 @@ describe("what is shown never differentiates the server's refusal", () => {
         "Nothing was asked of any server between those two lines. The claims of the token the plugin " +
           "holds are the whole of what decides this, which is why the fifth state does not undo what " +
           "`directory-search` makes indistinguishable."
+      );
+      await forgetLogin();
+    }));
+
+  test("the directory role is read under the configured server client id, not a hardcoded one", async () =>
+    watched("login-role-configured-client-id", async () => {
+      await forgetLogin();
+      await seedLoginFacts({
+        instanceUrl: INSTANCE,
+        serverClientId: "secureLectures",
+        accessToken: accessTokenFor({ name: "Ada Byron", roles: ["admin"], resource: "secureLectures" }),
+      });
+      assert.equal(
+        (await loginAnswers()).hasDirectoryRole,
+        true,
+        "A role granted under the configured server client id must be recognized, not just the " +
+          "project's own default `safeLearn` - a deployment with a different id (`design.md`) relies " +
+          "on this being read from the setting."
+      );
+
+      await seedLoginFacts({
+        accessToken: accessTokenFor({ name: "Ada Byron", roles: ["admin"], resource: "safeLearn" }),
+      });
+      assert.equal(
+        (await loginAnswers()).hasDirectoryRole,
+        false,
+        "The same role under a client id that is not the one configured must not count - otherwise " +
+          "the setting would not actually be read."
       );
       await forgetLogin();
     }));

@@ -1212,10 +1212,10 @@ export async function clearDirectoryLoginFixture() {
  * Unsigned on purpose: a signature would be a claim this makes about a token
  * nothing here verifies, and the third segment being nonsense is what says so.
  */
-export function accessTokenFor({ name = null, username = null, roles = [] } = {}) {
+export function accessTokenFor({ name = null, username = null, roles = [], resource = "safeLearn" } = {}) {
   const encode = (value) =>
     Buffer.from(JSON.stringify(value)).toString("base64url");
-  const payload = { resource_access: { safeLearn: { roles } } };
+  const payload = { resource_access: { [resource]: { roles } } };
   if (name) payload.name = name;
   if (username) payload.preferred_username = username;
   return `${encode({ alg: "none", typ: "JWT" })}.${encode(payload)}.not-a-signature`;
@@ -1252,6 +1252,7 @@ export async function seedLoginFacts({
   instanceUrl = undefined,
   keycloakUrl = undefined,
   realm = undefined,
+  serverClientId = undefined,
   accessToken = undefined,
   refreshToken = undefined,
   refreshTokenLifetimeSeconds = undefined,
@@ -1260,12 +1261,13 @@ export async function seedLoginFacts({
 } = {}) {
   doing(`seeding the login facts ${JSON.stringify({ instanceUrl, lastFailure, pending })}`);
   await page.evaluate(
-    ({ id, instanceUrl, keycloakUrl, realm, accessToken, refreshToken, refreshTokenLifetimeSeconds, lastFailure, pending }) => {
+    ({ id, instanceUrl, keycloakUrl, realm, serverClientId, accessToken, refreshToken, refreshTokenLifetimeSeconds, lastFailure, pending }) => {
       const plugin = window.app.plugins.plugins[id];
       if (!plugin) throw new Error(`No running plugin instance at app.plugins.plugins[${JSON.stringify(id)}].`);
       if (instanceUrl !== undefined) plugin.data.instanceUrl = instanceUrl;
       if (keycloakUrl !== undefined) plugin.data.keycloakUrl = keycloakUrl;
       if (realm !== undefined) plugin.data.realm = realm;
+      if (serverClientId !== undefined) plugin.data.serverClientId = serverClientId;
       if (refreshToken !== undefined) plugin.data.refreshToken = refreshToken;
       if (refreshTokenLifetimeSeconds !== undefined) {
         plugin.data.refreshTokenLifetimeSeconds = refreshTokenLifetimeSeconds;
@@ -1288,7 +1290,7 @@ export async function seedLoginFacts({
       }
       plugin.notifyLoginStateChanged();
     },
-    { id: pluginId, instanceUrl, keycloakUrl, realm, accessToken, refreshToken, refreshTokenLifetimeSeconds, lastFailure, pending }
+    { id: pluginId, instanceUrl, keycloakUrl, realm, serverClientId, accessToken, refreshToken, refreshTokenLifetimeSeconds, lastFailure, pending }
   );
   await settle();
 }
@@ -1301,6 +1303,7 @@ export async function forgetLogin() {
     plugin.data.instanceUrl = "";
     plugin.data.keycloakUrl = "https://auth.unterrainer.info/";
     plugin.data.realm = "safeLearn";
+    plugin.data.serverClientId = "safeLearn";
     plugin.accessToken = null;
     plugin.accessTokenExpiresAt = 0;
     plugin.data.refreshToken = null;
