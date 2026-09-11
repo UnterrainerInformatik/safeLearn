@@ -322,10 +322,16 @@ export function fetchDirectoryUserPage(first, token) {
  * token handed to the first page can no longer be trusted by the last one.
  *
  * The realm's total user count isn't known up front (Keycloak's paged `users`
- * endpoint doesn't report it), so progress here is a dot per page rather than
- * a percentage — one per `directoryPageSize` (100) users fetched, so a run
- * against a large realm still shows something moving in the logs rather than
- * going silent until every page is in.
+ * endpoint doesn't report it), so progress here is one line per page rather
+ * than a percentage. Each line ends in a newline on purpose, via `console.log`
+ * rather than an accumulating `process.stdout.write(".")`: observed live,
+ * Docker's log capture holds an incomplete (newline-less) line entirely,
+ * so a run of bare dots with no newline between them stayed invisible in
+ * `docker logs -f` for the run's whole duration — sometimes several minutes
+ * — and only appeared as one burst once something (the loop's own end, or
+ * the container dying) finally produced the newline. A fetch that was
+ * actually progressing the whole time then looked indistinguishable from
+ * one that had hung. One flushed line per page fixes that.
  */
 export async function fetchAllUserPages(getToken) {
   const users = [];
@@ -333,10 +339,9 @@ export async function fetchAllUserPages(getToken) {
     const token = await getToken();
     const page = await fetchDirectoryUserPage(users.length, token);
     users.push(...page);
-    process.stdout.write(".");
+    console.log(`Directory search: fetched page at first=${users.length - page.length} (${users.length} users so far)`);
     if (page.length < directoryPageSize) break;
   }
-  process.stdout.write("\n");
   return users;
 }
 
