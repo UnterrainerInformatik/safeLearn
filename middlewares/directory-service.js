@@ -128,22 +128,42 @@ function getDirectoryServiceClient() {
  * mid-loop, and every request after that point failed with a 401 that looked
  * like a permissions problem (see the diagnostic logging in
  * `fetchDirectoryUserPage` below, which is how this was found).
+ *
+ * The in-flight grant, while one is running — observed live once bisection
+ * (see `bisectFailingRange`) could fan out into a couple dozen concurrent
+ * callers: with a stale token and no lock here, every one of them saw the
+ * same "expired" check and started its own `grant()`, logging 823 "requesting
+ * a fresh token" against only 69 "got a fresh token" in one run — a request
+ * storm against Keycloak's token endpoint on top of the page-fetch fan-out
+ * itself. Concurrent callers now await the one grant already underway,
+ * mirroring the `directoryUsersFetchPromise` dedup above.
  */
+let directoryServiceTokenGrantPromise = null;
+
 async function getDirectoryServiceToken() {
   if (directoryServiceTokenSet && directoryServiceTokenSet.expires_in > 30) {
     return directoryServiceTokenSet.access_token;
   }
-  // TEMPORARY - isolating a live multi-minute hang with no error and no
-  // AbortSignal.timeout ever firing on the page fetch below it: this line
-  // tells whether the hang is here, in openid-client's own grant() request
-  // (a different HTTP stack than fetch, undocumented default timeout), or
-  // past it. Remove once that's answered.
-  console.log("Directory search: requesting a fresh directory-service access token...");
-  directoryServiceTokenSet = await getDirectoryServiceClient().grant({
-    grant_type: "client_credentials",
-  });
-  console.log("Directory search: got a fresh directory-service access token.");
-  return directoryServiceTokenSet.access_token;
+  if (directoryServiceTokenGrantPromise) {
+    return directoryServiceTokenGrantPromise;
+  }
+
+  directoryServiceTokenGrantPromise = (async () => {
+    console.log("Directory search: requesting a fresh directory-service access token...");
+    directoryServiceTokenSet = await withDeadline(
+      getDirectoryServiceClient().grant({ grant_type: "client_credentials" }),
+      directoryApiTimeoutMs,
+      "directory-service token grant"
+    );
+    console.log("Directory search: got a fresh directory-service access token.");
+    return directoryServiceTokenSet.access_token;
+  })();
+
+  try {
+    return await directoryServiceTokenGrantPromise;
+  } finally {
+    directoryServiceTokenGrantPromise = null;
+  }
 }
 
 // ################### Directory query (4.2-4.4) ###################
@@ -621,10 +641,10 @@ async function bisectFailingRange(first, len, getToken) {
   }
 }
 
-/** Entry point for `fetchAllUserPages`: splits straight away rather than re-trying the already-known-bad full page at the shorter timeout first. */
-function bisectFailingPage(first, getToken) {
-  const leftLen = Math.ceil(directoryPageSize / 2);
-  const rightLen = directoryPageSize - leftLen;
+/** Entry point for `fetchAllUserPages`: splits straight away rather than re-trying the already-known-bad full page at the shorter timeout first. `len` is that page's actual requested width, capped near `targetCount` by the caller — not assumed to always be `directoryPageSize`. */
+function bisectFailingPage(first, len, getToken) {
+  const leftLen = Math.ceil(len / 2);
+  const rightLen = len - leftLen;
   return Promise.all([
     bisectFailingRange(first, leftLen, getToken),
     bisectFailingRange(first + leftLen, rightLen, getToken),
@@ -659,6 +679,21 @@ function bisectFailingPage(first, getToken) {
  * there), which are excluded and logged, and pagination continues past them —
  * see `AI/open-proposals.md`'s first=14200 case, the reason this exists.
  *
+ * `targetCount` (Keycloak's own `GET users/count`, already fetched by
+ * `fetchAllDirectoryUsers` before this runs) hard-stops the loop once
+ * `first` reaches it, *before* issuing another request — belt-and-suspenders
+ * alongside the short-page check below, not a replacement for it, but the one
+ * that actually matters on an LDAP-federated realm: confirmed live against
+ * `auth.htl-leonding.ac.at` (14,289 users) that Keycloak never answers a
+ * clean short/empty page once `first` runs past the real end of federated
+ * data — every offset from there on hangs individually instead, which
+ * `bisectFailingPage` would otherwise "resolve" one at a time, forever,
+ * without `targetCount` ever ruling those offsets out. `resumeFrom.skipped`
+ * is filtered to `offset < targetCount` for the same reason: a checkpoint
+ * from before this bound existed can carry exactly that kind of phantom
+ * "skipped" run past the real end, which would otherwise be reported as
+ * suspect records rather than dropped as the artifact they are.
+ *
  * The realm's total user count isn't known up front (Keycloak's paged `users`
  * endpoint doesn't report it), so progress here is one line per page rather
  * than a percentage. Each line ends in a newline on purpose, via `console.log`
@@ -671,17 +706,21 @@ function bisectFailingPage(first, getToken) {
  * actually progressing the whole time then looked indistinguishable from
  * one that had hung. One flushed line per page fixes that.
  */
-export async function fetchAllUserPages(getToken, resumeFrom = {}, onPage) {
+export async function fetchAllUserPages(getToken, resumeFrom = {}, onPage, targetCount = Infinity) {
   const users = [...(resumeFrom.users ?? [])];
-  const skipped = [...(resumeFrom.skipped ?? [])];
+  const skipped = [...(resumeFrom.skipped ?? [])].filter((entry) => entry.offset < targetCount);
   let first = resumeFrom.nextFirst ?? 0;
-  for (;;) {
+  while (first < targetCount) {
+    // Capped to what targetCount says actually remains, once close to it: asking
+    // Keycloak for a full directoryPageSize width past that point is exactly how
+    // the phantom past-the-end hang above was found - never ask for it at all.
+    const pageWidth = Math.min(directoryPageSize, targetCount - first);
     let page;
     let consumed;
     let newlySkipped = [];
     try {
       page = await withRetry(
-        async () => fetchDirectoryUserPage(first, await getToken()),
+        async () => fetchDirectoryUserPage(first, await getToken(), { max: pageWidth }),
         3,
         `admin user page fetch (first=${first})`
       );
@@ -690,7 +729,7 @@ export async function fetchAllUserPages(getToken, resumeFrom = {}, onPage) {
       console.error(
         `Directory search: page fetch at first=${first} failed 3x (${error.message}) — bisecting to isolate the failing record...`
       );
-      const resolved = await bisectFailingPage(first, getToken);
+      const resolved = await bisectFailingPage(first, pageWidth, getToken);
       page = resolved.users;
       consumed = resolved.consumed;
       newlySkipped = resolved.skipped;
@@ -709,7 +748,7 @@ export async function fetchAllUserPages(getToken, resumeFrom = {}, onPage) {
         `${skipped.length ? `, ${skipped.length} skipped` : ""})`
     );
     onPage?.({ page, skipped, nextFirst: first });
-    if (consumed < directoryPageSize) break;
+    if (consumed < pageWidth) break;
   }
   return { users, skipped };
 }
@@ -770,7 +809,8 @@ async function fetchAllDirectoryUsers() {
       ({ page, skipped: skippedSoFar, nextFirst }) => {
         appendDirectoryFetchProgressPage(page);
         writeDirectoryFetchProgressMeta(serverCount, skippedSoFar, nextFirst);
-      }
+      },
+      serverCount
     );
     console.log(
       `Directory search: fetched ${users.length} users` +

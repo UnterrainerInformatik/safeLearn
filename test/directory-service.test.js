@@ -140,6 +140,71 @@ describe("fetchAllUserPages", () => {
     assert.deepEqual(skipped, []);
   });
 
+  test("never requests past targetCount, even for a page that would otherwise be full-size", async () => {
+    // Live incident (2026-09-11, auth.htl-leonding.ac.at, 14,289 users): past the
+    // real end of an LDAP-federated realm, Keycloak never answers a clean short
+    // page - every offset there hangs individually instead, which bisection would
+    // "resolve" one at a time forever without this bound. targetCount=230 stands
+    // in for that real end; nothing at or past it may ever be requested.
+    let calls = 0;
+    global.fetch = async (url) => {
+      calls += 1;
+      const params = new URL(url).searchParams;
+      const first = Number(params.get("first"));
+      const max = Number(params.get("max"));
+      assert.ok(first < 230, `must never request first=${first}, at or past targetCount`);
+      if (first === 200) {
+        assert.equal(max, 30, "the last page must be asked for exactly what's left (230-200), not a full 100");
+      }
+      return { ok: true, json: async () => page(first, Math.min(max, 230 - first)) };
+    };
+
+    const { users, skipped } = await fetchAllUserPages(async () => "token", {}, undefined, 230);
+
+    assert.equal(calls, 3, "exactly 3 pages (100, 100, 30) should be requested, then the loop must stop on its own");
+    assert.equal(users.length, 230);
+    assert.deepEqual(skipped, []);
+  });
+
+  test("drops phantom skipped entries at or past targetCount inherited from an older checkpoint", async () => {
+    // Simulates resuming a checkpoint written before targetCount-bounding existed:
+    // its skipped list can carry a run of offsets past the real end (exactly what
+    // the live incident's checkpoint looked like), which must not be reported.
+    global.fetch = async () => {
+      throw new Error("no request should be made - the resumed checkpoint is already at targetCount");
+    };
+
+    const { users, skipped } = await fetchAllUserPages(
+      async () => "token",
+      { users: page(0, 230), skipped: [{ offset: 230 }, { offset: 231 }], nextFirst: 230 },
+      undefined,
+      230
+    );
+
+    assert.equal(users.length, 230);
+    assert.deepEqual(skipped, [], "skipped entries at/past targetCount are phantom artifacts, not real records");
+  });
+
+  test("caps a bisected page's width near targetCount too, so bisection never touches offsets past it", async () => {
+    let maxOffsetRequested = 0;
+    global.fetch = async (url) => {
+      const params = new URL(url).searchParams;
+      const first = Number(params.get("first"));
+      const max = Number(params.get("max"));
+      maxOffsetRequested = Math.max(maxOffsetRequested, first + max);
+      assert.ok(first + max <= 230, `bisection must never probe past targetCount: first=${first}, max=${max}`);
+      if (first === 200 && max === 30) {
+        return { ok: false, status: 504, text: async () => "Gateway Timeout" };
+      }
+      return { ok: true, json: async () => page(first, Math.min(max, 230 - first)) };
+    };
+
+    const { users } = await fetchAllUserPages(async () => "token", { users: page(0, 200), nextFirst: 200 }, undefined, 230);
+
+    assert.equal(maxOffsetRequested, 230, "bisection should recover exactly up to targetCount, never beyond it");
+    assert.equal(users.length, 230);
+  });
+
   test("isolates a single record that keeps failing instead of losing the whole page", async () => {
     // A 100-user realm whose one full-size (max=100) page request fails outright
     // — standing in for the live first=14200 case, where it's an unresolved
