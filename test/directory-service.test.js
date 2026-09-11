@@ -23,6 +23,7 @@ import {
   readDirectoryDiskCache,
   resolveCallerRoles,
   withDeadline,
+  withRetry,
   writeDirectoryDiskCache,
 } from "../middlewares/directory-service.js";
 
@@ -86,6 +87,26 @@ describe("fetchAllUserPages", () => {
 
     assert.equal(tokenCalls, 2, "a token close to expiry on a later page must be refreshable, not fixed at the first page's token");
   });
+
+  test("retries a page that fails once, rather than losing every page already fetched", async () => {
+    const pages = [page(0, 100), page(100, 30)];
+    let secondPageAttempts = 0;
+    global.fetch = async (url) => {
+      const first = Number(new URL(url).searchParams.get("first"));
+      if (first === 100) {
+        secondPageAttempts += 1;
+        if (secondPageAttempts === 1) {
+          return { ok: false, status: 503, text: async () => "Service Unavailable" };
+        }
+      }
+      return { ok: true, json: async () => pages[first / 100] };
+    };
+
+    const users = await fetchAllUserPages(async () => "token");
+
+    assert.equal(secondPageAttempts, 2, "the failing page should have been retried, not given up on immediately");
+    assert.equal(users.length, 130, "a transient failure on one page must not discard the pages already fetched");
+  });
 });
 
 describe("fetchDirectoryUserPage", () => {
@@ -139,6 +160,58 @@ describe("withDeadline", () => {
       /the slow thing did not complete within 10ms/,
       "a hung admin-API call (headers fine, body never finishes) must still release its caller"
     );
+  });
+});
+
+describe("withRetry", () => {
+  test("succeeds without retrying when the first attempt succeeds", async () => {
+    let attempts = 0;
+    const result = await withRetry(
+      async () => {
+        attempts += 1;
+        return "ok";
+      },
+      3,
+      "test",
+      0
+    );
+    assert.equal(result, "ok");
+    assert.equal(attempts, 1);
+  });
+
+  test("retries after a failure and returns the value once an attempt succeeds", async () => {
+    let attempts = 0;
+    const result = await withRetry(
+      async () => {
+        attempts += 1;
+        if (attempts < 3) throw new Error("transient");
+        return "ok";
+      },
+      3,
+      "test",
+      0
+    );
+    assert.equal(result, "ok");
+    assert.equal(attempts, 3);
+  });
+
+  test("gives up after the given number of attempts and throws the last error", async () => {
+    let attempts = 0;
+    await assert.rejects(
+      () =>
+        withRetry(
+          async () => {
+            attempts += 1;
+            throw new Error(`failure ${attempts}`);
+          },
+          3,
+          "test",
+          0
+        ),
+      /failure 3/,
+      "the caller should see why the last attempt failed, not the first"
+    );
+    assert.equal(attempts, 3, "should try exactly `attempts` times, no more and no fewer");
   });
 });
 

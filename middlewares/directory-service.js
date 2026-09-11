@@ -191,6 +191,42 @@ export function withDeadline(promise, ms, label) {
   ]);
 }
 
+function delay(ms) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  });
+}
+
+/**
+ * Retries a transient failure in one call rather than letting it take the
+ * whole fetch down — observed live against a ~14,000-user realm: a single
+ * page far into the run hit `directoryApiTimeoutMs` once, and because
+ * nothing retried, that one timeout discarded every page already fetched in
+ * the same run (the disk cache below is only written at the very end) and
+ * left the in-memory cache empty too. `attemptFn` is a thunk, not a promise,
+ * so each attempt (including re-fetching a token — see the callers) starts
+ * fresh rather than re-awaiting whatever failed the first time. `delayMs`
+ * (default 1000, scaled by attempt number) exists as a parameter rather than
+ * a hardcoded constant so tests can make retries near-instant instead of
+ * actually waiting seconds per attempt.
+ */
+export async function withRetry(attemptFn, attempts, label, delayMs = 1000) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await attemptFn();
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) {
+        console.error(`Directory search: ${label} failed (attempt ${attempt}/${attempts}), retrying:`, error.message);
+        await delay(delayMs * attempt);
+      }
+    }
+  }
+  throw lastError;
+}
+
 /**
  * The in-flight fetch, while one is running — so a search that lands during
  * the startup warm-up (or during any other refresh) awaits that same fetch
@@ -396,10 +432,14 @@ export function writeDirectoryDiskCache(users, count) {
 export async function fetchAllUserPages(getToken) {
   const users = [];
   for (;;) {
-    const token = await getToken();
-    const page = await fetchDirectoryUserPage(users.length, token);
+    const first = users.length;
+    const page = await withRetry(
+      async () => fetchDirectoryUserPage(first, await getToken()),
+      3,
+      `admin user page fetch (first=${first})`
+    );
     users.push(...page);
-    console.log(`Directory search: fetched page at first=${users.length - page.length} (${users.length} users so far)`);
+    console.log(`Directory search: fetched page at first=${first} (${users.length} users so far)`);
     if (page.length < directoryPageSize) break;
   }
   return users;
@@ -457,7 +497,11 @@ async function fetchAllDirectoryUsers() {
       roleLookupConcurrency,
       async (user) => ({
         ...user,
-        clientRoleNames: await fetchClientRoleNames(user.id, await getDirectoryServiceToken(), resource),
+        clientRoleNames: await withRetry(
+          async () => fetchClientRoleNames(user.id, await getDirectoryServiceToken(), resource),
+          3,
+          `admin role-mappings fetch (user ${user.id})`
+        ),
       }),
       (completed, total) => {
         const percent = Math.floor((completed / total) * 20) * 5;
