@@ -267,8 +267,11 @@ async function fetchAllDirectoryUsers() {
     return directoryUsersCache;
   }
 
+  console.log("Directory search: cache stale or empty, fetching all users and role-mappings from Keycloak...");
+  const startedAt = now;
   const resource = readKeycloakConfig().resource;
   const users = await fetchAllUserPages(getDirectoryServiceToken);
+  console.log(`Directory search: fetched ${users.length} users, now resolving their role-mappings...`);
 
   // One role-mappings call per user, since Keycloak offers no bulk form of it.
   // All of them at once was survivable while the list above was capped at a
@@ -283,6 +286,7 @@ async function fetchAllDirectoryUsers() {
     clientRoleNames: await fetchClientRoleNames(user.id, await getDirectoryServiceToken(), resource),
   }));
   directoryUsersCachedAt = now;
+  console.log(`Directory search: done, ${directoryUsersCache.length} users and their classes cached (${Date.now() - startedAt}ms).`);
   return directoryUsersCache;
 }
 
