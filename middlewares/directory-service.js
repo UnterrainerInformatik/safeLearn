@@ -170,6 +170,27 @@ let directoryUsersCachedAt = 0;
 const directoryApiTimeoutMs = 30 * 1000;
 
 /**
+ * A backstop for `AbortSignal.timeout` above: observed live, a Keycloak
+ * admin-API response whose headers arrive quickly but whose body streams
+ * far slower than `directoryApiTimeoutMs` did not reject via the signal —
+ * `fetch`'s abort handling isn't guaranteed to cover body consumption across
+ * every Node/undici version the same way. Racing against a plain timer does
+ * not depend on that: whichever settles first wins, so the caller is always
+ * released by `ms`, even though the loser (the fetch itself) keeps running
+ * in the background rather than actually being cancelled. That's an accepted
+ * cost — a dangling request is far cheaper than a search that never returns.
+ */
+export function withDeadline(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      const timer = setTimeout(() => reject(new Error(`${label} did not complete within ${ms}ms`)), ms);
+      timer.unref?.();
+    }),
+  ]);
+}
+
+/**
  * The in-flight fetch, while one is running — so a search that lands during
  * the startup warm-up (or during any other refresh) awaits that same fetch
  * instead of starting a second one alongside it against the same realm.
@@ -185,7 +206,7 @@ let directoryUsersFetchPromise = null;
  * `teacher`, a class, or `examParticipant` this way, so the role/group half of
  * a search would otherwise find nothing on such a realm at all.
  */
-async function fetchClientRoleNames(userId, token, resource) {
+async function fetchClientRoleNamesUnbounded(userId, token, resource) {
   const url = `${adminApiBaseUrl()}users/${userId}/role-mappings`;
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
@@ -197,6 +218,14 @@ async function fetchClientRoleNames(userId, token, resource) {
   const mappings = await response.json();
   const clientMappings = mappings.clientMappings?.[resource]?.mappings;
   return Array.isArray(clientMappings) ? clientMappings.map((mapping) => mapping.name) : [];
+}
+
+function fetchClientRoleNames(userId, token, resource) {
+  return withDeadline(
+    fetchClientRoleNamesUnbounded(userId, token, resource),
+    directoryApiTimeoutMs,
+    `admin role-mappings fetch (user ${userId})`
+  );
 }
 
 /**
@@ -251,7 +280,7 @@ function unverifiedJwtClaims(token) {
   }
 }
 
-export async function fetchDirectoryUserPage(first, token) {
+async function fetchDirectoryUserPageUnbounded(first, token) {
   const url = `${adminApiBaseUrl()}users?briefRepresentation=false&first=${first}&max=${directoryPageSize}`;
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
@@ -271,6 +300,14 @@ export async function fetchDirectoryUserPage(first, token) {
   }
   const page = await response.json();
   return Array.isArray(page) ? page : [];
+}
+
+export function fetchDirectoryUserPage(first, token) {
+  return withDeadline(
+    fetchDirectoryUserPageUnbounded(first, token),
+    directoryApiTimeoutMs,
+    `admin user page fetch (first=${first})`
+  );
 }
 
 /**

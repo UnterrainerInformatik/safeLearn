@@ -18,6 +18,7 @@ import {
   fetchAllUserPages,
   fetchDirectoryUserPage,
   resolveCallerRoles,
+  withDeadline,
 } from "../middlewares/directory-service.js";
 
 const originalFetch = global.fetch;
@@ -115,5 +116,21 @@ describe("resolveCallerRoles", () => {
     const { isAdmin, isTeacher } = resolveCallerRoles("OU=Teachers,DC=example,DC=com", undefined);
     assert.equal(isTeacher, true, "the existing LDAP path should still work after moving into resolveCallerRoles");
     assert.equal(isAdmin, false);
+  });
+});
+
+describe("withDeadline", () => {
+  test("resolves with the wrapped promise's value when it settles before the deadline", async () => {
+    const result = await withDeadline(Promise.resolve("done"), 1000, "test");
+    assert.equal(result, "done");
+  });
+
+  test("rejects once the deadline elapses, for a promise that never settles on its own", async () => {
+    const neverSettles = new Promise(() => {});
+    await assert.rejects(
+      () => withDeadline(neverSettles, 10, "the slow thing"),
+      /the slow thing did not complete within 10ms/,
+      "a hung admin-API call (headers fine, body never finishes) must still release its caller"
+    );
   });
 });
