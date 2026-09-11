@@ -26,23 +26,20 @@ operations:
   archive:
     guidance:
       - >-
-        Retire the source proposal file. Changes in this project often originate
-        from a hand-written request in AI/proposals/, recorded as a line
-        "Source proposal: AI/proposals/<file>.md" near the top of the change's
-        proposal.md - the path may be wrapped in backticks, strip them.
-        After the change is archived successfully, read that line
-        and move the referenced file to the archived change directory as
-        source-proposal.md - for example
-        "git mv AI/proposals/install-puppeteer.md
-        AI/openspec/changes/archive/<archived-change-dir>/source-proposal.md".
-        Move it, never delete it: the file is the user's original wording and
-        belongs to the change's history, where a reader of the archived change
-        can still find it. Moving it out of AI/proposals/ is what stops the
-        session-start hook from offering the same request again.
+        Retire the backlog entry. Changes in this project often originate
+        from an entry in AI/open-proposals.md, recorded as a line
+        "Source: AI/open-proposals.md" near the top of the change's
+        proposal.md, naming which entry (by its bold lead-in). After the
+        change is archived successfully, read that line and delete the named
+        entry from AI/open-proposals.md. Delete it, do not move the text
+        anywhere: AI/open-proposals.md is fully tracked in git, so its history
+        already preserves the original wording, and deleting the entry is
+        what stops the session-start hook from offering the same request
+        again.
       - >-
-        If the change's proposal.md has no "Source proposal:" line, or the
-        referenced file no longer exists, archive normally and change nothing -
-        this is not an error.
+        If the change's proposal.md has no "Source:" line, or the named entry
+        is no longer in AI/open-proposals.md, archive normally and change
+        nothing - this is not an error.
       - >-
-        State the outcome in the archive summary: which file was moved and
-        where it went, or that no source proposal file had to be retired.
+        State the outcome in the archive summary: which backlog entry was
+        removed, or that no backlog entry had to be retired.

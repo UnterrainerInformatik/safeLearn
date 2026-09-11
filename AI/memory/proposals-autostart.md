@@ -1,20 +1,27 @@
 ---
 name: proposals-autostart
-description: Hand-written requests in AI/proposals/ are listed by a SessionStart hook, become a change of the same name, and are moved into the change archive when that change is archived
-metadata:
+description: "Backlog entries in AI/open-proposals.md are listed by a SessionStart hook and whenever Gerald asks what's open, become a change, and are deleted from the file when that change is archived"
+metadata: 
+  node_type: memory
   type: project
+  originSessionId: 11aeab4b-947a-410c-ab7c-331348a72231
+  modified: 2026-09-11T08:47:27.736Z
 ---
 
-Gerald legt formlose Änderungswünsche als Markdown-File in `AI/proposals/` ab. Der Weg eines solchen Files durch den Workflow ist seit 2026-08-15 festgelegt:
+Gerald sammelt Bug-Reports und Ideen als Einträge in einer einzigen Datei, `AI/open-proposals.md` (Backlog). Seit 2026-09-11 ersetzt das den früheren Mechanismus mit einem File pro Vorschlag in `AI/proposals/` — dieser Ordner ist entfernt, der alte Mechanismus vollständig migriert.
 
-1. **Auflisten beim Session-Start.** Der `SessionStart`-Hook in `AI/claude/settings.json` (Matcher `startup|resume`) ruft `AI/claude/hooks/list-open-proposals.sh` auf. Das Script listet alle `*.md` in `AI/proposals/` samt erster Überschrift und fordert dazu auf, eines davon per `/opsx:propose` als nächsten Schritt anzubieten. Ist der Ordner leer oder fehlt er, gibt das Script nichts aus.
-2. **Verknüpfung mit dem Change.** Der OpenSpec-Change heißt wie das File ohne `.md` (`install-puppeteer.md` → Change `install-puppeteer`), und seine `proposal.md` trägt oben die Zeile `Source proposal: AI/proposals/<file>.md`. Bei Abweichung zwischen Name und Zeile gilt die Zeile.
-3. **Archivieren.** Beim Archivieren wandert das Quell-File nach `AI/openspec/changes/archive/<change>/source-proposal.md` — verschieben, nie löschen. Geregelt über `operations.archive.guidance` in `AI/openspec/config.yaml`, was das Archive-Skill via `openspec instructions archive --json` liest.
+**Format der Datei** (siehe die Datei selbst, Kommentar am Kopf): `# <Kategorie>`-Überschriften (aktuell "Darstellungsfehler", "Funktionsfehler", "Allgemein"), darunter je `## <Titel>` mit freier Beschreibung. Bewusst formlos — keine feste Struktur pro Feld, keine IDs.
 
-**Why:** Ohne den Hook bleiben Requests in `AI/proposals/` unbemerkt liegen — sie werden nur gefunden, wenn sich jemand an den Ordner erinnert. Und ohne Schritt 3 bliebe ein erledigtes File liegen und würde bei jedem Start erneut vorgeschlagen, womit die Liste zu Dauerlärm verkommt. Verschieben statt Löschen, weil der Originaltext zur Historie des Changes gehört.
+1. **Auflisten beim Session-Start.** Der `SessionStart`-Hook (`AI/claude/hooks/list-open-proposals.sh`, verdrahtet in `AI/claude/settings.json`, Matcher `startup|resume`) zählt `## `-Zeilen in `AI/open-proposals.md`; gibt es welche, wird der volle Dateiinhalt ausgegeben und dazu aufgefordert, einen Eintrag als nächsten Schritt anzubieten (per `/opsx:propose`). Leere Datei, fehlende Datei, oder nur Kategorie-Überschriften ohne Einträge → keine Ausgabe, Exit 0 immer.
+2. **Verknüpfung mit dem Change.** Ein aus einem Eintrag entstandener Change trägt in seiner `proposal.md` die Zeile `Source: AI/open-proposals.md`, die den Eintrag benennt.
+3. **Archivieren.** Beim Archivieren wird der benannte Eintrag aus `AI/open-proposals.md` **gelöscht** (nicht verschoben) — geregelt über `operations.archive.guidance` in `AI/openspec/config.yaml`.
 
-**`AI/` ist in git — vollständig.** `git ls-files AI/` liefert 116 Files, nichts unter `AI/` ist per `.gitignore` ausgenommen, und Gerald hat das am 2026-08-16 ausdrücklich bestätigt. Die `operations.archive.guidance` in `AI/openspec/config.yaml` hatte das Verschieben ursprünglich damit begründet, dass `AI/` ungetrackt und ein `rm` deshalb unwiederbringlich sei; diese Begründung ist am 2026-08-16 aus der Config entfernt worden. Kein Design und keine Entscheidung darf sich darauf stützen, dass `AI/` ungetrackt wäre.
+**Warum löschen statt verschieben:** `AI/` ist vollständig in git (`git ls-files AI/` zeigte am 2026-08-16 alle Files erfasst, nichts per `.gitignore` ausgenommen, von Gerald bestätigt) — die Git-Historie von `AI/open-proposals.md` behält den Originaltext eines gelöschten Eintrags ohnehin, ein separates Aufbewahren wie beim alten Datei-pro-Vorschlag-Mechanismus ist unnötig. Kein Design darf sich darauf stützen, dass `AI/` ungetrackt wäre.
 
-**Nachsehen, wenn Gerald nach neuer Arbeit fragt.** Seit 2026-09-09 gilt zusätzlich: Jedes Mal, wenn Gerald nach neuer Arbeit fragt ("was gibt es zu tun", "womit machen wir weiter", ein `/opsx:propose` ohne Argument), zuerst `AI/proposals/` auflisten und die offenen Files anbieten — nicht nur beim Session-Start. Eine Datei `AI/open-proposals.md` gibt es nicht; Gerald nennt den Ordner gelegentlich so, weil das Hook-Script `list-open-proposals.sh` heißt und seine Ausgabe mit "Open proposals in AI/proposals/" beginnt. Gemeint ist immer der Ordner.
+**Nachsehen, wenn Gerald nach neuer Arbeit fragt.** Jedes Mal, wenn Gerald nach neuer Arbeit fragt ("was gibt es zu tun", "womit machen wir weiter", "wassup", ein `/opsx:propose` ohne Argument), zuerst `AI/open-proposals.md` lesen und offene Einträge anbieten — nicht nur beim Session-Start.
 
-**How to apply:** Aus einem Proposal-File immer einen gleichnamigen Change bauen und die `Source proposal:`-Zeile setzen. Beim Archivieren prüfen, ob diese Zeile existiert, und das File verschieben — fehlt Zeile oder File, ist das kein Fehler. Die Archive-Guidance ist laut Skill nur *advisory*, also nicht verlassen darauf: bleibt ein File liegen, taucht es beim nächsten Start wieder auf und wird dann von Hand einsortiert. Siehe [[ai-folder-layout]] und [[openspec-setup]].
+**Neue Einträge:** Kommt in einem Gespräch ein Bug oder eine Idee auf, die nicht sofort erledigt wird, gehört sie als Eintrag in `AI/open-proposals.md`, nicht nur im Gesprächsverlauf stehen bleiben. Sprache der Einträge ist Deutsch, wie Geralds eigene rohe Notizen (vgl. [[language-german]] — die Docs-müssen-Englisch-Regel in [[code-language-english]] gilt für formale Specs/Architektur-Docs, nicht für diese Rohnotizen).
+
+**Formale Spec:** `AI/openspec/specs/proposal-intake/spec.md` beschreibt diesen Mechanismus als Requirements, am 2026-09-11 direkt aktualisiert (ohne eigenen Change-Zyklus — war eine direkte Anweisung Geralds, kein `propose:`).
+
+**How to apply:** Aus einem Backlog-Eintrag immer einen Change mit der `Source: AI/open-proposals.md`-Zeile bauen. Beim Archivieren den benannten Eintrag aus `AI/open-proposals.md` löschen — fehlt die Zeile oder der Eintrag, ist das kein Fehler. Die Archive-Guidance ist laut Skill nur *advisory*: bleibt ein Eintrag liegen, taucht er beim nächsten Start wieder auf und wird dann von Hand einsortiert. Siehe [[ai-folder-layout]] und [[openspec-setup]].

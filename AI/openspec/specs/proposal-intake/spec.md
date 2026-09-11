@@ -2,24 +2,24 @@
 
 ## Purpose
 
-Defines how hand-written change requests dropped into `AI/proposals/` enter the OpenSpec workflow: they are surfaced automatically at session start, stay traceable to the change they produce, and are retired into the change archive once that change is archived.
+Defines how bug reports and ideas enter the OpenSpec workflow: they are collected as entries in `AI/open-proposals.md`, surfaced automatically whenever the user asks what there is to do, stay traceable to the change they produce, and are retired once that change is archived.
 
 ## Requirements
 
-### Requirement: Open proposals are surfaced at session start
+### Requirement: The backlog is surfaced at session start
 
-When a Claude Code session starts in this repository, the assistant SHALL be told, without being asked, which Markdown files are currently waiting in `AI/proposals/`, and SHALL offer them to the user as a next step.
+When a Claude Code session starts in this repository, the assistant SHALL be told, without being asked, which entries are currently waiting in `AI/open-proposals.md`, and SHALL offer them to the user as a next step.
 
-#### Scenario: Proposals are waiting
+#### Scenario: Entries are waiting
 
-- **WHEN** a session starts and `AI/proposals/` contains one or more `.md` files
-- **THEN** the assistant receives, as part of its starting context, the name of every such file
+- **WHEN** a session starts and `AI/open-proposals.md` holds one or more entries
+- **THEN** the assistant receives, as part of its starting context, the full list of entries
 - **AND** the assistant offers turning one of them into an OpenSpec change as the next step, before starting other work
 
-#### Scenario: No proposals are waiting
+#### Scenario: No entries are waiting
 
-- **WHEN** a session starts and `AI/proposals/` contains no `.md` files, or the directory does not exist
-- **THEN** no proposal-related context is produced and nothing is offered to the user
+- **WHEN** a session starts and `AI/open-proposals.md` is missing, or holds no entries beyond its headings and placeholder text
+- **THEN** no backlog-related context is produced and nothing is offered to the user
 - **AND** the session start produces no error and no visible output from the check
 
 #### Scenario: The check runs once per session
@@ -29,46 +29,57 @@ When a Claude Code session starts in this repository, the assistant SHALL be tol
 
 #### Scenario: The check never blocks the session
 
-- **WHEN** the check fails for any reason — unreadable directory, missing interpreter, non-zero exit
+- **WHEN** the check fails for any reason — unreadable file, missing interpreter, non-zero exit
 - **THEN** the session starts normally and the failure does not surface as an error to the user
 
-### Requirement: A change records the proposal file it came from
+### Requirement: The backlog is checked whenever the user asks what there is to do
 
-A change created from a file in `AI/proposals/` SHALL carry a machine- and human-readable link back to that file, so that archiving can retire the right one.
+Not only at session start: whenever the user asks a question in the spirit of "what is there to do", the assistant SHALL check `AI/open-proposals.md` for waiting entries before answering, in addition to any other source of pending work.
 
-#### Scenario: Change is created from a proposal file
+#### Scenario: The user asks what there is to do
 
-- **WHEN** an OpenSpec change is created from a file in `AI/proposals/`
-- **THEN** the change is named after that file's basename, without the `.md` extension
-- **AND** the change's `proposal.md` states the source path in the form `Source proposal: AI/proposals/<file>.md`
+- **WHEN** the user asks a question of that kind, in this or a later session
+- **THEN** the assistant reads `AI/open-proposals.md` before answering, and offers any entry found there alongside other pending work
 
-#### Scenario: Change name and file name diverge
+### Requirement: A new bug report or idea is added as an entry
 
-- **WHEN** a change's name does not match any file in `AI/proposals/`
-- **THEN** the `Source proposal:` line in its `proposal.md` is the authoritative link
+Where a bug report or idea comes up — in conversation or otherwise — and is not acted on right away, it SHALL be added to `AI/open-proposals.md` as an entry, under the "Bugs" or "Ideas" section as fits, rather than left to be recalled from the conversation alone.
 
-#### Scenario: Change has no proposal file behind it
+#### Scenario: A bug is reported and not fixed immediately
 
-- **WHEN** a change was created directly from a conversation rather than from a file in `AI/proposals/`
-- **THEN** it carries no `Source proposal:` line, and archiving it retires no file
+- **WHEN** the user reports a bug and it is not resolved in the same turn
+- **THEN** it is recorded as an entry in `AI/open-proposals.md`, with enough detail (what was reported, what has been established so far, what remains blocked or undecided) that work can resume from the entry alone
 
-### Requirement: Archiving retires the source proposal file
+### Requirement: A change records the entry it came from
 
-When a change that came from `AI/proposals/` is archived, its source file SHALL leave `AI/proposals/` and SHALL be preserved with the archived change, so the request is never offered again while its original wording stays available.
+A change created from an entry in `AI/open-proposals.md` SHALL carry a machine- and human-readable link back to that entry, so that archiving can retire the right one.
 
-#### Scenario: Archiving a change with a source proposal file
+#### Scenario: Change is created from a backlog entry
 
-- **WHEN** a change carrying a `Source proposal:` line is archived successfully
-- **THEN** the referenced file is moved out of `AI/proposals/` into the archived change's directory as `source-proposal.md`
-- **AND** the file's content is preserved unchanged
+- **WHEN** an OpenSpec change is created from an entry in `AI/open-proposals.md`
+- **THEN** the change's `proposal.md` states the source in the form `Source: AI/open-proposals.md`, naming the entry it came from
+
+#### Scenario: Change has no backlog entry behind it
+
+- **WHEN** a change was created directly from a conversation without first passing through `AI/open-proposals.md`
+- **THEN** it carries no `Source:` line, and archiving it retires no entry
+
+### Requirement: Archiving retires the source entry
+
+When a change that came from `AI/open-proposals.md` is archived, its source entry SHALL be removed from the file, so the request is never offered again. The entry SHALL be deleted outright rather than moved: `AI/open-proposals.md` is fully tracked in git, so its history already preserves the original wording.
+
+#### Scenario: Archiving a change with a source entry
+
+- **WHEN** a change carrying a `Source:` line is archived successfully
+- **THEN** the named entry is deleted from `AI/open-proposals.md`
 - **AND** the next session start no longer lists it
 
-#### Scenario: The source file is already gone
+#### Scenario: The source entry is already gone
 
-- **WHEN** a change carrying a `Source proposal:` line is archived but the referenced file no longer exists
-- **THEN** archiving completes normally and reports that no file had to be retired
+- **WHEN** a change carrying a `Source:` line is archived but the named entry is no longer in `AI/open-proposals.md`
+- **THEN** archiving completes normally and reports that no entry had to be retired
 
 #### Scenario: Archiving is reported
 
-- **WHEN** a source proposal file is retired during archiving
-- **THEN** the archive summary states which file was moved and where it went
+- **WHEN** a source entry is retired during archiving
+- **THEN** the archive summary states which entry was removed
