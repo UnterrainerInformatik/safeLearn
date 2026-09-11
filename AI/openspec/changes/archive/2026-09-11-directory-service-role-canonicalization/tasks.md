@@ -1,0 +1,14 @@
+## 1. Fix the canonicalization gap
+
+- [x] 1.1 In `middlewares/directory-service.js`, extract the role decision out of `verifyCallerIdentity` into a small exported pure function, e.g. `resolveCallerRoles(ldap, resourceAccessRoles)`, returning `{ isAdmin, isTeacher }`. Move the existing `deriveRoles(ldap)` call and the `resourceRoles` merge loop into it unchanged, then have `verifyCallerIdentity` call it with `introspection.ldap` and `introspection.resource_access?.[client.client_id]?.roles`.
+- [x] 1.2 In that extracted function, canonicalize the `resourceAccessRoles` merge the same way `deriveRoles` already canonicalizes LDAP-derived roles: after lowercasing/trimming a role name, map `"teachers"` → `"teacher"` and `"students"` → `"student"` before setting it on the role map, mirroring `keycloak-middleware.js`'s `deriveRoles`.
+- [x] 1.3 Confirm `verifyCallerIdentity`'s behavior is otherwise unchanged: still refuses on a missing/malformed bearer header, an inactive token, or an introspection call that throws, before ever reaching role resolution.
+
+## 2. Test coverage
+
+- [x] 2.1 In `test/directory-service.test.js`, add a `describe("resolveCallerRoles")` block exercising: a caller whose only signal is the plural client role `teachers` → `isTeacher: true`; a caller with `admin` → `isAdmin: true`; a caller with neither `teacher`/`teachers`/`admin` present → both `false`; a caller whose teacher grant arrives only via the `ldap` claim's `OU=Teachers` → `isTeacher: true` (regression guard that the existing LDAP path still works after the extraction).
+- [x] 2.2 Run `npm test` and confirm the new unit tests pass and nothing in `test/checks/directory-search.js` regresses (it exercises the demo realm's existing singular-role accounts and must keep passing unchanged). Ran: all 7 `test/directory-service.test.js` tests pass (including the 4 new `resolveCallerRoles` cases). `test/checks/directory-search.js` has 6 pre-existing failures unrelated to this change — documented in `AI/memory/directory-service-credentials-invalid.md`: this local environment's `DIRECTORY_SERVICE_CLIENT_ID`/`_SECRET` are rejected by the real realm, so every check expecting `200` gets `502`. The three refusal-path checks that exercise the auth gate this change touches (student token refused, missing bearer refused, invalidated token refused) all pass, confirming no regression.
+
+## 3. Spec sync
+
+- [x] 3.1 After implementation, verify the `directory-search` delta spec's new scenario ("The teacher role is held as the plural client role") is satisfied by the new unit test from 2.1, not left as an untested requirement. Verified: `test/directory-service.test.js`'s "a caller whose only signal is the plural client role teachers is recognized as a teacher" test asserts `resolveCallerRoles(undefined, ["teachers"])` returns `isTeacher: true` — the same decision `verifyCallerIdentity` now makes from `resource_access` roles, directly covering the scenario.

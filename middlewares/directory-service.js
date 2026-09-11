@@ -32,6 +32,37 @@ function adminApiBaseUrl() {
 const bearerPattern = /^Bearer\s+(\S+)$/i;
 
 /**
+ * The teacher/admin decision, split out as pure data in, pure flags out: no
+ * introspection, no networking, so it can be unit-tested without a live
+ * Keycloak (`client.introspect` cannot be substituted in a test process —
+ * see `test/directory-service.test.js`).
+ *
+ * Merges the same two sources `hasRoles` (utils.js) merges for the session
+ * path: the LDAP-derived group map and the client roles Keycloak assigned
+ * directly. Either can carry "admin" or "teacher", independent of whether the
+ * `ldap` claim is mapped onto the access token this endpoint sees. Both
+ * sources canonicalize the plural client-role spelling (`teachers` ->
+ * `teacher`, `students` -> `student`) the same way `deriveRoles`
+ * (keycloak-middleware.js) already does for LDAP, so a caller recognized as a
+ * teacher/admin anywhere else in the system is never refused here on account
+ * of the role's plural spelling alone.
+ */
+export function resolveCallerRoles(ldap, resourceAccessRoles) {
+  const roles = deriveRoles(ldap);
+  if (Array.isArray(resourceAccessRoles)) {
+    for (const role of resourceAccessRoles) {
+      let normalized = typeof role === "string" ? role.trim().toLowerCase() : "";
+      if (!normalized) continue;
+      if (normalized === "teachers") normalized = "teacher";
+      if (normalized === "students") normalized = "student";
+      roles[normalized] = true;
+    }
+  }
+
+  return { isAdmin: !!roles.admin, isTeacher: !!roles.teacher };
+}
+
+/**
  * Whether `req` carries proof of a currently valid teacher or admin identity.
  *
  * A missing header, a malformed bearer value, an inactive token, an
@@ -57,21 +88,10 @@ export async function verifyCallerIdentity(req) {
     return { authorized: false };
   }
 
-  // The same two sources `hasRoles` (utils.js) merges for the session path:
-  // the LDAP-derived group map and the client roles Keycloak assigned
-  // directly. Either can carry "admin" or "teacher", independent of whether
-  // the `ldap` claim is mapped onto the access token this endpoint sees.
-  const roles = deriveRoles(introspection.ldap);
-  const resourceRoles = introspection.resource_access?.[client.client_id]?.roles;
-  if (Array.isArray(resourceRoles)) {
-    for (const role of resourceRoles) {
-      const normalized = typeof role === "string" ? role.trim().toLowerCase() : "";
-      if (normalized) roles[normalized] = true;
-    }
-  }
-
-  const isAdmin = !!roles.admin;
-  const isTeacher = !!roles.teacher;
+  const { isAdmin, isTeacher } = resolveCallerRoles(
+    introspection.ldap,
+    introspection.resource_access?.[client.client_id]?.roles
+  );
   return { authorized: isAdmin || isTeacher };
 }
 

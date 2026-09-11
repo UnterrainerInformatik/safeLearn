@@ -14,7 +14,11 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, test } from "node:test";
 
-import { fetchAllUserPages, fetchDirectoryUserPage } from "../middlewares/directory-service.js";
+import {
+  fetchAllUserPages,
+  fetchDirectoryUserPage,
+  resolveCallerRoles,
+} from "../middlewares/directory-service.js";
 
 const originalFetch = global.fetch;
 
@@ -69,5 +73,31 @@ describe("fetchDirectoryUserPage", () => {
       /status 500/,
       "a failed admin-API page request should surface as an error, not as an empty (indistinguishable-from-last) page"
     );
+  });
+});
+
+describe("resolveCallerRoles", () => {
+  test("a caller whose only signal is the plural client role teachers is recognized as a teacher", () => {
+    const { isAdmin, isTeacher } = resolveCallerRoles(undefined, ["teachers"]);
+    assert.equal(isTeacher, true, "the plural client role should canonicalize to teacher, same as deriveRoles does for LDAP");
+    assert.equal(isAdmin, false);
+  });
+
+  test("a caller holding admin is recognized as an admin", () => {
+    const { isAdmin, isTeacher } = resolveCallerRoles(undefined, ["admin"]);
+    assert.equal(isAdmin, true);
+    assert.equal(isTeacher, false);
+  });
+
+  test("a caller holding neither teacher/teachers nor admin is recognized as neither", () => {
+    const { isAdmin, isTeacher } = resolveCallerRoles(undefined, ["student", "examParticipant"]);
+    assert.equal(isAdmin, false);
+    assert.equal(isTeacher, false);
+  });
+
+  test("a teacher grant arriving only via the ldap claim's OU=Teachers still resolves, unaffected by the extraction", () => {
+    const { isAdmin, isTeacher } = resolveCallerRoles("OU=Teachers,DC=example,DC=com", undefined);
+    assert.equal(isTeacher, true, "the existing LDAP path should still work after moving into resolveCallerRoles");
+    assert.equal(isAdmin, false);
   });
 });
