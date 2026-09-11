@@ -17,22 +17,32 @@ import path from "node:path";
 import { afterEach, describe, test } from "node:test";
 
 import {
+  appendDirectoryFetchProgressPage,
+  clearDirectoryFetchProgress,
   fetchAllUserPages,
   fetchDirectoryUserCount,
   fetchDirectoryUserPage,
+  fetchLastUserAdminEventTime,
+  isDirectoryCacheFresh,
   readDirectoryDiskCache,
+  readDirectoryFetchProgress,
   resolveCallerRoles,
   withDeadline,
   withRetry,
   writeDirectoryDiskCache,
+  writeDirectoryFetchProgressMeta,
 } from "../middlewares/directory-service.js";
 
 const originalFetch = global.fetch;
 const directoryCacheFilePath = path.join("data", "directory-cache.json");
+const progressMetaFilePath = path.join("data", "directory-fetch-progress.meta.json");
+const progressPagesFilePath = path.join("data", "directory-fetch-progress.jsonl");
 
 afterEach(() => {
   global.fetch = originalFetch;
   fs.rmSync(directoryCacheFilePath, { force: true });
+  fs.rmSync(progressMetaFilePath, { force: true });
+  fs.rmSync(progressPagesFilePath, { force: true });
 });
 
 /** A page of `count` distinct Keycloak-user-shaped objects, ids offset by `first`. */
@@ -53,10 +63,11 @@ describe("fetchAllUserPages", () => {
       return { ok: true, json: async () => pages[pageIndex] };
     };
 
-    const users = await fetchAllUserPages(async () => "token");
+    const { users, skipped } = await fetchAllUserPages(async () => "token");
 
     assert.equal(calls, 3, "a short final page should stop the loop, not be mistaken for more");
     assert.equal(users.length, 230, "every user across all pages should be returned");
+    assert.deepEqual(skipped, [], "nothing failed, so nothing should be reported as skipped");
     assert.deepEqual(
       users.map((user) => user.id),
       [...pages[0], ...pages[1], ...pages[2]].map((user) => user.id),
@@ -67,7 +78,7 @@ describe("fetchAllUserPages", () => {
   test("stops after a single short page", async () => {
     global.fetch = async () => ({ ok: true, json: async () => page(0, 5) });
 
-    const users = await fetchAllUserPages(async () => "token");
+    const { users } = await fetchAllUserPages(async () => "token");
 
     assert.equal(users.length, 5, "a realm smaller than one page should not trigger a second request");
   });
@@ -102,10 +113,66 @@ describe("fetchAllUserPages", () => {
       return { ok: true, json: async () => pages[first / 100] };
     };
 
-    const users = await fetchAllUserPages(async () => "token");
+    const { users } = await fetchAllUserPages(async () => "token");
 
     assert.equal(secondPageAttempts, 2, "the failing page should have been retried, not given up on immediately");
     assert.equal(users.length, 130, "a transient failure on one page must not discard the pages already fetched");
+  });
+
+  test("resumes from a seeded checkpoint at nextFirst, rather than starting over at first=0", async () => {
+    let calls = 0;
+    global.fetch = async (url) => {
+      calls += 1;
+      const first = Number(new URL(url).searchParams.get("first"));
+      assert.equal(first, 14200, "a resumed fetch must ask Keycloak for the next unfetched offset, not first=0");
+      return { ok: true, json: async () => page(14200, 30) };
+    };
+
+    const seedUsers = page(0, 14200);
+    const { users, skipped } = await fetchAllUserPages(async () => "token", {
+      users: seedUsers,
+      skipped: [],
+      nextFirst: 14200,
+    });
+
+    assert.equal(calls, 1, "only the missing page should be fetched");
+    assert.equal(users.length, 14230, "seeded users plus the newly-fetched page should both be present");
+    assert.deepEqual(skipped, []);
+  });
+
+  test("isolates a single record that keeps failing instead of losing the whole page", async () => {
+    // A 100-user realm whose one full-size (max=100) page request fails outright
+    // — standing in for the live first=14200 case, where it's an unresolved
+    // AbortSignal timeout rather than an HTTP error, but fetchAllUserPages reacts
+    // to withRetry exhausting either way. Any narrower (non-brief) request that
+    // still covers offset 37 fails the same way; a brief lookup at exactly that
+    // offset succeeds, standing in for the one lightweight identity fetch
+    // bisection falls back to. The next page (first=100) is a normal short
+    // (empty) page, so the loop ends cleanly once bisection resolves the first.
+    global.fetch = async (url) => {
+      const params = new URL(url).searchParams;
+      const first = Number(params.get("first"));
+      const max = Number(params.get("max"));
+      const brief = params.get("briefRepresentation") === "true";
+      const coversOffset37 = first < 100 && first <= 37 && first + max > 37;
+      if ((first === 0 && max === 100) || (coversOffset37 && !brief)) {
+        return { ok: false, status: 504, text: async () => "Gateway Timeout" };
+      }
+      if (coversOffset37 && brief) {
+        return { ok: true, json: async () => [{ id: "user-37", username: "broken.user" }] };
+      }
+      return { ok: true, json: async () => page(first, Math.max(0, Math.min(max, 100 - first))) };
+    };
+
+    const { users, skipped } = await fetchAllUserPages(async () => "token");
+
+    assert.equal(skipped.length, 1, "exactly the one reproducibly-failing record should be reported as skipped");
+    assert.deepEqual(skipped[0], { offset: 37, id: "user-37", username: "broken.user" });
+    assert.equal(users.length, 99, "every other user on the page should still be recovered");
+    assert.ok(
+      !users.some((user) => user.id === "user-37"),
+      "the skipped record itself must not appear in the recovered users"
+    );
   });
 });
 
@@ -245,7 +312,22 @@ describe("readDirectoryDiskCache / writeDirectoryDiskCache", () => {
     const cache = readDirectoryDiskCache();
     assert.deepEqual(cache.users, users);
     assert.equal(cache.count, 1);
+    assert.deepEqual(cache.skipped, [], "no skipped records were passed, so none should come back");
     assert.ok(Date.now() - cache.cachedAt < 1000, "cachedAt should be stamped at write time");
+  });
+
+  test("round-trips a skipped-records list alongside the users", () => {
+    writeDirectoryDiskCache([], 1, [{ offset: 37, id: "user-37", username: "broken.user" }]);
+
+    const cache = readDirectoryDiskCache();
+    assert.deepEqual(cache.skipped, [{ offset: 37, id: "user-37", username: "broken.user" }]);
+  });
+
+  test("defaults skipped to an empty array for a cache written before that field existed", () => {
+    fs.mkdirSync(path.dirname(directoryCacheFilePath), { recursive: true });
+    fs.writeFileSync(directoryCacheFilePath, JSON.stringify({ count: 1, cachedAt: Date.now(), users: [] }));
+
+    assert.deepEqual(readDirectoryDiskCache().skipped, []);
   });
 
   test("returns null for a file that isn't shaped like a cache, rather than throwing", () => {
@@ -260,5 +342,110 @@ describe("readDirectoryDiskCache / writeDirectoryDiskCache", () => {
     fs.writeFileSync(directoryCacheFilePath, "not json");
 
     assert.equal(readDirectoryDiskCache(), null);
+  });
+});
+
+describe("readDirectoryFetchProgress / appendDirectoryFetchProgressPage / writeDirectoryFetchProgressMeta", () => {
+  test("returns null when there is no checkpoint yet", () => {
+    assert.equal(readDirectoryFetchProgress(), null);
+  });
+
+  test("round-trips pages appended across multiple calls, in order", () => {
+    appendDirectoryFetchProgressPage(page(0, 100));
+    writeDirectoryFetchProgressMeta(230, [], 100);
+    appendDirectoryFetchProgressPage(page(100, 100));
+    writeDirectoryFetchProgressMeta(230, [{ offset: 137, id: "user-137" }], 200);
+
+    const progress = readDirectoryFetchProgress();
+    assert.equal(progress.users.length, 200, "both appended pages should be present");
+    assert.equal(progress.nextFirst, 200, "nextFirst should reflect the latest meta write, not a derived count");
+    assert.equal(progress.targetCount, 230);
+    assert.deepEqual(progress.skipped, [{ offset: 137, id: "user-137" }]);
+    assert.deepEqual(
+      progress.users.map((user) => user.id),
+      [...page(0, 100), ...page(100, 100)].map((user) => user.id),
+      "pages should come back in append order"
+    );
+  });
+
+  test("clearDirectoryFetchProgress removes both files without throwing when nothing exists", () => {
+    appendDirectoryFetchProgressPage(page(0, 10));
+    writeDirectoryFetchProgressMeta(10, [], 10);
+
+    clearDirectoryFetchProgress();
+    assert.equal(readDirectoryFetchProgress(), null);
+
+    assert.doesNotThrow(() => clearDirectoryFetchProgress());
+  });
+
+  test("returns null for a meta file that isn't shaped like a checkpoint, rather than throwing", () => {
+    fs.mkdirSync(path.dirname(progressMetaFilePath), { recursive: true });
+    fs.writeFileSync(progressMetaFilePath, JSON.stringify({ unrelated: true }));
+
+    assert.equal(readDirectoryFetchProgress(), null);
+  });
+});
+
+describe("fetchLastUserAdminEventTime", () => {
+  test("returns the most recent event's time", async () => {
+    global.fetch = async (url) => {
+      assert.ok(String(url).includes("resourceTypes=USER"), "should filter to user-resource events");
+      return { ok: true, json: async () => [{ time: 1234567890 }] };
+    };
+
+    assert.equal(await fetchLastUserAdminEventTime("token"), 1234567890);
+  });
+
+  test("returns null when the realm has no admin events recorded", async () => {
+    global.fetch = async () => ({ ok: true, json: async () => [] });
+
+    assert.equal(await fetchLastUserAdminEventTime("token"), null);
+  });
+
+  test("returns null (not a rejection) when Admin Events isn't available, e.g. missing view-events", async () => {
+    global.fetch = async () => ({ ok: false, status: 403 });
+
+    assert.equal(await fetchLastUserAdminEventTime("token"), null);
+  });
+});
+
+describe("isDirectoryCacheFresh", () => {
+  test("is never fresh when the stored count no longer matches Keycloak's current count", async () => {
+    global.fetch = async () => ({ ok: true, json: async () => [{ time: 0 }] });
+
+    assert.equal(await isDirectoryCacheFresh(100, Date.now(), 101, "token"), false);
+  });
+
+  test("is fresh when the count matches and no admin event happened since caching, even well past the age bound", async () => {
+    const longAgo = Date.now() - 30 * 24 * 60 * 60 * 1000; // 30 days, past the 24h age fallback
+    global.fetch = async () => ({ ok: true, json: async () => [{ time: longAgo - 1000 }] });
+
+    assert.equal(
+      await isDirectoryCacheFresh(100, longAgo, 100, "token"),
+      true,
+      "admin-events evidence of 'nothing changed' should outweigh the plain age bound"
+    );
+  });
+
+  test("is stale when the count matches but an admin event happened after caching", async () => {
+    const cachedAt = Date.now() - 1000;
+    global.fetch = async () => ({ ok: true, json: async () => [{ time: Date.now() }] });
+
+    assert.equal(await isDirectoryCacheFresh(100, cachedAt, 100, "token"), false);
+  });
+
+  test("falls back to the plain age bound when admin-events can't be consulted", async () => {
+    global.fetch = async () => ({ ok: false, status: 403 });
+
+    assert.equal(
+      await isDirectoryCacheFresh(100, Date.now(), 100, "token"),
+      true,
+      "recently cached and count matches - should stay fresh without admin-events"
+    );
+    assert.equal(
+      await isDirectoryCacheFresh(100, Date.now() - 25 * 60 * 60 * 1000, 100, "token"),
+      false,
+      "older than the 24h fallback bound and count matches, but with no admin-events evidence either way"
+    );
   });
 });

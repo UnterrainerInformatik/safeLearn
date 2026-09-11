@@ -7,8 +7,8 @@
  * own credentials (`client` from `keycloak-middleware.js`) — no new secret for
  * that half. The directory itself is queried under a second, dedicated
  * confidential client (`DIRECTORY_SERVICE_CLIENT_ID`/`_SECRET`, service
- * accounts enabled, holding only `view-users`) that never sees the caller's
- * identity.
+ * accounts enabled, holding `view-users` and `view-events`) that never sees
+ * the caller's identity.
  */
 
 import fs from "fs";
@@ -317,11 +317,11 @@ function unverifiedJwtClaims(token) {
   }
 }
 
-async function fetchDirectoryUserPageUnbounded(first, token) {
-  const url = `${adminApiBaseUrl()}users?briefRepresentation=false&first=${first}&max=${directoryPageSize}`;
+async function fetchDirectoryUserPageUnbounded(first, token, max, brief, timeoutMs) {
+  const url = `${adminApiBaseUrl()}users?briefRepresentation=${brief}&first=${first}&max=${max}`;
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
-    signal: AbortSignal.timeout(directoryApiTimeoutMs),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) {
     const bodyText = await response.text().catch(() => "<unreadable>");
@@ -339,11 +339,21 @@ async function fetchDirectoryUserPageUnbounded(first, token) {
   return Array.isArray(page) ? page : [];
 }
 
-export function fetchDirectoryUserPage(first, token) {
+/**
+ * `max`/`brief`/`timeoutMs` default to a normal full page fetch; `bisectFailingRange`
+ * below is the only caller that overrides them, asking for a narrower range with a
+ * shorter deadline (or, at its base case, a `brief` representation) once a full page
+ * has already proven it hangs.
+ */
+export function fetchDirectoryUserPage(
+  first,
+  token,
+  { max = directoryPageSize, brief = false, timeoutMs = directoryApiTimeoutMs } = {}
+) {
   return withDeadline(
-    fetchDirectoryUserPageUnbounded(first, token),
-    directoryApiTimeoutMs,
-    `admin user page fetch (first=${first})`
+    fetchDirectoryUserPageUnbounded(first, token, max, brief, timeoutMs),
+    timeoutMs,
+    `admin user page fetch (first=${first}, max=${max})`
   );
 }
 
@@ -377,11 +387,13 @@ export function fetchDirectoryUserCount(token) {
 const directoryCacheFilePath = path.join("data", "directory-cache.json");
 
 /**
- * How long a disk cache is trusted once its stored count still matches
- * Keycloak's current count. A matching count only rules out someone being
- * added or removed — a role or class reassignment on an existing user
- * changes nothing about it — so this bounds that blind spot rather than
- * being the primary staleness check.
+ * How long a disk cache (or an in-progress fetch's checkpoint) is trusted
+ * once its stored count still matches Keycloak's current count, on a realm
+ * where `isDirectoryCacheFresh`'s admin-events check can't be consulted. A
+ * matching count only rules out someone being added or removed — a role or
+ * class reassignment on an existing user changes nothing about it — so this
+ * bounds that blind spot as a fallback, where admin-events would otherwise
+ * close it precisely.
  */
 const diskCacheMaxAgeMs = 24 * 60 * 60 * 1000;
 
@@ -391,19 +403,236 @@ export function readDirectoryDiskCache() {
     if (typeof parsed.count !== "number" || typeof parsed.cachedAt !== "number" || !Array.isArray(parsed.users)) {
       return null;
     }
-    return parsed;
+    return { ...parsed, skipped: Array.isArray(parsed.skipped) ? parsed.skipped : [] };
   } catch {
     return null;
   }
 }
 
-export function writeDirectoryDiskCache(users, count) {
+/** `skipped` (default none) carries forward any records `bisectFailingRange` gave up identifying below. */
+export function writeDirectoryDiskCache(users, count, skipped = []) {
   try {
     fs.mkdirSync(path.dirname(directoryCacheFilePath), { recursive: true });
-    fs.writeFileSync(directoryCacheFilePath, JSON.stringify({ count, cachedAt: Date.now(), users }));
+    fs.writeFileSync(directoryCacheFilePath, JSON.stringify({ count, cachedAt: Date.now(), users, skipped }));
   } catch (error) {
     console.error("Directory search: failed to write the disk cache (next restart will refetch from scratch):", error);
   }
+}
+
+// ################### Resumable fetch-in-progress checkpoint ###################
+
+/**
+ * Where an in-progress fetch's checkpoint is written after every page, so a
+ * restart mid-fetch resumes near where it left off instead of paginating a
+ * realm the size of `AI/open-proposals.md`'s first=14200 case (~14,000 users,
+ * ~2.5s/page) from `first=0` again. Split into a small meta file, rewritten
+ * whole each time, and an append-only log of the pages themselves: rewriting
+ * every user fetched so far as one JSON document on every single page would
+ * be O(pages²) of disk I/O by the end of a long fetch, where appending one
+ * line per page is O(page size) each time.
+ */
+const directoryFetchProgressMetaPath = path.join("data", "directory-fetch-progress.meta.json");
+const directoryFetchProgressPagesPath = path.join("data", "directory-fetch-progress.jsonl");
+
+/**
+ * The in-progress checkpoint, if one exists and is well-formed. `nextFirst` is
+ * the actual Keycloak pagination offset to resume at — distinct from the
+ * returned `users.length` once any records have been skipped (see
+ * `bisectFailingRange`), since a skip doesn't shift Keycloak's own offsets.
+ */
+export function readDirectoryFetchProgress() {
+  try {
+    const meta = JSON.parse(fs.readFileSync(directoryFetchProgressMetaPath, "utf8"));
+    if (
+      typeof meta.targetCount !== "number" ||
+      typeof meta.updatedAt !== "number" ||
+      typeof meta.nextFirst !== "number" ||
+      !Array.isArray(meta.skipped)
+    ) {
+      return null;
+    }
+    const users = [];
+    for (const line of fs.readFileSync(directoryFetchProgressPagesPath, "utf8").split("\n")) {
+      if (!line) continue;
+      const page = JSON.parse(line);
+      if (Array.isArray(page)) users.push(...page);
+    }
+    return { ...meta, users };
+  } catch {
+    return null;
+  }
+}
+
+/** Appends one page's worth of successfully-fetched users — never rewrites what's already on disk. */
+export function appendDirectoryFetchProgressPage(users) {
+  try {
+    fs.mkdirSync(path.dirname(directoryFetchProgressPagesPath), { recursive: true });
+    fs.appendFileSync(directoryFetchProgressPagesPath, `${JSON.stringify(users)}\n`);
+  } catch (error) {
+    console.error("Directory search: failed to append a fetch-progress page (a restart won't be able to resume past this point):", error);
+  }
+}
+
+export function writeDirectoryFetchProgressMeta(targetCount, skipped, nextFirst) {
+  try {
+    fs.mkdirSync(path.dirname(directoryFetchProgressMetaPath), { recursive: true });
+    fs.writeFileSync(
+      directoryFetchProgressMetaPath,
+      JSON.stringify({ targetCount, nextFirst, skipped, updatedAt: Date.now() })
+    );
+  } catch (error) {
+    console.error("Directory search: failed to write fetch-progress meta (a restart won't be able to resume past this point):", error);
+  }
+}
+
+/** Called once a fetch finishes (successfully or by falling back to a fresh restart) — the checkpoint is superseded either way. */
+export function clearDirectoryFetchProgress() {
+  for (const filePath of [directoryFetchProgressMetaPath, directoryFetchProgressPagesPath]) {
+    try {
+      fs.unlinkSync(filePath);
+    } catch {
+      // Already gone - nothing to clear.
+    }
+  }
+}
+
+// ################### Change detection (admin-events) ###################
+
+async function fetchLastUserAdminEventTimeUnbounded(token) {
+  const url = `${adminApiBaseUrl()}admin-events?resourceTypes=USER&max=1&direction=desc`;
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(directoryApiTimeoutMs),
+  });
+  if (!response.ok) {
+    throw new Error(`Keycloak admin-events lookup answered with status ${response.status}`);
+  }
+  const events = await response.json();
+  if (!Array.isArray(events) || events.length === 0) return null;
+  return typeof events[0]?.time === "number" ? events[0].time : null;
+}
+
+/**
+ * The timestamp of the most recent change Keycloak's admin-events log recorded
+ * against any user, or `null` if that can't be determined — Admin Events isn't
+ * enabled on this realm, or the service account lacks `view-events` (see
+ * "Directory search client" in docs-keycloak.md), or the call itself failed.
+ * `null` means "unknown", not "nothing changed" — `isDirectoryCacheFresh` below
+ * falls back to the plain age check it used before this existed.
+ */
+export function fetchLastUserAdminEventTime(token) {
+  return withDeadline(fetchLastUserAdminEventTimeUnbounded(token), directoryApiTimeoutMs, "admin-events lookup").catch(
+    (error) => {
+      console.error("Directory search: admin-events check unavailable, falling back to count+TTL only:", error.message);
+      return null;
+    }
+  );
+}
+
+/**
+ * Whether previously-cached directory data (a completed disk cache, or an
+ * in-progress fetch's checkpoint) can still be trusted, given Keycloak's
+ * current user count. A count mismatch is always decisive — someone was added
+ * or removed. When the count still matches, Keycloak's admin-events log is
+ * asked whether anything happened to *any* user since `cachedAtMs`: a role or
+ * class reassignment leaves the count unchanged but is exactly what that log
+ * catches, closing the blind spot a count-only check always had. If the log
+ * can't be consulted, this falls back to the plain age bound (`diskCacheMaxAgeMs`)
+ * used before Admin Events was wired up — so nothing breaks on a realm where
+ * it isn't enabled.
+ */
+export async function isDirectoryCacheFresh(storedCount, cachedAtMs, serverCount, token) {
+  if (storedCount !== serverCount) return false;
+  const lastChange = await fetchLastUserAdminEventTime(token);
+  if (lastChange !== null) return lastChange <= cachedAtMs;
+  return Date.now() - cachedAtMs < diskCacheMaxAgeMs;
+}
+
+// ################### Bisecting a page that won't come back ###################
+
+/**
+ * Timeout for fetches made while isolating the exact record behind an already
+ * 3x-timed-out page (see `bisectFailingRange`) — deliberately shorter than
+ * `directoryApiTimeoutMs`. By the time this runs, the full-size page is
+ * already known to hang, and every sub-range here covers far fewer users, so
+ * a genuinely healthy sub-range's LDAP resolution work is proportionally
+ * smaller too; there's nothing to gain from waiting out the full 30s per
+ * attempt just to reconfirm what's already suspected.
+ */
+const directoryBisectionTimeoutMs = 8 * 1000;
+
+/**
+ * Retry backoff while bisecting: fixed and short, not scaled per attempt the
+ * way the outer page loop's is. This isn't waiting out transient load — it's
+ * confirming a reproducible hang — so there is no reason to pace it the same
+ * way. Together with the shorter timeout above, this cuts the walk from a
+ * failing page down to a single offset from roughly 10 minutes to 2-3.
+ */
+const directoryBisectionRetryDelayMs = 200;
+
+/**
+ * Recursively narrows `[first, first+len)` until the single offset causing a
+ * page to hang is found, instead of letting one bad record take the whole
+ * multi-minute fetch down. A range that fetches cleanly (even after retrying)
+ * is kept whole; a range that still fails 3x is halved and each half recursed
+ * into independently — so more than one bad record in the same page is found
+ * too, not just the first. At the base case (`len === 1`) the offset itself is
+ * the culprit: since even its full representation hangs, one extra lightweight
+ * `briefRepresentation=true` lookup is tried purely to identify it (`id`,
+ * `username`) for the caller to report — if that also hangs, only the offset
+ * is known and reported.
+ */
+async function bisectFailingRange(first, len, getToken) {
+  try {
+    const page = await withRetry(
+      async () => fetchDirectoryUserPage(first, await getToken(), { max: len, timeoutMs: directoryBisectionTimeoutMs }),
+      3,
+      `admin user page fetch (first=${first}, max=${len}, bisecting)`,
+      directoryBisectionRetryDelayMs
+    );
+    return { users: page, consumed: page.length, skipped: [] };
+  } catch {
+    if (len === 1) {
+      let identity = null;
+      try {
+        const [user] = await fetchDirectoryUserPage(first, await getToken(), {
+          max: 1,
+          brief: true,
+          timeoutMs: directoryBisectionTimeoutMs,
+        });
+        if (user) identity = { id: user.id, username: user.username };
+      } catch {
+        // Even the lightweight brief lookup hangs - report the offset alone.
+      }
+      return { users: [], consumed: 1, skipped: [{ offset: first, ...identity }] };
+    }
+
+    const leftLen = Math.ceil(len / 2);
+    const rightLen = len - leftLen;
+    const [left, right] = await Promise.all([
+      bisectFailingRange(first, leftLen, getToken),
+      bisectFailingRange(first + leftLen, rightLen, getToken),
+    ]);
+    return {
+      users: [...left.users, ...right.users],
+      consumed: left.consumed + right.consumed,
+      skipped: [...left.skipped, ...right.skipped],
+    };
+  }
+}
+
+/** Entry point for `fetchAllUserPages`: splits straight away rather than re-trying the already-known-bad full page at the shorter timeout first. */
+function bisectFailingPage(first, getToken) {
+  const leftLen = Math.ceil(directoryPageSize / 2);
+  const rightLen = directoryPageSize - leftLen;
+  return Promise.all([
+    bisectFailingRange(first, leftLen, getToken),
+    bisectFailingRange(first + leftLen, rightLen, getToken),
+  ]).then(([left, right]) => ({
+    users: [...left.users, ...right.users],
+    consumed: left.consumed + right.consumed,
+    skipped: [...left.skipped, ...right.skipped],
+  }));
 }
 
 /**
@@ -417,6 +646,19 @@ export function writeDirectoryDiskCache(users, count) {
  * against a realm large enough to take several minutes to page through, the
  * token handed to the first page can no longer be trusted by the last one.
  *
+ * `resumeFrom` seeds a restart from an earlier checkpoint (`readDirectoryFetchProgress`)
+ * instead of `first=0` — `nextFirst` is Keycloak's own pagination offset, which
+ * a skipped record doesn't shift, so it can't be derived from `users.length`
+ * once any exist. `onPage`, if given, fires after every page (a normal one or
+ * a bisected one) with that page's newly-fetched users, the skip list so far,
+ * and the new `nextFirst` — `fetchAllDirectoryUsers` uses it to checkpoint to
+ * disk as it goes, rather than only once the whole fetch finishes.
+ *
+ * A page whose fetch fails 3x no longer takes the whole run down with it: it's
+ * handed to `bisectFailingPage` to isolate the exact offset(s) responsible (see
+ * there), which are excluded and logged, and pagination continues past them —
+ * see `AI/open-proposals.md`'s first=14200 case, the reason this exists.
+ *
  * The realm's total user count isn't known up front (Keycloak's paged `users`
  * endpoint doesn't report it), so progress here is one line per page rather
  * than a percentage. Each line ends in a newline on purpose, via `console.log`
@@ -429,20 +671,47 @@ export function writeDirectoryDiskCache(users, count) {
  * actually progressing the whole time then looked indistinguishable from
  * one that had hung. One flushed line per page fixes that.
  */
-export async function fetchAllUserPages(getToken) {
-  const users = [];
+export async function fetchAllUserPages(getToken, resumeFrom = {}, onPage) {
+  const users = [...(resumeFrom.users ?? [])];
+  const skipped = [...(resumeFrom.skipped ?? [])];
+  let first = resumeFrom.nextFirst ?? 0;
   for (;;) {
-    const first = users.length;
-    const page = await withRetry(
-      async () => fetchDirectoryUserPage(first, await getToken()),
-      3,
-      `admin user page fetch (first=${first})`
-    );
+    let page;
+    let consumed;
+    let newlySkipped = [];
+    try {
+      page = await withRetry(
+        async () => fetchDirectoryUserPage(first, await getToken()),
+        3,
+        `admin user page fetch (first=${first})`
+      );
+      consumed = page.length;
+    } catch (error) {
+      console.error(
+        `Directory search: page fetch at first=${first} failed 3x (${error.message}) — bisecting to isolate the failing record...`
+      );
+      const resolved = await bisectFailingPage(first, getToken);
+      page = resolved.users;
+      consumed = resolved.consumed;
+      newlySkipped = resolved.skipped;
+      for (const bad of newlySkipped) {
+        console.error(
+          `Directory search: record at offset ${bad.offset} consistently times out — skipped, continuing.` +
+            (bad.id ? ` id=${bad.id} username=${bad.username}` : " identity unresolvable.")
+        );
+      }
+    }
     users.push(...page);
-    console.log(`Directory search: fetched page at first=${first} (${users.length} users so far)`);
-    if (page.length < directoryPageSize) break;
+    skipped.push(...newlySkipped);
+    first += consumed;
+    console.log(
+      `Directory search: fetched through first=${first} (${users.length} users so far` +
+        `${skipped.length ? `, ${skipped.length} skipped` : ""})`
+    );
+    onPage?.({ page, skipped, nextFirst: first });
+    if (consumed < directoryPageSize) break;
   }
-  return users;
+  return { users, skipped };
 }
 
 async function fetchAllDirectoryUsers() {
@@ -457,27 +726,56 @@ async function fetchAllDirectoryUsers() {
     console.log("Directory search: in-memory cache stale or empty — checking Keycloak's user count before deciding whether to refetch...");
     const startedAt = Date.now();
     const resource = readKeycloakConfig().resource;
-    const serverCount = await fetchDirectoryUserCount(await getDirectoryServiceToken());
+    const token = await getDirectoryServiceToken();
+    const serverCount = await fetchDirectoryUserCount(token);
 
     const disk = readDirectoryDiskCache();
-    if (disk && disk.count === serverCount && Date.now() - disk.cachedAt < diskCacheMaxAgeMs) {
+    if (disk && (await isDirectoryCacheFresh(disk.count, disk.cachedAt, serverCount, token))) {
       console.log(
-        `Directory search: disk cache matches Keycloak's count (${serverCount}) and is still within ` +
-          `${diskCacheMaxAgeMs}ms — reusing it, skipping the full fetch.`
+        `Directory search: disk cache matches Keycloak's count (${serverCount}) and nothing changed since — ` +
+          "reusing it, skipping the full fetch."
       );
       directoryUsersCache = disk.users;
       directoryUsersCachedAt = Date.now();
       return disk.users;
     }
 
+    const progress = readDirectoryFetchProgress();
+    let resumeFrom = { users: [], skipped: [], nextFirst: 0 };
+    if (progress && (await isDirectoryCacheFresh(progress.targetCount, progress.updatedAt, serverCount, token))) {
+      console.log(
+        `Directory search: resuming an in-progress fetch at first=${progress.nextFirst} ` +
+          `(${progress.users.length} users already fetched, ${progress.skipped.length} skipped so far).`
+      );
+      resumeFrom = progress;
+    } else {
+      if (progress) {
+        console.log(
+          "Directory search: an in-progress fetch checkpoint exists but the count changed (or something else did) " +
+            "— discarding it and starting over."
+        );
+      }
+      clearDirectoryFetchProgress();
+    }
+
     console.log(
       disk
         ? `Directory search: disk cache is stale (had ${disk.count} users, Keycloak now reports ${serverCount}, ` +
-            `or it's older than ${diskCacheMaxAgeMs}ms) — doing a full fetch...`
+            "or something changed) — doing a full fetch..."
         : `Directory search: no usable disk cache (Keycloak reports ${serverCount} users) — doing a full fetch...`
     );
-    const users = await fetchAllUserPages(getDirectoryServiceToken);
-    console.log(`Directory search: fetched ${users.length} users, now resolving their role-mappings...`);
+    const { users, skipped } = await fetchAllUserPages(
+      getDirectoryServiceToken,
+      resumeFrom,
+      ({ page, skipped: skippedSoFar, nextFirst }) => {
+        appendDirectoryFetchProgressPage(page);
+        writeDirectoryFetchProgressMeta(serverCount, skippedSoFar, nextFirst);
+      }
+    );
+    console.log(
+      `Directory search: fetched ${users.length} users` +
+        `${skipped.length ? ` (${skipped.length} skipped after repeated timeouts)` : ""}, now resolving their role-mappings...`
+    );
 
     // One role-mappings call per user, since Keycloak offers no bulk form of it.
     // All of them at once was survivable while the list above was capped at a
@@ -519,8 +817,13 @@ async function fetchAllDirectoryUsers() {
     // refetch again — including the one the startup warm-up exists to spare.
     directoryUsersCache = cache;
     directoryUsersCachedAt = Date.now();
-    writeDirectoryDiskCache(cache, serverCount);
-    console.log(`Directory search: done, ${cache.length} users and their classes cached (${Date.now() - startedAt}ms).`);
+    writeDirectoryDiskCache(cache, serverCount, skipped);
+    clearDirectoryFetchProgress();
+    console.log(
+      `Directory search: done, ${cache.length} users and their classes cached` +
+        `${skipped.length ? `, ${skipped.length} record(s) skipped: ${JSON.stringify(skipped)}` : ""} ` +
+        `(${Date.now() - startedAt}ms).`
+    );
     return cache;
   })();
 

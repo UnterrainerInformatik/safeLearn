@@ -27,3 +27,5 @@ Echter Ablageort: `/mnt/data/source/HTL/safeLearn/AI/memory/`
 - [babylon5-Server](babylon5-server.md) — Geralds eigener Server für detached Langläufer, SSH-Alias `babylon5`
 - [PII-Handling bei echten Realm-Daten](pii-handling-real-data.md) — nie Einzeldatensätze ausgeben, nur Aggregate; Classifier blockt sonst
 - [docker logs puffert Zeilen ohne \n](docker-logs-newline-buffering.md) — Progress-Writes ohne `\n` bleiben unsichtbar, bis ein Newline kommt oder der Container stirbt; sah aus wie ein Hänger, war keiner (babylon5/secureLectures)
+- [Realm-Update-Kadenz](directory-realm-update-cadence.md) — Directory-Daten ändern sich nur händisch durch Gerald, ~3-4x/Jahr; er könnte eine Cache-Invalidierung dabei vergessen
+- [Admin Events aktiviert](directory-admin-events-enabled.md) — seit 2026-09-11 an der unterrainer-Realm an (30 Tage), directory-service-Client hat jetzt zusätzlich `view-events`
