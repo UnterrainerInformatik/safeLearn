@@ -132,9 +132,16 @@ async function getDirectoryServiceToken() {
   if (directoryServiceTokenSet && directoryServiceTokenSet.expires_in > 30) {
     return directoryServiceTokenSet.access_token;
   }
+  // TEMPORARY - isolating a live multi-minute hang with no error and no
+  // AbortSignal.timeout ever firing on the page fetch below it: this line
+  // tells whether the hang is here, in openid-client's own grant() request
+  // (a different HTTP stack than fetch, undocumented default timeout), or
+  // past it. Remove once that's answered.
+  console.log("Directory search: requesting a fresh directory-service access token...");
   directoryServiceTokenSet = await getDirectoryServiceClient().grant({
     grant_type: "client_credentials",
   });
+  console.log("Directory search: got a fresh directory-service access token.");
   return directoryServiceTokenSet.access_token;
 }
 
