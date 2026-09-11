@@ -195,12 +195,35 @@ async function mapWithConcurrency(items, limit, mapper) {
   return results;
 }
 
+// TEMPORARY - diagnosing a live 401 from the admin API that config inspection
+// (role assignment, Full Scope Allowed, client scope) could not explain. Logs
+// only the token's own unverified claims (never the token itself) plus
+// whatever body Keycloak sent with the refusal - remove once resolved.
+function unverifiedJwtClaims(token) {
+  try {
+    const payload = token.split(".")[1];
+    const padded = payload.replace(/-/g, "+").replace(/_/g, "/").padEnd(payload.length + ((4 - (payload.length % 4)) % 4), "=");
+    return JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
+  } catch (error) {
+    return { decodeError: String(error) };
+  }
+}
+
 export async function fetchDirectoryUserPage(first, token) {
   const url = `${adminApiBaseUrl()}users?briefRepresentation=false&first=${first}&max=${directoryPageSize}`;
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!response.ok) {
+    const bodyText = await response.text().catch(() => "<unreadable>");
+    const { azp, aud, exp, iat, sub, iss } = unverifiedJwtClaims(token);
+    console.error("Directory service admin API refusal - diagnostic:", {
+      url,
+      status: response.status,
+      bodyText,
+      tokenClaims: { azp, aud, exp, iat, sub, iss },
+      nowUnixSeconds: Math.floor(Date.now() / 1000),
+    });
     throw new Error(`Keycloak admin user search answered with status ${response.status}`);
   }
   const page = await response.json();
