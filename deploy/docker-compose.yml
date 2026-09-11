@@ -22,3 +22,8 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
+      # The directory-search endpoint's disk cache (middlewares/directory-service.js)
+      # lives at /app/data so it survives a redeploy, not just a process restart —
+      # without this mount every push would force the next search back through the
+      # full, multi-minute Keycloak admin-API fetch it exists to avoid.
+      - ${DATA_DIR}:/app/data

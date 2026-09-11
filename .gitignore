@@ -47,6 +47,10 @@ docs/slides/revealjs
 # browser profiles and failure screenshots.
 test/.runtime/
 
+# The directory-search disk cache (middlewares/directory-service.js). Mounted
+# from ${DATA_DIR} in a real deployment; locally it's just a runtime artifact.
+/data/
+
 # The links to the companion Obsidian plugin repository. Both are absolute paths
 # into this machine's checkout, so they are set per installation rather than
 # shipped. AI/memory/plugin-repo-link.md says how to recreate them.

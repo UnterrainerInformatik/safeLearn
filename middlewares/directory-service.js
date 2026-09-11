@@ -12,6 +12,7 @@
  */
 
 import fs from "fs";
+import path from "path";
 
 import { client, keycloakIssuer, deriveRoles } from "./keycloak-middleware.js";
 
@@ -310,6 +311,65 @@ export function fetchDirectoryUserPage(first, token) {
   );
 }
 
+async function fetchDirectoryUserCountUnbounded(token) {
+  const response = await fetch(`${adminApiBaseUrl()}users/count`, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(directoryApiTimeoutMs),
+  });
+  if (!response.ok) {
+    throw new Error(`Keycloak admin user count answered with status ${response.status}`);
+  }
+  return await response.json();
+}
+
+/**
+ * A single number, not a fetch of every user — cheap enough to ask on every
+ * cache refresh as a first check: if it still matches what the disk cache
+ * below was built from, and that cache isn't too old, the whole multi-minute
+ * pagination-and-role-mappings fetch can be skipped entirely.
+ */
+export function fetchDirectoryUserCount(token) {
+  return withDeadline(fetchDirectoryUserCountUnbounded(token), directoryApiTimeoutMs, "admin user count fetch");
+}
+
+/**
+ * Persisted at `directoryCacheFilePath`, mounted at deploy/docker-compose.yml's
+ * `${DATA_DIR}:/app/data` so it survives a redeploy, not just a process
+ * restart — without that mount, every push would force the next search back
+ * through the fetch this cache exists to spare it from.
+ */
+const directoryCacheFilePath = path.join("data", "directory-cache.json");
+
+/**
+ * How long a disk cache is trusted once its stored count still matches
+ * Keycloak's current count. A matching count only rules out someone being
+ * added or removed — a role or class reassignment on an existing user
+ * changes nothing about it — so this bounds that blind spot rather than
+ * being the primary staleness check.
+ */
+const diskCacheMaxAgeMs = 24 * 60 * 60 * 1000;
+
+export function readDirectoryDiskCache() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(directoryCacheFilePath, "utf8"));
+    if (typeof parsed.count !== "number" || typeof parsed.cachedAt !== "number" || !Array.isArray(parsed.users)) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function writeDirectoryDiskCache(users, count) {
+  try {
+    fs.mkdirSync(path.dirname(directoryCacheFilePath), { recursive: true });
+    fs.writeFileSync(directoryCacheFilePath, JSON.stringify({ count, cachedAt: Date.now(), users }));
+  } catch (error) {
+    console.error("Directory search: failed to write the disk cache (next restart will refetch from scratch):", error);
+  }
+}
+
 /**
  * Every user across every page, asked for explicitly until one page comes
  * back short of `directoryPageSize` — split out from `fetchAllDirectoryUsers`
@@ -354,9 +414,28 @@ async function fetchAllDirectoryUsers() {
   }
 
   directoryUsersFetchPromise = (async () => {
-    console.log("Directory search: cache stale or empty, fetching all users and role-mappings from Keycloak...");
+    console.log("Directory search: in-memory cache stale or empty — checking Keycloak's user count before deciding whether to refetch...");
     const startedAt = Date.now();
     const resource = readKeycloakConfig().resource;
+    const serverCount = await fetchDirectoryUserCount(await getDirectoryServiceToken());
+
+    const disk = readDirectoryDiskCache();
+    if (disk && disk.count === serverCount && Date.now() - disk.cachedAt < diskCacheMaxAgeMs) {
+      console.log(
+        `Directory search: disk cache matches Keycloak's count (${serverCount}) and is still within ` +
+          `${diskCacheMaxAgeMs}ms — reusing it, skipping the full fetch.`
+      );
+      directoryUsersCache = disk.users;
+      directoryUsersCachedAt = Date.now();
+      return disk.users;
+    }
+
+    console.log(
+      disk
+        ? `Directory search: disk cache is stale (had ${disk.count} users, Keycloak now reports ${serverCount}, ` +
+            `or it's older than ${diskCacheMaxAgeMs}ms) — doing a full fetch...`
+        : `Directory search: no usable disk cache (Keycloak reports ${serverCount} users) — doing a full fetch...`
+    );
     const users = await fetchAllUserPages(getDirectoryServiceToken);
     console.log(`Directory search: fetched ${users.length} users, now resolving their role-mappings...`);
 
@@ -396,6 +475,7 @@ async function fetchAllDirectoryUsers() {
     // refetch again — including the one the startup warm-up exists to spare.
     directoryUsersCache = cache;
     directoryUsersCachedAt = Date.now();
+    writeDirectoryDiskCache(cache, serverCount);
     console.log(`Directory search: done, ${cache.length} users and their classes cached (${Date.now() - startedAt}ms).`);
     return cache;
   })();

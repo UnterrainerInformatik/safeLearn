@@ -147,6 +147,11 @@ jobs:
             # test/deployment-config.test.js is what makes that visible here.
             echo DIRECTORY_SERVICE_CLIENT_ID=${{ secrets.DIRECTORY_SERVICE_CLIENT_ID }} >> ./deploy/.env
             echo DIRECTORY_SERVICE_CLIENT_SECRET=${{ secrets.DIRECTORY_SERVICE_CLIENT_SECRET }} >> ./deploy/.env
+            # docker-compose.yml's volume mount reads this to persist the
+            # directory-search disk cache across deploys. The "Create data
+            # directory" step above only creates DATA_DIR on the host — it never
+            # reaches docker-compose itself without also being in this file.
+            echo DATA_DIR=${{ secrets.DATA_DIR }} >> ./deploy/.env
       - name: Normalize line endings for deploy scripts
         run: |
             sudo apt-get update -y

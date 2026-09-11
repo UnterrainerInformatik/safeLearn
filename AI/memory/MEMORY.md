@@ -18,10 +18,12 @@ Echter Ablageort: `/mnt/data/source/HTL/safeLearn/AI/memory/`
 - [Tag eines Releases umhängen](github-release-tag-move.md) — Tag löschen setzt das GitHub-Release auf Draft; danach `gh release edit --draft=false --latest`
 - [Zwei Update-Wege ins Obsidian](plugin-update-paths.md) — safeLearn-Vault sieht das Plugin sofort per Symlink, andere Vaults erst wenn Obsidians Index nachzieht (~1 Tag)
 - [Vault-Link unter Windows](plugin-vault-link-windows.md) — der Link auf das Plugin darf nicht eingecheckt werden; auf Windows wird er zur 53-Byte-Datei und jede Store-Installation hängt ewig
-- [secureLectures ist Downstream](securelectures-downstream-role.md) — dort nur Tests entfernen und `md/`-Files ergänzen; jede App-Entscheidung gehört upstream nach safeLearn
+- [secureLectures ist Downstream](securelectures-downstream-role.md) — dort nur Tests entfernen, `md/`-Inhalt und deployment-Config; jede App-Entscheidung (Code!) gehört upstream nach safeLearn
+- [Sync-Reihenfolge safeLearn → secureLectures](securelectures-sync-order.md) — erst safeLearn pushen, dann public/master in secureLectures mergen+pushen; nicht auf den Build warten
 - [Kontext vor Entscheidungsfragen](decision-questions-need-context.md) — erst den Mechanismus belegen, dann erst Optionen anbieten
 - [Directory-Service-Credentials ungültig](directory-service-credentials-invalid.md) — lokales `.env` gibt `invalid_client` gegen die echte Keycloak-Realm; `/api/admin/directory/search` antwortet immer mit 502
 - [git mv durch den openspec-Symlink](git-mv-through-openspec-symlink.md) — Ziel muss `AI/openspec/...` heißen, nicht `openspec/...`, sonst korrumpiert `git mv` den Index
 - [Realm-Cleanup-Investigation Stand](realm-directory-cleanup-investigation.md) — pausiert nach Section 1+2: keine Duplikate, Ursache ist fehlender periodischer LDAP-Sync (fullSyncPeriod=-1)
 - [babylon5-Server](babylon5-server.md) — Geralds eigener Server für detached Langläufer, SSH-Alias `babylon5`
 - [PII-Handling bei echten Realm-Daten](pii-handling-real-data.md) — nie Einzeldatensätze ausgeben, nur Aggregate; Classifier blockt sonst
+- [docker logs puffert Zeilen ohne \n](docker-logs-newline-buffering.md) — Progress-Writes ohne `\n` bleiben unsichtbar, bis ein Newline kommt oder der Container stirbt; sah aus wie ein Hänger, war keiner (babylon5/secureLectures)

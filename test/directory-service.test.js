@@ -12,19 +12,26 @@
  */
 
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { afterEach, describe, test } from "node:test";
 
 import {
   fetchAllUserPages,
+  fetchDirectoryUserCount,
   fetchDirectoryUserPage,
+  readDirectoryDiskCache,
   resolveCallerRoles,
   withDeadline,
+  writeDirectoryDiskCache,
 } from "../middlewares/directory-service.js";
 
 const originalFetch = global.fetch;
+const directoryCacheFilePath = path.join("data", "directory-cache.json");
 
 afterEach(() => {
   global.fetch = originalFetch;
+  fs.rmSync(directoryCacheFilePath, { force: true });
 });
 
 /** A page of `count` distinct Keycloak-user-shaped objects, ids offset by `first`. */
@@ -132,5 +139,53 @@ describe("withDeadline", () => {
       /the slow thing did not complete within 10ms/,
       "a hung admin-API call (headers fine, body never finishes) must still release its caller"
     );
+  });
+});
+
+describe("fetchDirectoryUserCount", () => {
+  test("returns the count Keycloak's /users/count answers with", async () => {
+    global.fetch = async (url) => {
+      assert.ok(String(url).endsWith("/users/count"), `expected the count endpoint, got ${url}`);
+      return { ok: true, json: async () => 8437 };
+    };
+
+    const count = await fetchDirectoryUserCount("token");
+    assert.equal(count, 8437);
+  });
+
+  test("throws on a non-ok response rather than treating it as a count of 0", async () => {
+    global.fetch = async () => ({ ok: false, status: 500 });
+
+    await assert.rejects(() => fetchDirectoryUserCount("token"), /status 500/);
+  });
+});
+
+describe("readDirectoryDiskCache / writeDirectoryDiskCache", () => {
+  test("returns null when there is no cache file yet", () => {
+    assert.equal(readDirectoryDiskCache(), null);
+  });
+
+  test("round-trips what was written", () => {
+    const users = [{ name: "Ada Lovelace", roles: { teacher: true } }];
+    writeDirectoryDiskCache(users, 1);
+
+    const cache = readDirectoryDiskCache();
+    assert.deepEqual(cache.users, users);
+    assert.equal(cache.count, 1);
+    assert.ok(Date.now() - cache.cachedAt < 1000, "cachedAt should be stamped at write time");
+  });
+
+  test("returns null for a file that isn't shaped like a cache, rather than throwing", () => {
+    fs.mkdirSync(path.dirname(directoryCacheFilePath), { recursive: true });
+    fs.writeFileSync(directoryCacheFilePath, JSON.stringify({ unrelated: true }));
+
+    assert.equal(readDirectoryDiskCache(), null);
+  });
+
+  test("returns null for a file that isn't valid JSON, rather than throwing", () => {
+    fs.mkdirSync(path.dirname(directoryCacheFilePath), { recursive: true });
+    fs.writeFileSync(directoryCacheFilePath, "not json");
+
+    assert.equal(readDirectoryDiskCache(), null);
   });
 });
