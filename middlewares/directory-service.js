@@ -153,6 +153,16 @@ let directoryUsersCache = null;
 let directoryUsersCachedAt = 0;
 
 /**
+ * Node's `fetch` has no default timeout, so a Keycloak admin-API call that
+ * hangs instead of erroring — observed live against a large, LDAP-federated
+ * realm, seemingly on `briefRepresentation=false`'s per-user LDAP resolution,
+ * while the same realm's own admin console lists users in under a second —
+ * would otherwise block the whole fetch forever without ever reaching the
+ * error handling below it. Generous enough for a slow-but-working page.
+ */
+const directoryApiTimeoutMs = 30 * 1000;
+
+/**
  * The in-flight fetch, while one is running — so a search that lands during
  * the startup warm-up (or during any other refresh) awaits that same fetch
  * instead of starting a second one alongside it against the same realm.
@@ -172,6 +182,7 @@ async function fetchClientRoleNames(userId, token, resource) {
   const url = `${adminApiBaseUrl()}users/${userId}/role-mappings`;
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(directoryApiTimeoutMs),
   });
   if (!response.ok) {
     throw new Error(`Keycloak admin role-mappings lookup answered with status ${response.status}`);
@@ -237,6 +248,7 @@ export async function fetchDirectoryUserPage(first, token) {
   const url = `${adminApiBaseUrl()}users?briefRepresentation=false&first=${first}&max=${directoryPageSize}`;
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(directoryApiTimeoutMs),
   });
   if (!response.ok) {
     const bodyText = await response.text().catch(() => "<unreadable>");
