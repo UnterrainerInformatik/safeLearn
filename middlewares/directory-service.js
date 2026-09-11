@@ -118,7 +118,16 @@ function getDirectoryServiceClient() {
   return directoryServiceClient;
 }
 
-/** Fetched once and reused until shortly before it expires, not per search. */
+/**
+ * Reused across calls until shortly before it expires — but callers that loop
+ * (paginating the whole realm, looking up role-mappings user by user) must
+ * call this again for every request rather than once up front and hold onto
+ * the result: a realm large enough, and LDAP-federated enough, to take
+ * several minutes to page through outlives a single 5-minute access token
+ * mid-loop, and every request after that point failed with a 401 that looked
+ * like a permissions problem (see the diagnostic logging in
+ * `fetchDirectoryUserPage` below, which is how this was found).
+ */
 async function getDirectoryServiceToken() {
   if (directoryServiceTokenSet && directoryServiceTokenSet.expires_in > 30) {
     return directoryServiceTokenSet.access_token;
@@ -236,10 +245,15 @@ export async function fetchDirectoryUserPage(first, token) {
  * so this loop (the pagination fix itself) can be tested without also
  * exercising the service-account token grant, which does not go through
  * `fetch` and so cannot be stubbed the same way.
+ *
+ * Takes a token *provider*, not a token, and calls it before every page —
+ * against a realm large enough to take several minutes to page through, the
+ * token handed to the first page can no longer be trusted by the last one.
  */
-export async function fetchAllUserPages(token) {
+export async function fetchAllUserPages(getToken) {
   const users = [];
   for (;;) {
+    const token = await getToken();
     const page = await fetchDirectoryUserPage(users.length, token);
     users.push(...page);
     if (page.length < directoryPageSize) break;
@@ -253,19 +267,20 @@ async function fetchAllDirectoryUsers() {
     return directoryUsersCache;
   }
 
-  const token = await getDirectoryServiceToken();
   const resource = readKeycloakConfig().resource;
-  const users = await fetchAllUserPages(token);
+  const users = await fetchAllUserPages(getDirectoryServiceToken);
 
   // One role-mappings call per user, since Keycloak offers no bulk form of it.
   // All of them at once was survivable while the list above was capped at a
   // single page; against a realm of several hundred it would open that many
   // sockets to Keycloak in one breath, and the failure that produces is a
   // directory that intermittently comes back empty. A small pool keeps the
-  // fetch concurrent without that.
+  // fetch concurrent without that. Re-fetching the token per user (cheap once
+  // valid — see getDirectoryServiceToken) rather than reusing the one from the
+  // page loop above, for the same reason that loop no longer does either.
   directoryUsersCache = await mapWithConcurrency(users, roleLookupConcurrency, async (user) => ({
     ...user,
-    clientRoleNames: await fetchClientRoleNames(user.id, token, resource),
+    clientRoleNames: await fetchClientRoleNames(user.id, await getDirectoryServiceToken(), resource),
   }));
   directoryUsersCachedAt = now;
   return directoryUsersCache;

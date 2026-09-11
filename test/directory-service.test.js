@@ -44,7 +44,7 @@ describe("fetchAllUserPages", () => {
       return { ok: true, json: async () => pages[pageIndex] };
     };
 
-    const users = await fetchAllUserPages("token");
+    const users = await fetchAllUserPages(async () => "token");
 
     assert.equal(calls, 3, "a short final page should stop the loop, not be mistaken for more");
     assert.equal(users.length, 230, "every user across all pages should be returned");
@@ -58,15 +58,31 @@ describe("fetchAllUserPages", () => {
   test("stops after a single short page", async () => {
     global.fetch = async () => ({ ok: true, json: async () => page(0, 5) });
 
-    const users = await fetchAllUserPages("token");
+    const users = await fetchAllUserPages(async () => "token");
 
     assert.equal(users.length, 5, "a realm smaller than one page should not trigger a second request");
+  });
+
+  test("calls the token provider again for every page, not once for the whole loop", async () => {
+    const pages = [page(0, 100), page(100, 30)];
+    let tokenCalls = 0;
+    global.fetch = async (url) => {
+      const first = Number(new URL(url).searchParams.get("first"));
+      return { ok: true, json: async () => pages[first / 100] };
+    };
+
+    await fetchAllUserPages(async () => {
+      tokenCalls += 1;
+      return "token";
+    });
+
+    assert.equal(tokenCalls, 2, "a token close to expiry on a later page must be refreshable, not fixed at the first page's token");
   });
 });
 
 describe("fetchDirectoryUserPage", () => {
   test("throws on a non-ok response rather than silently returning an empty page", async () => {
-    global.fetch = async () => ({ ok: false, status: 500, json: async () => [] });
+    global.fetch = async () => ({ ok: false, status: 500, json: async () => [], text: async () => "" });
 
     await assert.rejects(
       () => fetchDirectoryUserPage(0, "token"),
