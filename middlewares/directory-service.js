@@ -153,6 +153,13 @@ let directoryUsersCache = null;
 let directoryUsersCachedAt = 0;
 
 /**
+ * The in-flight fetch, while one is running — so a search that lands during
+ * the startup warm-up (or during any other refresh) awaits that same fetch
+ * instead of starting a second one alongside it against the same realm.
+ */
+let directoryUsersFetchPromise = null;
+
+/**
  * The `safeLearn` client roles `user` holds, by user id — the realm's own
  * equivalent of an LDAP-derived group, and the one `hasRoles` (utils.js)
  * already treats as interchangeable with it for the session path. A realm
@@ -278,48 +285,65 @@ export async function fetchAllUserPages(getToken) {
 }
 
 async function fetchAllDirectoryUsers() {
-  const now = Date.now();
-  if (directoryUsersCache && now - directoryUsersCachedAt < directoryCacheTtlMs) {
+  if (directoryUsersCache && Date.now() - directoryUsersCachedAt < directoryCacheTtlMs) {
     return directoryUsersCache;
   }
+  if (directoryUsersFetchPromise) {
+    return directoryUsersFetchPromise;
+  }
 
-  console.log("Directory search: cache stale or empty, fetching all users and role-mappings from Keycloak...");
-  const startedAt = now;
-  const resource = readKeycloakConfig().resource;
-  const users = await fetchAllUserPages(getDirectoryServiceToken);
-  console.log(`Directory search: fetched ${users.length} users, now resolving their role-mappings...`);
+  directoryUsersFetchPromise = (async () => {
+    console.log("Directory search: cache stale or empty, fetching all users and role-mappings from Keycloak...");
+    const startedAt = Date.now();
+    const resource = readKeycloakConfig().resource;
+    const users = await fetchAllUserPages(getDirectoryServiceToken);
+    console.log(`Directory search: fetched ${users.length} users, now resolving their role-mappings...`);
 
-  // One role-mappings call per user, since Keycloak offers no bulk form of it.
-  // All of them at once was survivable while the list above was capped at a
-  // single page; against a realm of several hundred it would open that many
-  // sockets to Keycloak in one breath, and the failure that produces is a
-  // directory that intermittently comes back empty. A small pool keeps the
-  // fetch concurrent without that. Re-fetching the token per user (cheap once
-  // valid — see getDirectoryServiceToken) rather than reusing the one from the
-  // page loop above, for the same reason that loop no longer does either.
-  //
-  // Unlike the page loop above, the total here is known up front (`users.length`),
-  // so progress is logged as the percentage actually done rather than a raw
-  // count — one line per 5% crossed, not one per user.
-  let lastPercentLogged = 0;
-  directoryUsersCache = await mapWithConcurrency(
-    users,
-    roleLookupConcurrency,
-    async (user) => ({
-      ...user,
-      clientRoleNames: await fetchClientRoleNames(user.id, await getDirectoryServiceToken(), resource),
-    }),
-    (completed, total) => {
-      const percent = Math.floor((completed / total) * 20) * 5;
-      if (percent > lastPercentLogged) {
-        lastPercentLogged = percent;
-        console.log(`Directory search: role-mappings ${percent}% (${completed}/${total})`);
+    // One role-mappings call per user, since Keycloak offers no bulk form of it.
+    // All of them at once was survivable while the list above was capped at a
+    // single page; against a realm of several hundred it would open that many
+    // sockets to Keycloak in one breath, and the failure that produces is a
+    // directory that intermittently comes back empty. A small pool keeps the
+    // fetch concurrent without that. Re-fetching the token per user (cheap once
+    // valid — see getDirectoryServiceToken) rather than reusing the one from the
+    // page loop above, for the same reason that loop no longer does either.
+    //
+    // Unlike the page loop above, the total here is known up front (`users.length`),
+    // so progress is logged as the percentage actually done rather than a raw
+    // count — one line per 5% crossed, not one per user.
+    let lastPercentLogged = 0;
+    const cache = await mapWithConcurrency(
+      users,
+      roleLookupConcurrency,
+      async (user) => ({
+        ...user,
+        clientRoleNames: await fetchClientRoleNames(user.id, await getDirectoryServiceToken(), resource),
+      }),
+      (completed, total) => {
+        const percent = Math.floor((completed / total) * 20) * 5;
+        if (percent > lastPercentLogged) {
+          lastPercentLogged = percent;
+          console.log(`Directory search: role-mappings ${percent}% (${completed}/${total})`);
+        }
       }
-    }
-  );
-  directoryUsersCachedAt = now;
-  console.log(`Directory search: done, ${directoryUsersCache.length} users and their classes cached (${Date.now() - startedAt}ms).`);
-  return directoryUsersCache;
+    );
+
+    // Stamped now, at completion, rather than when the fetch above started:
+    // against a realm slow enough for that fetch to take longer than
+    // directoryCacheTtlMs, stamping the start would make the result stale
+    // the instant it lands, and every following search would pay for a full
+    // refetch again — including the one the startup warm-up exists to spare.
+    directoryUsersCache = cache;
+    directoryUsersCachedAt = Date.now();
+    console.log(`Directory search: done, ${cache.length} users and their classes cached (${Date.now() - startedAt}ms).`);
+    return cache;
+  })();
+
+  try {
+    return await directoryUsersFetchPromise;
+  } finally {
+    directoryUsersFetchPromise = null;
+  }
 }
 
 /** Mirrors how Keycloak's built-in "full name" mapper derives the ID token's `name` claim. */

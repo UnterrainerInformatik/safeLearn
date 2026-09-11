@@ -305,6 +305,14 @@ initKeycloak(app).then(() => {
     }
   });
 
+  // Warms the cache searchDirectory() above reads from, so the fetch that can
+  // take minutes against a large realm happens here, at startup, rather than
+  // making whichever teacher's search happens to be first pay for it. Not
+  // awaited: the rest of startup, and every other route, must not wait on it.
+  searchDirectory("").catch((error) => {
+    console.error("Directory search: startup cache warm-up failed (a live search will retry it):", error);
+  });
+
   // Protect all routes and serve them statically after authentication.
   // Order matters when dealing with middleware!
   // For example the next() method will just pass the request on to the next middleware in line.
