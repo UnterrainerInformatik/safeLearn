@@ -22,14 +22,21 @@ The realm SHALL hold at most one enabled account for a given real person, identi
 
 The realm SHALL apply one documented rule for what happens to a person's account once they are no longer currently enrolled (graduated, withdrawn, or otherwise no longer a student or staff member), and that rule SHALL be applied consistently rather than left to accumulate as an accident of import history.
 
+**Approved rule (2026-09-10, Gerald)**: a federated account (one carrying `LDAP_ENTRY_DN`/`LDAP_ID`) is removed as soon as a periodic LDAP full sync finds no matching entry for it in the live source directory anymore — no additional grace period beyond the sync's own cadence, since the live directory is the authoritative signal (investigation found Keycloak's own stored timestamps too unreliable to use instead, see `investigation-findings.md`). Accounts with neither `LDAP_ENTRY_DN` nor `LDAP_ID` (manually created directly in Keycloak) are never touched by this rule — they are not federated, so they cannot be evaluated against LDAP presence at all.
+
 #### Scenario: A person is no longer enrolled
 
-- **WHEN** a person's enrollment status, as known to the source directory, changes to no-longer-enrolled
-- **THEN** their account is handled per the documented retention rule (for example: disabled, or removed after a retention period) rather than left enabled indefinitely with no distinguishing marker
+- **WHEN** a federated account's person is no longer present in the source LDAP directory at the time of a full sync
+- **THEN** the account is removed as part of that sync — not merely disabled, and not left for a separate retention window
+
+#### Scenario: A manually-created account is never evaluated
+
+- **WHEN** an account has neither `LDAP_ENTRY_DN` nor `LDAP_ID`
+- **THEN** the enrollment retention rule above does not apply to it, regardless of how long it has existed or when it was last modified
 
 #### Scenario: Enrollment status cannot be determined
 
-- **WHEN** the source directory provides no signal to determine whether a given account's person is currently enrolled
+- **WHEN** the source directory provides no signal to determine whether a given account's person is currently enrolled (for example, the LDAP sync itself is unavailable or fails)
 - **THEN** that account is left untouched and flagged for manual review rather than assumed to be safe to retire
 
 ### Requirement: Destructive remediation is reviewed before it runs
