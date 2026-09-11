@@ -189,15 +189,23 @@ const directoryPageSize = 100;
 /** At most this many role-mappings lookups are in flight at once. */
 const roleLookupConcurrency = 8;
 
-/** `Promise.all(items.map(...))`, but never more than `limit` of them in flight. Results keep `items`' order. */
-async function mapWithConcurrency(items, limit, mapper) {
+/**
+ * `Promise.all(items.map(...))`, but never more than `limit` of them in
+ * flight. Results keep `items`' order. `onProgress(completed, total)`, if
+ * given, fires after each item finishes — not in item order, since that's
+ * exactly what the concurrency makes unpredictable.
+ */
+async function mapWithConcurrency(items, limit, mapper, onProgress) {
   const results = new Array(items.length);
   let next = 0;
+  let completed = 0;
   const workers = new Array(Math.min(limit, items.length)).fill(null).map(async () => {
     for (;;) {
       const index = next++;
       if (index >= items.length) return;
       results[index] = await mapper(items[index]);
+      completed++;
+      onProgress?.(completed, items.length);
     }
   });
   await Promise.all(workers);
@@ -249,6 +257,12 @@ export async function fetchDirectoryUserPage(first, token) {
  * Takes a token *provider*, not a token, and calls it before every page —
  * against a realm large enough to take several minutes to page through, the
  * token handed to the first page can no longer be trusted by the last one.
+ *
+ * The realm's total user count isn't known up front (Keycloak's paged `users`
+ * endpoint doesn't report it), so progress here is a dot per page rather than
+ * a percentage — one per `directoryPageSize` (100) users fetched, so a run
+ * against a large realm still shows something moving in the logs rather than
+ * going silent until every page is in.
  */
 export async function fetchAllUserPages(getToken) {
   const users = [];
@@ -256,8 +270,10 @@ export async function fetchAllUserPages(getToken) {
     const token = await getToken();
     const page = await fetchDirectoryUserPage(users.length, token);
     users.push(...page);
+    process.stdout.write(".");
     if (page.length < directoryPageSize) break;
   }
+  process.stdout.write("\n");
   return users;
 }
 
@@ -281,10 +297,26 @@ async function fetchAllDirectoryUsers() {
   // fetch concurrent without that. Re-fetching the token per user (cheap once
   // valid — see getDirectoryServiceToken) rather than reusing the one from the
   // page loop above, for the same reason that loop no longer does either.
-  directoryUsersCache = await mapWithConcurrency(users, roleLookupConcurrency, async (user) => ({
-    ...user,
-    clientRoleNames: await fetchClientRoleNames(user.id, await getDirectoryServiceToken(), resource),
-  }));
+  //
+  // Unlike the page loop above, the total here is known up front (`users.length`),
+  // so progress is logged as the percentage actually done rather than a raw
+  // count — one line per 5% crossed, not one per user.
+  let lastPercentLogged = 0;
+  directoryUsersCache = await mapWithConcurrency(
+    users,
+    roleLookupConcurrency,
+    async (user) => ({
+      ...user,
+      clientRoleNames: await fetchClientRoleNames(user.id, await getDirectoryServiceToken(), resource),
+    }),
+    (completed, total) => {
+      const percent = Math.floor((completed / total) * 20) * 5;
+      if (percent > lastPercentLogged) {
+        lastPercentLogged = percent;
+        console.log(`Directory search: role-mappings ${percent}% (${completed}/${total})`);
+      }
+    }
+  );
   directoryUsersCachedAt = now;
   console.log(`Directory search: done, ${directoryUsersCache.length} users and their classes cached (${Date.now() - startedAt}ms).`);
   return directoryUsersCache;
