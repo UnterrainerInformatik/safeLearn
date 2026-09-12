@@ -58,3 +58,7 @@ AI/plugin
 .obsidian/plugins/safelearn-formatter
 
 .obsidian/workspace.json
+
+# Claude Code's lock for its scheduled tasks: a running session's id and pid,
+# rewritten per run and meaningless on any other machine.
+AI/claude/scheduled_tasks.lock
