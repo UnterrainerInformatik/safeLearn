@@ -254,6 +254,72 @@ export async function withRetry(attemptFn, attempts, label, delayMs = 1000) {
  */
 let directoryUsersFetchPromise = null;
 
+// ################### Fetch progress as observable state ###################
+
+/**
+ * How far the running fetch has got, as state rather than only as the log
+ * lines it always wrote. There is at most one fetch (`directoryUsersFetchPromise`
+ * above) and its two measurable phases already fire a callback per page and
+ * per resolved user, so this is one record updated in place by those callbacks
+ * — not an emitter and not a job registry, neither of which anything here
+ * would ask for.
+ *
+ * `phase` is one of:
+ *   `idle`     — no fetch running
+ *   `counting` — asking Keycloak for its user count, and deciding whether the
+ *                disk cache or a checkpoint can be reused. No total is known
+ *                yet, and `total` is deliberately `null` rather than a guess.
+ *   `entries`  — paginating the realm's users (`done` = the offset reached,
+ *                `total` = Keycloak's own count)
+ *   `roles`    — resolving each fetched user's role-mappings (`done`/`total`
+ *                = users resolved out of users fetched)
+ */
+const directoryFetchProgress = { phase: "idle", done: 0, total: null, startedAt: null };
+
+function setDirectoryFetchPhase(phase, done = 0, total = null) {
+  directoryFetchProgress.phase = phase;
+  directoryFetchProgress.done = done;
+  directoryFetchProgress.total = total;
+  directoryFetchProgress.startedAt = phase === "idle" ? null : (directoryFetchProgress.startedAt ?? Date.now());
+}
+
+/**
+ * When the data `directoryUsersCache` holds was actually built, and how many
+ * records were skipped building it — kept apart from `directoryUsersCachedAt`,
+ * which is the TTL clock and is restamped whenever a disk cache is adopted.
+ * Restamping is right for the TTL (a cache adopted now should not be refetched
+ * immediately) and wrong for the report: a day-old disk cache reused at startup
+ * would otherwise claim to have been built seconds ago, which is exactly the
+ * blind spot this change exists to close.
+ */
+let directoryUsersBuiltAt = null;
+let directoryUsersSkipped = [];
+
+/**
+ * The state of the directory data and of any fetch running over it — what
+ * `GET /api/admin/directory/status` answers with, and what a search that
+ * cannot be answered yet carries instead of a result list.
+ *
+ * Reads process memory only: no Keycloak call, no disk read, and above all no
+ * fetch started, so the plugin's settings tab can poll it without either
+ * becoming slow itself or provoking work. `skipped` is a count and nothing
+ * more — the records behind it are named only in the server's own log, never
+ * in an answer, since a skipped record's identity is not something a directory
+ * search discloses either.
+ */
+export function getDirectoryStatus() {
+  return {
+    fetching: directoryFetchProgress.phase !== "idle",
+    phase: directoryFetchProgress.phase,
+    done: directoryFetchProgress.done,
+    total: directoryFetchProgress.total,
+    startedAt: directoryFetchProgress.startedAt,
+    entries: directoryUsersCache ? directoryUsersCache.length : null,
+    builtAt: directoryUsersBuiltAt,
+    skipped: directoryUsersSkipped.length,
+  };
+}
+
 /**
  * The `safeLearn` client roles `user` holds, by user id — the realm's own
  * equivalent of an LDAP-derived group, and the one `hasRoles` (utils.js)
@@ -753,125 +819,166 @@ export async function fetchAllUserPages(getToken, resumeFrom = {}, onPage, targe
   return { users, skipped };
 }
 
-async function fetchAllDirectoryUsers() {
-  if (directoryUsersCache && Date.now() - directoryUsersCachedAt < directoryCacheTtlMs) {
-    return directoryUsersCache;
-  }
-  if (directoryUsersFetchPromise) {
-    return directoryUsersFetchPromise;
-  }
+/**
+ * The refresh itself, without the deduplication and lifecycle around it —
+ * `startDirectoryRefresh` owns those. Split out so that starting a refresh and
+ * waiting for one are separable: a search now answers from whatever is held
+ * and starts this behind itself, instead of awaiting it.
+ */
+async function runDirectoryFetch(getToken) {
+  console.log("Directory search: in-memory cache stale or empty — checking Keycloak's user count before deciding whether to refetch...");
+  const startedAt = Date.now();
+  // Set synchronously, before the first await: a search that starts this fetch
+  // reads the status back in the same tick to answer with, and must not find
+  // `idle` there.
+  setDirectoryFetchPhase("counting");
+  const resource = readKeycloakConfig().resource;
+  const token = await getToken();
+  const serverCount = await fetchDirectoryUserCount(token);
 
-  directoryUsersFetchPromise = (async () => {
-    console.log("Directory search: in-memory cache stale or empty — checking Keycloak's user count before deciding whether to refetch...");
-    const startedAt = Date.now();
-    const resource = readKeycloakConfig().resource;
-    const token = await getDirectoryServiceToken();
-    const serverCount = await fetchDirectoryUserCount(token);
-
-    const disk = readDirectoryDiskCache();
-    if (disk && (await isDirectoryCacheFresh(disk.count, disk.cachedAt, serverCount, token))) {
-      console.log(
-        `Directory search: disk cache matches Keycloak's count (${serverCount}) and nothing changed since — ` +
-          "reusing it, skipping the full fetch."
-      );
-      directoryUsersCache = disk.users;
-      directoryUsersCachedAt = Date.now();
-      return disk.users;
-    }
-
-    const progress = readDirectoryFetchProgress();
-    let resumeFrom = { users: [], skipped: [], nextFirst: 0 };
-    if (progress && (await isDirectoryCacheFresh(progress.targetCount, progress.updatedAt, serverCount, token))) {
-      console.log(
-        `Directory search: resuming an in-progress fetch at first=${progress.nextFirst} ` +
-          `(${progress.users.length} users already fetched, ${progress.skipped.length} skipped so far).`
-      );
-      resumeFrom = progress;
-    } else {
-      if (progress) {
-        console.log(
-          "Directory search: an in-progress fetch checkpoint exists but the count changed (or something else did) " +
-            "— discarding it and starting over."
-        );
-      }
-      clearDirectoryFetchProgress();
-    }
-
+  const disk = readDirectoryDiskCache();
+  if (disk && (await isDirectoryCacheFresh(disk.count, disk.cachedAt, serverCount, token))) {
     console.log(
-      disk
-        ? `Directory search: disk cache is stale (had ${disk.count} users, Keycloak now reports ${serverCount}, ` +
-            "or something changed) — doing a full fetch..."
-        : `Directory search: no usable disk cache (Keycloak reports ${serverCount} users) — doing a full fetch...`
+      `Directory search: disk cache matches Keycloak's count (${serverCount}) and nothing changed since — ` +
+        "reusing it, skipping the full fetch."
     );
-    const { users, skipped } = await fetchAllUserPages(
-      getDirectoryServiceToken,
-      resumeFrom,
-      ({ page, skipped: skippedSoFar, nextFirst }) => {
-        appendDirectoryFetchProgressPage(page);
-        writeDirectoryFetchProgressMeta(serverCount, skippedSoFar, nextFirst);
-      },
-      serverCount
-    );
-    console.log(
-      `Directory search: fetched ${users.length} users` +
-        `${skipped.length ? ` (${skipped.length} skipped after repeated timeouts)` : ""}, now resolving their role-mappings...`
-    );
-
-    // One role-mappings call per user, since Keycloak offers no bulk form of it.
-    // All of them at once was survivable while the list above was capped at a
-    // single page; against a realm of several hundred it would open that many
-    // sockets to Keycloak in one breath, and the failure that produces is a
-    // directory that intermittently comes back empty. A small pool keeps the
-    // fetch concurrent without that. Re-fetching the token per user (cheap once
-    // valid — see getDirectoryServiceToken) rather than reusing the one from the
-    // page loop above, for the same reason that loop no longer does either.
-    //
-    // Unlike the page loop above, the total here is known up front (`users.length`),
-    // so progress is logged as the percentage actually done rather than a raw
-    // count — one line per 5% crossed, not one per user.
-    let lastPercentLogged = 0;
-    const cache = await mapWithConcurrency(
-      users,
-      roleLookupConcurrency,
-      async (user) => ({
-        ...user,
-        clientRoleNames: await withRetry(
-          async () => fetchClientRoleNames(user.id, await getDirectoryServiceToken(), resource),
-          3,
-          `admin role-mappings fetch (user ${user.id})`
-        ),
-      }),
-      (completed, total) => {
-        const percent = Math.floor((completed / total) * 20) * 5;
-        if (percent > lastPercentLogged) {
-          lastPercentLogged = percent;
-          console.log(`Directory search: role-mappings ${percent}% (${completed}/${total})`);
-        }
-      }
-    );
-
-    // Stamped now, at completion, rather than when the fetch above started:
-    // against a realm slow enough for that fetch to take longer than
-    // directoryCacheTtlMs, stamping the start would make the result stale
-    // the instant it lands, and every following search would pay for a full
-    // refetch again — including the one the startup warm-up exists to spare.
-    directoryUsersCache = cache;
+    directoryUsersCache = disk.users;
     directoryUsersCachedAt = Date.now();
-    writeDirectoryDiskCache(cache, serverCount, skipped);
-    clearDirectoryFetchProgress();
-    console.log(
-      `Directory search: done, ${cache.length} users and their classes cached` +
-        `${skipped.length ? `, ${skipped.length} record(s) skipped: ${JSON.stringify(skipped)}` : ""} ` +
-        `(${Date.now() - startedAt}ms).`
-    );
-    return cache;
-  })();
-
-  try {
-    return await directoryUsersFetchPromise;
-  } finally {
-    directoryUsersFetchPromise = null;
+    directoryUsersBuiltAt = disk.cachedAt;
+    directoryUsersSkipped = disk.skipped;
+    return disk.users;
   }
+
+  const progress = readDirectoryFetchProgress();
+  let resumeFrom = { users: [], skipped: [], nextFirst: 0 };
+  if (progress && (await isDirectoryCacheFresh(progress.targetCount, progress.updatedAt, serverCount, token))) {
+    console.log(
+      `Directory search: resuming an in-progress fetch at first=${progress.nextFirst} ` +
+        `(${progress.users.length} users already fetched, ${progress.skipped.length} skipped so far).`
+    );
+    resumeFrom = progress;
+  } else {
+    if (progress) {
+      console.log(
+        "Directory search: an in-progress fetch checkpoint exists but the count changed (or something else did) " +
+          "— discarding it and starting over."
+      );
+    }
+    clearDirectoryFetchProgress();
+  }
+
+  console.log(
+    disk
+      ? `Directory search: disk cache is stale (had ${disk.count} users, Keycloak now reports ${serverCount}, ` +
+          "or something changed) — doing a full fetch..."
+      : `Directory search: no usable disk cache (Keycloak reports ${serverCount} users) — doing a full fetch...`
+  );
+  // Seeded from the checkpoint's own offset rather than from 0: a resumed
+  // fetch that reported starting over would read as one that had crashed and
+  // lost everything, which is the opposite of what resuming means.
+  setDirectoryFetchPhase("entries", resumeFrom.nextFirst ?? 0, serverCount);
+  const { users, skipped } = await fetchAllUserPages(
+    getToken,
+    resumeFrom,
+    ({ page, skipped: skippedSoFar, nextFirst }) => {
+      appendDirectoryFetchProgressPage(page);
+      writeDirectoryFetchProgressMeta(serverCount, skippedSoFar, nextFirst);
+      setDirectoryFetchPhase("entries", nextFirst, serverCount);
+    },
+    serverCount
+  );
+  console.log(
+    `Directory search: fetched ${users.length} users` +
+      `${skipped.length ? ` (${skipped.length} skipped after repeated timeouts)` : ""}, now resolving their role-mappings...`
+  );
+
+  // One role-mappings call per user, since Keycloak offers no bulk form of it.
+  // All of them at once was survivable while the list above was capped at a
+  // single page; against a realm of several hundred it would open that many
+  // sockets to Keycloak in one breath, and the failure that produces is a
+  // directory that intermittently comes back empty. A small pool keeps the
+  // fetch concurrent without that. Re-fetching the token per user (cheap once
+  // valid — see getDirectoryServiceToken) rather than reusing the one from the
+  // page loop above, for the same reason that loop no longer does either.
+  //
+  // Unlike the page loop above, the total here is known up front (`users.length`),
+  // so progress is logged as the percentage actually done rather than a raw
+  // count — one line per 5% crossed, not one per user.
+  let lastPercentLogged = 0;
+  setDirectoryFetchPhase("roles", 0, users.length);
+  const cache = await mapWithConcurrency(
+    users,
+    roleLookupConcurrency,
+    async (user) => ({
+      ...user,
+      clientRoleNames: await withRetry(
+        async () => fetchClientRoleNames(user.id, await getToken(), resource),
+        3,
+        `admin role-mappings fetch (user ${user.id})`
+      ),
+    }),
+    (completed, total) => {
+      setDirectoryFetchPhase("roles", completed, total);
+      const percent = Math.floor((completed / total) * 20) * 5;
+      if (percent > lastPercentLogged) {
+        lastPercentLogged = percent;
+        console.log(`Directory search: role-mappings ${percent}% (${completed}/${total})`);
+      }
+    }
+  );
+
+  // Stamped now, at completion, rather than when the fetch above started:
+  // against a realm slow enough for that fetch to take longer than
+  // directoryCacheTtlMs, stamping the start would make the result stale
+  // the instant it lands, and every following search would pay for a full
+  // refetch again — including the one the startup warm-up exists to spare.
+  directoryUsersCache = cache;
+  directoryUsersCachedAt = Date.now();
+  directoryUsersBuiltAt = directoryUsersCachedAt;
+  directoryUsersSkipped = skipped;
+  writeDirectoryDiskCache(cache, serverCount, skipped);
+  clearDirectoryFetchProgress();
+  console.log(
+    `Directory search: done, ${cache.length} users and their classes cached` +
+      `${skipped.length ? `, ${skipped.length} record(s) skipped: ${JSON.stringify(skipped)}` : ""} ` +
+      `(${Date.now() - startedAt}ms).`
+  );
+  return cache;
+}
+
+/** What the directory holds right now, without asking whether it is fresh and without fetching anything. */
+export function heldDirectoryUsers() {
+  return directoryUsersCache;
+}
+
+/**
+ * Starts a refresh unless one is already running, and hands back the promise
+ * either way — so a caller that wants to wait can, and one that only wants the
+ * fetch to exist need not.
+ *
+ * The phase is reset to `idle` on both paths: a fetch that died leaving
+ * `roles 62%` standing would have every waiting plugin poll a figure that can
+ * never advance again, which is precisely the "is it broken?" impression this
+ * change exists to remove. Failures are logged here rather than left to the
+ * caller, since the common caller no longer awaits this at all — and the
+ * `catch` also keeps an unawaited start from surfacing as an unhandled
+ * rejection, without swallowing it for a caller that does await.
+ *
+ * `getToken` is a parameter for the same reason `fetchAllUserPages` takes one:
+ * it is the fetch's one dependency that isn't an HTTP call of its own (it goes
+ * through openid-client, not `fetch`), so threading it through is what lets a
+ * test drive a whole fetch against a stubbed `fetch` without a live realm.
+ */
+export function startDirectoryRefresh(getToken = getDirectoryServiceToken) {
+  if (directoryUsersFetchPromise) return directoryUsersFetchPromise;
+  directoryUsersFetchPromise = runDirectoryFetch(getToken).finally(() => {
+    directoryUsersFetchPromise = null;
+    setDirectoryFetchPhase("idle");
+  });
+  directoryUsersFetchPromise.catch((error) => {
+    console.error("Directory search: the directory fetch failed (the next search starts a new one):", error);
+  });
+  return directoryUsersFetchPromise;
 }
 
 /** Mirrors how Keycloak's built-in "full name" mapper derives the ID token's `name` claim. */
@@ -913,13 +1020,40 @@ function directoryUserRoles(user) {
  * to a teacher or admin identity above, the same identity that could
  * reconstruct the same list today by sweeping single-character queries; this
  * just answers it directly instead.
+ *
+ * Answers `{ ready: true, results }`, or `{ ready: false, status }` when the
+ * directory holds nothing to match against yet — never by waiting for a fetch
+ * to finish. Against a realm of ~14,000 users that wait was minutes long, and
+ * the caller (Obsidian's `requestUrl`, with no timeout of its own, through a
+ * reverse proxy that has one) had nothing to show for it and no guarantee of
+ * surviving it either.
+ *
+ * Data past `directoryCacheTtlMs` is still answered from, with a refresh
+ * started behind the answer rather than in front of it: the TTL says when to
+ * *start* refreshing, not when to stop serving. Going back to "not ready" every
+ * ten minutes on a realm whose refresh takes minutes would re-enter exactly the
+ * state this exists to leave, to avoid data that is stale by minutes on a realm
+ * edited by hand a few times a year.
  */
 export async function searchDirectory(query) {
   const normalizedQuery = query.trim().toLowerCase();
 
-  const users = await fetchAllDirectoryUsers();
+  const users = heldDirectoryUsers();
+  if (!users) {
+    // A caller repeating the request must be waiting on something that will
+    // actually happen — so a cold cache with no fetch behind it starts one.
+    startDirectoryRefresh();
+    return { ready: false, status: getDirectoryStatus() };
+  }
+  if (Date.now() - directoryUsersCachedAt >= directoryCacheTtlMs) {
+    startDirectoryRefresh();
+  }
+
   if (!normalizedQuery) {
-    return users.map((user) => ({ name: displayName(user), roles: directoryUserRoles(user) }));
+    return {
+      ready: true,
+      results: users.map((user) => ({ name: displayName(user), roles: directoryUserRoles(user) })),
+    };
   }
 
   const matches = [];
@@ -934,5 +1068,5 @@ export async function searchDirectory(query) {
     }
   }
 
-  return matches;
+  return { ready: true, results: matches };
 }

@@ -96,3 +96,46 @@ When you have a look inside the code, you'll find that the file `obsidian.js` pr
 	3. `replaceObsidianImageLatResizeValues` deals with the conditional image resizing described in the Obsidian-specific document [here](docs-obsidian)
 	4. `makeContentMap` generates the map of the files' content later on displayed on the left navbar
 5. `DOMPurify.santitize` is called before sending the response to the client
+## Directory API
+Two endpoints back the Obsidian plugin's directory features (the person picker, "List classes" and "Show directory info"). Both are registered ahead of the browser-session gate and identify their caller from a bearer access token instead, introspected against Keycloak; both refuse anyone but a teacher or an admin with a bare `403`. See [Directory search client](docs-keycloak) for the two Keycloak identities involved.
+
+### GET /api/admin/directory/search
+```http
+GET /api/admin/directory/search?q=gera
+Authorization: Bearer <access token>
+```
+`q` is matched case-insensitively against a person's display name *or* any role/group value the directory holds for them (a class name, `teacher`, `examParticipant`, ...). An empty `q` returns the whole directory, which is what "List classes" and the class filter build on. A match carries a display name and a role/group map, and nothing else the directory knows about that person.
+
+It answers one of three ways:
+
+* `200` with the array of matches. An array is what a *successful* search answers with — an empty one means the query matched nobody.
+* `202` with the status payload below, when the server has no directory data to match against yet. This is not an error and not an empty match: the server is fetching the realm, which against a realm of ~14,000 LDAP-federated users takes minutes. The request is deliberately **not** held open for that — it used to be, and a reverse proxy in front of the deployment would sever it long before the fetch finished. Repeat the same request unchanged; it answers `200` once the fetch completes. A caller that has data but whose copy is past its refresh interval still gets `200` from that copy, with a refresh started behind the answer rather than in front of it.
+* `403` for a caller that is not a teacher or an admin, including one presenting no token or an expired one — the refusals are deliberately indistinguishable from each other.
+
+A `502` means the search itself failed server-side, which is distinct from all of the above.
+
+### GET /api/admin/directory/status
+```http
+GET /api/admin/directory/status
+Authorization: Bearer <access token>
+```
+Reports what state the directory data is in, and how far along any fetch of it has got, without transferring the directory itself. It reads the server's own memory: no Keycloak call, no disk access, and it never starts a fetch — so it is safe to poll while waiting on one, which is exactly what the plugin does.
+
+```json
+{
+  "fetching": true,
+  "phase": "roles",
+  "done": 1712,
+  "total": 14289,
+  "startedAt": 1757683200000,
+  "entries": null,
+  "builtAt": null,
+  "skipped": 0
+}
+```
+
+* `phase` is `idle` (nothing running), `counting` (asking Keycloak for its user count and deciding whether the cache can be reused), `entries` (paginating the realm's users) or `roles` (resolving each user's role-mappings). `fetching` is simply `phase !== "idle"`.
+* `done`/`total` are the raw figures for the current phase, not one blended percentage — the two phases' relative cost differs per realm, and a bar weighted for one of them would stall and then leap on the other. `total` is `null` while the phase does not know it yet (`counting`), rather than being guessed.
+* `entries`, `builtAt` and `skipped` describe the data currently held: how many entries, when it was actually built (not when it was last adopted from disk), and how many records had to be skipped while building it. `entries` and `builtAt` are `null` when nothing is held at all. `skipped` is a count only — the records behind it are named in the server's log, never in an answer.
+
+The same `403` as the search endpoint, for the same reasons.

@@ -514,3 +514,240 @@ describe("isDirectoryCacheFresh", () => {
     );
   });
 });
+
+// ################### Fetch progress and the non-blocking search (show-directory-fetch-progress) ###################
+
+/**
+ * A copy of the module with its own module-level state — the directory cache
+ * and the fetch-progress record both live there, and a check that inherited the
+ * previous one's would be asserting about whatever ran before it. A
+ * cache-busting query is all ESM needs for that; nothing in this module (or in
+ * `keycloak-middleware.js` behind it) runs at import time, so a second instance
+ * costs nothing and connects to nothing.
+ */
+let freshModuleCounter = 0;
+async function freshDirectoryService() {
+  freshModuleCounter += 1;
+  return import(`../middlewares/directory-service.js?case=${freshModuleCounter}`);
+}
+
+/** A Keycloak user shaped enough for `displayName` and `directoryUserRoles` to have something to read. */
+function namedUser(first, index) {
+  return { id: `user-${first + index}`, firstName: `First${first + index}`, lastName: `Last${first + index}` };
+}
+
+/**
+ * Stubs `fetch` for a whole directory fetch: the user count, the admin-events
+ * freshness check, the user pages, and one role-mappings lookup per user.
+ * `onRequest` sees every request as it is served, which is how a check
+ * observes the progress record *during* a phase rather than only after it.
+ */
+function stubWholeRealm(users, onRequest = () => {}) {
+  global.fetch = async (url) => {
+    const requested = new URL(url);
+    const where = requested.pathname;
+    onRequest(requested);
+    if (where.endsWith("/users/count")) return { ok: true, json: async () => users.length };
+    if (where.endsWith("/admin-events")) return { ok: true, json: async () => [] };
+    if (where.endsWith("/role-mappings")) return { ok: true, json: async () => ({ clientMappings: {} }) };
+    const first = Number(requested.searchParams.get("first"));
+    const max = Number(requested.searchParams.get("max"));
+    return { ok: true, json: async () => users.slice(first, Math.min(first + max, users.length)) };
+  };
+}
+
+describe("getDirectoryStatus", () => {
+  test("reports idle and no held data before anything has ever been fetched", async () => {
+    const service = await freshDirectoryService();
+
+    const status = service.getDirectoryStatus();
+    assert.equal(status.fetching, false, "nothing has been started, so nothing should be reported as running");
+    assert.equal(status.phase, "idle");
+    assert.equal(status.entries, null, "no data held should be reported as absent, not as an entry count of 0");
+    assert.equal(status.builtAt, null);
+    assert.equal(status.skipped, 0);
+  });
+
+  test("reports the counting phase with no total, rather than a total it does not know yet", async () => {
+    const service = await freshDirectoryService();
+    // Held at the token grant, before Keycloak's user count has been asked for:
+    // exactly the window in which no total exists to report.
+    service.startDirectoryRefresh(() => new Promise(() => {}));
+
+    const status = service.getDirectoryStatus();
+    assert.equal(status.fetching, true);
+    assert.equal(status.phase, "counting");
+    assert.equal(status.total, null, "a total that isn't known yet must be reported as absent, never guessed");
+    assert.ok(status.startedAt > 0, "a running fetch should say when it started");
+  });
+
+  test("reports the entries phase as the offset reached out of the realm's own count", async () => {
+    const service = await freshDirectoryService();
+    const users = Array.from({ length: 230 }, (_, index) => namedUser(0, index));
+    const seen = [];
+    stubWholeRealm(users, (requested) => {
+      if (requested.pathname.endsWith("/users") && requested.searchParams.has("first")) {
+        seen.push(service.getDirectoryStatus());
+      }
+    });
+
+    await service.startDirectoryRefresh(async () => "token");
+
+    assert.deepEqual(
+      seen.map(({ phase, done, total }) => ({ phase, done, total })),
+      [
+        { phase: "entries", done: 0, total: 230 },
+        { phase: "entries", done: 100, total: 230 },
+        { phase: "entries", done: 200, total: 230 },
+      ],
+      "each page should advance `done` by the offset actually reached, against Keycloak's own count as the total"
+    );
+  });
+
+  test("reports the roles phase against the number of users actually fetched", async () => {
+    const service = await freshDirectoryService();
+    const users = Array.from({ length: 30 }, (_, index) => namedUser(0, index));
+    const seen = [];
+    stubWholeRealm(users, (requested) => {
+      if (requested.pathname.endsWith("/role-mappings")) seen.push(service.getDirectoryStatus());
+    });
+
+    await service.startDirectoryRefresh(async () => "token");
+
+    assert.equal(seen.length, 30, "every user should have been resolved");
+    assert.ok(
+      seen.every((status) => status.phase === "roles" && status.total === 30),
+      `the role-mappings pass should report itself as its own phase against its own total: ${JSON.stringify(seen[0])}`
+    );
+    assert.ok(
+      seen.every((status, index) => status.done <= index + 1),
+      "`done` counts users finished, so it can never run ahead of the lookups started"
+    );
+  });
+
+  test("reports what is held once a fetch completes, and that nothing is running any more", async () => {
+    const service = await freshDirectoryService();
+    stubWholeRealm(Array.from({ length: 30 }, (_, index) => namedUser(0, index)));
+
+    await service.startDirectoryRefresh(async () => "token");
+
+    const status = service.getDirectoryStatus();
+    assert.equal(status.fetching, false, "a finished fetch must not still read as running");
+    assert.equal(status.phase, "idle");
+    assert.equal(status.entries, 30);
+    assert.equal(status.skipped, 0);
+    assert.ok(Date.now() - status.builtAt < 5000, "the data was just built, and should say so");
+  });
+
+  test("resets to idle after a failed fetch, rather than leaving a figure that can never advance", async () => {
+    const service = await freshDirectoryService();
+    global.fetch = async () => ({ ok: false, status: 500, text: async () => "" });
+
+    await assert.rejects(() => service.startDirectoryRefresh(async () => "token"), /status 500/);
+
+    const status = service.getDirectoryStatus();
+    assert.equal(status.fetching, false, "an abandoned fetch must not leave a stale 'running' state behind");
+    assert.equal(status.phase, "idle");
+    assert.equal(status.entries, null, "nothing was fetched, so nothing should be reported as held");
+  });
+
+  test("does not start a fetch just because the status was asked for", async () => {
+    const service = await freshDirectoryService();
+    global.fetch = async () => {
+      throw new Error("reading the status must never reach Keycloak");
+    };
+
+    for (let i = 0; i < 3; i++) assert.equal(service.getDirectoryStatus().fetching, false);
+  });
+});
+
+describe("searchDirectory", () => {
+  test("reports 'not ready' and starts a fetch when nothing is held at all", async () => {
+    const service = await freshDirectoryService();
+    // Removed for the duration so the fetch this starts fails at once, locally,
+    // instead of reaching for whatever realm the environment happens to name -
+    // what is under test is that a fetch was started, not that it succeeded.
+    const clientId = process.env.DIRECTORY_SERVICE_CLIENT_ID;
+    delete process.env.DIRECTORY_SERVICE_CLIENT_ID;
+    try {
+      const answer = await service.searchDirectory("ada");
+
+      assert.equal(answer.ready, false, "a cold cache is neither a result nor a failure");
+      assert.equal(answer.results, undefined, "'not ready' must not be dressed up as an empty match");
+      assert.equal(answer.status.fetching, true, "a repeated search must be waiting on something that will happen");
+      assert.equal(answer.status.phase, "counting");
+    } finally {
+      if (clientId === undefined) delete process.env.DIRECTORY_SERVICE_CLIENT_ID;
+      else process.env.DIRECTORY_SERVICE_CLIENT_ID = clientId;
+    }
+  });
+
+  test("answers 'not ready' immediately while a fetch is running, instead of waiting for it", async () => {
+    const service = await freshDirectoryService();
+    service.startDirectoryRefresh(() => new Promise(() => {}));
+
+    const answer = await service.searchDirectory("");
+
+    assert.equal(answer.ready, false);
+    assert.equal(answer.status.fetching, true);
+    assert.equal(answer.status.phase, "counting", "the answer should carry the running fetch's own progress");
+  });
+
+  test("answers a repeated search with its results once the fetch has completed", async () => {
+    const service = await freshDirectoryService();
+    stubWholeRealm(Array.from({ length: 30 }, (_, index) => namedUser(0, index)));
+
+    const running = service.startDirectoryRefresh(async () => "token");
+    // Asked while that fetch is still running: `searchDirectory` decides
+    // synchronously, so this is the cold answer regardless of how far the fetch
+    // has got by the time the promise is awaited.
+    const tooEarly = service.searchDirectory("First7");
+    assert.equal((await tooEarly).ready, false, "nothing is held yet");
+    await running;
+    const answer = await service.searchDirectory("First7");
+
+    assert.equal(answer.ready, true, "the same search, unchanged, should now be answerable");
+    assert.deepEqual(
+      answer.results.map((entry) => entry.name),
+      ["First7 Last7"],
+      "a search that can be answered should answer with its matches"
+    );
+  });
+
+  test("answers a query that matches nothing with an empty list, distinct from 'not ready'", async () => {
+    const service = await freshDirectoryService();
+    stubWholeRealm(Array.from({ length: 5 }, (_, index) => namedUser(0, index)));
+    await service.startDirectoryRefresh(async () => "token");
+
+    const answer = await service.searchDirectory("nobody-by-that-name");
+
+    assert.equal(answer.ready, true, "an empty match is an answer, not an absence of one");
+    assert.deepEqual(answer.results, []);
+  });
+
+  test("answers from data past its TTL and starts the refresh behind the answer, not in front of it", async () => {
+    const service = await freshDirectoryService();
+    stubWholeRealm(Array.from({ length: 5 }, (_, index) => namedUser(0, index)));
+    await service.startDirectoryRefresh(async () => "token");
+
+    // Past directoryCacheTtlMs (10 minutes) without sitting through it. The TTL
+    // says when to *start* refreshing, not when to stop serving - going back to
+    // "not ready" every ten minutes is the state this change exists to leave.
+    const realNow = Date.now;
+    Date.now = () => realNow() + 11 * 60 * 1000;
+    let answer;
+    try {
+      answer = await service.searchDirectory("");
+    } finally {
+      Date.now = realNow;
+    }
+
+    assert.equal(answer.ready, true, "stale-by-minutes data is still an answer");
+    assert.equal(answer.results.length, 5, "the held data should be what it answers from");
+    assert.equal(
+      service.getDirectoryStatus().fetching,
+      true,
+      "an expired TTL should have started a refresh behind the answer rather than been awaited"
+    );
+  });
+});

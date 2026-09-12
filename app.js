@@ -1,6 +1,11 @@
 import fileNameExtractor from "./middlewares/extract-filename-middleware.js";
 import { initKeycloak, checkAuthenticated, refreshAccessToken, getUserAttributes, setUserAttribute } from "./middlewares/keycloak-middleware.js";
-import { verifyCallerIdentity, searchDirectory } from "./middlewares/directory-service.js";
+import {
+  verifyCallerIdentity,
+  searchDirectory,
+  getDirectoryStatus,
+  startDirectoryRefresh,
+} from "./middlewares/directory-service.js";
 
 import express from "express";
 
@@ -297,21 +302,47 @@ initKeycloak(app).then(() => {
     const query = typeof req.query.q === "string" ? req.query.q.trim() : "";
 
     try {
-      const results = await searchDirectory(query);
-      res.json(results);
+      const answer = await searchDirectory(query);
+      if (!answer.ready) {
+        // 202, not 200-with-nothing and not an error: the directory has no data
+        // to match against yet, which is neither a query that found nobody nor a
+        // failure. The body is the same payload the status route answers with, so
+        // a caller holding this can render the fetch's progress without a second
+        // request. Answering instead of holding the request open is the whole
+        // point — see `show-directory-fetch-progress`'s design.md.
+        res.status(202).json(getDirectoryStatus());
+        return;
+      }
+      res.json(answer.results);
     } catch (error) {
       console.error("Directory search failed:", error);
       res.status(502).json({ error: "Directory search failed" });
     }
   });
 
+  // Registered right beside the search route, and gated identically: same
+  // `verifyCallerIdentity`, same 403 shape, same placement ahead of
+  // checkAuthenticated. It reads process memory only — no Keycloak call, no
+  // disk, and above all no fetch started — which is what lets the plugin's
+  // settings tab poll it without provoking the very work it is reporting on.
+  app.get("/api/admin/directory/status", async (req, res) => {
+    const identity = await verifyCallerIdentity(req);
+    if (!identity.authorized) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+
+    res.json(getDirectoryStatus());
+  });
+
   // Warms the cache searchDirectory() above reads from, so the fetch that can
   // take minutes against a large realm happens here, at startup, rather than
-  // making whichever teacher's search happens to be first pay for it. Not
-  // awaited: the rest of startup, and every other route, must not wait on it.
-  searchDirectory("").catch((error) => {
-    console.error("Directory search: startup cache warm-up failed (a live search will retry it):", error);
-  });
+  // leaving whichever teacher searches first with a 202 and a wait. Not awaited:
+  // the rest of startup, and every other route, must not wait on it. Started
+  // directly rather than through a throwaway search, now that a search no longer
+  // waits for the fetch it starts — and so no longer surfaces its failure either;
+  // `startDirectoryRefresh` logs that itself.
+  startDirectoryRefresh();
 
   // Protect all routes and serve them statically after authentication.
   // Order matters when dealing with middleware!

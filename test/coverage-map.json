@@ -107,7 +107,7 @@
       ]
     },
     "test/checks/deployment-surface.js": {
-      "what": "What a running instance publishes over HTTP: that keycloak.json, the application sources, the dependency manifests and what sits beside a mounted package directory are not served and a refusal looks like a path with no file behind it, that the assets a page addresses still are — including the ones only a stylesheet names — that every same-origin reference of a rendered page resolves in all three views, and that the one endpoint answering before authentication survives a parameter it cannot interpret. That a page which cannot reach the reload stream keeps trying with a growing delay rather than on a fixed timer. That a self-authenticating route such as the directory search endpoint returns no directory data to a request carrying neither a bearer token nor, distinctly, to one carrying only a valid browser session.",
+      "what": "What a running instance publishes over HTTP: that keycloak.json, the application sources, the dependency manifests and what sits beside a mounted package directory are not served and a refusal looks like a path with no file behind it, that the assets a page addresses still are — including the ones only a stylesheet names — that every same-origin reference of a rendered page resolves in all three views, and that the one endpoint answering before authentication survives a parameter it cannot interpret. That a page which cannot reach the reload stream keeps trying with a growing delay rather than on a fixed timer. That a self-authenticating route — the directory search endpoint and the status endpoint beside it — returns no directory data to a request carrying neither a bearer token nor, distinctly, to one carrying only a valid browser session.",
       "guards": [
         "app.js",
         "obsidian.js",
@@ -123,7 +123,7 @@
       ]
     },
     "test/checks/directory-search.js": {
-      "what": "GET /api/admin/directory/search: a teacher token searching by name and by a role/group value that is not a class or teacher/admin, an admin token succeeding without holding teacher, a student token refused, a missing bearer refused, an invalidated (expired/revoked-shaped) token refused indistinguishably from a missing one, a match's response carrying only name and roles, and an empty or unmatched query answering with an empty list rather than an error.",
+      "what": "GET /api/admin/directory/search: a teacher token searching by name and by a role/group value that is not a class or teacher/admin, an admin token succeeding without holding teacher, a student token refused, a missing bearer refused, an invalidated (expired/revoked-shaped) token refused indistinguishably from a missing one, a match's response carrying only name and roles, and an empty or unmatched query answering with an empty list rather than an error. That a search the server cannot answer yet reports the running fetch (202) instead of being held open, and is answered once the caller repeats it. GET /api/admin/directory/status: a teacher token reading what the directory holds without transferring any of it, the payload carrying figures only and no record from the directory, and a student token refused indistinguishably from a request carrying no identity at all.",
       "guards": [
         "app.js",
         "middlewares/directory-service.js",

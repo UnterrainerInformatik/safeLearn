@@ -1,8 +1,9 @@
 /**
- * `GET /api/admin/directory/search`: the caller's identity is proven by a
- * bearer token, introspected independently of the browser session; the
- * directory itself is matched by name or by role/group and mapped down to
- * `{ name, roles }`.
+ * `GET /api/admin/directory/search` and `GET /api/admin/directory/status`: the
+ * caller's identity is proven by a bearer token, introspected independently of
+ * the browser session; the directory itself is matched by name or by role/group
+ * and mapped down to `{ name, roles }`, and its state is readable without
+ * transferring any of it.
  *
  * Unlike every other check in this suite, this one calls the application
  * directly from the test process instead of through the browser page: the
@@ -21,15 +22,15 @@ import { accessToken, applicationUrl, displayName, roles, sharedSession } from "
 /** Roles/groups that exist for every account and so prove nothing about the directory-wide search. */
 const reservedRoleNames = new Set(["admin", "teacher", "teachers", "student", "students"]);
 
-async function search(token, query) {
+function bearer(token) {
   const headers = {};
   if (token !== null && token !== undefined) {
     headers.Authorization = `Bearer ${token}`;
   }
-  const response = await fetch(
-    `${applicationUrl}/api/admin/directory/search?q=${encodeURIComponent(query)}`,
-    { headers }
-  );
+  return headers;
+}
+
+async function answerOf(response) {
   let body = null;
   try {
     body = await response.json();
@@ -37,6 +38,62 @@ async function search(token, query) {
     body = null;
   }
   return { status: response.status, body };
+}
+
+async function searchOnce(token, query) {
+  return answerOf(
+    await fetch(`${applicationUrl}/api/admin/directory/search?q=${encodeURIComponent(query)}`, {
+      headers: bearer(token),
+    })
+  );
+}
+
+/**
+ * The endpoint answers `202` while it holds no directory data to match against
+ * yet: it builds the realm's user list behind the request rather than holding
+ * the request open across a fetch that takes minutes on a school-sized realm
+ * (`show-directory-fetch-progress`). The contract is that a caller repeats the
+ * same request, unchanged, until it is answered.
+ *
+ * The repeating follows the plugin's own rule rather than a plain timeout, so
+ * that this check reports what actually went wrong. A `202` while the status
+ * says a fetch is running is a wait; a `202` while it says none is, is a fetch
+ * that died — the search is re-issued once more, which starts a new one, and a
+ * third `202` after that says the fetch is not completing at all rather than
+ * that it is slow. Without that distinction an instance whose directory-service
+ * credentials are refused (see `AI/memory/directory-service-credentials-invalid.md`)
+ * would sit out the whole bound and, worse, outlive the caller's own access
+ * token, turning every later check into a spurious `403`.
+ */
+async function search(token, query) {
+  const deadline = Date.now() + 30_000;
+  let reissuedOnce = false;
+  for (;;) {
+    const answer = await searchOnce(token, query);
+    if (answer.status !== 202) return answer;
+
+    const state = await directoryStatus(token);
+    if (state.status === 200 && state.body?.fetching === false) {
+      assert.ok(
+        !reissuedOnce,
+        "the directory endpoint answers 202 while reporting no fetch running, twice running — the " +
+          "fetch it starts is dying immediately rather than progressing. Check this instance's " +
+          `DIRECTORY_SERVICE_CLIENT_ID/_SECRET against its realm. Status: ${JSON.stringify(state.body)}`
+      );
+      reissuedOnce = true;
+      continue;
+    }
+
+    assert.ok(
+      Date.now() < deadline,
+      `the directory endpoint still answered 202 after 30s — the fetch it reports is not finishing: ${JSON.stringify(answer.body)}`
+    );
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
+
+async function directoryStatus(token) {
+  return answerOf(await fetch(`${applicationUrl}/api/admin/directory/status`, { headers: bearer(token) }));
 }
 
 /**
@@ -194,6 +251,64 @@ describe("directory search", () => {
   });
 
   // ---- A query matching nothing returns an empty list ----
+
+  // ---- show-directory-fetch-progress: the status endpoint, behind the same gate ----
+
+  test("a teacher token reads the directory's state without searching it", async () => {
+    const { status, body } = await directoryStatus(teacherToken);
+    assert.equal(status, 200, `the status should be readable by a teacher token, got ${status}`);
+    assert.ok(
+      ["idle", "counting", "entries", "roles"].includes(body.phase),
+      `the status should name which phase of a fetch is running, got ${JSON.stringify(body)}`
+    );
+    assert.equal(
+      body.fetching,
+      body.phase !== "idle",
+      `"a fetch is running" and "the phase is not idle" are the same statement, got ${JSON.stringify(body)}`
+    );
+    assert.ok(
+      body.total === null || typeof body.total === "number",
+      `a total that is not known yet should be reported as absent, never guessed, got ${JSON.stringify(body)}`
+    );
+    assert.ok(
+      body.entries === null || typeof body.entries === "number",
+      `how many entries are held should be a count or absent, got ${JSON.stringify(body)}`
+    );
+    assert.equal(typeof body.skipped, "number", "how many records were skipped should be a count");
+  });
+
+  test("the status carries none of the directory's contents", async () => {
+    const { body } = await directoryStatus(teacherToken);
+    assert.deepEqual(
+      Object.keys(body).sort(),
+      ["builtAt", "done", "entries", "fetching", "phase", "skipped", "startedAt", "total"],
+      `the status should carry figures about the directory and nothing from it, got ${JSON.stringify(body)}`
+    );
+    assert.ok(
+      !Object.values(body).some((value) => Array.isArray(value) || (value !== null && typeof value === "object")),
+      `no field of the status may carry a record or a list of them, got ${JSON.stringify(body)}`
+    );
+  });
+
+  test("a student token is refused the status, indistinguishably from a request carrying none", async () => {
+    const refusedStudent = await directoryStatus(studentToken);
+    const refusedMissing = await directoryStatus(null);
+    assert.notEqual(
+      refusedStudent.status,
+      200,
+      `a student token should be refused the status, got ${refusedStudent.status} with ${JSON.stringify(refusedStudent.body)}`
+    );
+    assert.equal(
+      refusedStudent.status,
+      refusedMissing.status,
+      "holding neither role and presenting no identity at all should be refused the same way"
+    );
+    assert.deepEqual(
+      refusedStudent.body,
+      refusedMissing.body,
+      "and neither refusal may disclose anything about the directory's state that the other does not"
+    );
+  });
 
   test("a query matching nothing returns an empty list", async () => {
     const { status, body } = await search(teacherToken, "no-one-in-any-realm-is-named-this-4f2a7c");

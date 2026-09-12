@@ -37,6 +37,7 @@ import { after, before, describe, test } from "node:test";
 import {
   accessTokenFor,
   addSelectedDirectoryResults,
+  advanceDirectoryFetch,
   agePendingLogins,
   answerColumnCount,
   answerNameList,
@@ -45,12 +46,15 @@ import {
   checkDirectoryClass,
   checkDirectoryResults,
   clearDirectoryLoginFixture,
+  clickSettingsButton,
   clickLoginButton,
   closeExtraViews,
+  closeOpenModal,
   closePluginSettings,
   columns,
   commandIsAvailable,
   columnsAreSideBySide,
+  completeDirectoryFetch,
   completeRealLogin,
   confirmNameList,
   corpusPath,
@@ -58,6 +62,9 @@ import {
   deliverAuthCallback,
   dialogBoxes,
   directoryClassOptions,
+  directoryInfoState,
+  directoryInfoSummary,
+  directoryInfoViewPresent,
   directorySearchResults,
   directorySearchStripPresent,
   directoryStatus,
@@ -100,8 +107,10 @@ import {
   scrollTo,
   seedLoginFacts,
   selectAcross,
+  setDirectoryFetchFixture,
   setDirectoryLoginFixture,
   searchDirectoryStrip,
+  settingDescription,
   settingsFieldNames,
   settingsTextFields,
   shutdown,
@@ -112,6 +121,7 @@ import {
   type,
   vaultPath,
   waitForLoginState,
+  waitForValue,
   waitForPendingLoginCount,
   views,
   visibleText,
@@ -3864,5 +3874,216 @@ describe("the realm's own figure for how long a login may take", () => {
         REALM_REFRESH_TOKEN_SECONDS,
         "It is kept beside the refresh token it describes, so the next start knows it too."
       );
+    }));
+});
+
+// ################### A directory fetch in progress, wherever the plugin waits (show-directory-fetch-progress) ###################
+
+describe("a directory fetch in progress is shown rather than nothing", () => {
+  const FIXTURE = [
+    { name: "Ada Byron", roles: { student: true, "5bhif": true } },
+    { name: "Grace Hopper", roles: { student: true, "4ahif": true } },
+  ];
+
+  test("the picker shows the fetch and its progress instead of an empty dialog, and fills in when it completes", async () =>
+    watched("directory-fetching-picker", async () => {
+      await setDirectoryFetchFixture(FIXTURE, { phase: "entries", done: 40, total: 100 });
+      const name = "constructed-directory-fetching-picker.md";
+      await writeDocument(name, ["Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      const shown = await directoryStatus();
+      assert.match(
+        shown ?? "",
+        /Fetching the directory.*40%/,
+        "A picker opened while the instance is still fetching should say so, and how far along it " +
+          `is, rather than showing an empty list with no explanation. It showed: ${JSON.stringify(shown)}`
+      );
+      assert.doesNotMatch(
+        shown ?? "",
+        /could not be reached|failed/,
+        "A fetch in progress is not a failure and must not be worded as one."
+      );
+
+      // The indication follows the fetch rather than staying at the figure it
+      // first showed - the whole reason the plugin polls at all.
+      await advanceDirectoryFetch({ phase: "roles", done: 90, total: 100 });
+      const advanced = await waitForValue(
+        () => directoryStatus(),
+        (line) => /90%/.test(line ?? ""),
+        "The progress shown in the picker advancing with the fetch"
+      );
+      assert.match(advanced, /resolving roles/, "The phase should be named, not just the percentage.");
+
+      await completeDirectoryFetch();
+      await waitForValue(
+        () => directoryStatus(),
+        (line) => line === null,
+        "The picker's wait indication clearing once the fetch completed"
+      );
+      const classes = await waitForValue(
+        () => directoryClassOptions(),
+        (options) => (options ?? []).includes("5bhif"),
+        "The class filter filling in once the fetch completed"
+      );
+      assert.ok(
+        classes.includes("4ahif"),
+        `The picker should become usable without being reopened. Class options: ${JSON.stringify(classes)}`
+      );
+
+      await answerNameList(["teacher"]);
+      await clearDirectoryLoginFixture();
+    }));
+
+  test("the directory info view shows the fetch, then fills its sections in without being reopened", async () =>
+    watched("directory-fetching-info-view", async () => {
+      await setDirectoryFetchFixture(FIXTURE, { phase: "counting", done: 0, total: null });
+      // "Show directory info" refuses to open without the teacher/admin role -
+      // the fixture's own placeholder token carries no claims at all.
+      await seedLoginFacts({ accessToken: accessTokenFor({ name: "Ada Byron", roles: ["teacher"] }) });
+      await runCommand("show-directory-info", { expectEdit: false });
+      assert.ok(await directoryInfoViewPresent(), "The command should have opened the directory info view.");
+
+      const shown = await directoryStatus();
+      assert.match(
+        shown ?? "",
+        /Fetching the directory/,
+        `The view should say the directory is being fetched, not sit there empty. It showed: ${JSON.stringify(shown)}`
+      );
+      assert.doesNotMatch(
+        shown ?? "",
+        /\d+%/,
+        "No total is known in the counting phase, so no percentage may be invented for it."
+      );
+      assert.equal(
+        await directoryInfoSummary(),
+        null,
+        "No user/class totals may be shown while the fetch that would produce them is still running."
+      );
+
+      await completeDirectoryFetch();
+      const summary = await waitForValue(
+        () => directoryInfoSummary(),
+        (text) => (text ?? "").includes("2 users"),
+        "The info view's totals appearing once the fetch completed"
+      );
+      assert.match(summary, /2 classes/, "Both totals should appear, from the fetch the view was waiting on.");
+      assert.match(
+        (await directoryInfoState()) ?? "",
+        /2 entries, built/,
+        "The 'Directory data' section should report what the instance now holds and how old it is."
+      );
+
+      await closeOpenModal();
+      await forgetLogin();
+      await clearDirectoryLoginFixture();
+    }));
+
+  test('"list classes" shows the fetch and produces the list once it completes', async () =>
+    watched("directory-fetching-list-classes", async () => {
+      await forgetNotices();
+      await setDirectoryFetchFixture(FIXTURE, { phase: "entries", done: 10, total: 100 });
+      await runCommand("list-classes", { expectEdit: false });
+
+      assert.ok(
+        (await noticesShown()).some((notice) => /Fetching the directory/.test(notice)),
+        `"List classes" should report the fetch while it waits. Notices: ${JSON.stringify(await noticesShown())}`
+      );
+
+      await completeDirectoryFetch();
+      const notice = await waitForValue(
+        () => noticesShown(),
+        (notices) => notices.some((one) => one.includes("Classes in the directory")),
+        'The class list appearing once the fetch completed, without "List classes" being invoked again'
+      );
+      assert.ok(
+        notice.some((one) => one.includes("5bhif") && one.includes("4ahif")),
+        `The class list should be the one the completed fetch produced. Notices: ${JSON.stringify(notice)}`
+      );
+
+      await forgetNotices();
+      await clearDirectoryLoginFixture();
+    }));
+});
+
+describe("the directory info view is reachable from the settings, with the state beside it", () => {
+  const FIXTURE = [{ name: "Ada Byron", roles: { student: true, "5bhif": true } }];
+
+  test("a teacher's settings offer the view, and the line beside it reports what is held", async () =>
+    watched("directory-settings-entry-point", async () => {
+      // The fetch fixture rather than the plain one: the settings line polls the
+      // status endpoint, and an unstubbed one would have it reaching for a host
+      // that does not exist, once every two seconds, for as long as this runs.
+      await setDirectoryFetchFixture(FIXTURE);
+      await completeDirectoryFetch();
+      await seedLoginFacts({ accessToken: accessTokenFor({ name: "Ada Byron", roles: ["teacher"] }) });
+      await openPluginSettings();
+
+      assert.ok(
+        (await settingsFieldNames()).includes("Directory"),
+        "With an instance configured and the teacher role held, the settings should offer the view - " +
+          "the command palette is not where somebody who does not know it exists will find it."
+      );
+
+      await clickSettingsButton("Directory", "Show directory info");
+      assert.ok(
+        await directoryInfoViewPresent(),
+        "The settings entry point should open the same view the command palette opens."
+      );
+
+      await closeOpenModal();
+      await closePluginSettings();
+      await forgetLogin();
+      await clearDirectoryLoginFixture();
+    }));
+
+  test("the line beside it reports a running fetch, and what is held once it finishes", async () =>
+    watched("directory-settings-state-line", async () => {
+      await setDirectoryFetchFixture(FIXTURE, { phase: "roles", done: 25, total: 100 });
+      await seedLoginFacts({ accessToken: accessTokenFor({ name: "Ada Byron", roles: ["teacher"] }) });
+      await openPluginSettings();
+
+      const fetching = await waitForValue(
+        () => settingDescription("Directory"),
+        (line) => /Fetching the directory.*25%/.test(line ?? ""),
+        "The settings line reporting the running fetch"
+      );
+      assert.match(fetching, /resolving roles/, "It should name the phase, in the same words every other surface uses.");
+
+      await completeDirectoryFetch();
+      const held = await waitForValue(
+        () => settingDescription("Directory"),
+        (line) => /1 entries|1 entr/.test(line ?? ""),
+        "The settings line reporting what is held once the fetch finished"
+      );
+      assert.match(
+        held,
+        /built/,
+        `It should say how long ago the data was built, so data held for a long time is recognizable. It said: ${JSON.stringify(held)}`
+      );
+
+      await closePluginSettings();
+      await forgetLogin();
+      await clearDirectoryLoginFixture();
+    }));
+
+  test("settings with no directory role offer neither the view nor its state", async () =>
+    watched("directory-settings-no-role", async () => {
+      await setDirectoryLoginFixture(FIXTURE);
+      await seedLoginFacts({ accessToken: accessTokenFor({ name: "Stu Dent", roles: ["student"] }) });
+      await openPluginSettings();
+
+      assert.equal(
+        await settingDescription("Directory"),
+        null,
+        "Without the teacher/admin role the settings must offer nothing about the directory, exactly " +
+          "as the command palette offers nothing."
+      );
+
+      await closePluginSettings();
+      await forgetLogin();
+      await clearDirectoryLoginFixture();
     }));
 });

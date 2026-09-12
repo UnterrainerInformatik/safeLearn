@@ -93,12 +93,13 @@ const published = [
 
 /**
  * Routes that authenticate their own caller instead of joining the
- * `checkAuthenticated` chain — currently just the directory search endpoint
- * (`middlewares/directory-service.js`). Named here rather than only in
+ * `checkAuthenticated` chain — the directory search endpoint and the status
+ * endpoint beside it (`middlewares/directory-service.js`), which is gated the
+ * same way and must refuse the same way. Named here rather than only in
  * `app.js`, so a route added to this list without a scenario below is a gap
  * this file would otherwise not notice on its own.
  */
-const selfAuthenticatingRoutes = ["/api/admin/directory/search"];
+const selfAuthenticatingRoutes = ["/api/admin/directory/search", "/api/admin/directory/status"];
 
 /** A path no deployment has a file for, used as the shape of "not there". */
 const absent = "/no-deployment-has-a-file-at-this-path-4f2a7c.json";

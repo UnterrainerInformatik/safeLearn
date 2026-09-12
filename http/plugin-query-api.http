@@ -1,0 +1,61 @@
+###
+# @name API Query
+# Answers 200 with the matches once the directory has data to match against.
+# Answers 202 with the status payload below while it has none yet - a fetch of
+# a realm this size takes minutes, and the request is no longer held open for
+# it. Repeat the same request; it answers 200 once the fetch has finished.
+GET {{url}}/api/admin/directory/search?q=gera
+Authorization: openid password env
+Content-Type: application/json
+
+###
+# @name API Query while the directory is still being fetched
+# The same request, answered 202 on a cold cache:
+#   HTTP/1.1 202 Accepted
+#   {
+#     "fetching": true,
+#     "phase": "entries",
+#     "done": 6400,
+#     "total": 14289,
+#     "startedAt": 1757683200000,
+#     "entries": null,
+#     "builtAt": null,
+#     "skipped": 0
+#   }
+GET {{url}}/api/admin/directory/search?q=
+Authorization: openid password env
+Content-Type: application/json
+
+###
+# @name API Directory status
+# The same teacher/admin gate as the search above, and the same 403 for anyone
+# else. Reads process memory only: no Keycloak call, and it never starts a
+# fetch - so it can be polled while waiting on one.
+#
+# While a fetch is running:
+#   {
+#     "fetching": true,
+#     "phase": "roles",
+#     "done": 1712,
+#     "total": 14289,
+#     "startedAt": 1757683200000,
+#     "entries": null,
+#     "builtAt": null,
+#     "skipped": 0
+#   }
+#
+# While idle, with data held:
+#   {
+#     "fetching": false,
+#     "phase": "idle",
+#     "done": 0,
+#     "total": null,
+#     "startedAt": null,
+#     "entries": 14289,
+#     "builtAt": 1757683812345,
+#     "skipped": 2
+#   }
+GET {{url}}/api/admin/directory/status
+Authorization: openid password env
+Content-Type: application/json
+###

@@ -1187,6 +1187,71 @@ export async function setDirectoryLoginFixture(entries = [], { outcome = "ok" } 
   );
 }
 
+/**
+ * The same fixture, but with the instance still building its directory: every
+ * search answers `"fetching"` with the seeded progress and the status call
+ * reports a fetch running, until `completeDirectoryFetch()` below says
+ * otherwise. Both calls are stubbed, since a waiting surface polls the status
+ * and re-issues the search, and a fixture that stubbed only one of them would
+ * check half the path.
+ *
+ * The fixture's state lives on `window` rather than being closed over, so that
+ * `advanceDirectoryFetch` and `completeDirectoryFetch` can move it from outside
+ * without re-stubbing - a re-stub would be a new server, where what is under
+ * test is one server getting further along.
+ */
+export async function setDirectoryFetchFixture(entries = [], progress = { phase: "entries", done: 40, total: 100 }) {
+  doing(`seeding a directory fetch in progress at ${JSON.stringify(progress)}`);
+  await page.evaluate(
+    ({ id, entries, progress }) => {
+      const plugin = window.app.plugins.plugins[id];
+      if (!plugin) throw new Error(`No running plugin instance at app.plugins.plugins[${JSON.stringify(id)}].`);
+      plugin.data.instanceUrl = "https://safelearn.example.test";
+      plugin.accessToken = "fixture-access-token";
+      const fixture = { fetching: true, progress, entries, builtAt: Date.now() };
+      window.__safelearnDirectoryFixture = fixture;
+      plugin.searchDirectory = async (query) => {
+        if (fixture.fetching) return { outcome: "fetching", entries: [], progress: fixture.progress };
+        const normalized = query.trim().toLowerCase();
+        const matches = !normalized
+          ? fixture.entries
+          : fixture.entries.filter(
+              (entry) =>
+                entry.name.toLowerCase().includes(normalized) ||
+                Object.keys(entry.roles).some((role) => role.includes(normalized))
+            );
+        return { outcome: "ok", entries: matches };
+      };
+      plugin.directoryStatus = async () => ({
+        ...fixture.progress,
+        fetching: fixture.fetching,
+        entries: fixture.fetching ? null : fixture.entries.length,
+        builtAt: fixture.fetching ? null : fixture.builtAt,
+        skipped: 0,
+      });
+    },
+    { id: pluginId, entries, progress }
+  );
+}
+
+/** Moves the seeded fetch further along, so a check can assert that what is shown follows it. */
+export async function advanceDirectoryFetch(progress) {
+  doing(`advancing the seeded directory fetch to ${JSON.stringify(progress)}`);
+  await page.evaluate((progress) => {
+    window.__safelearnDirectoryFixture.progress = progress;
+  }, progress);
+}
+
+/** Finishes the seeded fetch: searches start answering, and the status reports nothing running. */
+export async function completeDirectoryFetch() {
+  doing("finishing the seeded directory fetch");
+  await page.evaluate(() => {
+    window.__safelearnDirectoryFixture.fetching = false;
+    window.__safelearnDirectoryFixture.progress = { phase: "idle", done: 0, total: null };
+    window.__safelearnDirectoryFixture.builtAt = Date.now();
+  });
+}
+
 /** Undoes `setDirectoryLoginFixture`, back to "no instance configured" - the state a fresh vault starts in. */
 export async function clearDirectoryLoginFixture() {
   await page.evaluate((id) => {
@@ -1195,6 +1260,8 @@ export async function clearDirectoryLoginFixture() {
     plugin.data.instanceUrl = "";
     plugin.accessToken = null;
     delete plugin.searchDirectory;
+    delete plugin.directoryStatus;
+    delete window.__safelearnDirectoryFixture;
   }, pluginId);
 }
 
@@ -1728,6 +1795,44 @@ export async function settingsTextFields() {
   );
 }
 
+/**
+ * One settings entry's description line, by the `Setting.setName` label above
+ * it - `null` when the tab shows no such entry at all, which is how a check
+ * tells "not offered" from "offered, saying nothing".
+ */
+export async function settingDescription(label) {
+  return page.evaluate((label) => {
+    const item = [...document.querySelectorAll(".vertical-tab-content .setting-item")].find(
+      (candidate) => candidate.querySelector(".setting-item-name")?.textContent === label
+    );
+    if (!item) return null;
+    return item.querySelector(".setting-item-description")?.textContent ?? "";
+  }, label);
+}
+
+/** Clicks a button in one settings entry, found by that entry's label and the text on the button. */
+export async function clickSettingsButton(label, buttonText) {
+  doing(`clicking ${JSON.stringify(buttonText)} in the ${JSON.stringify(label)} setting`);
+  await page.evaluate(
+    ({ label, buttonText }) => {
+      const item = [...document.querySelectorAll(".vertical-tab-content .setting-item")].find(
+        (candidate) => candidate.querySelector(".setting-item-name")?.textContent === label
+      );
+      const buttons = [...(item?.querySelectorAll(".setting-item-control button") ?? [])];
+      const button = buttons.find((candidate) => candidate.textContent === buttonText);
+      if (!button) {
+        throw new Error(
+          `The ${JSON.stringify(label)} setting offers no button called ${JSON.stringify(buttonText)}. ` +
+            `It offers ${JSON.stringify(buttons.map((candidate) => candidate.textContent))}.`
+        );
+      }
+      button.click();
+    },
+    { label, buttonText }
+  );
+  await settle();
+}
+
 /** Types into one of the settings tab's text fields, found by its `Setting.setName` label, and blurs it. */
 export async function fillSettingsField(label, value) {
   doing(`setting ${JSON.stringify(label)} to ${JSON.stringify(value)}`);
@@ -1922,6 +2027,57 @@ export async function directoryStatus() {
     if (!status || status.hidden) return null;
     return status.textContent ?? "";
   });
+}
+
+/**
+ * Waits until `read` answers with something `accept` is happy with, and says
+ * what it last saw when it does not.
+ *
+ * The surfaces that wait on a directory fetch fill themselves in on a two-second
+ * poll, so a check that read one of them once, immediately, would report a wait
+ * that is working exactly as it would report one that never resolves.
+ */
+export async function waitForValue(read, accept, what, { timeout = 15000 } = {}) {
+  const deadline = Date.now() + timeout;
+  let last;
+  for (;;) {
+    last = await read();
+    if (accept(last)) return last;
+    if (Date.now() >= deadline) {
+      throw new Error(`${what} never arrived within ${timeout}ms. Last saw: ${JSON.stringify(last)}.`);
+    }
+    await sleep(200);
+  }
+}
+
+/** Whether the directory info view is the dialog currently open - it is the only one carrying a "Directory data" section. */
+export async function directoryInfoViewPresent() {
+  return page.evaluate(() => !!document.querySelector(".modal-container .safelearn-directory-info-state"));
+}
+
+/** The directory info view's "Directory data" line: what the instance holds, or the fetch building it. */
+export async function directoryInfoState() {
+  return page.evaluate(
+    () => document.querySelector(".modal-container .safelearn-directory-info-state")?.textContent ?? null
+  );
+}
+
+/** The info view's user/class totals, or `null` while they are hidden - which they are until its fetch resolves. */
+export async function directoryInfoSummary() {
+  return page.evaluate(() => {
+    const summary = document.querySelector(".modal-container .safelearn-directory-info-summary");
+    if (!summary || summary.hidden) return null;
+    return summary.textContent ?? "";
+  });
+}
+
+/** Closes whatever dialog is open, the way its own close control does - for the ones that carry no confirmation button. */
+export async function closeOpenModal() {
+  doing("closing the open dialog");
+  await page.evaluate(() => {
+    document.querySelector(".modal-container .modal-close-button")?.click();
+  });
+  await settle();
 }
 
 /**
