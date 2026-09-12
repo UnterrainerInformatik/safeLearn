@@ -25,3 +25,11 @@ The `unterrainer` Keycloak realm at `auth.htl-leonding.ac.at` — the identity s
 - **Affected people**: every HTL Leonding student and staff member with an account in that realm — duplicates and stale accounts identified here belong to real people.
 - **Affected safeLearn behavior indirectly**: `role-resolution` and `directory-search` (`middlewares/directory-service.js`) both read this realm; a smaller, deduplicated directory also reduces the per-search cost `directory-search`'s own performance fix has to cover, though that fix is tracked separately.
 - **Whoever runs the import/sync job** feeding this realm — the process itself may need a change to stop the recurrence, scoped once the investigation identifies its actual behavior.
+
+## Outcome (closed 2026-09-12)
+
+The premise in "Why" above was wrong in its magnitude, and the investigation is what established that. **84% of the realm (12,060 of 14,289 accounts) is a synthetic `OU=TestUsers` fixture**, not historical people; the real population is 2,228. There are zero duplicate accounts by any signal. What survives of the original suspicion is one un-retired cohort: +317 students and +110 teachers against expectation.
+
+The remedy moved accordingly. Cleaning up inside Keycloak cannot hold, because paginating the admin API re-imports from LDAP on demand — so the fix is to narrow the federation's scope instead, which is tracked in `AI/open-proposals.md` under "Realm auf zwei LDAP-Provider aufteilen" and blocked on the AD bind password. Sections 3–5 are closed in `tasks.md` with their individual resolutions; the recurrence guards asked for in section 5 shipped along the way in the directory fetch (`0072059`, `8b3231e`).
+
+What this change leaves behind is the `realm-directory-integrity` capability: the invariants the realm has to satisfy — scope covering only real people, one enabled account per person, a documented retention rule, reviewed destructive changes, and enumeration that does not import — independent of who executes the next cleanup. Full detail in `investigation-findings.md`.

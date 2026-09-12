@@ -4,6 +4,20 @@ Defines what the school's Keycloak realm is allowed to hold as its user director
 
 ## ADDED Requirements
 
+### Requirement: The directory's federation scope covers only real people
+
+The realm's LDAP federation SHALL be scoped to the directory subtrees that hold the school's actual students and staff, and SHALL NOT reach subtrees holding synthetic, test, or otherwise unrelated accounts. Scope is the realm's first line of defence: an account outside the federation's scope is never imported, so it can never need cleaning up.
+
+#### Scenario: The source directory holds a subtree of non-people
+
+- **WHEN** the source LDAP directory contains a subtree whose entries do not correspond to current students or staff (a test fixture, a service-account tree, a decommissioned department)
+- **THEN** the federation's configured scope excludes that subtree, rather than importing its entries and relying on a later cleanup pass to remove them
+
+#### Scenario: Cleaning up inside Keycloak alone
+
+- **WHEN** accounts that the federation's scope still reaches are deleted from Keycloak
+- **THEN** this is understood not to be a durable fix — the next import of any kind restores them — and the scope itself is narrowed instead
+
 ### Requirement: One enabled account per person
 
 The realm SHALL hold at most one enabled account for a given real person, identified by a stable external signal (the LDAP distinguished name, an institutional email, or another external id that does not change across re-imports) rather than by username or display-name matching alone.
@@ -22,7 +36,7 @@ The realm SHALL hold at most one enabled account for a given real person, identi
 
 The realm SHALL apply one documented rule for what happens to a person's account once they are no longer currently enrolled (graduated, withdrawn, or otherwise no longer a student or staff member), and that rule SHALL be applied consistently rather than left to accumulate as an accident of import history.
 
-**Approved rule (2026-09-10, Gerald)**: a federated account (one carrying `LDAP_ENTRY_DN`/`LDAP_ID`) is removed as soon as a periodic LDAP full sync finds no matching entry for it in the live source directory anymore — no additional grace period beyond the sync's own cadence, since the live directory is the authoritative signal (investigation found Keycloak's own stored timestamps too unreliable to use instead, see `investigation-findings.md`). Accounts with neither `LDAP_ENTRY_DN` nor `LDAP_ID` (manually created directly in Keycloak) are never touched by this rule — they are not federated, so they cannot be evaluated against LDAP presence at all.
+**Approved rule (2026-09-10, Gerald)**: a federated account (one carrying `LDAP_ENTRY_DN`/`LDAP_ID`) is removed as soon as a periodic LDAP full sync finds no matching entry for it in the live source directory anymore — no additional grace period beyond the sync's own cadence, since the live directory is the authoritative signal (investigation found Keycloak's own stored timestamps too unreliable to use instead, see `investigation-findings.md`). Accounts with neither `LDAP_ENTRY_DN` nor `LDAP_ID` (manually created directly in Keycloak) are never touched by this rule — they are not federated, so they cannot be evaluated against LDAP presence at all. This rule presupposes the scope requirement above and cannot substitute for it: an account that is present in the source directory but does not belong to a real student or staff member (the `OU=TestUsers` fixture that made up 84% of this realm) is never caught by a presence check, because it is genuinely present.
 
 #### Scenario: A person is no longer enrolled
 
@@ -66,3 +80,9 @@ The process that feeds accounts into the realm SHALL NOT recreate a duplicate fo
 
 - **WHEN** an import run finishes
 - **THEN** the resulting total account count is checked against the expected order of magnitude for the school, so a reimport that silently balloons the realm again is noticed rather than discovered later by chance
+
+#### Scenario: The directory is enumerated over the admin API
+
+- **WHEN** a client pages through the realm's users over the Keycloak admin API
+- **THEN** it stops at a total it fetched beforehand from `users/count`, so the enumeration stays within Keycloak's local database and does not cause the federation to import further entries as a side effect of being read
+

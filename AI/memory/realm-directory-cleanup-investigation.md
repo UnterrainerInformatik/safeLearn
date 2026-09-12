@@ -1,17 +1,17 @@
 ---
 name: realm-directory-cleanup-investigation
-description: "Status and key findings of the unterrainer realm cleanup investigation (OpenSpec change realm-directory-cleanup), paused 2026-09-10 after Sections 1-2"
-metadata: 
+description: "Outcome of the unterrainer realm cleanup investigation (OpenSpec change realm-directory-cleanup, archived 2026-09-12): the realm is 84% synthetic test data, not stale people"
+metadata:
   node_type: memory
   type: project
-  originSessionId: 31377303-5cea-4e1c-8772-d35a2d6decfc
-  modified: 2026-09-10T20:34:06.015Z
 ---
 
-The OpenSpec change `realm-directory-cleanup` investigates why the `unterrainer` Keycloak realm (`auth.htl-leonding.ac.at`, HTL Leonding's production identity source) holds 14,289 accounts against an expected ~1,530 (~1,400 students + ~130 teachers). Sections 1 (Investigation) and 2 (Retention rule) are fully done and approved by Gerald as of 2026-09-10; Sections 3–5 (dry-run report, apply, prevent recurrence) are not started — paused there deliberately, Gerald said he'd pick it up later.
+The OpenSpec change `realm-directory-cleanup` investigated why the `unterrainer` Keycloak realm (`auth.htl-leonding.ac.at`, HTL Leonding's production identity source) held 14,289 accounts against an expected ~1,530. **Closed and archived 2026-09-12** under `AI/openspec/changes/archive/2026-09-12-realm-directory-cleanup/`; the invariants it produced live on as the `realm-directory-integrity` capability.
 
-**Key surprising finding**: the proposal's original hypothesis (duplicate accounts from repeated imports) was wrong — zero duplicates exist by any signal (`LDAP_ID`, `LDAP_ENTRY_DN`, email), confirmed even at a same-person-different-id level (only 3 coincidental name collisions out of 8,608 distinct names, not a re-enrollment pattern). The real cause: the realm's LDAP federation has `fullSyncPeriod`/`changedSyncPeriod` both set to `-1` — no periodic sync runs at all (confirmed by reading the federation component config directly once elevated `view-*` roles were granted). It has never pruned anyone who left since a one-time full sync on 2024-07-10 vacuumed in the entire AD OU tree (`ou=HTL,dc=EDU,dc=HTL-LEONDING,dc=AC,dc=AT`) as it stood, back to 2017. ~40% of the realm (5,699 accounts) is a frozen 2017 snapshot — evidenced by those accounts almost uniformly lacking the `firstName`/`lastName` that a later-added LDAP mapper backfilled onto every account touched since.
+**Answer**: 84% of the realm (12,060 accounts) is a synthetic `OU=TestUsers` fixture — see [[keycloak-testusers-ou-discovery]]. The real population is 2,228. Both of the change's original hypotheses were wrong: zero duplicate accounts exist by any signal (`LDAP_ID`, `LDAP_ENTRY_DN`, email, and same-person-different-id via name grouping), and the retention gap is one un-retired cohort (+317 students, +110 teachers), not thousands of stale accounts.
 
-**Why**: This reframes the fix from a Keycloak-side heuristic classifier to fixing the federation's sync/reconciliation behavior itself — no native "remove missing users on sync" toggle exists in this Keycloak version's LDAP provider (confirmed from the actual component config schema), so task 5.2 will need either enabling periodic sync (if a version-appropriate removal mechanism exists) or an external reconciliation script.
+**Two earlier readings were retracted on the way** — worth knowing, because both were confidently written up before the OU distribution was ever aggregated: the `createTimestamp` spikes in 2017/2021/2023 read as "AD bulk migration events" are 88–97% test accounts, and the "frozen 2017 pre-mapper snapshot, ~40% of the realm" was the same fixture measured a second way. Aggregating the DN's OU segments would have answered the question on day one.
 
-**How to apply**: Before resuming this change, re-read `AI/openspec/changes/realm-directory-cleanup/investigation-findings.md` and `tasks.md` for full detail — this memory is just a pointer/summary, not the source of truth. Full export artifacts (with real PII) live on Gerald's own server, not in this repo — see [[babylon5-server]]. See also [[pii-handling-real-data]] for how that data was handled during the investigation.
+**Why the remedy moved**: no Keycloak-side cleanup can hold, because enumerating the admin API re-imports from LDAP on demand — see [[keycloak-import-on-demand]]. The fix is narrowing the federation's `usersDn`, which is the still-open LDAP-split entry in `AI/open-proposals.md` (blocked on the AD bind password). The recurrence guards the change asked for shipped along the way in the directory fetch: enumeration capped at `users/count` (`0072059`) and count-based change detection (`8b3231e`).
+
+**How to apply**: this is the closed summary — for the full evidence read `investigation-findings.md` in the archived change, whose final "Correction (2026-09-12)" section supersedes everything above it. Export artifacts with real PII stayed on Gerald's own server, see [[babylon5-server]] and [[pii-handling-real-data]].

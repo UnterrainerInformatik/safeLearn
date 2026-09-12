@@ -66,3 +66,42 @@ After the retention rule was approved (2.1–2.3), Gerald raised a sharper versi
 ### Revised direction for tasks 2–5
 
 Given 1.4/1.5, the effective fix is closer to "make the LDAP federation sync reconcile against live LDAP (delete on disappearance, except manually-created accounts)" — which is what Gerald described wanting — rather than a heuristic Keycloak-side report built on the timestamp signals above. Task 2 (retention rule) and task 5 (fix recurrence) likely converge on the same mechanism: get the federation sync's own removal behavior confirmed/enabled, and use one authoritative "run it and see what it removes" as the task 3 dry-run report, instead of an independently-built heuristic classifier.
+
+---
+
+## Correction (2026-09-12): 84% of the realm is synthetic test data, and enumeration imports on demand
+
+Two findings from 2026-09-12 supersede the interpretation above. Both came from data the earlier investigation never looked at: the OU distribution itself, and the realm's behaviour while being paginated.
+
+### The realm is not 14,289 people
+
+Aggregating the `OU=` segments of `attributes.LDAP_ENTRY_DN` across the production directory cache (`directory-cache.json`, written 2026-09-11 after the fetch fixes, the first full fetch that ever completed) gives:
+
+- **12,060 of 14,289 accounts (84%) sit under `OU=TestUsers`** — sub-OUs `testA`…`testK`, each holding exactly 36 entries. A synthetic test fixture, not people.
+- **2,228 accounts are real**: 1,717 students (1,668 enabled / 49 disabled), 240 teachers (171 enabled / 69 disabled), ~271 other (Exams/Matura/Admin/Special).
+
+**This retracts the central claim of 1.5 and 1.6.** The `createTimestamp` spikes read there as AD-side bulk migration events are overwhelmingly the test fixture: of the 5,699 accounts dated 2017, 5,508 (97%) are TestUsers — only 191 are real. Same for 2021 (1,908/2,158 = 88% test) and 2023 (3,744/4,032 = 93% test). Once the test accounts are excluded, the real population spreads evenly across 2017–2025 at roughly 74–320 per year, which is what an ordinary school population looks like. The "frozen 2017 snapshot" argument from the 2026-09-10 follow-up — 1% name coverage in the 2017 batch versus ~100% everywhere else — measured the same artifact: the fixture was imported before the `givenName`→`firstName` mapper existed and has never been touched since, which says nothing about real former students.
+
+The ~9.5x gap in the proposal's "Why" therefore had a mundane cause. What remains of Gerald's original hypothesis is real but an order of magnitude smaller: **+317 students** (1,717 against ~1,400 expected) and **+110 teachers** (240 against ~130) — roughly one un-retired graduating cohort plus accumulated former staff. Also noted: real classes include years 6 and 7 (`7ABIF` — Aufbaulehrgänge), so the "5-year program" assumption behind the ~1,400 estimate is itself slightly low.
+
+### Reading the realm changes it
+
+Proven live against `unterrainer` on 2026-09-12: **paginating `GET /admin/realms/{realm}/users` is not a read-only operation.** The realm's count rose from 2,229 to 2,619 (+390) through pagination alone, with no sync running.
+
+`users/count` counts only Keycloak's local database. `GET /users?first=…` spans the local database **and** the LDAP federation: when a requested page reaches past the local end, Keycloak asks the LDAP provider for the remainder and — with `importEnabled: true` — persists every record it gets back. Hence a full page of 100 at `first=2200` against a count of 2,229, with every record past the count distinct rather than duplicated.
+
+`fullSyncPeriod: -1` does not protect against this. It governs only the scheduled background job, not this path; an ordinary login or an admin-console search imports the same way. This corrects an assumption held on both sides (Gerald, 2026-09-12: *"das ldap federation ist auf manual sync gestellt. das darf garnix holen eigentlich"*).
+
+Retroactively this explains two things:
+
+- The "phantom end" at `first=14288` that commit `0072059` fenced off with a hard stop was never a corrupt record or a Keycloak bug. It was the boundary between the local database and LDAP territory.
+- **No Keycloak-side cleanup can hold.** The 12,060 test accounts remain in AD under `OU=TestUsers`; deleting them locally only means the next deep page — or the next login — pulls them back. The 2024-07-10 one-time full sync laid the groundwork (`usersDn` = the whole `ou=HTL` tree, test OU included); the directory fetch was the re-acquisition path, not the origin.
+
+### What this means for tasks 3–5
+
+The remedy is not a Keycloak-side report of accounts to delete. It is **narrowing the federation's own scope** so the test fixture is never in reach: `usersDn` restricted to the OUs that hold real people. That work is specified and half-executed already — see `AI/open-proposals.md`, "Realm auf zwei LDAP-Provider aufteilen", which splits the federation into `ldap-students` and `ldap-teachers` and carries the ordered procedure, the rollback point (175 backed-up user attribute sets), and the expected end state (~1,958 federated accounts + 7 local). It is blocked only on the AD bind password.
+
+Two invariants worth keeping from this investigation, both now in the spec:
+
+1. The federation's scope must cover only OUs that hold real people — a scope that reaches synthetic or unrelated OUs makes every downstream count and every cleanup meaningless.
+2. Any enumeration over the admin API must be capped at a previously fetched `users/count`, so it stays inside the local database and imports nothing. `fetchAllUserPages` has done this since `0072059`.

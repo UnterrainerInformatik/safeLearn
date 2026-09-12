@@ -8,6 +8,8 @@
 ## Realm auf zwei LDAP-Provider aufteilen (offen — wartet auf das Bind-Passwort)
 Der Fetch selbst ist **gelöst** (Details im erledigten Abschnitt darunter). Offen ist die Ursache dahinter: `OU=TestUsers` (~12.060 synthetische Konten) liegt im Suchbereich der LDAP-Föderation, und jede Aufzählung, die über das lokale Ende hinausreicht, importiert sie nach — siehe [[keycloak-import-on-demand]]. Gerald hat keinen AD-Zugriff, die OU kann also nicht an der Quelle verschwinden; stattdessen wird der Suchbereich auf die zwei OUs verengt, die er braucht (Students, Teachers).
 
+Die Untersuchung dahinter ist abgeschlossen und liegt unter `AI/openspec/changes/archive/2026-09-12-realm-directory-cleanup/` — `investigation-findings.md` hält die vollständige Beweisführung (Zensus, OU-Verteilung, Federation-Config, der Import-beim-Blättern-Nachweis), die Invarianten stehen als Capability `realm-directory-integrity`. Der Vollzug ist dieser Eintrag hier.
+
 **Stand 2026-09-12, halb fertig:**
 - `ldap-teachers` ist angelegt (`usersDn=ou=Teachers,ou=HTL,…`, searchScope 2, UNSYNCED/import wie das Original, alle 9 Mapper inkl. `ldap-mapper` repliziert) — aber **deaktiviert**, weil Keycloak `bindCredential` nur maskiert herausgibt und Gerald das Passwort remote besorgen muss.
 - Der bisherige Provider heißt jetzt `ldap-students`, sein `usersDn` steht aber **bewusst noch auf `ou=HTL,…`** (zurückgedreht): mit der Verengung auf `ou=Students` lägen die 241 Lehrer im Suchbereich keines aktiven Providers, und Keycloak entfernt bei totem `federationLink` die lokale Kopie beim nächsten Zugriff — Lehrer könnten sich also aussperren.
