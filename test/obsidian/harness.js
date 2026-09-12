@@ -1073,18 +1073,28 @@ export async function editorMenuIcons() {
  * the way `columnsAreSideBySide` does, rather than the classes somebody meant to
  * lay them out with.
  *
- * The field is whichever of the two the dialog carries - a number field or a
- * textarea - because the field is the one thing the dialogs are entitled to
- * differ in.
+ * The field is whatever that dialog answers with - a number field, a textarea,
+ * or, where the directory picker replaced the textarea, the list of people
+ * chosen in it. That is the one thing the dialogs are entitled to differ in,
+ * and the geometry asserted around it is the same either way.
  */
 export async function dialogBoxes() {
   await page.waitForFunction(
-    () => !!document.querySelector(".modal-container input, .modal-container textarea"),
+    () =>
+      !!document.querySelector(
+        ".modal-container input, .modal-container textarea, .modal-container .safelearn-directory-chosen"
+      ),
     { timeout: 10000 }
   );
   return page.evaluate(() => {
     const modal = document.querySelector(".modal-container");
-    const field = modal?.querySelector("input, textarea");
+    // The picker's chosen list before any input, since the picker's own search
+    // and class fields stand above it and are not what the dialog is answered
+    // with. Where there is no picker this falls through to the field itself.
+    const field =
+      modal?.querySelector("textarea") ??
+      modal?.querySelector(".safelearn-directory-chosen") ??
+      modal?.querySelector("input");
     const button = modal?.querySelector("button");
     if (!field || !button) return null;
     const box = (element) => {
@@ -1113,33 +1123,50 @@ export async function answerColumnCount(value) {
 }
 
 /**
- * Answers a dialog that takes a list, with one entry per line.
+ * Answers a dialog that takes a list of names, whichever way that dialog asks
+ * for one.
  *
  * Separate from `answerColumnCount` because the two dialogs ask different
- * things: one takes a number, one takes the class list a person pasted into it,
- * and a helper that took either would have to guess which field it was looking
- * at.
+ * things: one takes a number, one takes a list of people, and a helper that
+ * took either would have to guess which field it was looking at.
+ *
+ * Where a textarea is shown - no picker, or the picker's fallback for a
+ * directory that cannot answer - the names are typed into it, exactly as this
+ * always did. Where the picker replaced it, they are chosen from it: the
+ * picker is searched for each name and its row clicked, which is the only way
+ * a name reaches that dialog at all. A name the directory does not hold
+ * therefore cannot be answered through the picker, and saying so here is the
+ * point - `confirmNameList()` is for a check that only wants the dialog shut.
  */
 export async function answerNameList(names) {
   doing(`answering the name list with ${JSON.stringify(names)}`);
-  await page.waitForFunction(() => !!document.querySelector(".modal-container textarea"), { timeout: 10000 });
-  await page.evaluate((lines) => {
-    document.querySelector(".modal-container textarea").value = lines.join("\n");
-    document.querySelector(".modal-container button").click();
+  await page.waitForFunction(
+    () => !!document.querySelector(".modal-container textarea, .modal-container .safelearn-directory-chosen"),
+    { timeout: 10000 }
+  );
+  const typed = await page.evaluate((lines) => {
+    const field = document.querySelector(".modal-container textarea");
+    if (!field) return false;
+    field.value = lines.join("\n");
+    return true;
   }, names);
+
+  if (!typed) for (const name of names) await chooseDirectoryResults([name], { searchFirst: true });
+
+  await page.evaluate(() => document.querySelector(".modal-container button").click());
   await settle();
 }
 
 /**
  * The name-list dialog's textarea content, read without changing it - unlike
- * `answerNameList`, which always overwrites it. For a check that picked a
- * directory result into the field and wants to read what landed there.
+ * `answerNameList`, which always overwrites it. `null` where the dialog shows
+ * no textarea at all, which is what a picker-only dialog looks like.
  */
 export async function nameListTextareaValue() {
   return page.evaluate(() => document.querySelector(".modal-container textarea")?.value ?? null);
 }
 
-/** Confirms the name-list dialog with whatever the textarea currently holds - the other half of `nameListTextareaValue`. */
+/** Confirms the name-list dialog with whatever it currently holds - typed, chosen, or nothing at all. */
 export async function confirmNameList() {
   doing("confirming the name list with its current contents");
   await page.evaluate(() => document.querySelector(".modal-container button").click());
@@ -1954,9 +1981,7 @@ export async function searchDirectoryStrip(query, classNames = []) {
 /**
  * The directory search strip's currently rendered matches, as text - the
  * plugin renders each as `"${name} — ${roles.join(", ")}"` (`main.ts`
- * `buildDirectorySearch`), not as a separate name attribute, so a check reads
- * the same text a person would. The row's own checkbox contributes nothing to
- * `textContent`, so this needs no change for it.
+ * `buildDirectorySearch`), so a check reads the same text a person would.
  */
 export async function directorySearchResults() {
   return page.evaluate(() =>
@@ -1967,44 +1992,89 @@ export async function directorySearchResults() {
 }
 
 /**
- * Checks (or, with `checked: false`, unchecks) the rendered result rows whose
- * text starts with each of `names` - replacing `chooseDirectoryResult`'s
- * single click-to-append now that a result is marked rather than taken
- * immediately (`tasks.md` #6.2). Marking several and then calling
- * `addSelectedDirectoryResults()` is the new one-action equivalent.
+ * Clicks the rendered result rows naming each of `names`, which is what moves
+ * those people into the chosen list.
+ *
+ * With `searchFirst`, a name the result list is not currently showing is
+ * searched for first - what a person does when the picker opens on a list that
+ * does not hold who they are after. Without it, a name that is not on offer is
+ * an error, so a check asserting on what a filter shows cannot quietly pass by
+ * searching its way out.
  */
-export async function checkDirectoryResults(names, { checked = true } = {}) {
-  doing(`${checked ? "checking" : "unchecking"} the directory results ${JSON.stringify(names)}`);
-  await page.evaluate(
-    ({ names, checked }) => {
+export async function chooseDirectoryResults(names, { searchFirst = false } = {}) {
+  doing(`choosing the directory results ${JSON.stringify(names)}`);
+  for (const name of names) {
+    if (searchFirst) {
+      const offered = await page.evaluate(
+        (name) =>
+          !!document.querySelector(
+            `.modal-container .safelearn-directory-results .safelearn-directory-result[data-safelearn-name="${name}"]`
+          ),
+        name
+      );
+      if (!offered) await searchDirectoryStrip(name);
+    }
+    await page.evaluate((name) => {
       const rows = [
         ...document.querySelectorAll(".modal-container .safelearn-directory-results .safelearn-directory-result"),
       ];
-      for (const name of names) {
-        const row = rows.find((candidate) => candidate.textContent?.startsWith(name));
-        if (!row) {
-          throw new Error(
-            `No rendered directory result starting with ${JSON.stringify(name)}, got ${JSON.stringify(rows.map((candidate) => candidate.textContent))}.`
-          );
-        }
-        const checkbox = row.querySelector("input[type=checkbox]");
-        checkbox.checked = checked;
-        checkbox.dispatchEvent(new Event("change", { bubbles: true }));
+      const row = rows.find((candidate) => candidate.getAttribute("data-safelearn-name") === name);
+      if (!row) {
+        throw new Error(
+          `No rendered directory result named ${JSON.stringify(name)}, got ${JSON.stringify(rows.map((candidate) => candidate.textContent))}.`
+        );
       }
-    },
-    { names, checked }
-  );
+      row.click();
+    }, name);
+  }
   await settle();
 }
 
-/** Clicks the search strip's "Add selected" control, taking over every currently checked result in one action. */
-export async function addSelectedDirectoryResults() {
-  doing("clicking the directory search strip's Add selected control");
+/** Clicks the search strip's "Add visible" control, taking over everything the result list is showing in one action. */
+export async function addVisibleDirectoryResults() {
+  doing("clicking the directory search strip's Add visible control");
   await page.evaluate(() => {
-    const control = document.querySelector(".modal-container .safelearn-directory-add-selected");
-    if (!control) throw new Error("No Add selected control rendered in the directory search strip.");
+    const control = document.querySelector(".modal-container .safelearn-directory-add-visible");
+    if (!control) throw new Error("No Add visible control rendered in the directory search strip.");
     control.click();
   });
+  await settle();
+}
+
+/**
+ * Who the picker currently holds as chosen, in the order it lists them - read
+ * from the name each row carries rather than from its text, so it is the name
+ * the dialog would return and not how the row is worded.
+ */
+export async function chosenDirectoryNames() {
+  return page.evaluate(() =>
+    [
+      ...document.querySelectorAll(
+        ".modal-container .safelearn-directory-chosen-list .safelearn-directory-chosen-name"
+      ),
+    ].map((row) => row.getAttribute("data-safelearn-name") ?? "")
+  );
+}
+
+/** The picker's count of who is chosen - the line a person reads instead of counting the rows themselves. */
+export async function chosenDirectoryCount() {
+  return page.evaluate(
+    () => document.querySelector(".modal-container .safelearn-directory-chosen-count")?.textContent ?? null
+  );
+}
+
+/** Clicks each named row in the chosen list, which is what takes that person back out of it. */
+export async function unchooseDirectoryNames(names) {
+  doing(`taking ${JSON.stringify(names)} back out of the chosen list`);
+  await page.evaluate((names) => {
+    for (const name of names) {
+      const row = document.querySelector(
+        `.modal-container .safelearn-directory-chosen-list .safelearn-directory-chosen-name[data-safelearn-name="${name}"]`
+      );
+      if (!row) throw new Error(`Nobody named ${JSON.stringify(name)} is in the chosen list.`);
+      row.click();
+    }
+  }, names);
   await settle();
 }
 

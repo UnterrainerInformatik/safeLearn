@@ -9,7 +9,9 @@ It is an Obsidian community plugin with its own repository: [safeLearn-Obsidian-
 ### Installing It
 Settings → **Community plugins** → **Browse** → search for `SafeLearn Formatter` → **Install**, then **Enable**.
 
-There is nothing to configure. No settings, no account, no network.
+Nothing has to be configured to write and read the tags: that half of the plugin is local, and stays local whatever else is set.
+
+The one thing that is not is [picking people from your school's directory](#it-picks-the-people-for-you) — point the plugin at a safeLearn instance and log in under Settings → **SafeLearn Formatter**, and the dialog that asks for a list of names offers you the directory instead. Leave it unset and it is the plain field it always was.
 
 Working on the plugin itself rather than using it? [docs-testing.md](docs-testing.md#pointing-your-own-vault-at-a-checkout) has the route that loads a checkout instead.
 ### It Writes The Tags For You
@@ -46,6 +48,20 @@ In the reading view the tags are gone and the headings remain — which is close
 ![](md/assets/plugin-per-name-result.png)
 
 `admin`, `teacher`, `teachers`, `student` and `students` are [reserved](docs-permissions.md): a display name equal to one of them is read as the role instead. The command writes your names unchanged and tells you when one of them was such a name.
+### It Picks The People For You
+With a safeLearn instance configured and a login held, *Restricted section per name…* and *Restrict selection…* stop asking you to type the list and let you pick it instead. Typing in the search field searches the school directory; typing in the class filter narrows a list of classes to check, and checking more than one shows the people from any of them.
+
+Click anybody in the results to move them into the **chosen** list below, or click **Add visible** to move over everybody the results are currently showing — which is how you take a whole class, however many people are in it, in one click rather than thirty.
+
+The chosen list is what gets inserted, and it stays in front of you the whole time:
+
+- Click somebody there to take them back out.
+- Somebody you chose under a class filter that no longer shows them stays on the list, and is counted on it, rather than disappearing into a mark you cannot see.
+- Choosing the same person twice leaves them on the list once.
+
+Somebody the directory has no entry for — a guest, or a student not yet enrolled — gets their block written by hand afterwards, alongside the ones the command wrote.
+
+If the directory cannot be reached, or a search fails on the server, that is said above the search field as soon as it happens rather than looking like an empty match, and the plain text field appears below the picker so the dialog can still be answered. With no instance configured, or with one configured but not logged in, the dialog is unchanged: the text field alone, one name per line, and no network activity.
 ### It Shows Fragments And Columns
 A `##fragment` stands as an icon in the editor, and is its own characters again with the cursor in it.
 

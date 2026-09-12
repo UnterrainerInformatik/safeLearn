@@ -20,10 +20,24 @@ Authorization: openid password env
 Content-Type: application/json
 
 ###
-
-###
 # @name GET all users
 GET {{keycloakUrl}}/admin/realms/{{realm}}/users
+Authorization: openid password env
+Content-Type: application/json
+
+###
+
+###
+# @name GET count all users
+GET {{keycloakUrl}}/admin/realms/{{realm}}/users/count
+Authorization: openid password env
+Content-Type: application/json
+
+###
+
+###
+# @name GET users
+GET {{keycloakUrl}}/admin/realms/{{realm}}/users?first=14289&max=1
 Authorization: openid password env
 Content-Type: application/json
 

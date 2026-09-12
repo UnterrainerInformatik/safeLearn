@@ -5,7 +5,25 @@
 
 # Directory-Search
 
-## Voller Directory-Fetch scheitert reproduzierbar bei first=14200 (offen, in Arbeit)
+## Realm auf zwei LDAP-Provider aufteilen (offen — wartet auf das Bind-Passwort)
+Der Fetch selbst ist **gelöst** (Details im erledigten Abschnitt darunter). Offen ist die Ursache dahinter: `OU=TestUsers` (~12.060 synthetische Konten) liegt im Suchbereich der LDAP-Föderation, und jede Aufzählung, die über das lokale Ende hinausreicht, importiert sie nach — siehe [[keycloak-import-on-demand]]. Gerald hat keinen AD-Zugriff, die OU kann also nicht an der Quelle verschwinden; stattdessen wird der Suchbereich auf die zwei OUs verengt, die er braucht (Students, Teachers).
+
+**Stand 2026-09-12, halb fertig:**
+- `ldap-teachers` ist angelegt (`usersDn=ou=Teachers,ou=HTL,…`, searchScope 2, UNSYNCED/import wie das Original, alle 9 Mapper inkl. `ldap-mapper` repliziert) — aber **deaktiviert**, weil Keycloak `bindCredential` nur maskiert herausgibt und Gerald das Passwort remote besorgen muss.
+- Der bisherige Provider heißt jetzt `ldap-students`, sein `usersDn` steht aber **bewusst noch auf `ou=HTL,…`** (zurückgedreht): mit der Verengung auf `ou=Students` lägen die 241 Lehrer im Suchbereich keines aktiven Providers, und Keycloak entfernt bei totem `federationLink` die lokale Kopie beim nächsten Zugriff — Lehrer könnten sich also aussperren.
+- App-eigene User-Attribute (`config`, `lastVisitedUrl`) von 175 Benutzern sind gesichert, davon 5 Lehrer. Sie gehen bei einem Neuimport verloren und müssen danach zurückgeschrieben werden.
+
+**Wenn das Bind-Passwort da ist, in dieser Reihenfolge:**
+1. Passwort in `ldap-teachers` eintragen, *Test authentication*, Provider aktivieren.
+2. Prüfen, dass er die 241 Lehrer im AD tatsächlich sieht — vor allem anderen.
+3. `ldap-students` auf `ou=Students,ou=HTL,…` verengen.
+4. Die 241 lokalen Lehrer-Kopien löschen, über den neuen Provider frisch importieren, die 5 gesicherten Einstellungen zurückschreiben. Neue Keycloak-IDs sind unkritisch (die App persistiert keine), laufende Sessions brechen aber.
+5. Manuellen Sync auf beiden Providern. Erwartung danach: 1.958 föderierte User (1.717 + 241) plus 7 rein lokale Konten; die 264 aus Exams/Special/service fallen heraus (von Gerald als egal bestätigt) und dienen als Kanarienvogel für das Verhalten bei totem `federationLink`.
+6. Danach `manage-realm` und `manage-users` am `safeLearn-directory-service` wieder abziehen — im Normalbetrieb liest der nur.
+
+Offen nebenbei: 118 der 242 Lehrer haben im AD weder `givenName` noch `sn` und erscheinen im Personen-Picker als Kennung statt als Name. Nach dem Import erneut messen. Und die vier `OU=Exams*`-Pools à exakt 36 sehen dem TestUsers-Muster ähnlich — falls sie doch gebraucht werden, vor Schritt 3 klären.
+
+## Erledigt: Voller Directory-Fetch scheiterte reproduzierbar bei first=14200
 Symptom ursprünglich: `g.unterrainer` sah im Obsidian-Plugin weder im Personen-Picker noch bei "List classes" Einträge. Der 401 von damals ist gelöst (siehe unten); der Realm (`unterrainer`, `auth.htl-leonding.ac.at`, `secureLectures`-Produktivinstanz auf `babylon5`) hat sich als sehr groß herausgestellt — **14.289 User** — und der volle Fetch scheitert jetzt reproduzierbar an einer bestimmten Stelle, nicht mehr an Auth.
 
 **Live bestätigt am 2026-09-11, drei Versuche in Folge:** die Seite `GET .../users?first=14200&max=100&briefRepresentation=false` antwortet konsequent nicht innerhalb von 30s — auch nach Retry (3× mit Backoff, safeLearn-Commit `fe83073`) immer derselbe Timeout an genau diesem Offset. Alle Seiten davor (0 bis 14199) laufen normal durch, ca. 2,5s/Seite. Sieht nach einem serverseitigen Problem mit genau diesem User-Batch aus (Keycloak oder das LDAP-Backend dahinter), nicht nach einem Client-Problem — Client-seitige Fixes (Timeout, Retry) sind ausgereizt.

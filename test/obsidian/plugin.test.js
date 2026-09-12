@@ -36,7 +36,7 @@ import { after, before, describe, test } from "node:test";
 
 import {
   accessTokenFor,
-  addSelectedDirectoryResults,
+  addVisibleDirectoryResults,
   advanceDirectoryFetch,
   agePendingLogins,
   answerColumnCount,
@@ -44,7 +44,9 @@ import {
   blockBoxes,
   callSearchDirectory,
   checkDirectoryClass,
-  checkDirectoryResults,
+  chooseDirectoryResults,
+  chosenDirectoryCount,
+  chosenDirectoryNames,
   clearDirectoryLoginFixture,
   clickSettingsButton,
   clickLoginButton,
@@ -119,6 +121,7 @@ import {
   storedPluginData,
   styleOf,
   type,
+  unchooseDirectoryNames,
   vaultPath,
   waitForLoginState,
   waitForValue,
@@ -2702,6 +2705,36 @@ describe("the directory search strip is gated behind a login", () => {
       await closePluginSettings();
     }));
 
+  test("with no login held, the dialog is the free-text field it always was", async () =>
+    watched("directory-gated-typed-list-unchanged", async () => {
+      await clearDirectoryLoginFixture();
+      const name = "constructed-directory-gated-typed-list.md";
+      await writeDocument(name, ["Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      assert.equal(
+        await directorySearchStripPresent(),
+        false,
+        "This check is about the dialog without a picker - there should be none here."
+      );
+      assert.equal(
+        await nameListTextareaValue(),
+        "",
+        "Without a picker the free-text field is the whole dialog, and it opens empty. Taking it " +
+          "away where no picker is shown would leave no way to name anybody at all."
+      );
+
+      await answerNameList(["Ada Byron", "Stu Dent"]);
+      const written = await documentText();
+      assert.ok(
+        written.includes("@@@ Ada Byron") && written.includes("@@@ Stu Dent"),
+        `A typed list writes exactly the sections it always wrote, one per line, in the order ` +
+          `given. Document: ${JSON.stringify(written)}`
+      );
+    }));
+
   test('"List classes" reports itself unavailable while no login is held', async () =>
     watched("directory-gated-list-classes", async () => {
       await clearDirectoryLoginFixture();
@@ -2722,7 +2755,7 @@ describe("the directory search strip", () => {
     { name: "Stu Dent", roles: { teacher: true, examParticipant: true } },
   ];
 
-  test("with a login held, the search strip renders matches and appending one adds a line", async () =>
+  test("with a login held, the search strip renders matches and clicking one moves it into the chosen list", async () =>
     watched("directory-search-strip", async () => {
       await setDirectoryLoginFixture(FIXTURE);
 
@@ -2734,7 +2767,13 @@ describe("the directory search strip", () => {
       await runCommand("insert-sections-per-name", { expectEdit: false });
       assert.ok(
         await directorySearchStripPresent(),
-        "With a login held, the search strip should be rendered above the textarea."
+        "With a login held, the dialog should be the picker rather than the free-text field."
+      );
+      assert.equal(
+        await nameListTextareaValue(),
+        null,
+        "Where the picker is shown it is the whole answer - the free-text field goes away, and a " +
+          "name the directory has no entry for is written into the document afterwards."
       );
 
       await searchDirectoryStrip("Ada");
@@ -2746,28 +2785,31 @@ describe("the directory search strip", () => {
           `its roles/groups beside it. Found: ${JSON.stringify(results)}`
       );
 
-      await checkDirectoryResults(["Ada Byron"]);
-      await addSelectedDirectoryResults();
-      const textareaValue = await nameListTextareaValue();
-      assert.ok(
-        (textareaValue ?? "")
-          .split("\n")
-          .map((line) => line.trim())
-          .includes("Ada Byron"),
-        `Marking a match and clicking "Add selected" should append its display name into the ` +
-          `textarea, exactly as if it had been typed. Textarea holds: ${JSON.stringify(textareaValue)}`
+      await chooseDirectoryResults(["Ada Byron"]);
+      const chosen = await chosenDirectoryNames();
+      assert.deepEqual(
+        chosen,
+        ["Ada Byron"],
+        `Clicking a match should move that person into the chosen list, where what will be ` +
+          `inserted is visible the whole time. Chosen: ${JSON.stringify(chosen)}`
+      );
+      assert.match(
+        (await chosenDirectoryCount()) ?? "",
+        /\b1\b/,
+        "How many people are chosen is shown, so a selection carried over from an earlier filter " +
+          "is countable at a glance rather than only by scrolling the list."
       );
 
       await confirmNameList();
       assert.ok(
         (await documentText()).includes("@@@ Ada Byron"),
-        "The command receives the picked name exactly as it would a typed one."
+        "The command receives the chosen name exactly as it would a typed one."
       );
 
       await clearDirectoryLoginFixture();
     }));
 
-  test("choosing a match does not close the modal - more than one can be added before confirming", async () =>
+  test("choosing a match does not close the modal - more than one can be chosen before confirming", async () =>
     watched("directory-search-strip-multiple", async () => {
       await setDirectoryLoginFixture(FIXTURE);
       const name = "constructed-directory-search-multi.md";
@@ -2778,29 +2820,32 @@ describe("the directory search strip", () => {
       await runCommand("insert-sections-per-name", { expectEdit: false });
 
       await searchDirectoryStrip("Ada");
-      await checkDirectoryResults(["Ada Byron"]);
-      await addSelectedDirectoryResults();
+      await chooseDirectoryResults(["Ada Byron"]);
       assert.ok(
         await directorySearchStripPresent(),
-        "Adding a match should not close the dialog - more than one can be added before confirming."
+        "Choosing a match should not close the dialog - more than one can be chosen before confirming."
       );
 
       await searchDirectoryStrip("Grace");
-      await checkDirectoryResults(["Grace Hopper"]);
-      await addSelectedDirectoryResults();
+      await chooseDirectoryResults(["Grace Hopper"]);
 
-      const value = (await nameListTextareaValue()) ?? "";
-      const lines = value
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line !== "");
+      const chosen = await chosenDirectoryNames();
       assert.deepEqual(
-        lines.sort(),
-        ["Ada Byron", "Grace Hopper"].sort(),
-        `Both picks should be on the textarea as separate lines. Textarea holds: ${JSON.stringify(value)}`
+        chosen,
+        ["Ada Byron", "Grace Hopper"],
+        `Both should stand in the chosen list, in the order they were chosen - which is the order ` +
+          `the command writes their sections in. Chosen: ${JSON.stringify(chosen)}`
       );
 
       await confirmNameList();
+      const written = await documentText();
+      assert.ok(
+        written.indexOf("@@@ Ada Byron") >= 0 &&
+          written.indexOf("@@@ Ada Byron") < written.indexOf("@@@ Grace Hopper"),
+        `The command receives the display names in the order they were chosen, trimmed and ` +
+          `otherwise unchanged, and writes one section per name in that order. ` +
+          `Document: ${JSON.stringify(written)}`
+      );
       await clearDirectoryLoginFixture();
     }));
 
@@ -2823,7 +2868,7 @@ describe("the directory search strip", () => {
           `(\`tasks.md\` #7.2). Found: ${JSON.stringify(results)}`
       );
 
-      await answerNameList(["teacher"]);
+      await confirmNameList();
       await clearDirectoryLoginFixture();
     }));
 
@@ -2845,7 +2890,7 @@ describe("the directory search strip", () => {
           `\`searchDirectory\` call per checked class - not just the last one checked. Found: ${JSON.stringify(results)}`
       );
 
-      await answerNameList(["teacher"]);
+      await confirmNameList();
       await clearDirectoryLoginFixture();
     }));
 
@@ -2875,14 +2920,14 @@ describe("the directory search strip", () => {
           `student matches. Found: ${JSON.stringify(narrowed)}`
       );
 
-      await answerNameList(["teacher"]);
+      await confirmNameList();
       await clearDirectoryLoginFixture();
     }));
 
-  test("marking several results and clicking Add selected takes them all over in one action", async () =>
-    watched("directory-search-strip-add-selected", async () => {
+  test("choosing several results from the same set of matches takes them all over", async () =>
+    watched("directory-search-strip-several", async () => {
       await setDirectoryLoginFixture(FIXTURE);
-      const name = "constructed-directory-search-add-selected.md";
+      const name = "constructed-directory-search-several.md";
       await writeDocument(name, ["Text.", ""].join("\n"));
       await open(name, views.livePreview);
       await placeCursorAfter("Text.");
@@ -2893,22 +2938,219 @@ describe("the directory search strip", () => {
       // in between, per the spec's "same set of results" scenario.
       await runCommand("insert-sections-per-name", { expectEdit: false });
       await searchDirectoryStrip("");
-      await checkDirectoryResults(["Ada Byron", "Grace Hopper"]);
-      await addSelectedDirectoryResults();
+      await chooseDirectoryResults(["Ada Byron", "Grace Hopper"]);
 
-      const value = (await nameListTextareaValue()) ?? "";
-      const lines = value
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line !== "");
+      const chosen = await chosenDirectoryNames();
       assert.deepEqual(
-        lines.sort(),
-        ["Ada Byron", "Grace Hopper"].sort(),
-        `Marking two results and clicking "Add selected" once should take both over together, ` +
-          `without a search in between. Textarea holds: ${JSON.stringify(value)}`
+        chosen,
+        ["Ada Byron", "Grace Hopper"],
+        `Both should be held as chosen together, without a search in between. ` +
+          `Chosen: ${JSON.stringify(chosen)}`
       );
 
       await confirmNameList();
+      await clearDirectoryLoginFixture();
+    }));
+
+  test('"Add visible" takes over the whole filtered list in one action', async () =>
+    watched("directory-search-strip-add-visible", async () => {
+      await setDirectoryLoginFixture(FIXTURE);
+      const name = "constructed-directory-search-add-visible.md";
+      await writeDocument(name, ["Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      await searchDirectoryStrip("", ["5bhif"]);
+      await addVisibleDirectoryResults();
+
+      const chosen = await chosenDirectoryNames();
+      assert.deepEqual(
+        chosen,
+        ["Ada Byron"],
+        `Narrowing to a class and using the one action should take over exactly what the result ` +
+          `list is showing - no more and no fewer. Chosen: ${JSON.stringify(chosen)}`
+      );
+
+      await confirmNameList();
+      assert.ok(
+        (await documentText()).includes("@@@ Ada Byron"),
+        "What the one action chose is what the command writes."
+      );
+      await clearDirectoryLoginFixture();
+    }));
+
+  test('"Add visible" used on two filters in turn chooses the people from both', async () =>
+    watched("directory-search-strip-add-visible-accumulates", async () => {
+      await setDirectoryLoginFixture(FIXTURE);
+      const name = "constructed-directory-search-add-visible-accumulates.md";
+      await writeDocument(name, ["Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      await searchDirectoryStrip("", ["5bhif"]);
+      await addVisibleDirectoryResults();
+
+      // The first class is unchecked again, so the second filter really is a
+      // different set of results and not the union of the two: what carries
+      // over has to be the chosen list, not what is on offer.
+      await checkDirectoryClass("5bhif", { checked: false });
+      await searchDirectoryStrip("", ["4ahif"]);
+      const offered = await directorySearchResults();
+      assert.deepEqual(
+        offered,
+        ["Grace Hopper — student, 4ahif"],
+        `This check assumes the second filter no longer offers the first class's people. ` +
+          `Offered: ${JSON.stringify(offered)}`
+      );
+
+      await addVisibleDirectoryResults();
+      const chosen = await chosenDirectoryNames();
+      assert.deepEqual(
+        chosen,
+        ["Ada Byron", "Grace Hopper"],
+        `Using the action, changing the filter and using it again should leave the people from ` +
+          `both filters chosen together. Chosen: ${JSON.stringify(chosen)}`
+      );
+      assert.match(
+        (await chosenDirectoryCount()) ?? "",
+        /\b2\b/,
+        "The count says how many are chosen, including the ones the current filter no longer shows."
+      );
+
+      await confirmNameList();
+      const written = await documentText();
+      assert.ok(
+        written.includes("@@@ Ada Byron") && written.includes("@@@ Grace Hopper"),
+        `Both should be written, including the one the filter no longer showed at the end. ` +
+          `Document: ${JSON.stringify(written)}`
+      );
+      await clearDirectoryLoginFixture();
+    }));
+
+  test('"Add visible" with nothing on offer loses nothing already chosen', async () =>
+    watched("directory-search-strip-add-visible-empty", async () => {
+      await setDirectoryLoginFixture(FIXTURE);
+      const name = "constructed-directory-search-add-visible-empty.md";
+      await writeDocument(name, ["Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      await searchDirectoryStrip("Ada");
+      await chooseDirectoryResults(["Ada Byron"]);
+
+      await searchDirectoryStrip("nobody-by-that-name");
+      assert.deepEqual(
+        await directorySearchResults(),
+        [],
+        "This check assumes a search that matches nobody leaves the result list empty."
+      );
+
+      await addVisibleDirectoryResults();
+      assert.deepEqual(
+        await chosenDirectoryNames(),
+        ["Ada Byron"],
+        "Using the action while nothing is offered should choose nobody, and lose nobody already chosen."
+      );
+
+      await confirmNameList();
+      await clearDirectoryLoginFixture();
+    }));
+
+  test("a chosen person can be taken back out, and is not returned when the dialog is confirmed", async () =>
+    watched("directory-search-strip-unchoose", async () => {
+      await setDirectoryLoginFixture(FIXTURE);
+      const name = "constructed-directory-search-unchoose.md";
+      await writeDocument(name, ["Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      await searchDirectoryStrip("");
+      await chooseDirectoryResults(["Ada Byron", "Grace Hopper"]);
+
+      await unchooseDirectoryNames(["Ada Byron"]);
+      assert.deepEqual(
+        await chosenDirectoryNames(),
+        ["Grace Hopper"],
+        "Acting on somebody in the chosen list should take them back out of it."
+      );
+
+      await confirmNameList();
+      const written = await documentText();
+      assert.ok(
+        !written.includes("Ada Byron"),
+        `Somebody taken back out is not returned when the picker is confirmed. Document: ${JSON.stringify(written)}`
+      );
+      assert.ok(written.includes("@@@ Grace Hopper"), "The one still chosen is still written.");
+      await clearDirectoryLoginFixture();
+    }));
+
+  test("choosing the same person twice holds them once", async () =>
+    watched("directory-search-strip-choose-twice", async () => {
+      await setDirectoryLoginFixture(FIXTURE);
+      const name = "constructed-directory-search-choose-twice.md";
+      await writeDocument(name, ["Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      await searchDirectoryStrip("Ada");
+      await chooseDirectoryResults(["Ada Byron"]);
+      await chooseDirectoryResults(["Ada Byron"]);
+      // And once more through the one-action control, which is the other way
+      // somebody already chosen can be chosen again.
+      await addVisibleDirectoryResults();
+
+      assert.deepEqual(
+        await chosenDirectoryNames(),
+        ["Ada Byron"],
+        "Somebody already chosen is held once however many times they are chosen again."
+      );
+
+      await confirmNameList();
+      assert.equal(
+        (await documentText()).split("@@@ Ada Byron").length - 1,
+        1,
+        "Held once, returned once - the command writes one section, not two."
+      );
+      await clearDirectoryLoginFixture();
+    }));
+
+  test("a chosen person survives a filter that no longer shows them, and is still inserted", async () =>
+    watched("directory-search-strip-survives-filter", async () => {
+      await setDirectoryLoginFixture(FIXTURE);
+      const name = "constructed-directory-search-survives-filter.md";
+      await writeDocument(name, ["Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      await searchDirectoryStrip("Ada");
+      await chooseDirectoryResults(["Ada Byron"]);
+
+      await searchDirectoryStrip("Grace");
+      const offered = await directorySearchResults();
+      assert.deepEqual(
+        offered,
+        ["Grace Hopper — student, 4ahif"],
+        `This check assumes the second search no longer offers the person chosen under the first. ` +
+          `Offered: ${JSON.stringify(offered)}`
+      );
+      assert.deepEqual(
+        await chosenDirectoryNames(),
+        ["Ada Byron"],
+        "Somebody the current search no longer shows is still shown as chosen - there is no state " +
+          "here a person cannot see."
+      );
+
+      await confirmNameList();
+      assert.ok(
+        (await documentText()).includes("@@@ Ada Byron"),
+        "And is still returned when the picker is confirmed."
+      );
       await clearDirectoryLoginFixture();
     }));
 
@@ -2931,6 +3173,35 @@ describe("the directory search strip", () => {
       await clearDirectoryLoginFixture();
     }));
 
+  test("a picker that cannot reach the directory offers the typed field instead", async () =>
+    watched("directory-unreachable-fallback-field", async () => {
+      await setDirectoryLoginFixture([], { outcome: "unreachable" });
+      const name = "constructed-directory-unreachable-fallback.md";
+      await writeDocument(name, ["Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      assert.equal(
+        await directoryStatus(),
+        "The directory could not be reached.",
+        "This check assumes the picker reports the directory as unreachable."
+      );
+      assert.equal(
+        await nameListTextareaValue(),
+        "",
+        "A picker that cannot offer anybody must not be a dead end: the typed/pasted field is " +
+          "available instead, so the command can still be given a list."
+      );
+
+      await answerNameList(["Ada Byron"]);
+      assert.ok(
+        (await documentText()).includes("@@@ Ada Byron"),
+        "And what is typed into it is what the command writes, exactly as where no picker is shown."
+      );
+      await clearDirectoryLoginFixture();
+    }));
+
   test("a reachable directory shows nothing about connectivity", async () =>
     watched("directory-status-ok-on-open", async () => {
       await setDirectoryLoginFixture(FIXTURE);
@@ -2947,7 +3218,7 @@ describe("the directory search strip", () => {
           "usable immediately."
       );
 
-      await answerNameList(["teacher"]);
+      await confirmNameList();
       await clearDirectoryLoginFixture();
     }));
 
@@ -3010,7 +3281,7 @@ describe("the directory search strip", () => {
         "A refused search should render no results, exactly as it always has."
       );
 
-      await answerNameList(["teacher"]);
+      await confirmNameList();
       await clearDirectoryLoginFixture();
     }));
 });
@@ -3933,7 +4204,7 @@ describe("a directory fetch in progress is shown rather than nothing", () => {
         `The picker should become usable without being reopened. Class options: ${JSON.stringify(classes)}`
       );
 
-      await answerNameList(["teacher"]);
+      await confirmNameList();
       await clearDirectoryLoginFixture();
     }));
 

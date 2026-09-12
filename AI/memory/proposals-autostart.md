@@ -18,7 +18,7 @@ Gerald sammelt Bug-Reports und Ideen als Einträge in einer einzigen Datei, `AI/
 
 **Warum löschen statt verschieben:** `AI/` ist vollständig in git (`git ls-files AI/` zeigte am 2026-08-16 alle Files erfasst, nichts per `.gitignore` ausgenommen, von Gerald bestätigt) — die Git-Historie von `AI/open-proposals.md` behält den Originaltext eines gelöschten Eintrags ohnehin, ein separates Aufbewahren wie beim alten Datei-pro-Vorschlag-Mechanismus ist unnötig. Kein Design darf sich darauf stützen, dass `AI/` ungetrackt wäre.
 
-**Nachsehen, wenn Gerald nach neuer Arbeit fragt.** Jedes Mal, wenn Gerald nach neuer Arbeit fragt ("was gibt es zu tun", "womit machen wir weiter", "wassup", ein `/opsx:propose` ohne Argument), zuerst `AI/open-proposals.md` lesen und offene Einträge anbieten — nicht nur beim Session-Start.
+**Nachsehen, wenn Gerald nach neuer Arbeit fragt.** Jedes Mal, wenn Gerald nach neuer Arbeit fragt ("was gibt es zu tun", "womit machen wir weiter", "wassup", ein `/opsx:propose` ohne Argument), zuerst `AI/open-proposals.md` lesen und offene Einträge anbieten — nicht nur beim Session-Start. Die Liste ist nicht abschließend: Gerald hat das am 2026-09-11 nochmal ausdrücklich bestätigt/verstärkt ("dass Du in dieser Datei auch jedes Mal nachsiehst") — im Zweifel lieber einmal zu oft in die Datei schauen als sie zu übergehen.
 
 **Neue Einträge:** Kommt in einem Gespräch ein Bug oder eine Idee auf, die nicht sofort erledigt wird, gehört sie als Eintrag in `AI/open-proposals.md`, nicht nur im Gesprächsverlauf stehen bleiben. Sprache der Einträge ist Deutsch, wie Geralds eigene rohe Notizen (vgl. [[language-german]] — die Docs-müssen-Englisch-Regel in [[code-language-english]] gilt für formale Specs/Architektur-Docs, nicht für diese Rohnotizen).
 
