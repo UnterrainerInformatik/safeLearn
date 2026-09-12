@@ -150,33 +150,19 @@ An authoring command SHALL change the document text and nothing else about the s
 
 ### Requirement: A restricted section is written for each name that was given
 
-A command SHALL write one restricted section per name, in the order the names were given: the directive naming that name, a heading, a place to write, and the closing marker. The sections SHALL be written as one insertion, so that a list produces a document rather than a sequence of separate edits.
+A command SHALL write one restricted section per name, in the order the names were given: the directive naming that name, a place to write, and the closing marker. The sections SHALL be written as one insertion, so that a list produces a document rather than a sequence of separate edits.
+
+A generated section SHALL carry no heading of its own. The rendered frame already carries the addressed name as its heading (`plugin-hidden-tags`'s "A restricted block carries its name as a heading"), so a heading written into the section's content would repeat, in the document's own text, what every reader already sees rendered above it.
 
 #### Scenario: A list of names is given
 
 - **WHEN** the command is given several names
-- **THEN** the document holds one restricted section per name, in that order, each addressed to its own name
+- **THEN** the document holds one restricted section per name, in that order, each addressed to its own name, with a single blank line as its content
 
 #### Scenario: A name is given more than once or the list holds a blank line
 
 - **WHEN** the list contains blank lines or surrounding whitespace
 - **THEN** the blank lines produce no section and each name is written trimmed
-
-### Requirement: The heading of a generated section stands inside the block
-
-The server replaces what stands *between* a directive and its closing marker, and leaves everything outside them for every reader. A heading naming the person a section is for SHALL therefore stand inside the block, not above it — otherwise a document with one section per student shows every student the names of all the others, which is the opposite of what such a document is written for.
-
-The heading's level SHALL be one below the last heading above the insertion point, so that the generated sections stand underneath whatever they were inserted into rather than at a level the command chose.
-
-#### Scenario: Sections are generated under a chapter heading
-
-- **WHEN** sections are generated below a heading in the document
-- **THEN** each section's heading is inside its own block and one level below that heading
-
-#### Scenario: A reader is not addressed by a section
-
-- **WHEN** the document is rendered for somebody a section is not addressed to
-- **THEN** nothing of that section is shown to them, its heading included
 
 ### Requirement: The names are given to the command
 

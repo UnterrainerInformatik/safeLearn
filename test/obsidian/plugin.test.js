@@ -2010,6 +2010,24 @@ describe("the reading view", () => {
         "The two views show the same directive with the same entries and the same distinctions."
       );
     }));
+
+  test("the reading view hides a closing marker at the file's true end", async () =>
+    watched("reading-marker-true-eof", async () => {
+      // The file ends exactly at the closing marker, with no trailing newline -
+      // the same true-EOF shape the Live Preview editor is already covered for.
+      const name = "constructed-reading-marker-eof.md";
+      await writeDocument(name, ["Intro.", "@@@ teacher", "Gated.", "@@@"].join("\n"));
+
+      const container = await open(name, views.reading);
+      await reveal(container, "Gated.");
+
+      const shown = await visibleText(container);
+      assert.ok(
+        !shown.includes("@@@"),
+        `A marker is still on screen when the file ends exactly at the closing marker with no ` +
+          `trailing newline: ${JSON.stringify(shown)}`
+      );
+    }));
 });
 
 // ################### The tags the plugin writes ###################
@@ -2290,89 +2308,26 @@ describe("the plugin writes the tags it recognizes", () => {
           "",
           "Text.",
           "@@@ Ada Byron",
-          "## Ada Byron",
           "",
           "@@@",
           "",
           "@@@ Stu Dent",
-          "## Stu Dent",
           "",
           "@@@",
           "",
           "@@@ Grace Hopper",
-          "## Grace Hopper",
           "",
           "@@@",
           "",
         ],
-        "One section per name, in the order the list gave them, each with a line to write in. The " +
-          "heading is one level below `# Chapter`, so the sections stand underneath the chapter " +
-          "they were inserted into."
+        "One section per name, in the order the list gave them, each with a single blank line to " +
+          "write in and no heading of its own - the reading view already renders the addressed " +
+          "name as the block's heading."
       );
       assert.deepEqual(
         await cursorPosition(),
-        { from: { line: 5, ch: 0 }, to: { line: 5, ch: 0 } },
-        "The cursor is in the first section, below its heading, where the next thing belongs."
-      );
-    }));
-
-  test("the heading of a generated section stands inside the block", async () =>
-    watched("sections-heading-inside", async () => {
-      // Not a formatting question. `removeForbiddenContent` replaces what stands
-      // *between* the markers and leaves everything outside them for every
-      // reader - so a heading above the block would show every student the names
-      // of all the others, on a page written so that each of them sees only
-      // their own section.
-      const name = "constructed-sections-inside.md";
-      await writeDocument(name, ["# Chapter", "", "Text.", ""].join("\n"));
-      await open(name, views.livePreview);
-      await placeCursorAfter("Text.");
-
-      await runCommand("insert-sections-per-name", { expectEdit: false });
-      await answerNameList(["Ada Byron", "Stu Dent"]);
-
-      const lines = (await documentText()).split("\n");
-      for (const person of ["Ada Byron", "Stu Dent"]) {
-        const opens = lines.indexOf(`@@@ ${person}`);
-        const heading = lines.findIndex((line, index) => index > opens && line.endsWith(` ${person}`));
-        const closes = lines.findIndex((line, index) => index > opens && line.trim() === "@@@");
-
-        assert.ok(opens !== -1, `No block was written for ${person}.`);
-        assert.ok(
-          heading > opens && heading < closes,
-          `${person}'s heading is on line ${heading + 1}, and the block runs from line ` +
-            `${opens + 1} to line ${closes + 1}. A heading outside the block is text the server ` +
-            `shows to every reader, which turns a document of private sections into a class list.`
-        );
-      }
-    }));
-
-  test("the heading level follows the heading above the insertion point", async () =>
-    watched("sections-heading-level", async () => {
-      const deep = "constructed-sections-deep.md";
-      await writeDocument(deep, ["# Chapter", "", "### Exercise", "", "Text.", ""].join("\n"));
-      await open(deep, views.livePreview);
-      await placeCursorAfter("Text.");
-      await runCommand("insert-sections-per-name", { expectEdit: false });
-      await answerNameList(["Ada Byron"]);
-
-      assert.ok(
-        (await documentText()).includes("#### Ada Byron"),
-        `The last heading above the insertion point is \`### Exercise\`, so the section's heading ` +
-          `is one level below it. Written: ${JSON.stringify(await documentText())}`
-      );
-
-      const flat = "constructed-sections-flat.md";
-      await writeDocument(flat, ["Text with no heading above it.", ""].join("\n"));
-      await open(flat, views.livePreview);
-      await placeCursorAfter("Text with no heading above it.");
-      await runCommand("insert-sections-per-name", { expectEdit: false });
-      await answerNameList(["Ada Byron"]);
-
-      assert.ok(
-        (await documentText()).includes("# Ada Byron"),
-        "With no heading above the insertion point there is no level to go one below, and the " +
-          "sections are the document's top level."
+        { from: { line: 4, ch: 0 }, to: { line: 4, ch: 0 } },
+        "The cursor is in the first section, on its blank line, where the next thing belongs."
       );
     }));
 

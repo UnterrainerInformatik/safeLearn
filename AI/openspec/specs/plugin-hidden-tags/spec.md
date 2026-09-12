@@ -19,6 +19,11 @@ A SafeLearn tag is an instruction to the rendering server, not text a reader is 
 - **WHEN** a line contains a tag beside ordinary text
 - **THEN** the tag is gone and the rest of the line is shown as it would be without it
 
+#### Scenario: A closing marker is the file's last line with no line break after it
+
+- **WHEN** a block's closing marker stands on the last line of the file and no character follows it
+- **THEN** it is hidden exactly as a closing marker followed by a line break is, and does not appear as its own characters
+
 ### Requirement: Hiding a tag does not rebuild what surrounds it
 
 Tag text SHALL be removed from the rendered node that holds it, rather than by replacing that node with a newly built one. Formatting, links and structure around a tag SHALL survive its removal unchanged, because a tag is not a reason to re-render the sentence it stands in.
