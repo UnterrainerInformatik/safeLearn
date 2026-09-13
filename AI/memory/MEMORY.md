@@ -29,5 +29,7 @@ Echter Ablageort: `/mnt/data/source/HTL/safeLearn/AI/memory/`
 - [docker logs puffert Zeilen ohne \n](docker-logs-newline-buffering.md) — Progress-Writes ohne `\n` bleiben unsichtbar, bis ein Newline kommt oder der Container stirbt; sah aus wie ein Hänger, war keiner (babylon5/secureLectures)
 - [Realm-Update-Kadenz](directory-realm-update-cadence.md) — Directory-Daten ändern sich nur händisch durch Gerald, ~3-4x/Jahr; er könnte eine Cache-Invalidierung dabei vergessen
 - [Admin Events aktiviert](directory-admin-events-enabled.md) — seit 2026-09-11 an der unterrainer-Realm an (30 Tage), directory-service-Client hat jetzt zusätzlich `view-events`
-- [TestUsers-OU dominiert Realm](keycloak-testusers-ou-discovery.md) — 84% (12.060/14.289) der unterrainer-Accounts sind synthetische TestUsers, nicht reale Alt-Daten; erklärt die 2017/2021/2023-Timestamp-Spitzen neu
+- [TestUsers-OU dominierte den Realm](keycloak-testusers-ou-discovery.md) — 84% waren synthetische TestUsers; seit dem Split vom 2026-09-13 außerhalb jedes Suchbereichs, Realm steht bei 1.978 Konten
 - [Keycloak importiert beim Blättern](keycloak-import-on-demand.md) — `users/count` zählt nur die lokale DB, `GET /users` paginiert in die LDAP-Föderation und importiert dabei; manual sync schützt nicht
+- [Toter federationLink löscht beim Lesen](keycloak-dead-federation-link-deletes-on-read.md) — nach einer `usersDn`-Verengung entfernt schon ein `GET` die lokale Kopie; erst sichern, dann umstellen
+- [Keycloak-Bot-Account](keycloak-bot-account.md) — `bot@unterrainer.info`, nur lesend; Passwort in `.env.sh` auf babylon5, Schreibrechte gibt Gerald temporär

@@ -1,6 +1,6 @@
 ---
 name: keycloak-testusers-ou-discovery
-description: "84% des unterrainer-Realms (12.060/14.289 Accounts) liegt unter einer synthetischen OU=TestUsers, entdeckt 2026-09-12 bei Analyse des produktiven directory-cache.json"
+description: "84% des unterrainer-Realms waren eine synthetische OU=TestUsers — erledigt: seit dem Provider-Split am 2026-09-13 liegt die OU außerhalb jedes Suchbereichs, der Realm steht bei 1.978 Konten"
 metadata:
   type: project
 ---
@@ -14,3 +14,5 @@ Bei den echten (Nicht-Test-)Accounts bestätigt sich Geralds Hypothese aber in k
 **Why**: Die ursprüngliche Investigation (Sektion 1.5, Sep 10) hatte nur nach Keycloak-createdTimestamp-Jahresclustern und Namens-Duplikaten gesucht, aber nie die OU-Verteilung selbst aggregiert — dadurch blieb der dominante TestUsers-Block unentdeckt und die 2017/2021/2023-Spitzen wurden versehentlich als reale (wenn auch verdächtige) Alt-Daten interpretiert.
 
 **How to apply**: Vor Wiederaufnahme von [[realm-directory-cleanup-investigation]] / OpenSpec-Change `realm-directory-cleanup`: diesen Fund in `investigation-findings.md` einarbeiten und Tasks 3–5 neu priorisieren. Die TestUsers-Bereinigung (LDAP-Federation-`usersDn` einschränken oder OU in AD entfernen/verschieben) ist ein separater, risikoärmerer und höher-wirksamer Fix als die Retention-Policy für echte Accounts — sollte zuerst passieren, weil er 84% des Realms ohne jedes Risiko für echte Personen entfernt.
+
+**Stand 2026-09-13 — erledigt.** Die 12.060 TestUsers sind gelöscht und die OU liegt außerhalb des Suchbereichs beider Provider: `ldap-students` steht auf `ou=Students,ou=HTL,…`, `ldap-teachers` auf `ou=Teachers,ou=HTL,…`. Der Realm zählt jetzt 1.978 Konten (1.721 Students, 250 Teachers, 7 lokale). Damit ist auch die hier genannte reale Restmenge neu vermessen — die „+317 Schüler / +110 Lehrer" gegenüber Geralds Erwartung bleiben bestehen und sind Sache der Aufbewahrungsregel, nicht der TestUsers. Details im erledigten Abschnitt von `AI/open-proposals.md` und in [[keycloak-dead-federation-link-deletes-on-read]].

@@ -19,3 +19,5 @@ Mechanismus: `users/count` zählt ausschließlich Keycloaks lokale DB. `GET /use
 **Why**: Ohne dieses Wissen wirken Count und Pagination widersprüchlich, und jede Bereinigung auf Keycloak-Seite wird durch den nächsten tiefen Seitenaufruf rückgängig gemacht.
 
 **How to apply**: Jede Aufzählung über die Admin-API hart beim vorher geholten `users/count` deckeln (macht `fetchAllUserPages` seit `0072059`) — dann bleibt sie innerhalb der lokalen DB und importiert nichts. Der eigentliche Hebel gegen die TestUsers liegt in der Föderationsconfig (`usersDn` einschränken oder `customUserSearchFilter`), nicht in Keycloaks User-Liste.
+
+**Nachtrag 2026-09-13:** Genau dieser Hebel ist umgelegt — die Föderation ist in `ldap-students` (`ou=Students`) und `ldap-teachers` (`ou=Teachers`) geteilt, `OU=TestUsers` liegt in keinem Suchbereich mehr. Der Deckel auf `users/count` bleibt trotzdem richtig, weil jede Seite jenseits des lokalen Endes weiterhin in die Föderation greift. Zur Gegenrichtung — Lesen *löscht* außerhalb des Suchbereichs — siehe [[keycloak-dead-federation-link-deletes-on-read]].
