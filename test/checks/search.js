@@ -244,6 +244,212 @@ describe("search", () => {
     );
   });
 
+  // ---- The views, and which of them a reader may switch on for themselves ----
+
+  /**
+   * `ve` and `va` are the reader's own preferences - the top bar writes them and
+   * `/userattributes` takes them from whoever is logged in. So the question here
+   * is not whether a switch changes what a session is shown, which it plainly
+   * does, but whether flipping it can hand a session something the roles never
+   * granted it.
+   *
+   * `#exam` is the one that must not move. `utils.js` gates it on teacher or
+   * admin and reads that gate after the student-view downgrade, so neither a
+   * student setting `ve` nor a teacher who has downgraded themselves may reach
+   * it. `#practice` is its literal complement, which is why the pair is asserted
+   * together: every session has to see exactly one of the two, or a question
+   * exists that somebody gets neither variant of.
+   *
+   * `#answer` is deliberately the other kind - a view with no role in its rule
+   * at all. The last check states that on purpose, so that nobody reads the four
+   * channels above and concludes the search withholds something the rule never
+   * withheld.
+   */
+  const viewsPage = "/md/test-search-views.md";
+
+  /**
+   * Sets the preferences, then reports what the same session is told by the
+   * search and what it is shown on the page, for one term. The two together are
+   * what every check below compares - a search that disagrees with the page it
+   * leads to is wrong whichever of the two is right.
+   */
+  async function probe(role, values, term) {
+    const session = sessions.get(role);
+    await setPreferences(session, values);
+    const answer = await search(session, term);
+    assert.equal(
+      answer.status,
+      200,
+      `the ${role} session searching ${term} was answered ${answer.status}: ${answer.body.slice(0, 200)}`
+    );
+    const page = await render(session, viewsPage);
+    return {
+      body: answer.body,
+      found: JSON.parse(answer.body).results.some((result) => result.path === viewsPage),
+      onPage: page.text.includes(term),
+    };
+  }
+
+  test("a student cannot reach the exam block by turning the exam view on", async () => {
+    const student = sessions.get("student");
+    const held = carried.get("student");
+    assert.ok(
+      !held.has("teacher") && !held.has("admin"),
+      `the student session carries ${[...held].join(", ")}, so this check is not about a student`
+    );
+
+    const exam = await probe("student", { ve: 1 }, "KLAUSURANSICHT");
+    const nothing = await search(student, absentTerm);
+    await setPreferences(student, {});
+
+    assert.equal(
+      exam.onPage,
+      false,
+      "the page served to a student that set ve=1 rendered the exam block, which no preference may open"
+    );
+    assert.equal(
+      exam.found,
+      false,
+      "a student that set ve=1 was told about KLAUSURANSICHT, which stands in a `@@@ #exam` block. " +
+        "The exam gate is hardcoded to teachers and admins, so the reader's own switch must not move it."
+    );
+    assert.equal(
+      exam.body,
+      nothing.body,
+      `a student searching the exam block's term was answered differently from a term that is in no file ` +
+        `at all: ${exam.body.slice(0, 300)}`
+    );
+  });
+
+  test("a teacher who has switched to the student view cannot reach the exam block either", async () => {
+    const teacher = sessions.get("teacher");
+    const exam = await probe("teacher", { vt: 0, ve: 1 }, "KLAUSURANSICHT");
+    await setPreferences(teacher, {});
+
+    assert.equal(
+      exam.onPage,
+      false,
+      "the page served to a downgraded teacher rendered the exam block; the downgrade is read before the gate"
+    );
+    assert.equal(
+      exam.found,
+      false,
+      "a teacher in the student view was told about KLAUSURANSICHT. The downgrade strips `teacher` before " +
+        "the exam gate is read, so the search has to fail it exactly as the page does."
+    );
+  });
+
+  test("every session is offered exactly one of the exam and practice variants", async () => {
+    // Four combinations of role and switch, plus the downgrade. The complement
+    // is what keeps a reader from ending up with neither variant of a question,
+    // so it is asserted over all of them rather than on the exam half alone.
+    const combinations = [
+      { role: "student", values: { ve: 0 }, expected: "UEBUNGSANSICHT" },
+      { role: "student", values: { ve: 1 }, expected: "UEBUNGSANSICHT" },
+      { role: "teacher", values: { ve: 0 }, expected: "UEBUNGSANSICHT" },
+      { role: "teacher", values: { ve: 1 }, expected: "KLAUSURANSICHT" },
+      { role: "teacher", values: { vt: 0, ve: 1 }, expected: "UEBUNGSANSICHT" },
+    ];
+
+    for (const { role, values, expected } of combinations) {
+      const withheld = expected === "KLAUSURANSICHT" ? "UEBUNGSANSICHT" : "KLAUSURANSICHT";
+      const shown = await probe(role, values, expected);
+      const hiddenHalf = await probe(role, values, withheld);
+      const how = `${role} with ${JSON.stringify(values)}`;
+
+      assert.equal(
+        shown.found,
+        true,
+        `${how} was not offered ${expected}, which is the variant it is served on the page`
+      );
+      assert.equal(
+        shown.onPage,
+        true,
+        `${how} is not shown ${expected} on the page, so this combination expects the wrong variant`
+      );
+      assert.equal(
+        hiddenHalf.found,
+        false,
+        `${how} was told about ${withheld}, which is the variant the other view holds`
+      );
+      assert.equal(
+        hiddenHalf.onPage,
+        false,
+        `${how} is shown ${withheld} on the page, so the search and the page disagree`
+      );
+    }
+
+    await setPreferences(sessions.get("student"), {});
+    await setPreferences(sessions.get("teacher"), {});
+  });
+
+  test("the answer view is a view and not a restriction, for both roles alike", async () => {
+    // Stated rather than assumed. `#answer` resolves to `va == 1` with no role
+    // in the rule, so a student that asks for answers gets them - on the page
+    // and therefore in the search. A check that expected otherwise would be
+    // asserting a restriction the application never claimed to apply.
+    for (const role of ["student", "teacher"]) {
+      const asked = await probe(role, { va: 1 }, "LOESUNGSANSICHT");
+      const notAsked = await probe(role, { va: 0 }, "LOESUNGSANSICHT");
+      await setPreferences(sessions.get(role), {});
+
+      assert.equal(
+        asked.found,
+        asked.onPage,
+        `the search and the page disagree about the answer block for the ${role} session with va=1`
+      );
+      assert.equal(
+        notAsked.found,
+        notAsked.onPage,
+        `the search and the page disagree about the answer block for the ${role} session with va=0`
+      );
+      assert.equal(
+        asked.onPage,
+        true,
+        `the ${role} session asked for answers and was not shown one. \`#answer\` is \`va == 1\` and ` +
+          `names no role, so both sessions see it.`
+      );
+      assert.equal(
+        notAsked.found,
+        false,
+        `the ${role} session did not ask for answers and was told about LOESUNGSANSICHT anyway`
+      );
+    }
+  });
+
+  test("a block whose window has closed is nobody's to find", async () => {
+    // The only channel of the five that hides content from the role it names.
+    // `admin` does not short-circuit a closed window either, which is why this
+    // is asserted for the teacher session and not only for the student one.
+    for (const role of ["student", "teacher"]) {
+      const session = sessions.get(role);
+      const answer = await search(session, "FENSTERGESCHLOSSEN");
+      const nothing = await search(session, absentTerm);
+      const page = await render(session, viewsPage);
+
+      // Not vacuous: the same file, searched for a term every session may read,
+      // does come back. Without this the check would also pass if the file had
+      // dropped out of the index entirely.
+      const open = await results(session, "ANSICHTOFFEN");
+      assert.ok(
+        open.some((result) => result.path === viewsPage),
+        `the ${role} session cannot find ${viewsPage} at all, so the closed-window check below proves nothing`
+      );
+
+      assert.equal(
+        page.text.includes("FENSTERGESCHLOSSEN"),
+        false,
+        `the page served to the ${role} session rendered a block whose window closed in 2025`
+      );
+      assert.equal(
+        answer.body,
+        nothing.body,
+        `the ${role} session searching a term inside a closed window was answered differently from a ` +
+          `term that is in no file at all: ${answer.body.slice(0, 300)}`
+      );
+    }
+  });
+
   // ---- The window between a change on disk and the scan that notices it ----
 
   /**
