@@ -24,6 +24,7 @@ Echter Ablageort: `/mnt/data/source/HTL/safeLearn/AI/memory/`
 - [Directory-Service-Credentials ungültig](directory-service-credentials-invalid.md) — lokales `.env` gibt `invalid_client` gegen die echte Keycloak-Realm; `/api/admin/directory/search` antwortet immer mit 502
 - [git mv durch den openspec-Symlink](git-mv-through-openspec-symlink.md) — Ziel muss `AI/openspec/...` heißen, nicht `openspec/...`, sonst korrumpiert `git mv` den Index
 - [Realm-Cleanup-Investigation abgeschlossen](realm-directory-cleanup-investigation.md) — archiviert 2026-09-12: keine Duplikate, 84% synthetische TestUsers, Remedy liegt im LDAP-Split
+- [Kein macOS erreichbar](no-macos-available.md) — gibt es nicht und wird es nie geben; keine Sichtprüfung auf einem Mac einplanen
 - [babylon5-Server](babylon5-server.md) — Geralds eigener Server für detached Langläufer, SSH-Alias `babylon5`
 - [PII-Handling bei echten Realm-Daten](pii-handling-real-data.md) — nie Einzeldatensätze ausgeben, nur Aggregate; Classifier blockt sonst
 - [docker logs puffert Zeilen ohne \n](docker-logs-newline-buffering.md) — Progress-Writes ohne `\n` bleiben unsichtbar, bis ein Newline kommt oder der Container stirbt; sah aus wie ein Hänger, war keiner (babylon5/secureLectures)

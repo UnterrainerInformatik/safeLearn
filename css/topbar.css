@@ -17,7 +17,7 @@
   text-align: center;
   flex-grow: 1;
   word-wrap: break-word;
-  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 
 .topbar-menu {

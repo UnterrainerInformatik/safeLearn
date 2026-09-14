@@ -97,6 +97,8 @@ Here you can find more information about [permissions](docs-permissions.md).
 If you're interested about the software used behind the scenes or some of the URLs you may use to do stuff, then look [here](docs-technical-details.md).
 ## Render Pipeline
 How a Markdown file becomes the HTML your browser receives — every step in between, and why they run in that order — is described [here](docs-render-pipeline.md).
+## Search Function
+How the search field beside the navigation tree answers a query — the two passes behind it, why a stale index cannot leak anything, and the keys the result list answers to — is described [here](docs-search.md).
 ## Development: Building this Project
 Here you can find information about [building](docs-building.md) this project.
 ## Development: Debugging

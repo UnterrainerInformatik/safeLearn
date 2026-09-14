@@ -131,4 +131,4 @@ stop
 	4. `postprocessFragments` turns the marks left by step 4.7 into the numbered fragments RevealJS reveals one at a time
 	5. `makeContentMap` generates the map of the files' content later on displayed on the left navbar
 7. `DOMPurify.sanitize` is called before sending the response to the client
-8. The sanitized HTML is wrapped for wherever it is going: `splitForReveal` and then `wrapInReveal` for `?reveal`, `wrapAsDocument` for `?document`, and `wrapInPage` for everything else. `POST /convert` is the one caller that receives the HTML unwrapped, as the `html` field of its JSON answer.
+8. The sanitized HTML is wrapped for wherever it is going. Each wrapper emits the `@font-face` block for the fonts this deployment ships, which is where the names a stylesheet has to use come from — see "Naming a font in a stylesheet" in [development](docs-development.md). The wrappers are: `splitForReveal` and then `wrapInReveal` for `?reveal`, `wrapAsDocument` for `?document`, and `wrapInPage` for everything else. `POST /convert` is the one caller that receives the HTML unwrapped, as the `html` field of its JSON answer.

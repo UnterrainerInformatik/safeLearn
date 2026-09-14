@@ -41,3 +41,10 @@ Symptom ursprünglich: `g.unterrainer` sah im Obsidian-Plugin weder im Personen-
 Die damals vermuteten Ursachen (kaputtes LDAP-Attribut, langsame OU, Keycloak-Fehler beim Auflösen von `briefRepresentation=false`) waren alle falsch — es war schlicht die Grenze zum TestUsers-Block. Nichts mehr zu tun.
 
 # Allgemein
+
+## Die Hauptschrift wird ohne Fallback gesetzt
+`applyAttributes()` in `obsidian-page.js` schreibt die gewählte Hauptschrift als Inline-Style auf `#markdown-content` — `mainContent.style.fontFamily = "main " + font` — und die Navigationsschrift ebenso auf jedes `.nav-font`-Element. Beide nennen eine ausgelieferte Family **ohne Fallback-Kette**. Kommt die Datei nicht an, fällt der Text auf die Default-Schrift des Browsers zurück, typischerweise eine Serife, statt auf eine Schrift derselben Art.
+
+Die Regel dazu steht seit `sharpen-the-page-a-reader-reads` in docs-development.md unter „Naming a font in a stylesheet", und `reading-legibility` verlangt sie für jede Deklaration, die eine ausgelieferte Family nennt. `test/checks/legibility.js` prüft aber nur `css/` und erreicht diese beiden Stellen nicht.
+
+Warum es nicht in jenem Change miterledigt wurde: ein pauschales `, sans-serif` wäre falsch. `assets/main-fonts/` enthält mit „EB Garamond" eine Serife und mit „FiraCode"/„Ubuntu Mono" zwei Monospace-Schriften — die richtige generische Family hängt an der einzelnen Schrift, das ist also eine kleine Zuordnungstabelle und keine Zeile. Gerald am 2026-09-14: vorerst so lassen.

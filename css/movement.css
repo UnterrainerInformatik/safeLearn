@@ -44,29 +44,47 @@
   transform: rotate(90deg);
 }
 
+/* Navigation and the file list. A list of links is not prose, so its items need
+   no underline to be told from what is around them. Both states are stated: a
+   link that changes appearance once it has been followed reads as a different
+   kind of element, and where a reader has been is invisible to the author. */
 .sidebar-menu a:link,
+.sidebar-menu a:visited,
 .folder-files a:link,
-a:visited {
+.folder-files a:visited {
   color: blue;
+  text-decoration: none;
 }
 
 .sidebar-menu a:hover,
 .folder-files a:hover {
   color: darkblue;
 }
+
+/* Running text, where a link does carry an underline, so colour is not the only
+   thing marking it. */
+#markdown-content a:link,
+#markdown-content a:visited {
+  color: #0000EE;
+  text-decoration: underline;
+}
+
+/* The dark theme, written at the specificity the rule above forces: it carries
+   an ID, so a bare `.dark-mode a:link` would lose to it and paint #0000EE on a
+   near-black page at about 1.3:1. The navigation selector stays beside it for
+   the chrome, which no ID scopes. */
 .dark-mode a:link,
-.dark-mode a:visited {
-  color: rgb(180, 180, 255);
+.dark-mode a:visited,
+#markdown-content.dark-mode a:link,
+#markdown-content.dark-mode a:visited {
+  color: #b4b4ff;
 }
 
-.dark-mode a:hover {
-  color: rgb(115, 115, 255);
-}
-
-.sidebar-menu a:link,
-.folder-files a:link,
-a:visited {
-  text-decoration: none;
+/* Lighter than its own resting state, which is the direction a hover goes on a
+   dark ground; the value it replaces was darker, and measured 4.47:1. */
+.dark-mode a:hover,
+#markdown-content.dark-mode a:hover {
+  color: #d4d4ff;
 }
 
 .sidebar-title-content {

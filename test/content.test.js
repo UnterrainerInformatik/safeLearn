@@ -22,6 +22,7 @@ import { knownRoles, loginCount, shutdown } from "./harness.js";
 import "./checks/permissions.js";
 import "./checks/views.js";
 import "./checks/rendering.js";
+import "./checks/legibility.js";
 import "./checks/navigation.js";
 import "./checks/presentation.js";
 import "./checks/search.js";

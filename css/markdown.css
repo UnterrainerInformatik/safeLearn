@@ -14,8 +14,19 @@
 
 #markdown-content table {
   border-collapse: collapse;
-  margin: 1px;
+  /* No horizontal margin: beside `max-width: 100%` below it is exactly what
+     would put the table one pixel past the edge of a narrow screen. */
+  margin: 1px 0;
   border: 1px solid #5f5f5f;
+  /* A table is the one thing on a page that is as wide as its content needs and
+     will not reflow, so on a narrow screen it pushed the whole page sideways.
+     It scrolls within its own box instead. `fit-content` is what keeps it
+     sizing to its columns rather than filling the column the way a block does,
+     which is the appearance it has everywhere the column is wide enough. */
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 #markdown-content table th {
@@ -35,10 +46,30 @@
   padding: 6px;
 }
 
+/* The family name is the one getFontImports() emits for a shipped font -
+   "main " plus the file's basename - and the chain behind it ends in a generic,
+   so a font that fails to load degrades to a monospace rather than to whatever
+   the browser defaults to. See docs-development.md. */
 .shiki {
+  /* A <pre> does not wrap at all by default, which is what kept the two wrapping
+     declarations below from ever doing anything: a block wider than the column
+     pushed the whole page sideways instead. Only visible on a narrow screen,
+     which is to say only since the viewport declaration reached one. */
+  white-space: pre-wrap;
   word-wrap: break-word;
-  word-break: break-all;
+  overflow-wrap: anywhere;
   line-height: 1.3em;
   font-size: 0.9em;
-  font-family: Fira-Code, monospace;
+  font-family: "main FiraCode", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* Inline code, in the face and proportion of the block beside it. The child
+   combinator is the point: .shiki already carries font-size: 0.9em, and a code
+   element inside it would take both and land at 0.81em. */
+#markdown-content :not(pre) > code {
+  font-family: "main FiraCode", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  /* An identifier or a URL named in a sentence has no spaces to wrap at, and a
+     narrow column is narrower than plenty of them. */
+  overflow-wrap: anywhere;
 }

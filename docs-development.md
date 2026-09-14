@@ -130,45 +130,31 @@ app.use("/your-prefix", checkAuthenticated, express.static(path.join(__dirname, 
 
 Mount the narrowest thing that covers the reference rather than widening an existing mount, and keep the URL prefix the same as the one the page emits so nothing else has to change. `npm test` catches the omission for you: `test/checks/deployment-surface.js` walks every same-origin reference of a rendered page in all three views and fails on a reference that falls through to the start page.
 
+## Naming a font in a stylesheet
+
+A font this deployment ships is **not** called what its file is called. `getFontImports()` in `obsidian.js` walks `assets/main-fonts/` and `assets/nav-fonts/` and emits one `@font-face` per file, naming the family after the directory it came from and the file's own basename:
+
+| file | family a stylesheet has to name |
+| --- | --- |
+| `assets/main-fonts/FiraCode.ttf` | `"main FiraCode"` |
+| `assets/nav-fonts/Inter.ttf` | `"nav Inter"` |
+
+A stylesheet that names `FiraCode`, or `Inter`, or `Fira-Code`, matches nothing. Nothing goes wrong loudly: the browser silently falls back to its own default, which is typically a serif where a sans was meant and which differs from one reader's machine to the next. Both of those exact names were in `css/` for a long time before anybody noticed.
+
+Two rules follow from that, and `test/checks/legibility.js` holds the code to both:
+
+- **Name a shipped family with its prefix.** Every name a `css/` declaration reaches for has to be a family this deployment declares — one of `getFontImports()`'s, or one a stylesheet declares itself with its own `@font-face` — a generic keyword, or one of the system faces the check names one by one. Reaching for a system face that is not on that list means adding it there, deliberately.
+- **End the chain in a generic family.** A declaration naming a shipped family carries a fallback chain after it, ending in `sans-serif`, `serif` or `monospace`, so a font file that does not arrive degrades to a face of the same kind rather than to whatever the browser defaults to.
+
+Two of the reader's preferences arrive as inline styles rather than as stylesheet rules — `applyAttributes()` in `obsidian-page.js` writes the chosen text size and main font onto `#markdown-content`, and the chosen navigation font onto every `.nav-font` element. An inline style beats any stylesheet rule, so a rule meant to reach content the reader has sized has to be relative (`em`) rather than absolute.
+
 ## Searching the corpus
 
-The search field sits beside the navigation tree and answers over `GET /search?q=…`, which is authenticated exactly as every other content route is. A query is answered in two passes, and the split between them is the whole of why a search cannot leak:
+The search field beside the navigation tree, the two passes behind `GET /search?q=…` and the keys the result list answers to have a page of their own: [search function](docs-search.md). It is where the rule the whole thing rests on is written down — the index proposes, the file decides — together with the diagrams of a query and of what one candidate file goes through.
 
-1. **The index proposes.** The in-memory index a scan built holds each file's text, so a case-insensitive substring pass over it picks out the files that could answer the query. This pass touches no disk and asks no permission question. It decides *which files to open* and nothing else.
-2. **The file decides.** Each candidate is read from disk, its whole-file directive is resolved through `resolveFileVisibility`, its inline `@@@` blocks are filtered through `filterForbiddenSegments`, and only the text that survives is matched, ranked and quoted. Headings, their occurrence numbers and every snippet come out of that filtered text.
+What a developer working here needs to keep in mind is the shorter half of it:
 
-Because the second pass reads the file, an index that has gone stale can cost a candidate that turns out to match nothing, or a candidate it failed to propose. It cannot disclose anything: a file restricted since the last scan is proposed and then refused, and a file whose text has changed is proposed and then contributes nothing. Neither outcome is distinguishable from a file that simply does not match — which is also what a file the session may not see looks like.
-
-What follows from that, and what `test/checks/search.js` holds the code to:
-
-- Nothing in the search restates a permission rule. It reaches `resolveFileVisibility` and `hasSomeRoles`, the same two the rendered page reaches.
-- A match is never reported across the place a hidden block was removed. The filter hands back the surviving passages as a list, and matching runs inside each of them, so the two sides of a removal are never in one string to begin with.
-- An answer carries its results and nothing else — no total taken before filtering, no "N more", no marker where something was withheld. The difference between such a number and what is shown would measure the hidden corpus.
-- No completion, suggestion or correction is offered. A vocabulary assembled over the corpus is exactly what must not reach a reader.
-- A query below `minimumQueryLength` (three characters) is refused, and the field waits `searchDebounceMs` (250 ms) after a keystroke before issuing one. Both are in `obsidian.js`, with the measurement against the production corpus that settled them: together they bound how fast a reader can probe.
-
-Following a result opens the **page view**, whatever view the reader was in — the print and presentation renderings display the same Markdown source and are not separate search targets. A result that is expanded to its headings links to one of them by carrying `?heading=…&occurrence=…`, the heading's text and which occurrence of that text it is, counted over the content that session is served. It is not an anchor: `makeContentMap` gives every heading a fresh `uuid` on every render, so a heading's `id` means nothing outside the render that produced it. `window.safeLearnJumpToHeading` counts the same way over the rendered page and scrolls, and it runs immediately after `window.safeLearnRestorePosition` in `revealPage()` — after the reveal and in the same task, because a hidden body has no scroll height. A target that is not found is a silent no-op, which is what makes a hand-written one useless for probing.
-
-### Driving it from the keyboard
-
-The reader's hands are already on the keys when the query is typed, so every step after it can be taken there too. The search field keeps the focus throughout — the selection is a mark on a node, not a focus ring — which is what lets the query go on being refined while a result stands selected.
-
-| KEY | IN THE FIELD | ON A RESULT | ON A HEADING |
-| --- | --- | --- | --- |
-| `↓` | enters the list at the first result | the next node below | the next node below |
-| `↑` | — | the node above; from the first result, back to the field | the node above |
-| `→` | at the end of the query: back into the list, where it was left | closed: opens its headings; open: steps into the first of them | — |
-| `←` | — | open: closes it; closed: back to the field | closes the heading list and lands on the result |
-| `⏎` | — | opens the document at its beginning | opens the document at that heading |
-
-Three things follow from the field keeping the focus, and each is a decision rather than an accident:
-
-- **`←` and `→` mean the list while something is selected**, so both of them lead back to the field at the edges — `↑` at the first result and `←` on a result that is not open. The way back to a caret is a key the reader's hand is already on.
-- **`→` means one step right, and when there is nothing left to the right, one level in.** With the whole query selected it collapses the selection; with the caret inside the query it moves one character; only at the end of the query does it mean the list. Extending a query and stepping into the results therefore never contend for the key.
-- **`→` resumes and `↓` starts at the top.** Leaving the list is not losing your place: as long as nothing is typed, `→` goes back to the node the selection was handed back from, while `↓` is always the first result. Typing anything forgets it, so the memory can never point into a list the reader is no longer looking at.
-
-Focusing the field selects the query it holds, so the next character typed replaces it; `→` gives that up and puts the caret at the end for a reader who wanted to extend it instead. That selection is held to a focus a finger did not cause — the decision is the `pointerType` of the press the focus followed, not what the machine is capable of — so a tap leaves the field exactly as it behaves without any of this, and a laptop with a touchscreen gets the convenience from its trackpad and the old behaviour from its screen.
-
-**None of this is the only way to anything.** Every result, every heading and every expand affordance is operated by pointer and by touch alone, exactly as before; whether a result is expanded is one state that the chevron and `→` both set. `Escape` is deliberately unbound — `type="search"` clears the field natively. And `autocomplete="off"` on the field is load-bearing rather than tidy: `↓` in a text input is also the key that opens the browser's own list of values the field has held before, and on a machine several readers share, that list is other readers' queries.
-
-Navigating asks nothing. The selection walks nodes that are already on screen, and a node is on screen because the two passes above already decided this session may see it — so holding `↓` measures nothing that reading the list does not already show. `test/checks/search-keyboard.js` counts the requests over a whole walk to keep that true.
+- Nothing in the search restates a permission rule. It reaches `resolveFileVisibility` and `hasSomeRoles`, the same two the rendered page reaches. A rule that would have to be repeated here is a rule that belongs in `filterForbiddenSegments` instead.
+- `filterForbiddenSegments` hands the surviving passages back as a **list**, and the search matches inside each of them separately. Anything new that comes to need filtered Markdown should take the list too: joining first is what would let a match be reported across the place a hidden block was removed.
+- An answer carries its results and nothing else — no total taken before filtering, no "N more", no marker where something was withheld, and no completion or suggestion. Each of those is a channel, and `openspec/specs/corpus-search/spec.md` holds the scenario for it.
+- `test/checks/search.js` and `test/checks/search-keyboard.js` run as part of `npm test` and hold the code to all of the above, staleness cases included.

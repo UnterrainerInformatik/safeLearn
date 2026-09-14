@@ -1,7 +1,17 @@
 @media screen and (max-width: 1024px) {
   #sidebar {
+    /* Below the bar rather than over it. At this width the column is an overlay
+       and the burger is the only way back out of it, and at top: 0 the column's
+       first link sits exactly where the burger is: a reader tapping to close the
+       navigation navigated Home instead. */
+    top: 50px;
+    height: calc(100vh - 50px);
     opacity: 0;
     max-width: 0;
+    /* max-width bounds the content box, so the padding would keep a folded
+       column 10px wide - and it is fixed and above everything, so those 10px
+       would stand over the left of the text with the resize handle in them. */
+    padding: 0;
     overflow: hidden;
     transition: background-color 0.3s ease-in-out, padding 0.3s ease, max-width 0.3s ease, opacity 0.3s ease-in-out, visibility 0.3s step-start;
   }

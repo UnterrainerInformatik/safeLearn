@@ -2,9 +2,14 @@
   background-color: #dfeffc;
 }
 
+/* Chosen as a pair rather than one half at a time: 12.87:1, still nearly double
+   the WCAG AAA threshold for body text, and out of the range where light glyphs
+   bloom into the dark over a long reading session. The !important is on the
+   background alone - on the colour it would beat the link rules in
+   css/movement.css and turn every link on the page into body text. */
 .dark-mode{
-  background-color: #1c1c1c !important;
-  color: #ffffff;
+  background-color: #1e1e1e !important;
+  color: #e2e2e2;
 }
 .dark-mode.width-reveal, .dark-mode.width-reveal .sidebar-menu a.dark-mode {
   background-color: #2d2d2df0 !important;

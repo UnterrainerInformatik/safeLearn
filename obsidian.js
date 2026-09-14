@@ -2487,6 +2487,12 @@ export async function wrapInPage(html, startPage, req) {
       <html lang="en">
       <head>
         <meta charset="UTF-8">
+        <!-- Lay the page out at the device's own width rather than at an assumed
+             desktop one and scaling the result down, which costs sharpness twice.
+             No maximum-scale and no user-scalable=no: a reader keeps their zoom.
+             wrapInReveal declares its own, scale pinning included, because Reveal
+             computes a deck's scale against the viewport itself. -->
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
           ${await getFontImports()}
         </style>
@@ -2503,7 +2509,7 @@ export async function wrapInPage(html, startPage, req) {
            is the only thing that does; wrapAsDocument below serves the body the
            same way for the same reason. -->
       <body style="display: none;">
-        <div id="topbar">${await getTopBar(startPage, req)}</div>
+        <div id="topbar" class="nav-font">${await getTopBar(startPage, req)}</div>
         <div id="wrapper">
           <div id="sidebar" class="nav-font">&nbsp;<br>${await getSideBar(
             startPage,
@@ -2539,6 +2545,8 @@ export async function wrapAsDocument(html, req) {
       <html lang="en">
       <head>
         <meta charset="UTF-8">
+        <!-- The same declaration, for the reason wrapInPage states. -->
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
           ${await getFontImports()}
         </style>

@@ -389,4 +389,6 @@ Recorded as found, without judgment on intent and without changes to the code.
 | [docs-debugging.md](../docs-debugging.md) | Running locally, which files the pipeline replaces, httpYac setup |
 | [docs-testing.md](../docs-testing.md) | The browser verification harness — what `npm test` does, the headed switch, the demo accounts, the environment variables, and the shared-account constraint on checks |
 | [docs-keycloak.md](../docs-keycloak.md) | Keycloak client and realm setup, the `config` and `lastVisitedUrl` user attributes, the account API endpoints |
+| [docs-render-pipeline.md](../docs-render-pipeline.md) | How a Markdown file becomes the HTML a browser receives: every step of `preParse`, `marked` and `manipulateHtml`, and why they run in that order |
+| [docs-search.md](../docs-search.md) | The corpus search: the route and its two numbers, the two passes (the index proposes, the file decides), matching and ranking, the channels a search must not open, following a hit to its heading, and the keyboard walk |
 | [docs-development.md](../docs-development.md) | The realm a development instance needs: why the demo realm carries no LDAP and every role is a client role, the demo accounts and the roles they hold, and which accounts would close the coverage gaps `docs-testing.md` records |
