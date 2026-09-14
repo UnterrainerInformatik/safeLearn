@@ -450,6 +450,38 @@ describe("search", () => {
     }
   });
 
+  test("a file whose window has closed is nobody's to find either", async () => {
+    // The whole-file form of the case above, asserted separately because the
+    // search reaches it through a different line: a block is decided by
+    // `filterForbiddenSegments`, a file by `resolveFileVisibility`. One of the
+    // two holding says nothing about the other.
+    const marker = "Only visible while the window is open";
+    const written = readFileSync(corpusFile("test-fileperms-window-closed.md"), "utf8");
+    assert.ok(
+      written.includes(marker),
+      `md/test-fileperms-window-closed.md no longer contains ${JSON.stringify(marker)}, so this check is ` +
+        `no longer about a file that holds a term nobody may be told about`
+    );
+
+    for (const role of ["student", "teacher"]) {
+      const session = sessions.get(role);
+      const answer = await search(session, marker);
+      const nothing = await search(session, absentTerm);
+
+      assert.equal(
+        answer.body,
+        nothing.body,
+        `the ${role} session searching a term inside a file whose window has closed was answered ` +
+          `differently from a term that is in no file at all: ${answer.body.slice(0, 300)}`
+      );
+      assert.ok(
+        !answer.body.includes("window-closed"),
+        `the answer names md/test-fileperms-window-closed.md, which no session may open - not even the ` +
+          `teacher its directive names: ${answer.body.slice(0, 300)}`
+      );
+    }
+  });
+
   // ---- The window between a change on disk and the scan that notices it ----
 
   /**
