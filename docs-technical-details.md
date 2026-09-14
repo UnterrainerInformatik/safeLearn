@@ -79,23 +79,7 @@ https://safelearn.unterrainer.info/md/presentations/test-presentation.md?reveal=
 ```
 This then renders your RevealJS presentation as a continuous page that you may print as PDF or on whatever printer you have currently installed.
 ## Render-Pipeline
-When you have a look inside the code, you'll find that the file `obsidian.js` prepares a page in a very particular way before it is rendered to HTML-output. Here I want to document that pipeline.
-
-1. File is loaded from disk (`app.js`)
-2. Accesstoken is refreshed, so it and all contained roles and attributes are actually current
-3. `preParse` is called preparing the content for HTML-conversion
-	1. `removeForbiddenContent` parses for file- and inline-permissions and removes forbidden parts of the file
-	2. `preReplacePlantUml` replaces the code tags containing PlantUML-code with a rendered version of it by calling a proper PlantUML conversion service and inserting the SVG of that output here instead of the code-tags
-	3. `preMarkCode` parses the file for code-marks (cannot be nested) and replaces them for later use of the marks (the content of the code-tags parsed is saved in an array for later insertion)
-	4. `preReplaceObsidianFileLinks` replaces Obsidian- (or Wiki-) style links with proper links your browser can understand
-	5. `preMarkCallouts` parses for callouts (may be nested) and replaces their tags inline with appropriate start- and end-tags of our own
-	6. `unmarkCode` replaces the code-marks by the content of the previously saved array
-4. `manipulateHtml` is called actually converting the file
-	1. `replacePreMarkCallouts` renders the proper callouts pre-marked earlier on
-	2. `replaceObsidianImageLinks` deals with the Obsidian- (or Wiki-) specific image links (shortform) by expanding that into a proper image-tag
-	3. `replaceObsidianImageLatResizeValues` deals with the conditional image resizing described in the Obsidian-specific document [here](docs-obsidian)
-	4. `makeContentMap` generates the map of the files' content later on displayed on the left navbar
-5. `DOMPurify.santitize` is called before sending the response to the client
+When you have a look inside the code, you'll find that the file `obsidian.js` prepares a page in a very particular way before it is rendered to HTML-output. That pipeline — from the three ways Markdown reaches the server to the four ways the finished HTML leaves it — is documented [here](docs-render-pipeline.md).
 ## Directory API
 Two endpoints back the Obsidian plugin's directory features (the person picker, "List classes" and "Show directory info"). Both are registered ahead of the browser-session gate and identify their caller from a bearer access token instead, introspected against Keycloak; both refuse anyone but a teacher or an admin with a bare `403`. See [Directory search client](docs-keycloak) for the two Keycloak identities involved.
 

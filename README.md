@@ -95,6 +95,8 @@ You can specify who is able to read whole files, or only parts of it.
 Here you can find more information about [permissions](docs-permissions.md).
 ## Technical Details
 If you're interested about the software used behind the scenes or some of the URLs you may use to do stuff, then look [here](docs-technical-details.md).
+## Render Pipeline
+How a Markdown file becomes the HTML your browser receives — every step in between, and why they run in that order — is described [here](docs-render-pipeline.md).
 ## Development: Building this Project
 Here you can find information about [building](docs-building.md) this project.
 ## Development: Debugging
