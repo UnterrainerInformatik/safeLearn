@@ -2174,7 +2174,19 @@ async function getSideBar(startPage, req) {
          The two numbers are read by the field's script instead of being
          written down a second time in obsidian-page.js - the minimum length
          the route enforces and the interval the field waits are one decision
-         each, taken in obsidian.js and carried here. -->
+         each, taken in obsidian.js and carried here.
+
+         The field is a combobox over the list below it: the arrow keys move a
+         selection through the results and an expanded result's headings while
+         the focus stays here, so aria-activedescendant is what names the node
+         the reader is on - obsidian-page.js writes it from the same place it
+         writes the mark.
+
+         autocomplete="off" is load-bearing, not tidiness. Arrow-down in a text
+         input is also the key that opens the browser's own list of values this
+         field has held before, and on a machine several readers share that list
+         is other readers' queries. Arrow-down has to enter the result list and
+         nothing else. -->
     <div class="sidebar-title sidebar-title-search"><b>Search</b></div>
     <div class="sidebar-search">
       <input
@@ -2185,10 +2197,14 @@ async function getSideBar(startPage, req) {
         autocomplete="off"
         autocapitalize="off"
         spellcheck="false"
+        role="combobox"
+        aria-controls="searchResults"
+        aria-expanded="false"
+        aria-autocomplete="list"
         data-minimum-length="${minimumQueryLength}"
         data-debounce-ms="${searchDebounceMs}"
         oninput="onSearchInput()">
-      <div id="searchResults" class="sidebar-menu sl-search-results"></div>
+      <div id="searchResults" class="sidebar-menu sl-search-results" role="listbox" aria-label="Search results"></div>
     </div>
     <div class="sidebar-title sidebar-title-dirlist row" onclick="toggleDirList('sidebar-dirlist')"><b>Site</b><div class="sidebar-dirlist-chevron">${lucideIcon(
       "ChevronRight",

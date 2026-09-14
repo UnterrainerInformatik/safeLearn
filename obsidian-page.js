@@ -239,9 +239,32 @@ let searchTimer = null;
  */
 let searchGeneration = 0;
 
+/**
+ * The node the reader's selection stands on, or `null` while it stands nowhere.
+ *
+ * A direct reference rather than an index into anything kept beside the DOM: a
+ * list is replaced whole by every answer, and the one line that gives the
+ * selection up sits at the top of `showSearchResults`, before the nodes it
+ * could point at are detached.
+ */
+let searchSelection = null;
+
+/**
+ * The node the selection was last handed back from, for as long as the query
+ * stands. Cleared on every keystroke below, which is also what keeps it from
+ * ever naming a node in a list the reader is no longer looking at: a list is
+ * only ever replaced by an answer to a query that was typed.
+ */
+let searchResume = null;
+
 function onSearchInput() {
   const field = document.getElementById("searchField");
   if (!field) return;
+
+  // Typed, so the way back into the list is given up - before the debounce and
+  // before the minimum length is looked at, because the rule the reader knows is
+  // *as long as nothing is typed* rather than *until a new answer arrives*.
+  searchResume = null;
 
   clearTimeout(searchTimer);
   const query = field.value.trim();
@@ -299,7 +322,16 @@ async function runSearch(query) {
 function showSearchResults(results) {
   const list = document.getElementById("searchResults");
   if (!list) return;
+  // A position in the previous list names nothing in this one, so the selection
+  // is given up here rather than cleaned up afterwards - and before the node it
+  // points at is detached.
+  selectSearchNode(null);
   list.replaceChildren();
+
+  // Names a node for this render and for no other. The list is rebuilt whole, so
+  // an id from the render before means nothing, exactly as a heading's id in a
+  // rendered page does.
+  let nodeIndex = 0;
 
   for (const result of results) {
     const entry = document.createElement("div");
@@ -317,11 +349,11 @@ function showSearchResults(results) {
       toggle.className = "sl-search-expand";
       toggle.textContent = "❯";
       toggle.title = "Show the headings the matches are under";
-      toggle.addEventListener("click", () => {
-        toggle.classList.toggle("expanded");
-        expanded.classList.toggle("collapsed");
-      });
+      toggle.addEventListener("click", () =>
+        setSearchEntryExpanded(entry, !searchEntryHeadings(entry).expanded)
+      );
       row.appendChild(toggle);
+      row.setAttribute("aria-expanded", "false");
     }
 
     // The page view, whatever view the reader is in right now: the print and
@@ -330,6 +362,8 @@ function showSearchResults(results) {
     // its renderings.
     const link = document.createElement("a");
     link.className = "sl-search-name";
+    link.id = `sl-search-node-${++nodeIndex}`;
+    link.setAttribute("role", "option");
     link.href = result.path;
     link.textContent = result.name;
     row.appendChild(link);
@@ -345,6 +379,8 @@ function showSearchResults(results) {
     for (const heading of headings) {
       const anchor = document.createElement("a");
       anchor.className = "sl-search-heading";
+      anchor.id = `sl-search-node-${++nodeIndex}`;
+      anchor.setAttribute("role", "option");
       // Which heading, not which anchor: a heading's id is generated fresh on
       // every render, so it means nothing outside the render that produced it.
       // The text and its occurrence are counted over the content this session
@@ -366,7 +402,291 @@ function showSearchResults(results) {
     for (const element of list.querySelectorAll("a")) element.classList.add("dark-mode");
     list.classList.add("dark-mode");
   }
+
+  // What the field says it controls: a list with something in it, or none.
+  document
+    .getElementById("searchField")
+    ?.setAttribute("aria-expanded", String(results.length > 0));
 }
+
+/*
+ * Driving the result list from the keyboard.
+ *
+ * The list has two levels - results, and the headings of an expanded result -
+ * and everything below walks exactly the nodes the reader is looking at. None
+ * of it asks anything: a node is on screen because `corpus-search` already
+ * decided this session may see it, so a walk cannot reach further than reading
+ * the list already does, and holding a key measures nothing.
+ *
+ * The search field keeps the focus the whole time and the selection is a mark
+ * rather than a focus ring, so the query can still be refined while a result is
+ * selected. That is why arrow-left and arrow-up lead back out of the list: while
+ * something is selected, left and right mean the tree rather than the caret, and
+ * the reader needs a way back to a caret they can move.
+ */
+
+/**
+ * Sets whether a result's headings are shown.
+ *
+ * `expanded` on the chevron, `collapsed` on the container and `aria-expanded`
+ * on the row are one state written three ways, and they are written only here.
+ * The chevron's listener and the arrow keys are two callers of one function
+ * rather than two notions of what an expanded result is.
+ */
+function setSearchEntryExpanded(entry, shown) {
+  const toggle = entry?.querySelector(".sl-search-expand");
+  const container = entry?.querySelector(".sl-search-headings");
+  if (!toggle || !container) return;
+
+  toggle.classList.toggle("expanded", shown);
+  container.classList.toggle("collapsed", !shown);
+  entry.querySelector(".sl-search-result-row")?.setAttribute("aria-expanded", String(shown));
+
+  // A node that is not displayed cannot be the selected one. Closing a heading
+  // list the selection stands in therefore leaves it on the result that list
+  // belongs to - whichever of the two callers closed it.
+  if (!shown && searchSelection && container.contains(searchSelection)) {
+    selectSearchNode(entry.querySelector("a.sl-search-name"));
+  }
+}
+
+/**
+ * Whether a result has headings at all, and whether they are currently shown.
+ * The one place either question is asked; nothing else reads the two classes.
+ */
+function searchEntryHeadings(entry) {
+  const container = entry ? entry.querySelector(".sl-search-headings") : null;
+  return {
+    expandable: container !== null,
+    expanded: container !== null && !container.classList.contains("collapsed"),
+  };
+}
+
+/**
+ * The nodes the selection can stand on, top to bottom: every result, with the
+ * headings of an expanded result spliced in beneath it.
+ *
+ * Derived on every key press out of the DOM the reader is looking at rather
+ * than kept, so an expand and a collapse have nothing to invalidate and a node
+ * that is not displayed cannot be walked onto.
+ */
+function searchWalkOrder() {
+  const list = document.getElementById("searchResults");
+  if (!list) return [];
+  return [...list.querySelectorAll("a.sl-search-name, a.sl-search-heading")].filter(
+    (anchor) => !anchor.closest(".sl-search-headings.collapsed")
+  );
+}
+
+/**
+ * Moves the mark to `anchor`, or gives it up when there is none.
+ *
+ * The mark is `.highlight`, the same one the content list uses to say *this is
+ * where you are*; it lands on an `<a>`, which is what `a.dark-mode.highlight`
+ * needs to reach it in dark mode. `aria-activedescendant` is written from here
+ * too, so what is seen and what is announced cannot disagree.
+ */
+function selectSearchNode(anchor) {
+  const field = document.getElementById("searchField");
+  if (searchSelection) searchSelection.classList.remove("highlight");
+  searchSelection = anchor || null;
+
+  if (!searchSelection) {
+    field?.removeAttribute("aria-activedescendant");
+    return;
+  }
+  searchSelection.classList.add("highlight");
+  field?.setAttribute("aria-activedescendant", searchSelection.id);
+  // `nearest` is the smallest movement that brings the node into view, which for
+  // a node inside the list's own 40vh scroller is that scroller and not the page
+  // behind the sidebar.
+  searchSelection.scrollIntoView({ block: "nearest" });
+}
+
+/**
+ * Gives the selection up and puts the caret at the end of the query, keeping
+ * the node it stood on.
+ *
+ * The caret's position is not cosmetic: the end of the query is the one place
+ * from which arrow-right means the list, so leaving it there is what makes the
+ * way out the way back in.
+ */
+function handBackSearchSelection() {
+  const field = document.getElementById("searchField");
+  searchResume = searchSelection;
+  selectSearchNode(null);
+  if (!field) return;
+  field.focus();
+  field.setSelectionRange(field.value.length, field.value.length);
+}
+
+/**
+ * The keys the result list answers to.
+ *
+ * A decision table over the key and where the selection stands. `return` means
+ * the press was not ours and is left entirely alone - which is what keeps
+ * arrow-left and arrow-right moving the caret while the caret is what the reader
+ * is using; `break` means the search acted on it, and every one of those presses
+ * is consumed at the end, so a walk never moves the caret and never scrolls the
+ * page.
+ *
+ * Modified presses are none of ours before anything else is looked at. The only
+ * other key listener on the page is the Ctrl+Alt print shortcut, registered on
+ * `window` in the capture phase; the two cannot meet over a key.
+ */
+function onSearchKeyDown(event) {
+  if (event.ctrlKey || event.altKey || event.metaKey) return;
+
+  const field = document.getElementById("searchField");
+  if (!field) return;
+
+  const order = searchWalkOrder();
+  // Read back out of the walk order rather than trusted: a chevron may have
+  // closed the list the selection stood in since the last press.
+  const at = searchSelection ? order.indexOf(searchSelection) : -1;
+  const selected = at === -1 ? null : searchSelection;
+  const entry = selected ? selected.closest(".sl-search-result") : null;
+
+  switch (event.key) {
+    case "ArrowDown":
+      // The node below where the reader is, and from the field that is the first
+      // result whatever happened earlier - which is also the only way back to the
+      // top of a list without walking up it.
+      if (!selected) {
+        if (order.length === 0) return;
+        selectSearchNode(order[0]);
+        break;
+      }
+      selectSearchNode(order[Math.min(at + 1, order.length - 1)]);
+      break;
+
+    case "ArrowUp":
+      if (!selected) return;
+      if (at === 0) handBackSearchSelection();
+      else selectSearchNode(order[at - 1]);
+      break;
+
+    case "ArrowRight": {
+      if (!selected) {
+        // One step right, and when there is nothing left to the right, one level
+        // in. Anywhere but the end of the query there is still text to the right,
+        // so the press belongs to the field: a selected query collapses, a caret
+        // inside it moves one character.
+        const end = field.value.length;
+        if (field.selectionStart !== end || field.selectionEnd !== end) return;
+        if (order.length === 0) return;
+        selectSearchNode(order.includes(searchResume) ? searchResume : order[0]);
+        break;
+      }
+      if (selected.classList.contains("sl-search-heading")) return;
+      const { expandable, expanded } = searchEntryHeadings(entry);
+      if (!expandable) break;
+      if (expanded) selectSearchNode(order[at + 1]);
+      else setSearchEntryExpanded(entry, true);
+      break;
+    }
+
+    case "ArrowLeft":
+      if (!selected) return;
+      // One level up, and from a result that has no level above it inside the
+      // list, out of the list and back to the field.
+      if (selected.classList.contains("sl-search-heading")) setSearchEntryExpanded(entry, false);
+      else if (searchEntryHeadings(entry).expanded) setSearchEntryExpanded(entry, false);
+      else handBackSearchSelection();
+      break;
+
+    case "Enter":
+      if (!selected) return;
+      // Followed by the very code the pointer follows it with, `href` and all,
+      // rather than by a second way of opening the same two kinds of node.
+      selected.click();
+      break;
+
+    default:
+      return;
+  }
+
+  event.preventDefault();
+}
+
+/**
+ * The press the field is taking focus from, and how far it has travelled.
+ * Recorded on `pointerdown`, read by the `focus` that follows it, and let go of
+ * as soon as either that focus or the press itself is over.
+ */
+let searchPress = null;
+
+/**
+ * The press whose focus selected the query, kept until its `mouseup` - the one
+ * event whose default would collapse that selection again.
+ */
+let searchFocusPress = null;
+
+/** How far a press may travel and still be a click rather than a drag. */
+const searchPressSlack = 3;
+
+/**
+ * Offers the previous query for replacement, unless a finger put the caret
+ * where it is.
+ *
+ * The decision is made from the press this focus followed rather than from what
+ * the machine is capable of, so a laptop with a touchscreen gets the convenience
+ * from its trackpad and the old behaviour from its screen without being asked
+ * which kind of machine it is. A focus that arrives with no press at all - Tab,
+ * or a script - selects, because a keyboard focus is by definition not a finger.
+ *
+ * The touch path is this early return and nothing else.
+ */
+function onSearchFocus(event) {
+  const press = searchPress;
+  searchPress = null;
+  if (press?.pointerType === "touch") return;
+
+  event.target.select();
+  // The press that caused this focus still has its `mouseup` to come, and the
+  // browser places the caret there. Remembered so that one mouseup - and no
+  // other - can be kept from undoing what was just selected.
+  searchFocusPress = press ? { x: press.x, y: press.y } : null;
+}
+
+function onSearchMouseUp(event) {
+  const press = searchFocusPress;
+  searchFocusPress = null;
+  if (!press) return;
+
+  // A press that travelled is a drag, and a drag selects what was dragged
+  // across. Only a press that stayed where it went down is the click this guard
+  // is for.
+  const moved =
+    Math.abs(event.clientX - press.x) > searchPressSlack ||
+    Math.abs(event.clientY - press.y) > searchPressSlack;
+  if (!moved) event.preventDefault();
+}
+
+/**
+ * Binds the field to everything above. Absent in the document view, which has no
+ * sidebar and therefore no field.
+ */
+function initSearchField() {
+  const field = document.getElementById("searchField");
+  if (!field) return;
+
+  field.addEventListener("keydown", onSearchKeyDown);
+  field.addEventListener("pointerdown", (event) => {
+    searchPress = { pointerType: event.pointerType, x: event.clientX, y: event.clientY };
+  });
+  field.addEventListener("pointerup", () => {
+    searchPress = null;
+  });
+  field.addEventListener("focus", onSearchFocus);
+  field.addEventListener("mouseup", onSearchMouseUp);
+  field.addEventListener("blur", () => {
+    searchPress = null;
+    searchFocusPress = null;
+  });
+}
+
+document.addEventListener("DOMContentLoaded", initSearchField);
 
 let mainFontsArray = [];
 

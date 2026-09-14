@@ -25,6 +25,7 @@ import "./checks/rendering.js";
 import "./checks/navigation.js";
 import "./checks/presentation.js";
 import "./checks/search.js";
+import "./checks/search-keyboard.js";
 import "./checks/directory-search.js";
 // Last on purpose: its reference walk requests every page the navigation tree
 // links to, and each of those writes `lastVisitedUrl` back to the shared account

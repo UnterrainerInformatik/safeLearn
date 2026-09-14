@@ -148,3 +148,27 @@ What follows from that, and what `test/checks/search.js` holds the code to:
 - A query below `minimumQueryLength` (three characters) is refused, and the field waits `searchDebounceMs` (250 ms) after a keystroke before issuing one. Both are in `obsidian.js`, with the measurement against the production corpus that settled them: together they bound how fast a reader can probe.
 
 Following a result opens the **page view**, whatever view the reader was in — the print and presentation renderings display the same Markdown source and are not separate search targets. A result that is expanded to its headings links to one of them by carrying `?heading=…&occurrence=…`, the heading's text and which occurrence of that text it is, counted over the content that session is served. It is not an anchor: `makeContentMap` gives every heading a fresh `uuid` on every render, so a heading's `id` means nothing outside the render that produced it. `window.safeLearnJumpToHeading` counts the same way over the rendered page and scrolls, and it runs immediately after `window.safeLearnRestorePosition` in `revealPage()` — after the reveal and in the same task, because a hidden body has no scroll height. A target that is not found is a silent no-op, which is what makes a hand-written one useless for probing.
+
+### Driving it from the keyboard
+
+The reader's hands are already on the keys when the query is typed, so every step after it can be taken there too. The search field keeps the focus throughout — the selection is a mark on a node, not a focus ring — which is what lets the query go on being refined while a result stands selected.
+
+| KEY | IN THE FIELD | ON A RESULT | ON A HEADING |
+| --- | --- | --- | --- |
+| `↓` | enters the list at the first result | the next node below | the next node below |
+| `↑` | — | the node above; from the first result, back to the field | the node above |
+| `→` | at the end of the query: back into the list, where it was left | closed: opens its headings; open: steps into the first of them | — |
+| `←` | — | open: closes it; closed: back to the field | closes the heading list and lands on the result |
+| `⏎` | — | opens the document at its beginning | opens the document at that heading |
+
+Three things follow from the field keeping the focus, and each is a decision rather than an accident:
+
+- **`←` and `→` mean the list while something is selected**, so both of them lead back to the field at the edges — `↑` at the first result and `←` on a result that is not open. The way back to a caret is a key the reader's hand is already on.
+- **`→` means one step right, and when there is nothing left to the right, one level in.** With the whole query selected it collapses the selection; with the caret inside the query it moves one character; only at the end of the query does it mean the list. Extending a query and stepping into the results therefore never contend for the key.
+- **`→` resumes and `↓` starts at the top.** Leaving the list is not losing your place: as long as nothing is typed, `→` goes back to the node the selection was handed back from, while `↓` is always the first result. Typing anything forgets it, so the memory can never point into a list the reader is no longer looking at.
+
+Focusing the field selects the query it holds, so the next character typed replaces it; `→` gives that up and puts the caret at the end for a reader who wanted to extend it instead. That selection is held to a focus a finger did not cause — the decision is the `pointerType` of the press the focus followed, not what the machine is capable of — so a tap leaves the field exactly as it behaves without any of this, and a laptop with a touchscreen gets the convenience from its trackpad and the old behaviour from its screen.
+
+**None of this is the only way to anything.** Every result, every heading and every expand affordance is operated by pointer and by touch alone, exactly as before; whether a result is expanded is one state that the chevron and `→` both set. `Escape` is deliberately unbound — `type="search"` clears the field natively. And `autocomplete="off"` on the field is load-bearing rather than tidy: `↓` in a text input is also the key that opens the browser's own list of values the field has held before, and on a machine several readers share, that list is other readers' queries.
+
+Navigating asks nothing. The selection walks nodes that are already on screen, and a node is on screen because the two passes above already decided this session may see it — so holding `↓` measures nothing that reading the list does not already show. `test/checks/search-keyboard.js` counts the requests over a whole walk to keep that true.

@@ -157,6 +157,20 @@
         "md/test-fileperms-window-closed.md"
       ]
     },
+    "test/checks/search-keyboard.js": {
+      "what": "Driving the search from the keyboard: that arrow-down enters the list at its first result and stops at its last node without wrapping, that exactly one node carries the mark at a time and that the field names the same node it stands on, that arrow-right opens a result and then steps into its headings while arrow-down walks them and steps out to the result below, that arrow-left closes a heading list onto the result it belongs to and hands the selection back from a result that is not open, that arrow-up at the first result hands it back too and that arrow-left afterwards moves the caret within the query again. That arrow-right at the end of the query resumes the node the selection was handed back from while arrow-down starts at the top whatever happened earlier, that a further character typed forgets that node, and that anywhere but the end of the query arrow-right stays the caret - a selected query collapses, a caret inside it moves one character, and a query nothing answers has nothing to step into. That enter leaves the reader exactly where a pointer following the same node leaves them, compared against the click rather than against a rebuilt expectation, for a result and for a heading. That a click into the field selects the query it holds, that arrow-right then leaves the caret at its end so the next character extends it, and that a pointerdown carrying pointerType touch before the focus selects nothing. That entering the list, walking it and leaving it make no request to /search and leave the query alone, that a walk moves neither the caret within the query nor the page behind the sidebar, and that the Ctrl+Alt print shortcut still works with the caret in the field. That expanded is one state whichever of the chevron and the arrow keys set it, in both directions, and that a new answer - narrower, or below the minimum length - gives the selection up. The two shapes the walk needs are asserted before they are relied on, so a corpus edit fails the fixture rather than weakening the checks.",
+      "guards": [
+        "obsidian-page.js",
+        "obsidian.js",
+        "css/search.css",
+        "css/fixes.css",
+        "test/harness.js"
+      ],
+      "corpus": [
+        "md/test-search-jump.md",
+        "md/test-md-file.md"
+      ]
+    },
     "test/directive-grammar.test.js": {
       "what": "What a permission directive means, entry by entry: a table of edge-case directive lines read by parseFirstLineForPermissions, covering the permissive cases of parseLocalDateTime that a hand-written mirror gets wrong. It is the oracle the companion plugin's own grammar is held against - the plugin's parseDirectiveEntries reads the same table and has to reach the same conclusion per entry, so a divergence fails here rather than misinforming a person writing a document. Needs no browser, no login and no server; it does need the plugin checkout the AI/plugin symlink points at.",
       "guards": [
