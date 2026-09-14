@@ -18,6 +18,8 @@ The consequence is worth stating plainly, because it decides everything below:
 
 Both paths are the same code and produce the same flat role set, so a role behaves identically whichever way it arrived — a client role named `Students` is canonicalized exactly like an LDAP unit named `Students`. Developing against client roles therefore verifies the LDAP path too, apart from the claim parsing itself.
 
+That flat role set is assembled **once per request**, in `permission-context.js`, together with the session's view preferences and one reference time. Every directive a request evaluates — a whole-file one in the navigation tree, an inline `@@@` block of the document, the teacher switch in the top bar — is decided against that one context, so a request cannot answer the same question two ways, and the identity provider is asked for the preferences at most once no matter how many directives the page carries.
+
 ## What the realm needs for `npm test` to run at all
 
 Without these the run fails outright rather than passing weakly. The ordinary client setup is in [keycloak](docs-keycloak.md); these are the parts the suite depends on specifically.
@@ -50,7 +52,7 @@ Username and password are identical for every account, the way `student`/`studen
 
 On the client `safeLearn`, under *Roles*: `admin`, `teacher`, `examParticipant`, `4AHIF`, `4BHIF`, `5BHIF`, and — for the synthetic accounts described further down — `student`, `students`, `teachers`.
 
-Capitalization does not matter, `hasRoles` compares everything trimmed and lowercased, but the class roles are conventionally written in capitals.
+Capitalization does not matter, `hasRoles` compares everything trimmed and lowercased — against the role set the request resolved once, as a set membership rather than a lookup of its own — but the class roles are conventionally written in capitals.
 
 ### A student holds no role, and that is the point
 

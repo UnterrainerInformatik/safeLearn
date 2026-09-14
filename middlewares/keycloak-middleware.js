@@ -6,6 +6,13 @@ import { Issuer, Strategy } from "openid-client";
 export let client;
 let issuerUrl;
 export let keycloakIssuer;
+/**
+ * The parsed `keycloak.json`, read once here at startup. `getClientRoles` in
+ * `permission-context.js` reads `resource` from it; it used to open the file
+ * with `fs.readFileSync` once per permission check, which put a synchronous
+ * disk read on the event loop in the middle of every rendered page.
+ */
+export let keycloakConfig;
 
 function base64urlToUtf8(str) {
   // base64url -> base64
@@ -32,16 +39,17 @@ function jwtDecode(token) {
 
 export async function initKeycloak(app) {
   // Load keycloak.json
-  const kcConfig = JSON.parse(fs.readFileSync("keycloak.json", "utf8"));
-  issuerUrl = kcConfig["auth-server-url"] + "realms/" + kcConfig.realm;
+  keycloakConfig = JSON.parse(fs.readFileSync("keycloak.json", "utf8"));
+  issuerUrl =
+    keycloakConfig["auth-server-url"] + "realms/" + keycloakConfig.realm;
   keycloakIssuer = await Issuer.discover(issuerUrl);
   // console.log("Discovered issuer %s %O", keycloakIssuer.issuer, keycloakIssuer.metadata);
 
   const serverUrl =
     process.env.NEXT_PUBLIC_SERVER_URL || "http://localhost:8080";
   client = new keycloakIssuer.Client({
-    client_id: kcConfig.resource,
-    client_secret: kcConfig.credentials.secret,
+    client_id: keycloakConfig.resource,
+    client_secret: keycloakConfig.credentials.secret,
     redirect_uris: [serverUrl + "/auth/callback"],
     post_logout_redirect_uris: [serverUrl + "/logout/callback"],
     response_types: ["code"],
@@ -97,7 +105,7 @@ export async function initKeycloak(app) {
       userProfile.accessToken = accessToken;
       userProfile.accessTokenDecoded = jwtDecode(accessToken)?.payload;
       userProfile.refreshToken = refreshToken;
-      userProfile.keycloakConfig = kcConfig;
+      userProfile.keycloakConfig = keycloakConfig;
       // hasRoles() in utils.js reads req.user.rolesCalculated unconditionally
       // and JSON.parse(undefined) throws, so this has to exist from the first
       // request onward - it must not wait for the near-expiry refresh in
@@ -196,6 +204,10 @@ export async function refreshAccessToken(req) {
     const userinfo = await client.userinfo(req.user.accessToken);
     // Merge the updated user information with the user profile
     req.user = { ...req.user, ...userinfo };
+    // The roles and the claims this request would be judged by have just been
+    // replaced, so a context assembled from the old ones must not be answered
+    // from. The next check builds one from what is now in the session.
+    req.permissionContext = null;
     // console.log("Token refreshed", req.user);
   } catch (err) {
     // invalid_grant / Token is not active -> RT expired/rotated/revoked
@@ -253,63 +265,102 @@ export function getLdapGroups(req) {
   return deriveRoles(req.user.ldap);
 }
 
-export async function getUserAttributes(req, getAll = false) {
-  if (!req || !req.user || !req.user.accessToken ||!req.user.keycloakConfig) {
-    return null;
-  }
-  const keycloakConfig = req.user.keycloakConfig;
-  const realm = keycloakConfig.realm;
-  const u = keycloakConfig["auth-server-url"];
-  const url = `${u.endsWith("/") ? u.slice(0, -1) : u}/realms/${realm}/account`;
+/** The account endpoint of the realm this session was issued by. */
+function accountUrl(req) {
+  const sessionConfig = req.user.keycloakConfig;
+  const u = sessionConfig["auth-server-url"];
+  return `${u.endsWith("/") ? u.slice(0, -1) : u}/realms/${sessionConfig.realm}/account`;
+}
 
-  // Fetch current user attributes
-  const currentAttributes = await fetch(url, {
+/**
+ * The one GET against the account endpoint a request makes, and the only place
+ * this application asks the identity provider for the stored attributes.
+ *
+ * It raises rather than swallowing, because the caller has to be able to tell a
+ * lookup that failed from an account that simply carries no attributes: the
+ * first is logged once for the request and settles it on the default
+ * preferences, the second is an ordinary answer.
+ *
+ * Every attribute arrives as a single-element array and is unwrapped here, so
+ * the shape everything above reads is `account.attributes.<name>`.
+ */
+export async function fetchAccount(req) {
+  // Counted on the session, because this is the one number that says whether
+  // the permission context is doing its job, and nothing else would notice it
+  // growing back. `GET /userattributes` answers with the whole user, so a check
+  // reads it before and after a rendered page and compares - see
+  // test/checks/permissions.js. The count is diagnostic and nothing reads it to
+  // decide anything.
+  req.user.accountLookups = (req.user.accountLookups ?? 0) + 1;
+  const response = await fetch(accountUrl(req), {
     headers: {
       Authorization: "Bearer " + req.user.accessToken,
       "Content-Type": "application/json",
     },
-  })
-    .then((response) => {
-      return response.json();
-    })
-    .then((data) => {
-      // console.log("data of user attributes", data);
-      for(let key in data.attributes) {
-        data.attributes[key] = data.attributes[key][0];
-      }
-      if(getAll) {
-        // Remove fields from the object that are not needed.
-        let { userProfileMetadata, id, username, emailVerified, ...d} = data;
-        return d;
-      }
-      return data;
-    })
-    .catch((error) => {
+  });
+  if (!response.ok) {
+    throw new Error(`the account endpoint answered ${response.status}`);
+  }
+  const data = await response.json();
+  for (let key in data.attributes) {
+    data.attributes[key] = data.attributes[key][0];
+  }
+  return data;
+}
+
+/**
+ * The account as this request holds it. Both shapes are derived from the
+ * permission context rather than fetched: the context made the one lookup this
+ * request is allowed, and a second fetch here would answer a question already
+ * answered - possibly differently, halfway through a page.
+ *
+ * `getAll` strips the fields the account endpoint will not take back on a write.
+ *
+ * A request that has not built a context yet - `POST /userattributes`, which
+ * evaluates no directive - falls back to fetching, and that fetch is then the
+ * one lookup of that request.
+ */
+export async function getUserAttributes(req, getAll = false) {
+  if (!req || !req.user || !req.user.accessToken || !req.user.keycloakConfig) {
+    return null;
+  }
+
+  let account;
+  if (req.permissionContext) {
+    // A failed lookup resolves the context with no account at all, and `{}` is
+    // what this function has always answered with in that case.
+    account = (await req.permissionContext).account ?? {};
+  } else {
+    account = await fetchAccount(req).catch((error) => {
       console.error("Error fetching current attributes:", error);
       return {};
     });
-  return currentAttributes;
+  }
+
+  if (getAll) {
+    // Remove fields from the object that are not needed.
+    let { userProfileMetadata, id, username, emailVerified, ...d } = account;
+    return d;
+  }
+  return account;
 }
 
 export async function setUserAttribute(req, attributeName, attributeValue) {
   if (!req || !req.user || !req.user.accessToken || !req.user.keycloakConfig) {
     return null;
   }
-  const keycloakConfig = req.user.keycloakConfig;
-  const realm = keycloakConfig.realm;
-  const u = keycloakConfig["auth-server-url"];
-  const url = `${u.endsWith("/") ? u.slice(0, -1) : u}/realms/${realm}/account`;
 
-  // Fetch current user attributes
+  // Reads from the permission context when this request has one, so storing
+  // `lastVisitedUrl` after a rendered page costs no lookup of its own.
   const currentAttributes = await getUserAttributes(req, true);
   // console.log("current attributes", currentAttributes);
 
   // Merge current and new attributes
   const mas = { ...currentAttributes.attributes, [attributeName]: attributeValue };
-  const mergedAttributes = { ...currentAttributes, attributes: mas };  
+  const mergedAttributes = { ...currentAttributes, attributes: mas };
   // console.log("merged attributes before saving", mergedAttributes);
 
-  const result = fetch(url, {
+  const result = await fetch(accountUrl(req), {
     method: "POST",
     headers: {
       Authorization: "Bearer " + req.user.accessToken,
@@ -329,5 +380,13 @@ export async function setUserAttribute(req, attributeName, attributeValue) {
       console.error("Error updating attribute:", error);
       return false;
     });
+
+  // What was just written is what the rest of this request has to read. The
+  // context is handed the value rather than asked to fetch it again, and it
+  // knows how to fold a written preference block into the preferences a check
+  // reads - this file does not.
+  if (result && req.permissionContext) {
+    (await req.permissionContext).applyWrittenAttribute(attributeName, attributeValue);
+  }
   return result;
 }

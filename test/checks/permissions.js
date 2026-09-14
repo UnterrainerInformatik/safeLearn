@@ -27,7 +27,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { before, describe, test } from "node:test";
 
-import { render, roles, setPreferences, sharedSession } from "../harness.js";
+import { accountLookups, render, roles, setPreferences, sharedSession } from "../harness.js";
 
 const corpusRoot = path.join(path.resolve(import.meta.dirname, "..", ".."), "md");
 
@@ -637,7 +637,64 @@ describe("permissions", () => {
     }
   });
 
-  // ---- 3.6 The harness against the application ----
+  // ---- 3.6 What the answers cost ----
+
+  /**
+   * Every check above asks what a session may see. This one asks how much
+   * asking costs, and it is the only thing that does.
+   *
+   * A page of this corpus evaluates one whole-file directive per listed file
+   * plus one per `@@@` block of the document, and each of those used to be an
+   * uncached request to the identity provider's account endpoint - roughly a
+   * hundred and forty for one page view of the production corpus. They happen
+   * between the application and Keycloak, where the browser cannot see them, so
+   * the application counts them on the session and this check reads the count
+   * before and after.
+   *
+   * At most one, not exactly one: a route that answers without asking a
+   * permission question should be free to be added without failing this.
+   */
+  test("a rendered page costs the identity provider at most one account lookup", async () => {
+    for (const role of ["student", "teacher"]) {
+      const { session } = shown.get(role);
+
+      const before = await accountLookups(session);
+      const page = await render(session, permissionsPage);
+      assert.ok(
+        page.text.length > 0,
+        `${permissionsPage} rendered nothing for the ${role} session, so there is no page to have counted`
+      );
+      const after = await accountLookups(session);
+
+      assert.ok(
+        after - before <= 1,
+        `rendering ${permissionsPage} for the ${role} session cost ${after - before} account lookups. ` +
+          `A page decides every one of its directives against one context, so one lookup answers all of them; ` +
+          `more than one means something asked the identity provider behind the context's back.`
+      );
+    }
+  });
+
+  test("a request that evaluates no directive costs no account lookup at all", async () => {
+    const { session } = shown.get("teacher");
+
+    const before = await accountLookups(session);
+    const served = await session.page.evaluate(async (url) => {
+      const response = await fetch(url, { credentials: "include" });
+      return response.status;
+    }, "/css/main.css");
+    assert.equal(served, 200, "the stylesheet this check requests should be served");
+    const after = await accountLookups(session);
+
+    assert.equal(
+      after - before,
+      0,
+      `a stylesheet cost ${after - before} account lookups. The context is built on first need so that a ` +
+        `request asking no permission question pays for none.`
+    );
+  });
+
+  // ---- 3.7 The harness against the application ----
 
   test("the roles the harness derives agree with what the application shows", () => {
     for (const role of ["student", "teacher"]) {

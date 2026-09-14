@@ -676,6 +676,40 @@ export async function roles(session) {
   return carried;
 }
 
+/**
+ * How often this session has made the application fetch its account from the
+ * identity provider, counted by `fetchAccount` in
+ * `middlewares/keycloak-middleware.js`.
+ *
+ * Read before and after something the session does, the difference is the number
+ * of lookups that thing cost. The count lives on the session rather than on one
+ * request because it has to be readable from a second request: those lookups
+ * happen between the application and Keycloak, where the browser cannot see
+ * them.
+ *
+ * `GET /userattributes` performs none itself, so asking does not change the
+ * answer.
+ */
+export async function accountLookups(session) {
+  const counted = await session.page.evaluate(async (url) => {
+    try {
+      const response = await fetch(url, { credentials: "include" });
+      if (!response.ok) return { error: `the application answered ${response.status}` };
+      const user = await response.json();
+      return { count: user?.accountLookups ?? 0 };
+    } catch (error) {
+      return { error: String(error) };
+    }
+  }, `${applicationUrl}/userattributes`);
+
+  if (!counted || counted.error) {
+    throw new Error(
+      `Could not read the lookup count of the ${session.role} session: ${counted?.error ?? "no answer"}.`
+    );
+  }
+  return counted.count;
+}
+
 // ################### Preferences ###################
 
 /** The preference block the application is rendering this session with. */

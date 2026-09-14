@@ -29,12 +29,14 @@
       "corpus": []
     },
     "test/checks/permissions.js": {
-      "what": "Block-level and whole-file directives in both directions, including the admin directive and both plural aliases (teachers and students), their effect on the navigation tree, time-bounded windows, and the teacher-to-student downgrade. That the navigation tree and the page a link leads to agree for every file carrying a whole-file directive - the tree read from the rendered sidebar, the page from a direct request, compared against each other rather than against a derived expectation - and that the two refusals stay told apart by their cause. That the same rule reaches Markdown posted to /convert, which has no corpus file behind it.",
+      "what": "Block-level and whole-file directives in both directions, including the admin directive and both plural aliases (teachers and students), their effect on the navigation tree, time-bounded windows, and the teacher-to-student downgrade. That the navigation tree and the page a link leads to agree for every file carrying a whole-file directive - the tree read from the rendered sidebar, the page from a direct request, compared against each other rather than against a derived expectation - and that the two refusals stay told apart by their cause. That the same rule reaches Markdown posted to /convert, which has no corpus file behind it. That a rendered page costs the identity provider at most one account lookup however many directives it evaluates, and that a request evaluating no directive costs none - counted on the session by fetchAccount, because those lookups happen between the application and Keycloak where the browser cannot see them.",
       "guards": [
         "utils.js",
         "obsidian.js",
         "app.js",
-        "middlewares/keycloak-middleware.js"
+        "middlewares/keycloak-middleware.js",
+        "permission-context.js",
+        "test/harness.js"
       ],
       "corpus": [
         "md/test-perms.md",
@@ -158,6 +160,16 @@
       "what": "A regression guard for the Keycloak admin-API pagination fix: fetchAllUserPages keeps asking for pages until one comes back short, rather than silently stopping at the first (a directory larger than one page going quietly missing past the 100th user). Stubs fetch; needs no live realm, no browser, no login.",
       "guards": [
         "middlewares/directory-service.js"
+      ],
+      "corpus": []
+    },
+    "test/permission-context.test.js": {
+      "what": "That a request resolves its permission context once: many checks of one request cause one account lookup, concurrent checks started before the first resolves cause one, and a request evaluating no directive causes none. That the downgraded check and the check beside it do not affect each other in either order, that a role inherited from Object.prototype - constructor, __proto__ - is granted to nobody, that a failed lookup settles the whole request on the default preferences with its roles intact and is logged once, and that every directive of one request is decided against the same reference time even when a window closes mid-request. Stubs fetch; needs no live realm, no browser, no login.",
+      "guards": [
+        "permission-context.js",
+        "utils.js",
+        "middlewares/keycloak-middleware.js",
+        "obsidian.js"
       ],
       "corpus": []
     },

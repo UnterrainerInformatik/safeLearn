@@ -15,6 +15,9 @@ You also need to add the user-attributes to the user-profile first (`Realm setti
 The application uses the following endpoints of the Keycloak-API to do that:
 - `GET {{keycloakUrl}}/realms/{{realm}}/account`
 - `POST {{keycloakUrl}}/realms/{{realm}}/account`
+
+A request reads the first of the two **at most once**, however many permission directives it goes on to evaluate, and a request that evaluates no directive — a stylesheet, an image, the hot-reload stream — does not read it at all. The answer is resolved once into the request's permission context (`permission-context.js`) and every check of that request is decided against it; before that, each directive cost a request of its own, which was around a hundred and forty of them for one page view of a corpus the size of the production one. The write is unchanged: a request that stores a preference posts once, and merges from the context it already holds rather than reading the account again first.
+
 The distinguished name your LDAP federation stores in the user attribute `LDAP_ENTRY_DN` has to arrive in the token under the claim name `ldap`. That is the name the application reads (`getLdapGroups` in `middlewares/keycloak-middleware.js`), and the `OU=` parts of that string are what the class and teacher roles are derived from. An attribute is not a claim, so this needs a mapper of its own — a `User Attribute` mapper on the client's dedicated scope, mapping `LDAP_ENTRY_DN` to the token claim name `ldap` and added to the ID token. Without it the application sees no LDAP groups at all, and every session is a session without a class.
 
 | ATTRIBUTE-NAME                                                                              | TYPE   | DESCRIPTION                                                                                           |

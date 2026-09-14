@@ -5,6 +5,7 @@ import pako from "pako";
 import { v4 as uuidv4 } from "uuid";
 import { JSDOM } from "jsdom";
 import { hasSomeRoles } from "./utils.js";
+import { getPermissionContext } from "./permission-context.js";
 import * as lucideIcons from "lucide-static";
 
 const internalTags = {
@@ -310,7 +311,12 @@ export async function resolveFileVisibility(req, permissions) {
   if (permissions === null || permissions === undefined) {
     return { visible: true };
   }
-  const activeRoles = getActivePermissionRoles(permissions);
+  // The request's own reference time, not this call's. The navigation tree and
+  // the page it links to reach this function from different sides, and a window
+  // that closes between the two would otherwise leave them disagreeing about
+  // the same file.
+  const { referenceDate } = await getPermissionContext(req);
+  const activeRoles = getActivePermissionRoles(permissions, referenceDate);
   if (activeRoles.length === 0) {
     return { visible: false, reason: "outside-window" };
   }
@@ -805,13 +811,22 @@ async function removeForbiddenContent(md, req) {
   while ((match = regex.exec(md)) !== null) {
     matches.push(match);
   }
+  if (matches.length === 0) {
+    // Nothing to decide, so nothing to resolve a context for: a document that
+    // carries no inline directive must not cost a lookup.
+    return md;
+  }
+  // Awaited once, ahead of the fan-out below. Every block of the document is
+  // then decided against the same reference time, so a window cannot close
+  // between the first paragraph of a page and the last.
+  const { referenceDate } = await getPermissionContext(req);
   const replacements = await Promise.all(
     matches.map(async ([fullMatch, perms, content]) => {
       const permissionEntries = parsePermissionEntries(perms);
       if (permissionEntries.length === 0) {
         return "";
       }
-      const activeRoles = getActivePermissionRoles(permissionEntries);
+      const activeRoles = getActivePermissionRoles(permissionEntries, referenceDate);
       if (activeRoles.length === 0) {
         return "";
       }

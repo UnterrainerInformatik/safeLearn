@@ -1,5 +1,4 @@
-import fs from "fs";
-import { getUserAttributes } from "./middlewares/keycloak-middleware.js";
+import { getPermissionContext, normalizeRole } from "./permission-context.js";
 
 /**
  * hasSomeRoles(req, ["teacher", "student", "admin", "gluppy"])
@@ -9,57 +8,19 @@ export async function hasSomeRoles(req, clientRoles, allowOverride = false) {
 }
 
 /**
- * Gets the Keycloak roles for the client.
- */
-async function getClientRoles(req) {
-  try {
-    if (
-      req.user.accessTokenDecoded.resource_access !== undefined &&
-      req.user.accessTokenDecoded.resource_access !== null
-    ) {
-      // Load keycloak.json
-      const keycloakConfig = JSON.parse(
-        fs.readFileSync("keycloak.json", "utf8")
-      );
-      const resource = keycloakConfig.resource;
-      const a = req.user.accessTokenDecoded.resource_access;
-      const r = a[resource];
-      if (r) {
-        return r.roles;
-      }
-    }
-    return null;
-  } catch (error) {
-    console.error(`Error checking client roles: ${error}`);
-    return null;
-  }
-}
-
-/**
- * The names that belong to a role and to nothing else. The display name is
- * merged into the same flat set as the roles, so these five have to be kept out
- * of it: only the identity provider or the LDAP claim may hand them out. Both
- * plural spellings are listed, because a name has to be refused before the
- * canonicalization in hasRoles folds `teachers` into `teacher`.
- */
-const namesReservedForRoles = new Set([
-  "admin",
-  "teacher",
-  "teachers",
-  "student",
-  "students",
-]);
-
-/**
- * Fetches all Keycloak roles of the client and all LDAP roles of the user, previously calculated in the Keycloak-middleware and checks for permissions.
+ * Decides whether the session may see content addressed to `clientRoles`.
+ *
+ * It performs no I/O. Everything it reads - the session's roles, the view
+ * preferences, the reference time - was resolved once by
+ * `getPermissionContext`, so the hundred and forty questions one page view asks
+ * are a hundred and forty set lookups against one answer rather than a hundred
+ * and forty round-trips to the identity provider, each with a clock and a
+ * preference block of its own.
  */
 async function hasRoles(req, clientRoles, all, allowOverride) {
   try {
     //console.log("Checking roles", clientRoles, "all", all, "allowOverride", allowOverride);
     // The roles to check are empty. So we return true.
-    const normalizeRole = (role) =>
-      typeof role === "string" ? role.trim().toLowerCase() : "";
-
     let normalizedClientRoles = Array.isArray(clientRoles)
       ? clientRoles
           .map(normalizeRole)
@@ -71,88 +32,30 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
     }
 
     let clientAccess = null;
-    const attributes = await getUserAttributes(req);
-    // console.log("Request user rolesCalculated", req.user.rolesCalculated);
-    // console.log("attributes", attributes);
-    let a = {ve: 0, vt: 0, va: 0};
-    if (attributes?.attributes?.config) {
-      a = JSON.parse(attributes.attributes.config);
-    }
-    let r = JSON.parse(req.user.rolesCalculated);
-    // console.log("Roles Calculated", r);
-    if (r === undefined || r === null) {
-      r = {};
-    }
-    let name = req.user.name
-    name = name.trim()
-    name = name.toLowerCase()
-    // Being addressed by name is a documented feature, so the display name
-    // shares this namespace with the roles - and must never be able to stand in
-    // for one. A name equal to a built-in role is dropped here, at the
-    // assignment, so it reaches neither the canonicalization below nor the
-    // admin short-circuit, the student-view downgrade or the exam gate.
-    if (namesReservedForRoles.has(name)) {
-      console.warn(
-        `Display name "${name}" is a reserved role name and was not added to the role set of ` +
-          `${req.user.preferred_username ?? "this session"}. The account keeps every role the ` +
-          `identity provider issued; rename it in Keycloak to make it addressable by name again.`
-      );
-    } else {
-      r[name] = true;
-    }
-    const cr = await getClientRoles(req);
-    if (cr) {
-      for (const role of cr) {
-        const normalizedRole = normalizeRole(role);
-        if (normalizedRole) {
-          r[normalizedRole] = true;
-        }
-      }
-    }
-    // The session's role set is complete at this point. Any future source of
-    // roles must be merged above this line, so that the canonicalization and
-    // the alias below cover it too. Nothing below reads the requested roles to
-    // decide which roles the session holds - a directive never grants itself.
-    if (r.teachers) {
-      r.teacher = true;
-      delete r["teachers"];
-    }
-    if (r.students) {
-      r.student = true;
-      delete r["students"];
-    }
-    if (r.teacher) {
-      r.teachers = true;
-    }
-    if (r.student) {
-      r.students = true;
-    }
+    const context = await getPermissionContext(req);
+    const a = context.preferences;
+    // The student-view downgrade, as a choice between two sets built before
+    // either was read. It used to delete `teacher`, `teachers` and `admin` from
+    // the map the call had just assembled, which is the one write that would
+    // make the answer to a directive depend on which directive came before it.
+    const view = allowOverride && a.vt == 0 ? context.studentView : context.full;
+
     let clientViews = normalizedClientRoles.filter((role) => role.startsWith("#"));
     normalizedClientRoles = normalizedClientRoles.filter((role) => !role.startsWith("#"));
-    let isAdmin = !!r.admin;
-    let isTeacher = !!r.teacher;
-    if ((isAdmin || isTeacher) && allowOverride && a.vt == 0) {
-      // Downgrade teacher and admin to student.
-      isAdmin = false;
-      isTeacher = false;
-      delete r["teacher"];
-      delete r["teachers"];
-      delete r["admin"];
-    }
-    if (isAdmin) {
+    if (view.isAdmin) {
       clientAccess = true;
     } else {
       if (normalizedClientRoles.length > 0) {
         if (all) {
-          clientAccess = normalizedClientRoles.every((role) => r[role]);
+          clientAccess = normalizedClientRoles.every((role) => view.roles.has(role));
         } else {
-          clientAccess = normalizedClientRoles.some((role) => r[role]);
+          clientAccess = normalizedClientRoles.some((role) => view.roles.has(role));
         }
       }
     }
     if (clientAccess === null || clientAccess) {
-      for (const view of clientViews) {
-        const viewRole = view.substring(1);
+      for (const v of clientViews) {
+        const viewRole = v.substring(1);
         switch (viewRole) {
           // The exam and the practice case are one rule and its complement, not
           // two rules over the same preference: every session sees exactly one
@@ -160,10 +63,10 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
           // both, or a session ends up seeing neither version of the question.
           case "exam":
             // For security reasons hardcoded to only allow teachers and admins to view exam-questions.
-            clientAccess = a.ve == 1 && (isAdmin || isTeacher);
+            clientAccess = a.ve == 1 && (view.isAdmin || view.isTeacher);
             break;
           case "practice":
-            clientAccess = !(a.ve == 1 && (isAdmin || isTeacher));
+            clientAccess = !(a.ve == 1 && (view.isAdmin || view.isTeacher));
             break;
           case "answer":
             clientAccess = a.va == 1;
@@ -171,7 +74,6 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
         }
       }
     }
-    //console.log("Checking roles:", clientRoles, "all:", all, "allowOverride:", allowOverride, "isAdmin:", isAdmin, "isTeacher:", isTeacher, "studOvr:", a.vt == 0, "Client access:", clientAccess);
     if (clientAccess === null) {
       clientAccess = false;
     }
@@ -180,7 +82,9 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
     console.error(`Error checking client roles: ${error}`);
     // Refuse rather than leave the decision open: the success path already
     // normalizes an undecided result to false, and this is the branch that
-    // knows the least about what the session may read.
+    // knows the least about what the session may read. A context that fails to
+    // build at all is not the same thing as a lookup that returned nothing -
+    // that one is settled inside the context, with the defaults.
     return false;
   }
 }

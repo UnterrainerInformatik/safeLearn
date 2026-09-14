@@ -1,5 +1,6 @@
 import fileNameExtractor from "./middlewares/extract-filename-middleware.js";
-import { initKeycloak, checkAuthenticated, refreshAccessToken, getUserAttributes, setUserAttribute } from "./middlewares/keycloak-middleware.js";
+import { initKeycloak, checkAuthenticated, refreshAccessToken, setUserAttribute } from "./middlewares/keycloak-middleware.js";
+import { getPermissionContext } from "./permission-context.js";
 import {
   verifyCallerIdentity,
   searchDirectory,
@@ -158,6 +159,23 @@ async function mdGetToHtml(url, req) {
     headers: headers,
   });
   return sanitizeAndParseMarkdown(response.data, req);
+}
+
+/**
+ * Stores the page this request served, so `/` can resolve to it when the
+ * session asked for that.
+ *
+ * Called after the page has been wrapped rather than before, and that ordering
+ * is the point: wrapping builds the navigation tree and the top bar, both of
+ * which ask permission questions, so by now this request holds its permission
+ * context and the write merges from it. Started before, the write would fetch
+ * the account for itself and a page carrying no directive would cost two
+ * lookups where the whole point is that it costs one.
+ *
+ * Not awaited - the answer does not wait on it, the way it never has.
+ */
+function rememberLastVisited(req) {
+  setUserAttribute(req, "lastVisitedUrl", req.originalUrl);
 }
 
 function getStartPage() {
@@ -352,12 +370,14 @@ initKeycloak(app).then(() => {
   app.use(checkAuthenticated, (req, res, next) => {
     if (req.url === "/" || req.url === "") {
       let startPage = getStartPage();
-      getUserAttributes(req).then((attributes) => {
-        if (attributes && attributes.config) {
-          const a = JSON.parse(attributes.config);
-          if (a.sl == 1 && attributes.lastVisitedUrl) {
-            startPage = attributes.lastVisitedUrl;
-          }
+      // Read from the request's one context, and through the shape the account
+      // endpoint actually answers with: every stored attribute lives under
+      // `attributes`, so the `attributes.config` this route read before was
+      // always undefined and "remember last visited page" never took effect.
+      getPermissionContext(req).then((context) => {
+        const lastVisitedUrl = context.account?.attributes?.lastVisitedUrl;
+        if (context.preferences.sl == 1 && lastVisitedUrl) {
+          startPage = lastVisitedUrl;
         }
         res.redirect(startPage);
       });
@@ -388,15 +408,15 @@ initKeycloak(app).then(() => {
           const doc = req.query.document;
           if  (doc) {
             sanitizeAndParseMarkdown(data, req).then((html) => {
-              setUserAttribute(req, "lastVisitedUrl", req.originalUrl);
               wrapAsDocument(html, req).then((r) => {
+                rememberLastVisited(req);
                 res.send(r);
               });
             });
           } else {
             sanitizeAndParseMarkdown(data, req).then((html) => {
-              setUserAttribute(req, "lastVisitedUrl", req.originalUrl);
               wrapInPage(html, getStartPage(), req).then((r) => {
+                rememberLastVisited(req);
                 res.send(r);
               });
             });
