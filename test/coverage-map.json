@@ -140,6 +140,13 @@
       ],
       "corpus": []
     },
+    "test/semester-table.test.js": {
+      "what": "The dates a semester table is made of: the walk from the first lesson to the last, the weekdays it keeps, and the shape of the table written from them. Taken out of the plugin's own main.ts rather than reimplemented, so the check cannot drift away from the code it is about. Covers the cases that are invisible while writing it - both ends of the range, the daylight-saving switch a semester crosses twice, the turn of the month and of the year, and five timezones that have to produce one identical table because the corpus is shared. Also that the generated Markdown is a table to a GitHub-flavoured renderer, standalone and under a paragraph. Needs no browser, no login and no server; it does need the plugin checkout the AI/plugin symlink points at. What the command does to a document is in test/obsidian/plugin.test.js, which drives the real editor.",
+      "guards": [
+        "app.js"
+      ],
+      "corpus": []
+    },
     "test/coverage.test.js": {
       "what": "The coverage record itself: every path it names exists, every test file appears in it, and no entry names a file that is gone.",
       "guards": [

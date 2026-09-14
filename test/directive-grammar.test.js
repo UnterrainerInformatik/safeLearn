@@ -23,14 +23,10 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import path from "node:path";
 import { test } from "node:test";
-import { pathToFileURL } from "node:url";
-import vm from "node:vm";
 
 import { parseFirstLineForPermissions } from "../obsidian.js";
-import { resolvePlugin } from "./obsidian/harness.js";
+import { pluginFunction, pluginModule } from "./obsidian/harness.js";
 
 /**
  * Directive lines and the entries the server keeps for each, in order.
@@ -268,79 +264,20 @@ test("the server reads every directive of the table the way the table says", () 
  * question, and it asks it against a real Obsidian.
  */
 /**
- * A stand-in for a module the plugin imports.
+ * The plugin's reading of a directive, taken out of its own module.
  *
- * What is named is what the module uses in a way this check has an opinion
- * about. Everything else answers with a class, and that is the point: a name
- * that only has to exist for `class X extends Y` to evaluate is not something a
- * check about a directive grammar should have a say in. Without it, every import
- * the plugin gains turns this file red for a reason unconnected to what it
- * asserts - and because a class declaration evaluates its base at load time, the
- * failure is the whole module and every check in it, not the line that uses the
- * name. That happened twice while `plugin-hide-tags` and `plugin-insert-commands`
- * were built, which is why the answer is a rule rather than two more entries.
+ * The loading itself - transpiling `main.ts` with the checkout's TypeScript and
+ * running it in a `vm` with its imports stubbed - moved into the Obsidian
+ * harness when `plugin-semester-table-command` needed the same thing for the
+ * date walk. Two copies of it would have been free to disagree about how the
+ * plugin is loaded, which is the one thing both checks have to agree about.
  *
- * Names beginning with `__` are answered with nothing, so that a module system's
- * own probes - `__esModule` above all - are not told a class is there.
+ * Absent is still an error: a check that called nothing would pass against a
+ * plugin that had lost the very function it is about. `pluginFunction` says so
+ * in those words.
  */
-function stubModule(named) {
-  return new Proxy(named, {
-    get(target, property) {
-      if (property in target) return target[property];
-      if (typeof property !== "string" || property.startsWith("__")) return undefined;
-      return class {};
-    },
-  });
-}
-
-function pluginGrammar() {
-  const dir = resolvePlugin();
-  const compiler = path.join(dir, "node_modules", "typescript", "lib", "typescript.js");
-  if (!existsSync(compiler)) {
-    throw new Error(
-      `The plugin checkout at ${dir} has no TypeScript to read its own source with. Run ` +
-        `\`npm install\` there once; this check does not install anything as a side effect.`
-    );
-  }
-  return import(pathToFileURL(compiler)).then((module) => {
-    const ts = module.default ?? module;
-    const source = path.join(dir, "main.ts");
-    const transpiled = ts.transpileModule(readFileSync(source, "utf8"), {
-      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
-    }).outputText;
-
-    const stubs = {
-      obsidian: stubModule({ Plugin: class {} }),
-      "@codemirror/view": stubModule({
-        Decoration: {
-          mark: () => ({ range: () => ({}) }),
-          line: () => ({ range: () => ({}) }),
-          replace: () => ({ range: () => ({}) }),
-        },
-        ViewPlugin: { fromClass: () => ({}) },
-      }),
-      "@codemirror/state": stubModule({}),
-    };
-    const context = vm.createContext({
-      module: { exports: {} },
-      exports: {},
-      console,
-      require: (name) => stubs[name] ?? stubModule({}),
-    });
-    vm.runInContext(transpiled, context, { filename: source });
-
-    const parse = vm.runInContext(
-      "typeof parseDirectiveEntries === 'function' ? parseDirectiveEntries : null",
-      context
-    );
-    if (!parse) {
-      throw new Error(
-        `${source} declares no parseDirectiveEntries. The plugin's reading of a directive is what ` +
-          `this check holds against the server, and without it nothing here means anything.`
-      );
-    }
-    return parse;
-  });
+async function pluginGrammar() {
+  return pluginFunction(await pluginModule(), "parseDirectiveEntries");
 }
 
 /**

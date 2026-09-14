@@ -41,6 +41,7 @@ import {
   agePendingLogins,
   answerColumnCount,
   answerNameList,
+  answerSemesterTable,
   blockBoxes,
   callSearchDirectory,
   checkDirectoryClass,
@@ -63,6 +64,7 @@ import {
   cursorPosition,
   deliverAuthCallback,
   dialogBoxes,
+  dialogIsOpen,
   directoryClassOptions,
   directoryInfoState,
   directoryInfoSummary,
@@ -109,6 +111,7 @@ import {
   scrollTo,
   seedLoginFacts,
   selectAcross,
+  semesterDialogFields,
   setDirectoryFetchFixture,
   setDirectoryLoginFixture,
   searchDirectoryStrip,
@@ -134,11 +137,11 @@ import {
 /** The one entry the plugin contributes to the editor's context menu. */
 const MENU_ENTRY = "SafeLearn";
 
-/** That entry and the five commands under it. */
-const MENU_ENTRY_COUNT = 6;
+/** That entry and the six commands under it. */
+const MENU_ENTRY_COUNT = 7;
 
 /**
- * What the five commands are called, in both surfaces that show them.
+ * What the commands are called, in both surfaces that show them.
  *
  * Written down here rather than read from the plugin, because that is what makes
  * a renaming visible: a name is what somebody reads on screen and what the
@@ -149,6 +152,7 @@ const MENU_COMMAND_NAMES = [
   "Side-by-side block",
   "Side-by-side, n columns…",
   "Fragment marker",
+  "Semester table…",
   "Restricted section per name…",
   "Restrict selection…",
 ];
@@ -156,9 +160,10 @@ const MENU_COMMAND_NAMES = [
 /**
  * Commands `plugin-admin-directory-ui` registered outside `AUTHORING_COMMANDS`
  * - read-only, not tied to an editor or a selection, and deliberately not
- * offered in the context menu the five above share. The menu/palette symmetry
- * checks below are about that shared list, so these are excluded from them by
- * name rather than by the tests silently going stale against a sixth entry.
+ * offered in the context menu the authoring commands above share. The
+ * menu/palette symmetry checks below are about that shared list, so these are
+ * excluded from them by name rather than by the tests silently going stale
+ * against one more entry.
  */
 const NON_EDITOR_COMMAND_IDS = ["list-classes", "show-directory-info"];
 
@@ -2475,6 +2480,30 @@ describe("the plugin writes the tags it recognizes", () => {
         "And an insertion made with the cursor at the very top of the document goes below the " +
           "directive, not above it."
       );
+
+      // The same, for the command that asks first: a dialog between the
+      // keystroke and the insertion changes nothing about which line the
+      // insertion may not take.
+      await open(name, views.livePreview);
+      await placeCursorAtStart();
+      await runCommand("insert-semester-table", { expectEdit: false });
+      await answerSemesterTable({
+        start: "2026-09-21",
+        end: "2026-10-05",
+        weekdays: ["Mon"],
+        subjects: [["0WMC", "(UNTEG)"]],
+      });
+      const gated = (await documentText()).split("\n");
+      assert.equal(
+        gated[0],
+        "@@@ teacher",
+        `A table generated at the very top of a gated file leaves the directive on line 1. ` +
+          `The document: ${JSON.stringify(gated.slice(0, 4))}`
+      );
+      assert.ok(
+        gated.some((line) => line.includes("21.09.2026")),
+        "And the table was written all the same, below it."
+      );
     }));
 
   test("every command Obsidian holds for this plugin is in the editor's context menu", async () =>
@@ -2510,8 +2539,9 @@ describe("the plugin writes the tags it recognizes", () => {
         topLevel,
         [MENU_ENTRY],
         `The menu belongs to Obsidian and other plugins fill it too, so what this one costs ` +
-          `somebody who wants none of it is a single line. Five of them, which is what this reads ` +
-          `as when the nesting is gone, is the state the change was made to leave behind.`
+          `somebody who wants none of it is a single line. One line per command, which is what ` +
+          `this reads as when the nesting is gone, is the state the change was made to leave ` +
+          `behind.`
       );
       assert.deepEqual(
         commands.filter((command) => !submenu.some((title) => command.name.endsWith(title))).map((c) => c.id),
@@ -2535,7 +2565,7 @@ describe("the plugin writes the tags it recognizes", () => {
       assert.equal(
         entries.length,
         MENU_ENTRY_COUNT,
-        `The plugin's entry and its five commands are ${MENU_ENTRY_COUNT} entries between them. ` +
+        `The plugin's entry and its commands are ${MENU_ENTRY_COUNT} entries between them. ` +
           `Found ${JSON.stringify(entries.map((entry) => entry.title))}.`
       );
       assert.deepEqual(
@@ -2564,6 +2594,409 @@ describe("the plugin writes the tags it recognizes", () => {
           `name in front of each, which is what lets them be this short. A renaming that reached ` +
           `one surface and not the other, or the list and not the documentation, fails here. In ` +
           `the palette: ${JSON.stringify(commands.map((c) => c.name))}.`
+      );
+    }));
+});
+
+// ################### The semester table (plugin-semester-table-command) ###################
+
+describe("the semester table command", () => {
+  /** The winter semester the class files in the corpus carry, and the command's own id. */
+  const WS = { from: "2026-09-21", to: "2027-02-08" };
+  const COMMAND = "insert-semester-table";
+  /** Two subject columns, as the dialog asks for them: the subject, and who takes it. */
+  const SUBJECTS = [
+    ["0WMC", "(UNTEG)"],
+    ["1WMC", "(UNTEG+LANDH)"],
+  ];
+
+  /** The headings those two become, which is the form every semester file in the corpus carries. */
+  const SUBJECT_HEADINGS = ["0WMC<br>(UNTEG)", "1WMC<br>(UNTEG+LANDH)"];
+
+  /** A table line split into its cells, with the leading and trailing pipe dropped. */
+  function cellsOf(line) {
+    return line
+      .split(/(?<!\\)\|/)
+      .slice(1, -1)
+      .map((cell) => cell.trim());
+  }
+
+  /** The lines of the one table in a document, from its heading row to its last row. */
+  function tableIn(text) {
+    const lines = text.split("\n");
+    const first = lines.findIndex((line) => line.trimStart().startsWith("|"));
+    assert.notEqual(first, -1, `No table was written at all. The document is ${JSON.stringify(text)}.`);
+    let last = first;
+    while (last + 1 < lines.length && lines[last + 1].trimStart().startsWith("|")) last++;
+    return { lines: lines.slice(first, last + 1), first, last, all: lines };
+  }
+
+  test("the command asks, and writes nothing until it has been answered", async () =>
+    watched("semester-asks-first", async () => {
+      // A table of the wrong dates is worse than no table, because it is
+      // corrected row by row. So the command asks, and a dialog nobody answered
+      // leaves the document as it was.
+      const name = "constructed-semester-asks.md";
+      await writeDocument(name, ["Intro.", "", "End."].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Intro.");
+
+      const before = await documentText();
+      await runCommand(COMMAND, { expectEdit: false });
+
+      assert.ok(await dialogIsOpen(), "The command opened no dialog at all.");
+      assert.equal(await documentText(), before, "Something was written before the dialog was answered.");
+
+      await closeOpenModal();
+      assert.equal(
+        await documentText(),
+        before,
+        "A dialog closed without generating leaves the document unchanged."
+      );
+    }));
+
+  test("the dialog opens on today, and says which format it will write", async () =>
+    watched("semester-dialog-fields", async () => {
+      const name = "constructed-semester-dialog.md";
+      await writeDocument(name, ["Intro.", "", "End."].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Intro.");
+      await runCommand(COMMAND, { expectEdit: false });
+
+      const shown = await semesterDialogFields();
+      const now = new Date();
+      const today = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, "0"),
+        String(now.getDate()).padStart(2, "0"),
+      ].join("-");
+
+      assert.equal(
+        shown.dates[0],
+        today,
+        `A teacher setting up a semester most often starts from the day they are doing it, so the ` +
+          `first field already holds it. Built from local components, not from an ISO string cut ` +
+          `short - that is the UTC day, and east of UTC it is yesterday for part of the evening.`
+      );
+      assert.ok(
+        shown.labels.some((label) => label.includes("dd.MM.yyyy")),
+        `The date fields say which format the table will carry. The picker draws itself in the ` +
+          `browser's locale and may well be offering 09/21/2026 for the value that becomes ` +
+          `21.09.2026, and nothing else in the dialog can say so. Labels: ` +
+          `${JSON.stringify(shown.labels)}`
+      );
+      assert.deepEqual(
+        shown.weekdays.map((day) => day.name),
+        ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+        `Monday first, which is how a school week reads here - while the numbers behind them stay ` +
+          `the ones getDay() hands out.`
+      );
+      assert.deepEqual(
+        shown.weekdays.filter((day) => day.checked).map((day) => day.name),
+        [],
+        "Nothing is ticked in advance: which days a class meets is the one thing nobody can guess."
+      );
+
+      // A subject column is asked for as the two halves of its heading rather
+      // than as the heading itself. The `<br>` between them is markup, and a
+      // dialog that expects a person to type markup is asking them to know the
+      // format it exists to spare them.
+      assert.ok(
+        shown.subjects.length >= 1,
+        `The dialog offers no subject column to fill in. Shown: ${JSON.stringify(shown.subjects)}`
+      );
+      for (const row of shown.subjects) {
+        assert.equal(
+          row.length,
+          2,
+          `Every subject row is two fields - the subject, and who takes it. Got ` +
+            `${JSON.stringify(row)}.`
+        );
+      }
+      assert.deepEqual(
+        shown.subjects.flat().filter((field) => field.value !== ""),
+        [],
+        "And none of them is filled in ahead of the person answering."
+      );
+      assert.deepEqual(
+        [...new Set(shown.labels.concat(shown.subjects.flat().map((field) => field.placeholder)))]
+          .filter((text) => text.includes("<br>")),
+        [],
+        `Nothing in the dialog says <br> to the person answering it - not a label, not a ` +
+          `placeholder. Shown: ${JSON.stringify(shown.labels)} / ` +
+          `${JSON.stringify(shown.subjects.flat().map((field) => field.placeholder))}`
+      );
+
+      await closeOpenModal();
+    }));
+
+  test("a semester is written as one row per lesson, in the shape the corpus uses", async () =>
+    watched("semester-writes-table", async () => {
+      const name = "constructed-semester-table.md";
+      await writeDocument(name, ["# 26-27 4BHIF - WS", "", "UNTEG, LANDH", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("UNTEG, LANDH");
+
+      await runCommand(COMMAND, { expectEdit: false });
+      await answerSemesterTable({ start: WS.from, end: WS.to, weekdays: ["Mon"], subjects: SUBJECTS });
+
+      const { lines } = tableIn(await documentText());
+      assert.deepEqual(
+        cellsOf(lines[0]),
+        ["", "Day", "Date", ...SUBJECT_HEADINGS, "Info"],
+        "The marker column with an empty heading, Day, Date, the subjects as given, and Info - " +
+          "which is the shape every semester file in the corpus already has."
+      );
+      assert.match(lines[1], /^\| -{3,} \|/, `A delimiter row under the heading: ${lines[1]}`);
+
+      const rows = lines.slice(2).map(cellsOf);
+      assert.equal(rows.length, 21, `21 Mondays from 21.09.2026 to 08.02.2027. Got ${rows.length}.`);
+      assert.deepEqual(rows[0].slice(0, 3), ["x", "Mon", "21.09.2026"]);
+      assert.deepEqual(rows.at(-1).slice(0, 3), ["", "Mon", "08.02.2027"]);
+      assert.deepEqual(
+        rows.filter((row) => row[0] !== "").map((row) => row[2]),
+        ["21.09.2026"],
+        "The marker stands in the first data row and nowhere else."
+      );
+      assert.deepEqual(
+        rows.flatMap((row) => row.slice(3)).filter((cell) => cell !== ""),
+        [],
+        "The subject and info cells are empty - what goes in them is the part with judgement in it."
+      );
+    }));
+
+  test("the table stands under a blank line and renders as a table", async () =>
+    watched("semester-renders", async () => {
+      // A table written directly beneath a paragraph can be read as part of that
+      // paragraph. `writeLines` puts the insertion on a line of its own, which
+      // is not the same thing, so the command writes the blank line itself.
+      const name = "constructed-semester-render.md";
+      await writeDocument(name, ["Prose the table must not be swallowed by."].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("swallowed by.");
+
+      await runCommand(COMMAND, { expectEdit: false });
+      await answerSemesterTable({
+        start: "2026-09-21",
+        end: "2026-10-12",
+        weekdays: ["Mon"],
+        subjects: [["0WMC", "(UNTEG)"]],
+      });
+
+      const written = await documentText();
+      const { first, all } = tableIn(written);
+      assert.equal(
+        all[first - 1].trim(),
+        "",
+        `The line above the heading row is blank. Written: ${JSON.stringify(written)}`
+      );
+      assert.equal(
+        all[first - 2],
+        "Prose the table must not be swallowed by.",
+        "And the paragraph it was invoked under is still there, whole."
+      );
+
+      const container = await open(name, views.reading);
+      // Waited for rather than read straight off: the reading view renders on
+      // its own schedule, and an empty one read too early says "no table" in
+      // exactly the words a broken table would.
+      await reveal(container, "21.09.2026");
+      const html = await renderedHtml(container);
+      assert.equal(
+        (html.match(/<table/g) ?? []).length,
+        1,
+        `The reading view shows it as one table. What it rendered: ${html.slice(0, 800)}`
+      );
+      assert.ok(
+        html.includes("<br>") || html.includes("<br/>") || html.includes("<br />"),
+        "And the markup in a subject heading is markup in the rendered view, which is why the " +
+          "command writes those headings exactly as they were given."
+      );
+    }));
+
+  test("a selection is still there afterwards", async () =>
+    watched("semester-keeps-selection", async () => {
+      // A grid of empty cells has nothing to enclose a selection with, and
+      // `writeLines` replaces what is selected. So the cursor is collapsed to
+      // where the selection begins and the table goes there instead.
+      const name = "constructed-semester-selection.md";
+      await writeDocument(name, ["Keep me.", "Keep me too.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await selectAcross("Keep me.", "Keep me too.");
+
+      await runCommand(COMMAND, { expectEdit: false });
+      await answerSemesterTable({
+        start: "2026-09-21",
+        end: "2026-09-28",
+        weekdays: ["Mon"],
+        subjects: [],
+      });
+
+      const written = await documentText();
+      assert.ok(
+        written.includes("Keep me.") && written.includes("Keep me too."),
+        `The selected text was consumed by the insertion. Written: ${JSON.stringify(written)}`
+      );
+      assert.equal(tableIn(written).lines.length, 4, "And the table was written all the same.");
+    }));
+
+  test("the cursor is left on the row that is waiting to be written in", async () =>
+    watched("semester-cursor", async () => {
+      // In source mode, because that is where this is the plugin's to decide.
+      // In Live Preview the inserted text becomes a rendered table under the
+      // cursor, and Obsidian's own table editing puts the cursor in the table
+      // rather than where the insertion left it - observed, and not something a
+      // plugin gets to overrule. What the command is responsible for is asking
+      // for the right line, and that is what this reads.
+      const name = "constructed-semester-cursor.md";
+      await writeDocument(name, ["Intro.", ""].join("\n"));
+      await open(name, views.source);
+      await placeCursorAfter("Intro.");
+
+      await runCommand(COMMAND, { expectEdit: false });
+      await answerSemesterTable({
+        start: "2026-09-21",
+        end: "2026-10-05",
+        weekdays: ["Mon"],
+        subjects: [["0WMC", "(UNTEG)"]],
+      });
+
+      const written = await documentText();
+      const { first, lines } = tableIn(written);
+      const where = await cursorPosition();
+
+      assert.equal(
+        where.from.line,
+        first + 2,
+        `The first data row is the row carrying the marker, and the first one there is anything ` +
+          `to write in. The document: ${JSON.stringify(written)}`
+      );
+      assert.equal(
+        where.from.ch,
+        lines[2].length,
+        "At the end of that row, which is where the insertion left off."
+      );
+    }));
+
+  test("a span that describes no lessons is refused, and the dialog stays open", async () =>
+    watched("semester-refuses", async () => {
+      const name = "constructed-semester-refused.md";
+      await writeDocument(name, ["Intro.", "", "End."].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Intro.");
+
+      const before = await documentText();
+      await runCommand(COMMAND, { expectEdit: false });
+
+      // An end before the start.
+      await forgetNotices();
+      await answerSemesterTable({ start: "2026-10-01", end: "2026-09-01", weekdays: ["Mon"] });
+      assert.equal(await documentText(), before, "An end before the start wrote something.");
+      assert.ok(
+        await dialogIsOpen(),
+        "A dialog that closed on nothing would have to be reopened and filled in again before the " +
+          "one wrong field could be corrected."
+      );
+      assert.ok(
+        (await noticesShown()).some((notice) => notice.length > 0),
+        "And it says what is wrong: a dialog that refuses silently reads as a broken button."
+      );
+
+      // Nothing ticked.
+      await forgetNotices();
+      await answerSemesterTable({ start: WS.from, end: WS.to, weekdays: [] });
+      assert.equal(await documentText(), before, "A dialog with no weekday ticked wrote something.");
+      assert.ok(await dialogIsOpen(), "And it is still open for the ticking.");
+
+      // Corrected, in the dialog that stayed open.
+      await answerSemesterTable({ start: WS.from, end: WS.to, weekdays: ["Tue"] });
+      assert.notEqual(
+        await documentText(),
+        before,
+        "The same dialog, once it was given a span with lessons in it, wrote the table."
+      );
+      assert.equal(await dialogIsOpen(), false, "And closed.");
+    }));
+
+  test("the dialog that asks for a semester separates its confirmation from its field", async () =>
+    watched("semester-dialog-spacing", async () => {
+      // The same question the other two dialogs are asked, in the same words: a
+      // `modal-button-container` a theme collapsed to nothing carries the class
+      // and leaves the button against the field all the same.
+      const name = "constructed-semester-spacing.md";
+      await writeDocument(name, ["Intro.", "", "End."].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Intro.");
+
+      await runCommand(COMMAND, { expectEdit: false });
+      const boxes = await dialogBoxes();
+
+      assert.ok(boxes, "The command opened no dialog with a field and a confirmation to measure.");
+      assert.ok(
+        boxes.button.top > boxes.field.bottom,
+        `The confirmation stands below the field and the two do not touch. Field ` +
+          `${JSON.stringify(boxes.field)}, button ${JSON.stringify(boxes.button)}.`
+      );
+
+      await closeOpenModal();
+    }));
+
+  test("the generated table is one Obsidian's own table editor leaves alone", async () =>
+    watched("semester-stays-formatted", async () => {
+      // The tables in the corpus are aligned, and Obsidian reformats a table it
+      // is edited in. A generated table that was not already in that form would
+      // turn the first edit anybody makes into a diff of pure whitespace across
+      // every line of the semester.
+      const name = "constructed-semester-formatting.md";
+      await writeDocument(name, ["Intro.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Intro.");
+
+      await runCommand(COMMAND, { expectEdit: false });
+      await answerSemesterTable({
+        start: "2026-09-21",
+        end: "2026-10-12",
+        weekdays: ["Mon", "Thu"],
+        subjects: SUBJECTS,
+      });
+
+      const { lines } = tableIn(await documentText());
+      assert.equal(
+        new Set(lines.map((line) => line.length)).size,
+        1,
+        `Every line of the table is the same width. Widths: ` +
+          `${JSON.stringify(lines.map((line) => line.length))}`
+      );
+
+      // Typed into, the way a teacher fills the first lesson in. Obsidian
+      // reformats the table it is edited in, so what this establishes is that
+      // the reformatting has nothing to do: the one column whose cell grew is
+      // widened by exactly that, and every other column is left at the width it
+      // was written with. A table that had not already been in this form would
+      // come back with every column rewritten.
+      const widthsOf = (delimiter) => cellsOf(delimiter).map((cell) => cell.length);
+      const before = widthsOf(lines[1]);
+
+      await moveCursorInto("21.09.2026");
+      await type("x");
+      const after = tableIn(await documentText()).lines;
+      const widths = widthsOf(after[1]);
+
+      assert.deepEqual(
+        widths.filter((_, column) => column !== 2),
+        before.filter((_, column) => column !== 2),
+        `Every column but the one typed in keeps the width it was written with. Was ` +
+          `${JSON.stringify(before)}, is ${JSON.stringify(widths)}.`
+      );
+      assert.equal(
+        widths[2],
+        before[2] + 1,
+        "And the one typed in grew by the one character that was typed into it."
+      );
+      assert.equal(
+        new Set(after.map((line) => line.length)).size,
+        1,
+        `The table is still aligned afterwards: ${JSON.stringify(after.map((l) => l.length))}`
       );
     }));
 });

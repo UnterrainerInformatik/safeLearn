@@ -26,6 +26,8 @@ import { execFileSync, execSync, spawn } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
+import vm from "node:vm";
 
 import puppeteer from "puppeteer";
 
@@ -272,6 +274,100 @@ export function resolvePlugin() {
     );
   }
   return pluginDir;
+}
+
+/**
+ * The plugin's own module, evaluated out of `main.ts` so that a check can call a
+ * function in it directly.
+ *
+ * The plugin is one file that declares everything at module scope and exports
+ * none of it, because Obsidian loads it as a script rather than importing from
+ * it. So it is transpiled with the checkout's own TypeScript - the same compiler
+ * the build uses, rather than a second reading of the language - and run in a
+ * `vm` context whose `require` hands out stubs for the three modules it imports.
+ * Nothing in that context reaches Obsidian, CodeMirror or the file system; what
+ * comes back is the context, and `pluginFunction` takes a declaration out of it
+ * by name.
+ *
+ * This is for the parts of the plugin that are arithmetic - a date walk, a
+ * grammar - and it is the only honest way to check them without a running
+ * application: the alternative is a copy of the code in a test file, which
+ * passes for as long as the copy matches and stops meaning anything the moment
+ * it does not. Anything about what the plugin *does to a document* belongs in
+ * the checks that drive the real editor instead, because that is where an
+ * `Editor` and a rendered view exist.
+ */
+export async function pluginModule() {
+  const dir = resolvePlugin();
+  const compiler = path.join(dir, "node_modules", "typescript", "lib", "typescript.js");
+  if (!existsSync(compiler)) {
+    throw new Error(
+      `The plugin checkout at ${dir} has no TypeScript to read its own source with. Run ` +
+        `\`npm install\` there once; this does not install anything as a side effect.`
+    );
+  }
+  const module = await import(pathToFileURL(compiler));
+  const ts = module.default ?? module;
+  const source = path.join(dir, "main.ts");
+  const transpiled = ts.transpileModule(readFileSync(source, "utf8"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  }).outputText;
+
+  const stubs = {
+    obsidian: stubModule({ Plugin: class {} }),
+    "@codemirror/view": stubModule({
+      Decoration: {
+        mark: () => ({ range: () => ({}) }),
+        line: () => ({ range: () => ({}) }),
+        replace: () => ({ range: () => ({}) }),
+      },
+      ViewPlugin: { fromClass: () => ({}) },
+    }),
+    "@codemirror/state": stubModule({}),
+  };
+  const context = vm.createContext({
+    module: { exports: {} },
+    exports: {},
+    console,
+    require: (name) => stubs[name] ?? stubModule({}),
+  });
+  vm.runInContext(transpiled, context, { filename: source });
+  return context;
+}
+
+/**
+ * One declaration of the plugin's module, by name.
+ *
+ * Absent is an error rather than `undefined`: a check that called nothing would
+ * pass against a plugin that had renamed or lost the very thing it is about.
+ */
+export function pluginFunction(context, name) {
+  const found = vm.runInContext(`typeof ${name} === 'function' ? ${name} : null`, context);
+  if (!found) {
+    throw new Error(
+      `${path.join(resolvePlugin(), "main.ts")} declares no ${name}. A check that cannot reach it ` +
+        `establishes nothing, so this is a failure rather than a skipped check.`
+    );
+  }
+  return found;
+}
+
+/**
+ * A stand-in for a module the plugin imports, which answers to any name asked of
+ * it with a class that can be extended.
+ *
+ * The plugin's module body runs `class NameListModal extends Modal` at load, so
+ * every named import has to be constructible - an empty object throws before a
+ * single function in the file is reachable.
+ */
+function stubModule(known = {}) {
+  return new Proxy(known, {
+    get(target, property) {
+      if (property in target) return target[property];
+      if (typeof property !== "string" || property.startsWith("__")) return undefined;
+      return class {};
+    },
+  });
 }
 
 // ################### Building what gets loaded ###################
@@ -1164,6 +1260,155 @@ export async function answerNameList(names) {
  */
 export async function nameListTextareaValue() {
   return page.evaluate(() => document.querySelector(".modal-container textarea")?.value ?? null);
+}
+
+/**
+ * What the semester dialog is showing, without answering it.
+ *
+ * The labels come back with it because two of them carry a claim: the date
+ * fields say which format the table will be written in, and they have to,
+ * since `<input type="date">` draws itself in the browser's locale and can
+ * therefore be offering `09/21/2026` for the value that becomes `21.09.2026`.
+ */
+export async function semesterDialogFields() {
+  await page.waitForFunction(() => !!document.querySelector('.modal-container input[type="date"]'), {
+    timeout: 10000,
+  });
+  return page.evaluate(() => {
+    const modal = document.querySelector(".modal-container");
+    const dates = [...modal.querySelectorAll('input[type="date"]')];
+    return {
+      labels: [...modal.querySelectorAll("label")].map((label) => label.textContent ?? ""),
+      dates: dates.map((input) => input.value),
+      weekdays: [...modal.querySelectorAll('.safelearn-semester-weekdays label')].map((label) => ({
+        name: (label.textContent ?? "").trim(),
+        checked: !!label.querySelector("input")?.checked,
+      })),
+      subjects: [...modal.querySelectorAll(".safelearn-semester-subject")].map((row) =>
+        [...row.querySelectorAll("input")].map((field) => ({
+          value: field.value,
+          placeholder: field.placeholder,
+        }))
+      ),
+      button: modal.querySelector("button")?.textContent ?? null,
+    };
+  });
+}
+
+/**
+ * Answers the semester dialog: a span, the weekdays the class meets, and the
+ * subject columns.
+ *
+ * The weekdays are named the way the dialog names them, so a check says `"Mon"`
+ * rather than a number and cannot tick Sunday by meaning Monday. A name the
+ * dialog does not offer is an error here rather than a silently unticked box -
+ * a check answering with nothing ticked would be answering a different
+ * question, and there is a separate helper for wanting that.
+ *
+ * Values are written into the fields rather than typed: `<input type="date">`
+ * takes an ISO value however its picker is drawn, and typing into a picker
+ * drawn in an unknown locale is not a thing a check can do portably.
+ *
+ * `confirm: false` leaves the dialog open with the fields filled in, for the
+ * checks about a dialog that refuses what it was given.
+ */
+export async function answerSemesterTable({
+  start,
+  end,
+  weekdays = [],
+  subjects = [],
+  confirm = true,
+} = {}) {
+  doing(
+    `answering the semester dialog with ${start}..${end}, ${JSON.stringify(weekdays)}, ` +
+      `${JSON.stringify(subjects)}${confirm ? "" : " (without confirming)"}`
+  );
+  await page.waitForFunction(() => !!document.querySelector('.modal-container input[type="date"]'), {
+    timeout: 10000,
+  });
+
+  const unknown = await page.evaluate(
+    ({ start, end, weekdays, subjects }) => {
+      const modal = document.querySelector(".modal-container");
+      const dates = [...modal.querySelectorAll('input[type="date"]')];
+      if (start !== undefined) dates[0].value = start;
+      if (end !== undefined) dates[1].value = end;
+
+      const boxes = new Map(
+        [...modal.querySelectorAll(".safelearn-semester-weekdays label")].map((label) => [
+          (label.textContent ?? "").trim(),
+          label.querySelector("input"),
+        ])
+      );
+      for (const box of boxes.values()) box.checked = false;
+      const missing = [];
+      for (const day of weekdays) {
+        const box = boxes.get(day);
+        if (!box) missing.push(`${day} (offered: ${[...boxes.keys()].join(", ")})`);
+        else box.checked = true;
+      }
+
+      // One subject column is two fields on a line: the subject, and who takes
+      // it. The dialog grows a fresh row as the last one is filled in, which a
+      // check cannot make happen by assigning `value` - that raises no `input`
+      // event - so the rows are filled and the event dispatched per field.
+      const rows = [...modal.querySelectorAll(".safelearn-semester-subject")];
+      for (const [index, column] of subjects.entries()) {
+        const row = rows[index];
+        if (!row) {
+          missing.push(`a ${index + 1}. subject row (the dialog is showing ${rows.length})`);
+          continue;
+        }
+        const [over, under] = row.querySelectorAll("input");
+        const [subject, teachers] = Array.isArray(column) ? column : [column, ""];
+        over.value = subject ?? "";
+        under.value = teachers ?? "";
+        for (const field of [over, under]) field.dispatchEvent(new Event("input"));
+      }
+      return missing;
+    },
+    { start, end, weekdays, subjects }
+  );
+
+  if (unknown.length > 0) {
+    throw new Error(`The semester dialog could not be answered: ${unknown.join("; ")}.`);
+  }
+
+  if (confirm) {
+    await page.evaluate(() => document.querySelector(".modal-container button").click());
+    // Answered means the dialog has finished being a dialog. Obsidian takes the
+    // modal out over a frame or two of its own, and a caller that read the
+    // document, or typed into it, in between found the editor still behind
+    // something modal - so the wait is here rather than in every check.
+    //
+    // Read in a loop rather than waited for with `waitForFunction`: that one
+    // never sees the modal go in this application, whether it polls on
+    // animation frames or on a timer, and a wait that always costs its whole
+    // timeout is worse than none - it is slow *and* it establishes nothing.
+    // Reading the same question through `evaluate`, which is how every other
+    // answer here is read, reports it immediately.
+    //
+    // A dialog that refused what it was given stays open, which is a legitimate
+    // answer and not a failure: the loop ends and the caller asserts on it.
+    for (let attempt = 0; attempt < 40; attempt++) {
+      if (!(await dialogIsOpen())) break;
+      await sleep(50);
+    }
+  }
+  await settle();
+}
+
+/**
+ * Whether a dialog is still standing - for the checks about one that refuses
+ * what it was given.
+ *
+ * The dialog rather than its container: Obsidian empties the container a frame
+ * before it takes it away, and an empty container is not a dialog anybody is
+ * looking at. Asking about the container alone reports a dialog that has
+ * already closed as open, for as long as that lasts.
+ */
+export async function dialogIsOpen() {
+  return page.evaluate(() => !!document.querySelector(".modal-container .modal"));
 }
 
 /** Confirms the name-list dialog with whatever it currently holds - typed, chosen, or nothing at all. */
@@ -2144,10 +2389,42 @@ export async function directoryInfoSummary() {
 /** Closes whatever dialog is open, the way its own close control does - for the ones that carry no confirmation button. */
 export async function closeOpenModal() {
   doing("closing the open dialog");
-  await page.evaluate(() => {
-    document.querySelector(".modal-container .modal-close-button")?.click();
+
+  // The topmost dialog, marked before anything is clicked, so that what is
+  // waited for afterwards is *this* dialog going away rather than the absence of
+  // dialogs in general. Obsidian's settings window is itself a modal, and a
+  // dialog opened from it stands on top of one that is supposed to stay.
+  const how = await page.evaluate(() => {
+    const modals = [...document.querySelectorAll(".modal-container .modal")];
+    const modal = modals[modals.length - 1];
+    if (!modal) return "none";
+    modal.dataset.safelearnClosing = "yes";
+
+    // The close button where the dialog has one, and some do not: a `Modal`
+    // drawn without the X leaves this selector matching nothing. That went
+    // unnoticed for as long as the call was written with `?.` - a dialog that
+    // stayed open looked exactly like one that had been closed, until a later
+    // check found three of them stacked up and answered the wrong one.
+    const button =
+      modal.querySelector(".modal-close-button") ??
+      modal.parentElement?.querySelector(".modal-close-button");
+    if (!button) return "escape";
+    button.click();
+    return "clicked";
   });
+
+  if (how === "none") return;
+  if (how === "escape") await page.keyboard.press("Escape");
   await settle();
+
+  const stillThere = () => page.evaluate(() => !!document.querySelector("[data-safelearn-closing]"));
+  for (let attempt = 0; attempt < 40 && (await stillThere()); attempt++) await sleep(50);
+  if (await stillThere()) {
+    throw new Error(
+      `The dialog is still open after ${how === "clicked" ? "its close button was clicked" : "Escape"}. ` +
+        `Whatever follows would be acting on it rather than on what is behind it.`
+    );
+  }
 }
 
 /**
