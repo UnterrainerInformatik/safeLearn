@@ -271,12 +271,12 @@ Each half SHALL otherwise be written exactly as it was given. What belongs in a 
 
 #### Scenario: A table is generated
 
-- **WHEN** the dialog is generated from with more than one weekday ticked
+- **WHEN** a table is generated from the dialog with more than one weekday ticked
 - **THEN** a table is written whose columns are, in order, the marker column with an empty heading, `Day`, `Date`, each subject column given, and `Info`
 
 #### Scenario: The class meets on one weekday
 
-- **WHEN** the dialog is generated from with exactly one weekday ticked
+- **WHEN** a table is generated from the dialog with exactly one weekday ticked
 - **THEN** the table carries no `Day` column: its columns are, in order, the marker column with an empty heading, `Date`, each subject column given, and `Info`
 
 #### Scenario: A row is written
@@ -301,7 +301,7 @@ Each half SHALL otherwise be written exactly as it was given. What belongs in a 
 
 #### Scenario: No subject column is given
 
-- **WHEN** the dialog is generated from with no subject column named
+- **WHEN** a table is generated from the dialog with no subject column named
 - **THEN** a well-formed table is still written, carrying the marker column, `Date` and `Info`, and `Day` where more than one weekday was ticked
 
 ### Requirement: Every date in the range is written and none is skipped
@@ -312,12 +312,12 @@ The command SHALL NOT leave a date out on account of it being a holiday or other
 
 #### Scenario: A range covering several weeks is generated
 
-- **WHEN** a range is generated for with one weekday ticked
+- **WHEN** a table is generated for a range with one weekday ticked
 - **THEN** there is one row for every occurrence of that weekday in the range, a week apart, in chronological order
 
 #### Scenario: More than one weekday is ticked
 
-- **WHEN** a range is generated for with several weekdays ticked
+- **WHEN** a table is generated for a range with several weekdays ticked
 - **THEN** every occurrence of each of them is written, and the rows are in date order rather than grouped by weekday
 
 #### Scenario: The range begins or ends on a ticked weekday
@@ -347,17 +347,17 @@ Where the end date falls before the start date, or where no weekday was ticked, 
 
 #### Scenario: The end date is before the start date
 
-- **WHEN** an end date earlier than the start date is generated from
+- **WHEN** a table is generated from a dialog whose end date falls before its start date
 - **THEN** no table is written into the document
 
 #### Scenario: No weekday is ticked
 
-- **WHEN** the dialog is generated from with no weekday ticked
+- **WHEN** a table is generated from the dialog with no weekday ticked
 - **THEN** no table is written into the document
 
 #### Scenario: The range holds no occurrence of a ticked weekday
 
-- **WHEN** a range too short to contain any ticked weekday is generated from
+- **WHEN** a table is generated for a range too short to contain any ticked weekday
 - **THEN** no table is written into the document
 
 ### Requirement: Generating a table never costs the author text they had selected
