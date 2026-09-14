@@ -2604,9 +2604,17 @@ describe("the semester table command", () => {
   /** The winter semester the class files in the corpus carry, and the command's own id. */
   const WS = { from: "2026-09-21", to: "2027-02-08" };
   const COMMAND = "insert-semester-table";
-  /** Two subject columns, as the dialog asks for them: the subject, and who takes it. */
+  /**
+   * Two subject columns, as the dialog asks for them: the subject, and who
+   * takes it.
+   *
+   * The first is given its teachers without parentheses and the second with
+   * them, because the plugin writes those brackets itself: one column shows the
+   * wrapping happening end to end, the other shows that a person who typed them
+   * out of habit gets one pair and not two.
+   */
   const SUBJECTS = [
-    ["0WMC", "(UNTEG)"],
+    ["0WMC", "UNTEG"],
     ["1WMC", "(UNTEG+LANDH)"],
   ];
 
@@ -2726,12 +2734,23 @@ describe("the semester table command", () => {
           `placeholder. Shown: ${JSON.stringify(shown.labels)} / ` +
           `${JSON.stringify(shown.subjects.flat().map((field) => field.placeholder))}`
       );
+      assert.deepEqual(
+        shown.subjects.flat().map((field) => field.placeholder).filter((text) => text.includes("(")),
+        [],
+        `Nor does a placeholder show the parentheses around the teachers. They are part of the ` +
+          `form the plugin writes, the same as the <br> is, and a field offering "(UNTEG)" is ` +
+          `asking for them. Placeholders: ` +
+          `${JSON.stringify(shown.subjects.flat().map((field) => field.placeholder))}`
+      );
 
       await closeOpenModal();
     }));
 
   test("a semester is written as one row per lesson, in the shape the corpus uses", async () =>
     watched("semester-writes-table", async () => {
+      // One weekday ticked, which is how most classes meet - and then the table
+      // is written without its weekday column, because that column would carry
+      // the same three letters down all 21 rows.
       const name = "constructed-semester-table.md";
       await writeDocument(name, ["# 26-27 4BHIF - WS", "", "UNTEG, LANDH", ""].join("\n"));
       await open(name, views.livePreview);
@@ -2743,25 +2762,61 @@ describe("the semester table command", () => {
       const { lines } = tableIn(await documentText());
       assert.deepEqual(
         cellsOf(lines[0]),
-        ["", "Day", "Date", ...SUBJECT_HEADINGS, "Info"],
-        "The marker column with an empty heading, Day, Date, the subjects as given, and Info - " +
-          "which is the shape every semester file in the corpus already has."
+        ["", "Date", ...SUBJECT_HEADINGS, "Info"],
+        "The marker column with an empty heading, Date, the subjects as given, and Info - which " +
+          "is the shape every semester file in the corpus already has, down to the parentheses " +
+          "the plugin puts around the teachers rather than asking for."
       );
       assert.match(lines[1], /^\| -{3,} \|/, `A delimiter row under the heading: ${lines[1]}`);
 
       const rows = lines.slice(2).map(cellsOf);
       assert.equal(rows.length, 21, `21 Mondays from 21.09.2026 to 08.02.2027. Got ${rows.length}.`);
-      assert.deepEqual(rows[0].slice(0, 3), ["x", "Mon", "21.09.2026"]);
-      assert.deepEqual(rows.at(-1).slice(0, 3), ["", "Mon", "08.02.2027"]);
+      assert.deepEqual(rows[0].slice(0, 2), ["x", "21.09.2026"]);
+      assert.deepEqual(rows.at(-1).slice(0, 2), ["", "08.02.2027"]);
       assert.deepEqual(
-        rows.filter((row) => row[0] !== "").map((row) => row[2]),
+        rows.filter((row) => row[0] !== "").map((row) => row[1]),
         ["21.09.2026"],
         "The marker stands in the first data row and nowhere else."
       );
       assert.deepEqual(
-        rows.flatMap((row) => row.slice(3)).filter((cell) => cell !== ""),
+        rows.flatMap((row) => row.slice(2)).filter((cell) => cell !== ""),
         [],
         "The subject and info cells are empty - what goes in them is the part with judgement in it."
+      );
+    }));
+
+  test("a class that meets twice a week gets the weekday column back", async () =>
+    watched("semester-writes-weekdays", async () => {
+      // The column earns its width as soon as there is more than one weekday in
+      // it, and the rows interleave in date order rather than grouping by
+      // weekday - a table grouped by weekday reads as two terms laid end to end.
+      const name = "constructed-semester-weekdays.md";
+      await writeDocument(name, ["# 26-27 4BHIF - WS", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("# 26-27 4BHIF - WS");
+
+      await runCommand(COMMAND, { expectEdit: false });
+      await answerSemesterTable({
+        start: "2026-09-21",
+        end: "2026-10-05",
+        weekdays: ["Mon", "Thu"],
+        subjects: SUBJECTS,
+      });
+
+      const { lines } = tableIn(await documentText());
+      assert.deepEqual(cellsOf(lines[0]), ["", "Day", "Date", ...SUBJECT_HEADINGS, "Info"]);
+
+      const rows = lines.slice(2).map(cellsOf);
+      assert.deepEqual(
+        rows.map((row) => row.slice(1, 3)),
+        [
+          ["Mon", "21.09.2026"],
+          ["Thu", "24.09.2026"],
+          ["Mon", "28.09.2026"],
+          ["Thu", "01.10.2026"],
+          ["Mon", "05.10.2026"],
+        ],
+        "Every occurrence of each ticked weekday, in date order."
       );
     }));
 

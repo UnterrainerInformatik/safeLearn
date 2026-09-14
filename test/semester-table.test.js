@@ -60,9 +60,14 @@ function datesOf(from, to, weekdays) {
   return Array.from(dates, (date) => cellsOf(rowFor(date))[2]);
 }
 
-/** One date as the table writes it, without going through the table. */
+/**
+ * One date as the table writes it, without going through the table.
+ *
+ * Written with the weekday column, so that a cell can be named by its position
+ * here whatever the fixture around it ticked: marker, weekday, date.
+ */
 function rowFor(date) {
-  return semesterTableLines([date], [])[2];
+  return semesterTableLines([date], [], true)[2];
 }
 
 /** A table line split into its cells, with the leading and trailing pipe dropped. */
@@ -73,11 +78,18 @@ function cellsOf(line) {
     .map((cell) => cell.trim());
 }
 
-/** The whole table for a span, as the command would write it. */
+/**
+ * The whole table for a span, as the command would write it.
+ *
+ * The weekday column follows the ticked weekdays rather than the generated
+ * dates, which is what `insertSemesterTable` does with the set the dialog hands
+ * it - so a fixture that ticks one weekday here is a table without that column.
+ */
 function tableFor(from, to, weekdays, subjects = []) {
-  const dates = lessonDates(readDateField(from), readDateField(to), new Set(weekdays));
+  const ticked = new Set(weekdays);
+  const dates = lessonDates(readDateField(from), readDateField(to), ticked);
   if (dates.length === 0) return [];
-  return semesterTableLines(dates, subjectHeadings(subjects));
+  return semesterTableLines(dates, subjectHeadings(subjects), ticked.size > 1);
 }
 
 describe("every date in the range is written and none is skipped", () => {
@@ -250,7 +262,7 @@ describe("the dates do not depend on the machine that writes them", () => {
 
 describe("the table is written in the shape the corpus already uses", () => {
   test("the columns are the marker, Day, Date, the subjects as given, and Info", () => {
-    const table = tableFor("2026-09-21", "2026-09-28", [MON], [
+    const table = tableFor("2026-09-21", "2026-09-28", [MON, THU], [
       "0WMC<br>(UNTEG)",
       "1WMC<br>(UNTEG+LANDH)",
     ]);
@@ -271,14 +283,69 @@ describe("the table is written in the shape the corpus already uses", () => {
     );
   });
 
+  test("a class that meets on one weekday gets no column of one weekday", () => {
+    // The column would carry the same three letters down the whole semester -
+    // width in an already wide table, saying nothing the date beside it does
+    // not.
+    const table = tableFor("2026-09-21", "2026-09-28", [MON], [
+      "0WMC<br>(UNTEG)",
+      "1WMC<br>(UNTEG+LANDH)",
+    ]);
+
+    assert.deepEqual(cellsOf(table[0]), [
+      "",
+      "Date",
+      "0WMC<br>(UNTEG)",
+      "1WMC<br>(UNTEG+LANDH)",
+      "Info",
+    ]);
+    assert.deepEqual(
+      cellsOf(table[2]),
+      ["x", "21.09.2026", "", "", ""],
+      "A row then reads marker, date, and the cells the teacher fills in - the weekday is gone " +
+        "from the rows as well as from the heading, or every row would be one cell short of its " +
+        "heading row."
+    );
+    for (const line of table) {
+      assert.equal(
+        cellsOf(line).length,
+        5,
+        `Every line has as many cells as the heading row. ${JSON.stringify(line)} does not.`
+      );
+    }
+  });
+
+  test("the weekday column follows what was ticked, not what the range contains", () => {
+    // A span too short to hold a Thursday, ticked for Mondays and Thursdays.
+    // Read off the rows the column would vanish here; read off the dialog it
+    // stays, which is the rule a person can predict before pressing Generate.
+    const table = tableFor("2026-09-21", "2026-09-23", [MON, THU]);
+
+    assert.deepEqual(
+      cellsOf(table[0]),
+      ["", "Day", "Date", "Info"],
+      "What the person ticked is what the table is for. A rule read off the generated dates " +
+        "would make the column appear and disappear with the end date."
+    );
+    assert.deepEqual(cellsOf(table[2]), ["x", "Mon", "21.09.2026", ""]);
+  });
+
   test("a table with no subject column at all is still well-formed", () => {
     const table = tableFor("2026-09-21", "2026-09-28", [MON]);
 
-    assert.deepEqual(cellsOf(table[0]), ["", "Day", "Date", "Info"]);
+    assert.deepEqual(cellsOf(table[0]), ["", "Date", "Info"]);
     assert.match(
       table[1],
-      /^\| -{3,} \| -{3,} \| -{3,} \| -{3,} \|$/,
+      /^\| -{3,} \| -{3,} \| -{3,} \|$/,
       `The delimiter row has one cell per column, filled with dashes. Got ${JSON.stringify(table[1])}.`
+    );
+
+    const twoWeekdays = tableFor("2026-09-21", "2026-09-28", [MON, THU]);
+    assert.deepEqual(cellsOf(twoWeekdays[0]), ["", "Day", "Date", "Info"]);
+    assert.match(
+      twoWeekdays[1],
+      /^\| -{3,} \| -{3,} \| -{3,} \| -{3,} \|$/,
+      `The delimiter row grows with the weekday column. Got ${JSON.stringify(twoWeekdays[1])}.`
     );
   });
 
@@ -307,8 +374,10 @@ describe("the table is written in the shape the corpus already uses", () => {
     ]);
 
     const headings = cellsOf(table[0]);
+    // One weekday ticked, so the subject headings begin after the marker column
+    // and `Date`.
     assert.deepEqual(
-      headings.slice(3, -1),
+      headings.slice(2, -1),
       ["0WMC<br>(UNTEG)", "A\\|B"],
       "The markup in a heading is there on purpose and is not normalized; a blank line is no " +
         "column; and a pipe is escaped, because an unescaped one ends the cell early and shifts " +
@@ -340,6 +409,45 @@ describe("the table is written in the shape the corpus already uses", () => {
     );
     assert.equal(subjectHeading("", "(UNTEG)"), "(UNTEG)");
     assert.equal(subjectHeading("  ", ""), "", "Neither half is no column at all.");
+  });
+
+  test("the half naming who takes the subject is written in its parentheses", () => {
+    // The brackets are part of the form every heading in the corpus has, the
+    // same as the line break is, so the plugin writes them rather than asking
+    // for them.
+    assert.equal(
+      subjectHeading("0WMC", "UNTEG"),
+      "0WMC<br>(UNTEG)",
+      "A dialog that asked a person to type the brackets would be asking them for the format it " +
+        "exists to spare them."
+    );
+    assert.equal(subjectHeading("  1WMC  ", "  UNTEG+LANDH  "), "1WMC<br>(UNTEG+LANDH)");
+
+    assert.equal(
+      subjectHeading("0WMC", "(UNTEG)"),
+      "0WMC<br>(UNTEG)",
+      "A half that already carries its brackets is written as it stands. Somebody who typed them " +
+        "out of habit meant one pair and not ((UNTEG))."
+    );
+    assert.equal(
+      subjectHeading("0WMC", "(UNTEG+LANDH"),
+      "0WMC<br>((UNTEG+LANDH)",
+      "A half is bracketed when it begins with ( and ends with ) - not when it merely contains " +
+        "one. This is a half missing its closing bracket, and leaving it alone would be reading " +
+        "the typo as a decision."
+    );
+
+    assert.equal(
+      subjectHeading("", "UNTEG"),
+      "(UNTEG)",
+      "The teacher half alone is still the whole heading, now in its parentheses: the brackets " +
+        "belong to the half, not to the joining."
+    );
+    assert.equal(
+      subjectHeading("0WMC", ""),
+      "0WMC",
+      "And the subject half alone carries none: it is not the half the brackets belong to."
+    );
   });
 
   test("every line of the table is padded to one width", () => {
@@ -387,7 +495,8 @@ describe("the generated table is a table to a GitHub-flavoured renderer", () => 
     const html = await marked.parse(table.join("\n"));
 
     assert.equal((html.match(/<table>/g) ?? []).length, 1, `Not one table: ${html}`);
-    assert.equal((html.match(/<th[ >]/g) ?? []).length, 5, `Five headings: ${html}`);
+    // One weekday ticked, so: the marker column, Date, the one subject, Info.
+    assert.equal((html.match(/<th[ >]/g) ?? []).length, 4, `Four headings: ${html}`);
     assert.equal(
       (html.match(/<tr>/g) ?? []).length,
       1 + table.length - 2,
