@@ -1,5 +1,4 @@
 import fs from "fs";
-import readline from "readline";
 import path from "path";
 import pako from "pako";
 import { v4 as uuidv4 } from "uuid";
@@ -330,17 +329,37 @@ function hasTimedWindow(entry) {
   return Boolean(entry?.window && (entry.window.start || entry.window.end));
 }
 
-function extractInlinePermissionEntries(markdown) {
+/**
+ * Every inline `@@@` block of a document, as the file writes it: where the block
+ * begins and ends, where its body begins and ends, and the entries its directive
+ * parses to.
+ *
+ * What is deliberately absent is any verdict. Who may see a block depends on the
+ * session asking and on the moment it asks - `role-resolution` makes that the
+ * whole point of resolving it per request - so a conclusion recorded here would
+ * be a conclusion recorded for one session and handed to the next. The index
+ * stores this shape and nothing more; the decision is taken by
+ * `filterForbiddenSegments` when a request actually asks.
+ */
+function extractInlinePermissionBlocks(markdown) {
   if (typeof markdown !== "string" || markdown.length === 0) {
     return [];
   }
   const regex = new RegExp(inlinePermissionRegex);
-  const matches = [];
+  const blocks = [];
   let match;
   while ((match = regex.exec(markdown)) !== null) {
-    matches.push(parsePermissionEntries(match[1]));
+    const end = match.index + match[0].length;
+    blocks.push({
+      start: match.index,
+      end,
+      // The body ends three characters - the closing `@@@` - before the block.
+      contentStart: end - 3 - match[2].length,
+      contentEnd: end - 3,
+      entries: parsePermissionEntries(match[1]),
+    });
   }
-  return matches;
+  return blocks;
 }
 
 function registerTimedPermissionEntries(fileFullPath, sourceKey, entries = []) {
@@ -361,31 +380,26 @@ function registerTimedPermissionEntries(fileFullPath, sourceKey, entries = []) {
   });
 }
 
-async function rebuildTimedPermissionSchedule(filesMeta = []) {
+/**
+ * The windows the visibility timer watches, rebuilt from the index rather than
+ * from the corpus.
+ *
+ * It used to read every file of the corpus on every scan, which made the
+ * carry-forward in `scanFiles` worth nothing: one edit still opened all of them.
+ * Now that an index entry carries the parsed directives of a file's blocks, this
+ * is a walk over what the scan already holds, and a scan really does read only
+ * what changed.
+ */
+async function rebuildTimedPermissionSchedule(indexEntries = new Map()) {
   timedPermissionEntries.clear();
-  const tasks = filesMeta.map(async (fileMeta) => {
-    if (!fileMeta?.absolutePath) {
-      return;
+  for (const [fullPath, entry] of indexEntries) {
+    if (entry.permissions !== null && entry.permissions !== undefined) {
+      registerTimedPermissionEntries(fullPath, "file", entry.permissions);
     }
-    let content;
-    try {
-      content = await fs.promises.readFile(fileMeta.absolutePath, "utf8");
-    } catch (error) {
-      console.warn(`Unable to read file for timed permissions: ${fileMeta.absolutePath}`, error);
-      return;
-    }
-
-    if (fileMeta.permissions !== null && fileMeta.permissions !== undefined) {
-      registerTimedPermissionEntries(fileMeta.fullPath, "file", fileMeta.permissions);
-    }
-
-    const inlinePermissions = extractInlinePermissionEntries(content);
-    inlinePermissions.forEach((entries, idx) => {
-      registerTimedPermissionEntries(fileMeta.fullPath, `block-${idx}`, entries);
+    entry.blocks.forEach((block, idx) => {
+      registerTimedPermissionEntries(fullPath, `block-${idx}`, block.entries);
     });
-  });
-
-  await Promise.allSettled(tasks);
+  }
   ensureVisibilityTimerState();
 }
 
@@ -427,31 +441,30 @@ export function registerVisibilityChangeCallback(callback) {
   visibilityChangeCallback = typeof callback === "function" ? callback : null;
 }
 
-function getPermissionsFor(filePath) {
-  return new Promise((resolve, reject) => {
-    const fileStream = fs.createReadStream(filePath);
-    const rl = readline.createInterface({
-      input: fileStream,
-      crlfDelay: Infinity,
-    });
-
-    let result = null;
-    const lineReader = (line) => {
-      result = parseFirstLineForPermissions(line);
-      rl.removeListener("line", lineReader);
-      rl.close();
-    };
-
-    rl.on("line", lineReader);
-
-    rl.on("close", () => {
-      resolve(result);
-    });
-
-    rl.on("error", (err) => {
-      reject(err);
-    });
-  });
+/**
+ * Everything the index records about one file, from one read of it.
+ *
+ * This used to be a stream closed after its first line, because the directive on
+ * that line was all the index held. It holds the text and the block boundaries
+ * too now, so that a search can decide which files are worth opening without
+ * touching the disk - and all three come out of the same read rather than out of
+ * three passes over the same file.
+ *
+ * What the read costs was measured against the production corpus: 279 files,
+ * 1.41 MB, 15 ms for the whole of it. A scan pays that once, on the files that
+ * actually changed.
+ */
+async function readCorpusFile(filePath) {
+  const text = await fs.promises.readFile(filePath, "utf8");
+  // `readline` handed the first line over without its line ending, whichever of
+  // the two it was, and `parseFirstLineForPermissions` is held to the same input
+  // as before.
+  const firstLine = text.split("\n", 1)[0].replace(/\r$/, "");
+  return {
+    permissions: parseFirstLineForPermissions(firstLine),
+    text,
+    blocks: extractInlinePermissionBlocks(text),
+  };
 }
 
 function makeSafeForCSS(name) {
@@ -542,12 +555,18 @@ export async function scanFonts(dir, root = dir) {
 let lastFileSnapshot = new Map();
 
 /**
- * The whole-file permission directive of every file the last scan saw, keyed by
- * fullPath (the `md/...` form, the same string lastFileSnapshot uses). A scan
- * rebuilds the index from scratch, and reading the directive back out of every
- * file meant opening the entire corpus each time - with NEXT_AUTOSCAN on, once
- * per keystroke-triggered save anywhere under md/. An entry whose mtime still
- * matches is carried forward instead of read again.
+ * What the last scan derived from every file it saw, keyed by fullPath (the
+ * `md/...` form, the same string lastFileSnapshot uses): `{ mtime, permissions,
+ * text, blocks }`. A scan rebuilds the index from scratch, and deriving all of
+ * that again meant opening the entire corpus each time - with NEXT_AUTOSCAN on,
+ * once per keystroke-triggered save anywhere under md/. An entry whose mtime
+ * still matches is carried forward whole instead of read again.
+ *
+ * `text` and `blocks` are here so that a search can decide which files are worth
+ * opening without touching the disk; they are never what a reader is answered
+ * from. `corpus-search` states that rule and `searchCorpus` below obeys it: a
+ * candidate proposed here is read from disk again before a single word of it
+ * reaches anyone.
  *
  * What this assumes: that mtime moves when the content does. Where it does not
  * - a filesystem with coarse timestamps, a restore that preserves mtimes - the
@@ -561,7 +580,7 @@ let lastFileSnapshot = new Map();
  * Rebuilt from the files each scan saw, so a deleted file's entry does not
  * survive it.
  */
-let lastFilePermissions = new Map();
+let lastIndexEntries = new Map();
 
 /**
  * Scans all markdown files recursively and detects added/removed/modified files.
@@ -637,8 +656,8 @@ export async function scanFiles(prefix, dir, resetFonts = false, root = dir) {
   scanFilesInternal(dir, root);
 
   // Build file metadata
-  const carriedPermissions = lastFilePermissions;
-  const currentPermissions = new Map();
+  const carriedEntries = lastIndexEntries;
+  const currentEntries = new Map();
   let mdFiles = await Promise.all(
     Object.keys(mdFilesDir).map(async (file) => {
       const pwe = mdFilesDir[file];
@@ -650,16 +669,17 @@ export async function scanFiles(prefix, dir, resetFonts = false, root = dir) {
       const absPath = path.join(dir, file);
       const relFullPath = prefix + file;
       const mtime = fs.existsSync(absPath) ? fs.statSync(absPath).mtimeMs : 0;
-      // Carry the directive forward when the file has not moved since the last
-      // scan saw it, and open the file only otherwise. The first scan of a
-      // process finds an empty map and therefore reads everything, which needs
-      // no branch of its own.
-      const carried = carriedPermissions.get(relFullPath);
-      const permissions =
-        carried && carried.mtime === mtime
-          ? carried.permissions
-          : await getPermissionsFor(absPath);
-      currentPermissions.set(relFullPath, { mtime, permissions });
+      // Carry the entry forward when the file has not moved since the last scan
+      // saw it, and open the file only otherwise. The first scan of a process
+      // finds an empty map and therefore reads everything, which needs no branch
+      // of its own. The condition is the one it always was: same path and same
+      // mtime reuses everything the entry holds, anything else derives all of it
+      // from one read.
+      const carried = carriedEntries.get(relFullPath);
+      const derived =
+        carried && carried.mtime === mtime ? carried : await readCorpusFile(absPath);
+      const { permissions, text, blocks } = derived;
+      currentEntries.set(relFullPath, { mtime, permissions, text, blocks });
       return {
         [file]: {
           path: file,
@@ -681,7 +701,7 @@ export async function scanFiles(prefix, dir, resetFonts = false, root = dir) {
   );
 
   // Built from the files this scan saw, so a removed file's entry is gone.
-  lastFilePermissions = currentPermissions;
+  lastIndexEntries = currentEntries;
 
   // Flatten
   mdFiles = mdFiles.reduce((acc, file) => {
@@ -709,7 +729,7 @@ export async function scanFiles(prefix, dir, resetFonts = false, root = dir) {
 
   mdFilesDirStructure = mdFiles;
 
-  await rebuildTimedPermissionSchedule(Object.values(mdFiles));
+  await rebuildTimedPermissionSchedule(currentEntries);
 
   return { added, removed, modified };
 }
@@ -804,7 +824,25 @@ export async function preParse(md, req) {
   return r;
 }
 
-async function removeForbiddenContent(md, req) {
+/**
+ * The passages of `md` this session may see, in document order, each carrying
+ * the offset in `md` it was taken from.
+ *
+ * This is the one implementation of inline block filtering, and it hands back a
+ * list rather than a string on purpose. Removing a block makes the text before
+ * it and the text after it adjacent, and a search reading the joined form can
+ * find a term across that seam - a term nobody wrote, assembled out of two
+ * passages a hidden block used to separate. A caller that never sees the two
+ * sides in one string cannot report such a match, so the seam is closed by
+ * construction rather than by a boundary check every future caller would have
+ * to remember.
+ *
+ * `removeForbiddenContent` below joins the list and is what the render pipeline
+ * uses; `corpus-search` matches within each segment separately. Neither of them
+ * restates the rule this function applies - `hasSomeRoles` decides, as it does
+ * for the rendered page.
+ */
+export async function filterForbiddenSegments(md, req) {
   const regex = new RegExp(inlinePermissionRegex);
   const matches = [];
   let match;
@@ -814,30 +852,369 @@ async function removeForbiddenContent(md, req) {
   if (matches.length === 0) {
     // Nothing to decide, so nothing to resolve a context for: a document that
     // carries no inline directive must not cost a lookup.
-    return md;
+    return [{ text: md, offset: 0 }];
   }
   // Awaited once, ahead of the fan-out below. Every block of the document is
   // then decided against the same reference time, so a window cannot close
   // between the first paragraph of a page and the last.
   const { referenceDate } = await getPermissionContext(req);
-  const replacements = await Promise.all(
-    matches.map(async ([fullMatch, perms, content]) => {
+  const visible = await Promise.all(
+    matches.map(async ([, perms]) => {
       const permissionEntries = parsePermissionEntries(perms);
       if (permissionEntries.length === 0) {
-        return "";
+        return false;
       }
       const activeRoles = getActivePermissionRoles(permissionEntries, referenceDate);
       if (activeRoles.length === 0) {
-        return "";
+        return false;
       }
-      const allowed = await hasSomeRoles(req, activeRoles, true);
-      return allowed ? content : "";
+      return hasSomeRoles(req, activeRoles, true);
     })
   );
+
+  const segments = [];
+  // An empty passage is not a passage. Two adjacent blocks leave one between
+  // them, and carrying it would put a zero-length segment into every offset the
+  // search reports against.
+  const keep = (text, offset) => {
+    if (text.length > 0) {
+      segments.push({ text, offset });
+    }
+  };
+
+  let carried = 0;
   for (let i = 0; i < matches.length; i++) {
-    md = md.replace(matches[i][0], replacements[i]);
+    const [fullMatch, , content] = matches[i];
+    keep(md.slice(carried, matches[i].index), carried);
+    if (visible[i]) {
+      // Where the block's body sits in the original: the match ends with the
+      // closing `@@@`, so the body ends three characters before the match does.
+      // Derived from the end rather than from the opening line, because the
+      // directive the regex reads before the first newline is itself matched
+      // with the `s` flag.
+      keep(content, matches[i].index + fullMatch.length - 3 - content.length);
+    }
+    carried = matches[i].index + fullMatch.length;
   }
-  return md;
+  keep(md.slice(carried), carried);
+  return segments;
+}
+
+/**
+ * The document as the session may read it: the surviving passages, joined. The
+ * render pipeline's caller of the function above, and the reason that function
+ * exists in two forms at all.
+ */
+async function removeForbiddenContent(md, req) {
+  const segments = await filterForbiddenSegments(md, req);
+  return segments.map((segment) => segment.text).join("");
+}
+
+// ################### Searching the corpus ###################
+
+/**
+ * The shortest query the search will answer, and how long the field waits after
+ * a keystroke before issuing one.
+ *
+ * Both are security parameters rather than comfort ones: together they bound how
+ * fast a reader can probe the corpus, and the minimum length bounds how much of
+ * it one probe can be about. Measured against the production corpus - 279 files,
+ * 1.41 MB - by counting the files a query of each length proposes as candidates:
+ *
+ *   1 character  -> 273 of 279 files, for the median query
+ *   2 characters -> 173
+ *   3 characters -> 101
+ *   4 characters -> 42
+ *
+ * One and two characters return most of the corpus whatever they are, so they
+ * measure the corpus rather than search it; three is where a query starts being
+ * about something. A shorter one is refused rather than truncated or answered
+ * empty, because a refusal is the only answer that says nothing about what is
+ * there.
+ *
+ * 250 ms is longer than an answer takes - the slowest three-character query
+ * measured against that corpus, the one that opens 200 of its files, is answered
+ * in about 90 ms and most are answered in tens - so the reader never waits on a
+ * queue, and it is short enough not to feel like a delay. It also means that
+ * typing issues no query at all until the reader pauses, so a probe costs a
+ * pause each.
+ */
+export const minimumQueryLength = 3;
+export const searchDebounceMs = 250;
+
+/**
+ * How much of the surrounding passage a snippet quotes on either side. Read
+ * against the real sidebar: the column is about 230 px wide, and this is what
+ * fills three or four lines of it rather than a paragraph.
+ */
+const snippetContext = 60;
+
+/** `text`, safe to put inside a regular expression as a literal. */
+function escapeForRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Where `query` occurs in `text`, case-insensitively, as offsets into `text`.
+ *
+ * A regular expression rather than `indexOf` over a lowercased copy: lowercasing
+ * changes the length of a few characters, and an offset taken against a copy of
+ * a different length would quote the wrong part of the passage.
+ */
+function occurrencesIn(text, query) {
+  const regex = new RegExp(escapeForRegExp(query), "gi");
+  const at = [];
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    at.push(match.index);
+    // A query of at least three characters cannot be empty, so lastIndex always
+    // advances; this is the guard against a future caller passing one that is.
+    if (match.index === regex.lastIndex) regex.lastIndex++;
+  }
+  return at;
+}
+
+/**
+ * The files that could answer `query`, as fullPaths, from the index alone.
+ *
+ * This is the whole of what the index is allowed to decide. It touches no disk
+ * and asks no permission question, and it is deliberately generous: a file it
+ * proposes may turn out to be one the session may not see, or one whose text has
+ * changed since the scan. Both of those are settled by reading the file, which
+ * is what makes an index that has gone stale cost a wasted read rather than a
+ * disclosure.
+ */
+function candidatePaths(query) {
+  const needle = query.toLowerCase();
+  const paths = [];
+  for (const [fullPath, entry] of lastIndexEntries) {
+    if (
+      fullPath.toLowerCase().includes(needle) ||
+      entry.text.toLowerCase().includes(needle)
+    ) {
+      paths.push(fullPath);
+    }
+  }
+  return paths;
+}
+
+/**
+ * A heading's text as the rendered page will show it.
+ *
+ * The client finds the heading to scroll to by comparing this against the
+ * `textContent` of a `.docanchor`, so what is stripped here is what the renderer
+ * turns into markup rather than into text: an embedded image becomes an `<img>`
+ * and contributes nothing, a wiki link becomes its alias or its target, code
+ * spans and emphasis keep their content and lose their delimiters, and the
+ * fragment marker is consumed before a deck is built.
+ *
+ * A heading whose wiki link names no file of the corpus is left as written by
+ * the renderer and stripped here, so the two disagree and the jump finds
+ * nothing. That is a jump that does not happen, never a jump to the wrong place:
+ * a target that is not found is a no-op by construction.
+ */
+function headingText(raw) {
+  return raw
+    .replace(/##fragment(?=\s|$)/g, "")
+    .replace(/!\[\[[^\]\n]*\]\]/g, "")
+    .replace(/\[\[[^\]\n|]*\|([^\]\n]*)\]\]/g, "$1")
+    .replace(/\[\[([^\]\n]*)\]\]/g, "$1")
+    .replace(/!\[[^\]\n]*\]\([^)\n]*\)/g, "")
+    .replace(/\[([^\]\n]*)\]\([^)\n]*\)/g, "$1")
+    .replace(/`+/g, "")
+    .replace(/\*\*|__|\*|~~/g, "")
+    .replace(/\s+#+\s*$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * The ATX headings of the filtered content, in the order the session will see
+ * them, each numbered by how many headings of the same text came before it.
+ *
+ * The occurrence number is counted over the filtered content and nowhere else -
+ * a corpus of exam questions repeats `## Answer` dozens of times, and the reader
+ * has to land on the one the search found. The client repeats this count over
+ * the rendered page, which is the same document filtered the same way, so the
+ * two agree.
+ *
+ * Fenced code is skipped so a `#` inside a fence is not read as a heading. The
+ * fence state is per passage: a fence that opened in one passage and closed in
+ * another would be a fence spanning the place a hidden block was cut out, which
+ * is not something the document as written says.
+ */
+function headingsOf(segments) {
+  const headings = [];
+  const seen = new Map();
+  segments.forEach((segment, index) => {
+    let fenced = false;
+    let at = 0;
+    for (const line of segment.text.split("\n")) {
+      if (/^ {0,3}(?:```|~~~)/.test(line)) {
+        fenced = !fenced;
+      } else if (!fenced) {
+        const heading = line.match(/^ {0,3}(#{1,6})(?:[ \t]+(.*))?$/);
+        if (heading) {
+          const text = headingText(heading[2] ?? "");
+          const occurrence = (seen.get(text) ?? 0) + 1;
+          seen.set(text, occurrence);
+          headings.push({ text, occurrence, segment: index, offset: at });
+        }
+      }
+      at += line.length + 1;
+    }
+  });
+  return headings;
+}
+
+/** The heading a match at `offset` of segment `index` stands under, or null. */
+function headingAt(headings, index, offset) {
+  let found = null;
+  for (const heading of headings) {
+    if (heading.segment > index) break;
+    if (heading.segment === index && heading.offset > offset) break;
+    found = heading;
+  }
+  return found;
+}
+
+/**
+ * The passage around a match, quoted from the one segment it was found in.
+ *
+ * Clipped to that segment's own bounds, so a snippet cannot be assembled out of
+ * two passages a hidden block used to separate. That is the same rule the
+ * matching itself obeys, restated where the text is quoted rather than assumed.
+ */
+function snippetAround(segment, offset, length) {
+  const from = Math.max(0, offset - snippetContext);
+  const to = Math.min(segment.text.length, offset + length + snippetContext);
+  const quoted = segment.text.slice(from, to).replace(/\s+/g, " ").trim();
+  return `${from > 0 ? "…" : ""}${quoted}${to < segment.text.length ? "…" : ""}`;
+}
+
+/**
+ * What one candidate file contributes to an answer, or null when it contributes
+ * nothing - which is what a file the session may not see contributes, and what a
+ * file whose text no longer holds the query contributes. The two are the same
+ * answer on purpose.
+ *
+ * Everything below is derived from the file as it stands on disk right now and
+ * from the permission rules as they apply to this request. The index proposed
+ * this file; it decides nothing about it.
+ */
+async function answerFromFile(req, file, query) {
+  let raw;
+  try {
+    raw = await fs.promises.readFile(file.absolutePath, "utf8");
+  } catch {
+    // A file the index still names and the disk no longer has is a file that
+    // matches nothing. It is not an error a reader is told about.
+    return null;
+  }
+
+  // The same two steps the page handler performs before anything else, in the
+  // same order: the leading marks it drops, then the whole-file directive.
+  let content = raw.replace(/^[​‌‍‎‏﻿]/, "");
+  const permissions = parseFirstLineForPermissions(content.split("\n")[0]);
+  if (permissions !== null) {
+    const { visible } = await resolveFileVisibility(req, permissions);
+    if (!visible) {
+      return null;
+    }
+    content = content.split("\n").slice(1).join("\n");
+  }
+
+  const segments = await filterForbiddenSegments(content, req);
+  const headings = headingsOf(segments);
+
+  // Matched inside each passage separately. Nothing here ever holds the joined
+  // document, so a match across the place a hidden block was removed cannot be
+  // found in the first place.
+  const found = [];
+  segments.forEach((segment, index) => {
+    for (const offset of occurrencesIn(segment.text, query)) {
+      found.push({ segment, index, offset, heading: headingAt(headings, index, offset) });
+    }
+  });
+
+  const inName = occurrencesIn(file.fileNameWithoutExtension, query).length > 0;
+  if (found.length === 0 && !inName) {
+    return null;
+  }
+
+  // One entry per heading the session may see, in the order the filtered content
+  // puts them in. The heading and its occurrence and nothing else: one snippet
+  // per document is what the sidebar has room to show, and what is not shown is
+  // not sent.
+  const underHeadings = [];
+  const already = new Set();
+  for (const match of found) {
+    if (!match.heading) continue;
+    const key = `${match.heading.occurrence}:${match.heading.text}`;
+    if (already.has(key)) continue;
+    already.add(key);
+    underHeadings.push({
+      text: match.heading.text,
+      occurrence: match.heading.occurrence,
+    });
+  }
+
+  const first = found[0];
+  return {
+    name: file.fileNameWithoutExtension,
+    path: `/${encodePathPreserveSlashes(file.fullPath)}`,
+    snippet: first ? snippetAround(first.segment, first.offset, query.length) : null,
+    headings: underHeadings,
+    // Not part of the answer - stripped before it is sent - but what the order of
+    // the answer is built from.
+    prominent:
+      inName || headings.some((heading) => occurrencesIn(heading.text, query).length > 0),
+  };
+}
+
+/**
+ * What this session may be told about `query`.
+ *
+ * Two passes, and the split between them is the whole safety argument. The first
+ * reads the index and decides only which files are worth opening. The second
+ * opens each of them, resolves its whole-file directive, removes the blocks this
+ * session may not see, and derives every word of the answer - the headings, the
+ * order, the snippets - from what survives. Nothing an index entry holds reaches
+ * a reader.
+ *
+ * The candidates are answered concurrently on purpose: each of them asks for the
+ * request's permission context, and they all join the one build rather than
+ * starting one each, so a whole query costs the identity provider a single
+ * lookup however many files it opens.
+ */
+export async function searchCorpus(req, rawQuery) {
+  const query = typeof rawQuery === "string" ? rawQuery.trim() : "";
+  if (query.length < minimumQueryLength) {
+    return { results: [] };
+  }
+
+  const byFullPath = new Map(
+    Object.values(mdFilesDirStructure).map((file) => [file.fullPath, file])
+  );
+  const answers = await Promise.all(
+    candidatePaths(query)
+      .map((fullPath) => byFullPath.get(fullPath))
+      .filter((file) => file !== undefined)
+      .map((file) => answerFromFile(req, file, query))
+  );
+
+  return {
+    results: answers
+      .filter((answer) => answer !== null)
+      .sort((a, b) => {
+        // A match in the document's name or in one of its headings is what the
+        // reader was probably looking for; a match in a paragraph is what they
+        // get when it was not.
+        if (a.prominent !== b.prominent) return a.prominent ? -1 : 1;
+        return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+      })
+      .map(({ prominent, ...answer }) => answer),
+  };
 }
 
 function preMarkCode(md) {
@@ -1792,6 +2169,27 @@ async function getSideBar(startPage, req) {
     <div class="sidebar-menu">
       <a href="${startPage}">Home</a>
     </div>
+    <!-- The search field, beside the tree rather than above the content,
+         because it answers the same question the tree does: where is this.
+         The two numbers are read by the field's script instead of being
+         written down a second time in obsidian-page.js - the minimum length
+         the route enforces and the interval the field waits are one decision
+         each, taken in obsidian.js and carried here. -->
+    <div class="sidebar-title sidebar-title-search"><b>Search</b></div>
+    <div class="sidebar-search">
+      <input
+        id="searchField"
+        class="sl-search-input nav-font"
+        type="search"
+        placeholder="at least ${minimumQueryLength} characters"
+        autocomplete="off"
+        autocapitalize="off"
+        spellcheck="false"
+        data-minimum-length="${minimumQueryLength}"
+        data-debounce-ms="${searchDebounceMs}"
+        oninput="onSearchInput()">
+      <div id="searchResults" class="sidebar-menu sl-search-results"></div>
+    </div>
     <div class="sidebar-title sidebar-title-dirlist row" onclick="toggleDirList('sidebar-dirlist')"><b>Site</b><div class="sidebar-dirlist-chevron">${lucideIcon(
       "ChevronRight",
       null,
@@ -1979,25 +2377,86 @@ function getAutoReloadScript() {
   // The caller reveals first and calls this immediately after, in the same task:
   // a hidden body has no scroll height and no slide geometry, so there would be
   // nothing to scroll or lay out, and nothing is painted between the two.
+  //
+  // It reports whether it put a position back. A page opened from a search wants
+  // to scroll to the heading the result named, and a page that was hot-reloaded
+  // wants the offset the reader had scrolled to; when both apply - a reload of a
+  // page that was opened from a search - the reader has scrolled since, so the
+  // saved position wins and the jump below stands down.
   window.safeLearnRestorePosition = function() {
     try {
       if (window.Reveal && Reveal.slide) {
         const savedSlide = sessionStorage.getItem("revealSlide");
-        if (!savedSlide) return;
+        if (!savedSlide) return false;
         const idx = JSON.parse(savedSlide);
         Reveal.slide(idx.h || 0, idx.v || 0, (typeof idx.f === "number") ? idx.f : 0);
         Reveal.layout();
         sessionStorage.removeItem("revealSlide");
-        return;
+        return true;
       }
       const savedScroll = sessionStorage.getItem("scrollY");
-      if (!savedScroll) return;
+      if (!savedScroll) return false;
       window.scrollTo(0, parseInt(savedScroll, 10));
       sessionStorage.removeItem("scrollY");
+      return true;
     } catch (err) {
       // A saved position that cannot be read is not a reason to leave the page
       // hidden: the caller reveals whether this succeeds or not.
       console.warn('[SSE] Could not restore the saved position:', err);
+      return false;
+    }
+  };
+
+  /**
+   * Scrolls to the heading a search result named, if this page was opened from
+   * one.
+   *
+   * Offered beside safeLearnRestorePosition and for the same reason: a page view
+   * is served with its body hidden, and a hidden body has no scroll height, so
+   * anything that scrolls has to run after the reveal and in the same task as
+   * it. Nothing is painted between the two, so the first frame the reader sees
+   * is already at the heading. The view's owner calls this immediately after the
+   * restore - see revealPage() in obsidian-page.js.
+   *
+   * A native #fragment cannot do this: the browser resolves a fragment during
+   * load, while the body is still hidden, and would land at the top. Nor could
+   * it address the right place - makeContentMap gives every heading a fresh
+   * uuid on every render, so a heading's id means nothing outside the render
+   * that produced it. What a result carries instead is the heading's text and
+   * which occurrence of that text it is, counted over the content this session
+   * is served. This counts the same way over the page in front of it.
+   *
+   * The fixed header's offset is applied here rather than repaired afterwards,
+   * which is what the hashchange listener at the top of obsidian-page.js does
+   * for hand-written hash links. That listener stays; this does not use it.
+   *
+   * A target that is not found is a silent no-op and the page stays at its top.
+   * That is what makes a hand-written target useless for probing: a heading that
+   * is absent and a heading that was filtered out of this session's copy look
+   * exactly alike from here.
+   */
+  window.safeLearnJumpToHeading = function() {
+    try {
+      const asked = new URLSearchParams(window.location.search);
+      const wanted = (asked.get("heading") || "").replace(/\\s+/g, " ").trim();
+      if (!wanted) return;
+      const occurrence = parseInt(asked.get("occurrence") || "1", 10);
+      if (!Number.isFinite(occurrence) || occurrence < 1) return;
+
+      let seen = 0;
+      for (const anchor of document.querySelectorAll(".docanchor")) {
+        if ((anchor.textContent || "").replace(/\\s+/g, " ").trim() !== wanted) continue;
+        seen++;
+        if (seen !== occurrence) continue;
+        // 50 is the height of the fixed header, the same number the hashchange
+        // listener subtracts after the browser has already scrolled.
+        window.scrollTo(0, anchor.getBoundingClientRect().top + window.scrollY - 50);
+        return;
+      }
+    } catch (err) {
+      // A page that cannot be scrolled to a heading is still a page. Nothing
+      // about which target was asked for is reported anywhere a reader can see.
+      console.warn('[search] Could not scroll to the heading that was asked for:', err);
     }
   };
 

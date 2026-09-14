@@ -214,6 +214,160 @@ function openAsDocument(sameWindow = false) {
   }
 }
 
+/*
+ * The search beside the navigation tree.
+ *
+ * Everything shown here comes from one answer of `/search`, which the server
+ * derived from the files themselves, filtered for this session. Nothing is kept
+ * between two queries and nothing is assembled locally out of two answers: a
+ * result list is replaced whole, so what stands there is always the answer to
+ * the query in the field.
+ *
+ * There is deliberately no completion, no suggestion and no correction. Any of
+ * the three would have to be derived from a vocabulary, and a vocabulary
+ * assembled over the corpus is exactly the thing this search may not hand to a
+ * reader. If one is ever added it has to be built from filtered content only.
+ */
+
+/** The debounce in flight, so a keystroke can cancel the one before it. */
+let searchTimer = null;
+
+/**
+ * Which query the list on screen belongs to. Answers can arrive out of order —
+ * a broad query started first can come back after a narrower one started later
+ * — and a list is only replaced by an answer that is still the current one.
+ */
+let searchGeneration = 0;
+
+function onSearchInput() {
+  const field = document.getElementById("searchField");
+  if (!field) return;
+
+  clearTimeout(searchTimer);
+  const query = field.value.trim();
+  const minimum = Number(field.dataset.minimumLength || 3);
+
+  if (query.length < minimum) {
+    // Below the minimum nothing is asked and nothing is shown. The field says
+    // what it wants in its placeholder; the empty list says nothing about the
+    // corpus, which is the point.
+    searchGeneration++;
+    showSearchResults([]);
+    return;
+  }
+
+  const wait = Number(field.dataset.debounceMs || 250);
+  searchTimer = setTimeout(() => runSearch(query), wait);
+}
+
+/**
+ * Asks the application, as this session, what it may be told about `query`.
+ *
+ * `no-store` rather than a default fetch: an answer served out of the browser's
+ * cache would be an answer that was authorized once and shown again, and every
+ * query has to be authorized as it is answered.
+ */
+async function runSearch(query) {
+  const generation = ++searchGeneration;
+  try {
+    const response = await fetch(`/search?q=${encodeURIComponent(query)}`, {
+      credentials: "include",
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) {
+      if (generation === searchGeneration) showSearchResults([]);
+      return;
+    }
+    const answer = await response.json();
+    if (generation !== searchGeneration) return;
+    showSearchResults(Array.isArray(answer.results) ? answer.results : []);
+  } catch (error) {
+    console.warn("[search] The query could not be answered:", error);
+    if (generation === searchGeneration) showSearchResults([]);
+  }
+}
+
+/**
+ * Puts a result list on screen.
+ *
+ * Built with `createElement` and `textContent` throughout. A snippet is corpus
+ * text quoted back, and corpus text is written by people who may write angle
+ * brackets; assembling this list as markup would make every document that
+ * contains a `<script>` in a code fence a hazard on the way to the reader.
+ */
+function showSearchResults(results) {
+  const list = document.getElementById("searchResults");
+  if (!list) return;
+  list.replaceChildren();
+
+  for (const result of results) {
+    const entry = document.createElement("div");
+    entry.className = "sl-search-result";
+
+    const row = document.createElement("div");
+    row.className = "sl-search-result-row";
+
+    const headings = Array.isArray(result.headings) ? result.headings : [];
+    const expanded = document.createElement("div");
+    expanded.className = "sl-search-headings collapsed";
+
+    if (headings.length > 0) {
+      const toggle = document.createElement("span");
+      toggle.className = "sl-search-expand";
+      toggle.textContent = "❯";
+      toggle.title = "Show the headings the matches are under";
+      toggle.addEventListener("click", () => {
+        toggle.classList.toggle("expanded");
+        expanded.classList.toggle("collapsed");
+      });
+      row.appendChild(toggle);
+    }
+
+    // The page view, whatever view the reader is in right now: the print and
+    // presentation renderings display the same Markdown source and are selected
+    // by query parameter, so a hit belongs to the document rather than to one of
+    // its renderings.
+    const link = document.createElement("a");
+    link.className = "sl-search-name";
+    link.href = result.path;
+    link.textContent = result.name;
+    row.appendChild(link);
+    entry.appendChild(row);
+
+    if (result.snippet) {
+      const snippet = document.createElement("span");
+      snippet.className = "sl-search-snippet";
+      snippet.textContent = result.snippet;
+      entry.appendChild(snippet);
+    }
+
+    for (const heading of headings) {
+      const anchor = document.createElement("a");
+      anchor.className = "sl-search-heading";
+      // Which heading, not which anchor: a heading's id is generated fresh on
+      // every render, so it means nothing outside the render that produced it.
+      // The text and its occurrence are counted over the content this session
+      // is served, and the page counts them again the same way.
+      anchor.href =
+        `${result.path}?heading=${encodeURIComponent(heading.text)}` +
+        `&occurrence=${encodeURIComponent(heading.occurrence)}`;
+      anchor.textContent = heading.text || "(untitled)";
+      expanded.appendChild(anchor);
+    }
+    if (headings.length > 0) entry.appendChild(expanded);
+
+    list.appendChild(entry);
+  }
+
+  // The preferences were applied to the page at init(), before any of this
+  // existed, so a result list built afterwards has to be told about dark mode.
+  if (attributes.dm === 1) {
+    for (const element of list.querySelectorAll("a")) element.classList.add("dark-mode");
+    list.classList.add("dark-mode");
+  }
+}
+
 let mainFontsArray = [];
 
 let navFontsArray = [];
@@ -288,6 +442,12 @@ let revealBound = null;
  * top. Both statements are one task and the browser paints once, so the first
  * frame the session sees is already at the restored offset.
  *
+ * A page opened from a search result scrolls to the heading the result named,
+ * in the same task and for the same reason. It runs only when the restore put
+ * nothing back: the two want the same page at different offsets in exactly one
+ * case — a hot reload of a page that was opened from a search — and there the
+ * reader has scrolled since, so what they scrolled to wins.
+ *
  * Called twice or more, it does nothing the second time: the preference request
  * and the bound `init()` arms are two callers, and whichever arrives first is
  * the one that counts. Clearing that bound is part of revealing, so the two
@@ -300,7 +460,8 @@ function revealPage() {
   revealBound = null;
 
   document.body.style.display = "";
-  window.safeLearnRestorePosition?.();
+  const restored = window.safeLearnRestorePosition?.();
+  if (!restored) window.safeLearnJumpToHeading?.();
 }
 
 function init() {
@@ -342,6 +503,7 @@ const darkModeAffectedElements = [
   "#sidebar",
   "#topbar",
   "#topdown-menu",
+  "#searchField",
   ".sidebar-dirlist a",
   ".sidebar-anchors a",
 ];

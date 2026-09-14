@@ -46,6 +46,12 @@ partition #MistyRose "May this caller see it? (app.js)" {
 
 partition #AliceBlue "preParse (obsidian.js) - still Markdown" {
   :removeForbiddenContent;
+  note right
+    A thin caller of filterForbiddenSegments, which
+    returns the surviving passages as a list. This one
+    joins them; the corpus search is the other caller
+    and matches inside each passage separately.
+  end note
   :preReplacePlantUml;
   :preReplaceMermaid;
   :preMarkCode;
@@ -108,7 +114,7 @@ stop
 2. Accesstoken is refreshed, so it and all contained roles and attributes are actually current
 3. The first line is examined for a file-permission directive. If it carries one, `resolveFileVisibility` decides whether this caller may see the file at all - by the same rule, and through the same implementation, that the navigation tree applies - and the directive line is then dropped from the content.
 4. `preParse` is called preparing the content for HTML-conversion
-	1. `removeForbiddenContent` parses for inline permissions and removes forbidden parts of the file
+	1. `removeForbiddenContent` parses for inline permissions and removes forbidden parts of the file. It does that by calling `filterForbiddenSegments`, which returns the passages that survive **as a list**, each with the offset in the original Markdown it was taken from; `removeForbiddenContent` is the caller that joins them, and the rendered page is what it always was. The list is not an implementation detail to be tidied away by joining earlier: removing a block makes the text before it and the text after it adjacent, and a caller reading the joined form can find a term across that seam — a term nobody wrote. The corpus search is the second caller and matches inside each passage separately, so it cannot. Anything else that comes to need filtered Markdown should take the list for the same reason.
 	2. `preReplacePlantUml` replaces the code tags containing PlantUML-code with a rendered version of it by calling a proper PlantUML conversion service and inserting the SVG of that output here instead of the code-tags
 	3. `preReplaceMermaid` replaces the code tags containing Mermaid-code with the `pre` element the client-side renderer looks for. Unlike PlantUML, Mermaid is drawn in the browser and not by a service.
 	4. `preMarkCode` parses the file for code-marks (cannot be nested) and replaces them for later use of the marks (the content of the code-tags parsed is saved in an array for later insertion)

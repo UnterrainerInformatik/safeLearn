@@ -4,7 +4,8 @@
  * Reads `md/test-perms.md`, `md/test-perms-teacher-alias.md`,
  * `md/test-perms-student-alias.md`, `md/test-fileperms-teachers.md`,
  * `md/test-fileperms-4bhif-5bhif-2ahif.md`,
- * `md/test-fileperms-window-closed.md` and the admin and time-bound blocks of
+ * `md/test-fileperms-window-closed.md`, the two `md/test-search-*.md` files that
+ * carry a whole-file directive, and the admin and time-bound blocks of
  * `md/test-md-file.md`.
  *
  * It also compares the navigation tree against the page each entry leads to.
@@ -171,6 +172,19 @@ const restrictedFiles = [
     directive: ["teacher"],
     windowClosed: true,
     content: "Only visible while the window is open.",
+  },
+  // The two the search checks are about. They carry whole-file directives, so
+  // the agreement between the tree and the page has to hold for them too -
+  // which is what the consistency check below would otherwise let slip.
+  {
+    path: "/md/test-search-teacher-file.md",
+    directive: ["teacher"],
+    content: "KLAUSURSCHLUESSEL",
+  },
+  {
+    path: "/md/test-search-staleness-restricted.md",
+    directive: ["teacher"],
+    content: "STALEGESCHLOSSEN",
   },
 ];
 

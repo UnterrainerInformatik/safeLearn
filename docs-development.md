@@ -129,3 +129,22 @@ app.use("/your-prefix", checkAuthenticated, express.static(path.join(__dirname, 
 ```
 
 Mount the narrowest thing that covers the reference rather than widening an existing mount, and keep the URL prefix the same as the one the page emits so nothing else has to change. `npm test` catches the omission for you: `test/checks/deployment-surface.js` walks every same-origin reference of a rendered page in all three views and fails on a reference that falls through to the start page.
+
+## Searching the corpus
+
+The search field sits beside the navigation tree and answers over `GET /search?q=…`, which is authenticated exactly as every other content route is. A query is answered in two passes, and the split between them is the whole of why a search cannot leak:
+
+1. **The index proposes.** The in-memory index a scan built holds each file's text, so a case-insensitive substring pass over it picks out the files that could answer the query. This pass touches no disk and asks no permission question. It decides *which files to open* and nothing else.
+2. **The file decides.** Each candidate is read from disk, its whole-file directive is resolved through `resolveFileVisibility`, its inline `@@@` blocks are filtered through `filterForbiddenSegments`, and only the text that survives is matched, ranked and quoted. Headings, their occurrence numbers and every snippet come out of that filtered text.
+
+Because the second pass reads the file, an index that has gone stale can cost a candidate that turns out to match nothing, or a candidate it failed to propose. It cannot disclose anything: a file restricted since the last scan is proposed and then refused, and a file whose text has changed is proposed and then contributes nothing. Neither outcome is distinguishable from a file that simply does not match — which is also what a file the session may not see looks like.
+
+What follows from that, and what `test/checks/search.js` holds the code to:
+
+- Nothing in the search restates a permission rule. It reaches `resolveFileVisibility` and `hasSomeRoles`, the same two the rendered page reaches.
+- A match is never reported across the place a hidden block was removed. The filter hands back the surviving passages as a list, and matching runs inside each of them, so the two sides of a removal are never in one string to begin with.
+- An answer carries its results and nothing else — no total taken before filtering, no "N more", no marker where something was withheld. The difference between such a number and what is shown would measure the hidden corpus.
+- No completion, suggestion or correction is offered. A vocabulary assembled over the corpus is exactly what must not reach a reader.
+- A query below `minimumQueryLength` (three characters) is refused, and the field waits `searchDebounceMs` (250 ms) after a keystroke before issuing one. Both are in `obsidian.js`, with the measurement against the production corpus that settled them: together they bound how fast a reader can probe.
+
+Following a result opens the **page view**, whatever view the reader was in — the print and presentation renderings display the same Markdown source and are not separate search targets. A result that is expanded to its headings links to one of them by carrying `?heading=…&occurrence=…`, the heading's text and which occurrence of that text it is, counted over the content that session is served. It is not an anchor: `makeContentMap` gives every heading a fresh `uuid` on every render, so a heading's `id` means nothing outside the render that produced it. `window.safeLearnJumpToHeading` counts the same way over the rendered page and scrolls, and it runs immediately after `window.safeLearnRestorePosition` in `revealPage()` — after the reveal and in the same task, because a hidden body has no scroll height. A target that is not found is a silent no-op, which is what makes a hand-written one useless for probing.

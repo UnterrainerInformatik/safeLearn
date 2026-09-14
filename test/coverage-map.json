@@ -45,7 +45,9 @@
         "md/test-fileperms-teachers.md",
         "md/test-fileperms-4bhif-5bhif-2ahif.md",
         "md/test-fileperms-window-closed.md",
-        "md/test-md-file.md"
+        "md/test-md-file.md",
+        "md/test-search-teacher-file.md",
+        "md/test-search-staleness-restricted.md"
       ]
     },
     "test/checks/views.js": {
@@ -133,6 +135,25 @@
         "test/harness.js"
       ],
       "corpus": []
+    },
+    "test/checks/search.js": {
+      "what": "What a search may return and what it may never reveal: that a term occurring only in a file whose first line restricts it, only in a restricted block, only in a block addressed to another person by name, or only across the seam a removed block leaves behind, comes back as nothing - and as the same nothing a term that is in no file at all comes back as. That the joined document really does contain the seam term, so the seam check is about a seam. That the same session running the same query before and after the teacher/student toggle sees its results change exactly as the rendered page does. That a file restricted after the last scan is not returned and one relaxed after it is, driven by editing the corpus while the application runs. That an answer carries the results and nothing else - no total, no mark for what was left out - and that every occurrence it reports is an occurrence the session can count on the page it is served. That following a result lands on its heading, that a repeated heading lands on the occurrence the search found, and that a hand-written target naming a heading the session may not see leaves the page at its top. That a query below the minimum length is refused, that a request carrying no session is refused, that matching is substring and case-insensitive, that a name or heading match outranks a body match, and that a whole query costs the identity provider at most one account lookup.",
+      "guards": [
+        "obsidian.js",
+        "app.js",
+        "obsidian-page.js",
+        "css/search.css",
+        "utils.js",
+        "permission-context.js",
+        "test/harness.js"
+      ],
+      "corpus": [
+        "md/test-search-blocks.md",
+        "md/test-search-teacher-file.md",
+        "md/test-search-jump.md",
+        "md/test-search-staleness-open.md",
+        "md/test-search-staleness-restricted.md"
+      ]
     },
     "test/directive-grammar.test.js": {
       "what": "What a permission directive means, entry by entry: a table of edge-case directive lines read by parseFirstLineForPermissions, covering the permissive cases of parseLocalDateTime that a hand-written mirror gets wrong. It is the oracle the companion plugin's own grammar is held against - the plugin's parseDirectiveEntries reads the same table and has to reach the same conclusion per entry, so a divergence fails here rather than misinforming a person writing a document. Needs no browser, no login and no server; it does need the plugin checkout the AI/plugin symlink points at.",

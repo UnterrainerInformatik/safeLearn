@@ -102,7 +102,7 @@ const DOMPurify = createDOMPurify(window);
 const app = express();
 app.set("trust proxy", true);
 
-import { scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions, wrapAsDocument, resolveFileVisibility, registerVisibilityChangeCallback } from "./obsidian.js";
+import { scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions, wrapAsDocument, resolveFileVisibility, registerVisibilityChangeCallback, searchCorpus, minimumQueryLength } from "./obsidian.js";
 
 import chokidar from "chokidar";
 
@@ -509,6 +509,46 @@ initKeycloak(app).then(() => {
     checkAuthenticated,
     express.static(path.join(__dirname, "node_modules", "reveal.js", "plugin", "notes"))
   );
+
+  /**
+   * What this session may be told about a query over the corpus.
+   *
+   * Beside the content routes and gated exactly as they are: `checkAuthenticated`
+   * refuses a request without a session before anything here runs, so an
+   * unauthenticated search is refused the way an unauthenticated page is. Every
+   * query is authorized afresh - the answer is derived from this request's own
+   * permission context, so a view preference changed between two keystrokes
+   * takes effect on the second.
+   *
+   * The answer is the list of results and nothing else. There is no total, no
+   * count taken before filtering and no sign that anything was left out: the
+   * difference between such a number and what is displayed would measure the part
+   * of the corpus this session may not see. `corpus-search` states that rule; it
+   * is kept here by having nothing else to send.
+   *
+   * A query shorter than the minimum is refused rather than answered, because a
+   * one- or two-character query returns most of the corpus whatever it says and
+   * is the cheapest probe there is. `minimumQueryLength` in `obsidian.js` carries
+   * the measurement that settled it, together with the debounce the field waits.
+   */
+  app.get("/search", checkAuthenticated, (req, res) => {
+    const query = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    if (query.length < minimumQueryLength) {
+      res.status(400).json({
+        error: `A search needs at least ${minimumQueryLength} characters.`,
+      });
+      return;
+    }
+
+    searchCorpus(req, query)
+      .then((answer) => {
+        res.json({ results: answer.results });
+      })
+      .catch((error) => {
+        console.error(`Search failed: ${error}`);
+        res.status(500).json({ error: "The search could not be answered." });
+      });
+  });
 
   // Convert markdown to HTML using marked.
   app.get("/convert", checkAuthenticated, (req, res) => {
