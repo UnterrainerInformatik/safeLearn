@@ -41,7 +41,7 @@
 - [x] 6.3 Widen the existing fallback-chain assertion past `css/` to the two inline declarations `applyAttributes()` writes, which it cannot reach today. Verify it fails when either is written without its generic.
 - [x] 6.4 Add the Lato italics to the stylesheet-only font references in `test/checks/deployment-surface.js`, beside the three upright Lato files already listed.
 - [x] 6.5 Update `test/coverage-map.json` for what the legibility check now guards, including the two font directories.
-- [ ] 6.6 Run `npm test` and confirm the suite passes, `test/coverage.test.js` included.
+- [x] 6.6 Run `npm test` and confirm the suite passes, `test/coverage.test.js` included.
 
 ## 7. Write it down
 
@@ -53,4 +53,4 @@
 
 - [x] 8.1 Verify in a browser, in both themes: a heading, a bold run, an italic run, a bold-italic run, and one of the typefaces that keeps its synthesised italic — so the exception is seen rather than assumed.
 - [x] 8.2 Confirm a reader with an existing stored preference still reads in the font they chose, against a real account rather than a fresh one.
-- [ ] 8.3 Sync to secureLectures in the established order: push safeLearn, then merge and push `public`/`master` there.
+- [x] 8.3 Sync to secureLectures in the established order: push safeLearn, then merge and push `public`/`master` there.
