@@ -134,11 +134,34 @@ export const preferenceBaseline = Object.freeze({
   ve: 0,
 });
 
-/** The views the same Markdown source is served in, and how each is addressed. */
+/**
+ * The views the same Markdown source is served in, how each is addressed, and
+ * what shows it.
+ *
+ * All three are served `<body style="display: none">` and stay that way until
+ * something clears it. `shownBy` names that something: the two page views wait
+ * for the session's preferences and are shown by `revealPage()` in
+ * `obsidian-page.js`; a deck loads none of that and is shown by the script at
+ * the end of its own body, once Reveal reports ready. The name is for the
+ * failure `render()` raises when a view is never shown — the fact it waits on is
+ * the same for all three, the owner that writes it is not.
+ */
 const views = {
-  page: { query: null, root: "#markdown-content" },
-  presentation: { query: "reveal=true", root: "#revealContent" },
-  document: { query: "document=true", root: "#markdown-content" },
+  page: {
+    query: null,
+    root: "#markdown-content",
+    shownBy: "revealPage() in obsidian-page.js, when the session's preferences arrive",
+  },
+  presentation: {
+    query: "reveal=true",
+    root: "#revealContent",
+    shownBy: "the deck's own reveal script, when Reveal reports ready",
+  },
+  document: {
+    query: "document=true",
+    root: "#markdown-content",
+    shownBy: "revealPage() in obsidian-page.js, when the session's preferences arrive",
+  },
 };
 
 // ################### Application lifecycle ###################
@@ -821,11 +844,30 @@ function encodeSegments(rawPath) {
 
 /**
  * Navigates the session to `pagePath` in `view` and returns once the application
- * has rendered it.
+ * has shown it.
+ *
+ * Shown, and not merely rendered: every view is served hidden, and a hidden
+ * element has no box, so until its owner clears that a check can neither click
+ * an element of the page, type into one, nor measure one. The content appears in
+ * the DOM well before that happens, so a caller handed the page at that point
+ * races the owner — and a check that clicks then passes or fails according to
+ * which of the two answered first. The wait is here so that no caller repeats
+ * it, and so that no caller can forget to.
+ *
+ * Every view is waited on, each through its own owner — `views[view].shownBy`
+ * names it. What is observed is the one fact all of them write, the body no
+ * longer being hidden, rather than the value any one of them writes: whether the
+ * page is shown is this function's question, and which value said so is
+ * `presentation.js`'s.
+ *
+ * The wait is bounded by `navigationTimeoutMs`, nine times the bound the
+ * application puts on its own hidden period. Both owners show their view when
+ * that bound expires, even without what they were waiting for, so a page that is
+ * going to be shown at all is shown long before this gives up.
  *
  * Fails — rather than returning an empty result a check could mistake for an
- * empty page — when the application redirects somewhere else instead, or when
- * the view's content never appears.
+ * empty page — when the application redirects somewhere else instead, when the
+ * view's content never appears, or when it appears and is never shown.
  */
 export async function render(session, pagePath, { view = "page" } = {}) {
   const requested = views[view];
@@ -860,6 +902,20 @@ export async function render(session, pagePath, { view = "page" } = {}) {
     throw new Error(
       `${pagePath} as a ${view} never showed its content for the ${session.role} session: ` +
         `${requested.root} did not appear. The page ended up at ${session.page.url()}.`
+    );
+  }
+
+  try {
+    await session.page.waitForFunction(() => document.body.style.display !== "none", {
+      timeout: navigationTimeoutMs,
+    });
+  } catch {
+    throw new Error(
+      `${pagePath} as a ${view} rendered but was never shown for the ${session.role} session: ` +
+        `${requested.root} appeared, but the body stayed hidden for ${navigationTimeoutMs} ms. ` +
+        `This view is shown by ${requested.shownBy}. ` +
+        `Every element on it measures zero by zero until then, so a check would find them ` +
+        `unclickable. The page ended up at ${session.page.url()}.`
     );
   }
 

@@ -515,7 +515,8 @@ describe("legibility", () => {
   });
 
   /**
-   * Puts the session on the corpus page and waits until its owner has shown it.
+   * Puts the session on the corpus page. `render` hands back a page its owner
+   * has shown, which is what these checks measure against.
    *
    * `preferences` is written with the rest of the block rather than before it:
    * `setPreferences` sends the whole baseline every time, so a preference set in
@@ -524,11 +525,7 @@ describe("legibility", () => {
   async function showCorpus({ dark = false, width = null, preferences = {} } = {}) {
     if (width) await session.page.setViewport({ width, height: 900 });
     await setPreferences(session, { fs: readerSize, dm: dark ? 1 : 0, ...preferences });
-    const rendered = await render(session, corpusPath);
-    await session.page.waitForFunction(() => document.body.style.display === "", {
-      timeout: 30000,
-    });
-    return rendered;
+    return render(session, corpusPath);
   }
 
   // ---- Nothing softens the glyphs ----
@@ -1046,7 +1043,6 @@ describe("legibility", () => {
     const larger = 24;
     await setPreferences(session, { fs: larger, dm: 0 });
     await render(session, corpusPath);
-    await session.page.waitForFunction(() => document.body.style.display === "", { timeout: 30000 });
 
     const sizes = await session.page.evaluate(() => ({
       block: parseFloat(
