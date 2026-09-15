@@ -477,30 +477,173 @@ function makeSafeForCSS(name) {
 }
 
 /**
- * The name a file in one of the font directories is offered under, or `null`
- * when it is not one of the fonts the picker offers.
+ * What each typeface this deployment ships is, where its filename cannot say it.
  *
- * The picker lists one entry per family and the preference stores the user's
- * choice as an index into that list, so what lands here decides what an already
- * stored preference points at. Two kinds of file are passed over:
+ * Two facts about a shipped typeface do not follow from the files in its
+ * directory. Which generic family it belongs to — a declaration naming it has to
+ * end somewhere when the file does not arrive, and ending a serif at `sans-serif`
+ * lands the text on the wrong kind of shape. And whether a missing cut is
+ * upstream's doing or ours — without that, a family whose italic nobody drew is
+ * indistinguishable from one whose italic was simply not shipped.
  *
- * - anything that is not a `.ttf`: the licence text that ships beside a font is
- *   not a font.
- * - a weight variant, written as the family followed by `-` and its numeric
- *   weight (`Lato-300.ttf`). Those are there for a stylesheet that asks for the
- *   family and the weight — `css/reveal-theme-moon.css` does, over the same
- *   files — and offering them would list one family three times and move every
- *   preference stored behind it.
+ * `noItalic` is therefore a statement about the release, not about the
+ * directory: it says the upstream project draws no italic for this typeface, so
+ * a page setting italic there falls to the browser's slant because that is the
+ * only thing there is. Every typeface `scanFonts` finds has a row here, and
+ * `test/checks/legibility.js` reads the column to know which absent italic is
+ * expected.
  *
- * `OpenDyslexic3-Regular.ttf` is a family and not a variant: what marks a
- * variant is the number.
+ * `cutsFromAnotherBuild` is the other kind of thing a check must not mistake for
+ * a mistake: the family's cuts and its regular come from different releases of
+ * the typeface, because no one release publishes both. The value says what was
+ * accepted in taking them, and `assets/main-fonts/SOURCES.md` says why. It is
+ * not a licence to mix releases — it is the one case where mixing was the only
+ * way to have a bold at all.
  */
-function pickerFontName(file) {
-  const extension = path.extname(file);
-  if (extension.toLowerCase() !== ".ttf") return null;
-  const name = path.basename(file, extension);
-  if (/-\d{3}$/.test(name)) return null;
-  return name;
+export const typefaces = {
+  "EB Garamond": { generic: "serif" },
+  FiraCode: { generic: "monospace", noItalic: true },
+  Inter: { generic: "sans-serif" },
+  Lato: { generic: "sans-serif" },
+  Montserrat: { generic: "sans-serif" },
+  NotoSans: { generic: "sans-serif" },
+  "NotoSans Condensed": { generic: "sans-serif" },
+  "Open Sans": { generic: "sans-serif" },
+  "OpenDyslexic3-Regular": {
+    generic: "sans-serif",
+    cutsFromAnotherBuild:
+      "OpenDyslexic 0.920, which is the only release still publishing cuts for " +
+      "this typeface. Its bold is drawn at OS/2 weight 800 rather than 700, and " +
+      "its faces sit on a taller descender and a shorter ascender than the " +
+      "regular shipped here (1300/-520 against 1556/-426), so a line of bold " +
+      "occupies a different box from the line of prose above it.",
+  },
+  Oswald: { generic: "sans-serif", noItalic: true },
+  "PT Sans Narrow": { generic: "sans-serif", noItalic: true },
+  "Ubuntu Mono": { generic: "monospace" },
+};
+
+/** The generic family to end a chain naming `typeface` in. */
+export function genericOf(typeface) {
+  return typefaces[typeface]?.generic || "sans-serif";
+}
+
+/**
+ * The weights a rendered page can ask for, and therefore the ones a shipped
+ * typeface is composed out of: 400 is what prose is set in and 700 is what a
+ * heading, a table header and a `strong` resolve to. A file at any other weight
+ * is there for a stylesheet that names the family and the weight itself —
+ * `css/reveal-theme-moon.css` does, over `Lato-300.ttf` and `Lato-300italic.ttf`
+ * — and joining it to the family the page composes would offer the browser a
+ * face nothing on the page selects.
+ */
+const composedWeights = new Set([400, 700]);
+
+/** The key a cut is held under, and the form `getFontImports()` emits it in. */
+function cutKey(weight, style) {
+  return `${weight}${style}`;
+}
+
+/**
+ * The font containers this deployment serves, by extension: the `format()` an
+ * `@font-face` names them with, and the order a browser should be offered them
+ * in — smallest first, so a browser that understands `woff2` never fetches the
+ * `.ttf` beside it.
+ *
+ * Everything shipped today is `.ttf`, and `.otf` arrived with the one family
+ * whose cuts exist in no other container. The two web formats are here so that
+ * converting the payload — which is worth its own change, and would cut it to
+ * roughly a quarter — is a matter of putting files in these directories rather
+ * than of teaching this file what they are.
+ */
+const fontFormats = {
+  ".woff2": { format: "woff2", preference: 0 },
+  ".woff": { format: "woff", preference: 1 },
+  ".otf": { format: "opentype", preference: 2 },
+  ".ttf": { format: "truetype", preference: 3 },
+};
+
+/**
+ * The typeface a file in one of the font directories belongs to, together with
+ * the cut it is — or `null` when it is not a font at all.
+ *
+ * The filename carries the cut, so the emission is derived from the directory
+ * rather than declared beside it: a file that is added is emitted, and a file
+ * that is missing cannot be claimed. `<Name>.ttf` is the regular, and a cut is
+ * the name followed by `-` and its numeric weight, `italic`, or both:
+ *
+ *   Inter.ttf            → Inter, 400 upright
+ *   Inter-700.ttf        → Inter, 700 upright
+ *   Inter-italic.ttf     → Inter, 400 italic
+ *   Inter-700italic.ttf  → Inter, 700 italic
+ *   Lato-300.ttf         → Lato, 300 upright
+ *
+ * The extension decides the container and nothing else — the same cut may arrive
+ * as `.ttf`, `.otf`, `.woff` or `.woff2`, and the ones that do are offered
+ * together. A file whose extension is none of those is not a font: the licence
+ * text that ships beside one is not, and neither is `SOURCES.md`.
+ *
+ * `OpenDyslexic3-Regular.ttf` is a typeface and not a cut, and its bold is
+ * `OpenDyslexic3-Regular-700.otf`: what marks a cut is the number or the word
+ * `italic`, not the hyphen, and the container it arrives in is its own business.
+ */
+function parseFontFile(file) {
+  const extension = path.extname(file).toLowerCase();
+  const container = fontFormats[extension];
+  if (!container) return null;
+  const name = path.basename(file, path.extname(file));
+  const cut = /^(.+)-(?:(\d{3})(italic)?|(italic))$/.exec(name);
+  if (!cut) return { typeface: name, weight: 400, style: "normal", container };
+  return {
+    typeface: cut[1],
+    weight: cut[2] ? Number(cut[2]) : 400,
+    style: cut[3] || cut[4] ? "italic" : "normal",
+    container,
+  };
+}
+
+/**
+ * Files the emission composes a family out of, by typeface, in the form
+ * `getFontImports()` reads them:
+ * `{ "400normal": [{ path, format, preference }, …], … }`.
+ *
+ * A cut is a list rather than a path because one cut may ship in more than one
+ * container, and `@font-face` takes them all in one `src`: the browser walks it
+ * and fetches the first it understands. Kept sorted so that walk finds the
+ * smallest first.
+ *
+ * The picker offers a typeface only once its regular has been seen, so a
+ * directory holding a bold whose regular is absent offers nothing rather than an
+ * entry whose prose has no face. That is also what fills `<array>` below, which
+ * is why the array is filled at the end of a scan rather than as files arrive.
+ */
+function recordFont(registry, typeface, weight, style, container, filePath) {
+  if (!composedWeights.has(weight)) return;
+  const cuts = registry[typeface] || (registry[typeface] = {});
+  const key = cutKey(weight, style);
+  const sources = cuts[key] || (cuts[key] = []);
+  // A rescan walks the same directory again; the same file is the same source.
+  if (sources.some((source) => source.path === filePath)) return;
+  sources.push({ path: filePath, ...container });
+  sources.sort((a, b) => a.preference - b.preference);
+}
+
+/**
+ * Fills a font array from the registry that was just scanned: the typefaces that
+ * have a regular, by name.
+ *
+ * Sorted, because a reader's picker should offer the same fonts in the same
+ * order on every machine this is deployed to. `fs.readdirSync` answers in
+ * whatever order the filesystem keeps the directory in, which differs between an
+ * image layer and a working tree and can change when a file is added.
+ */
+function fillFontArray(registry, array) {
+  array.length = 0;
+  array.push(
+    ...Object.keys(registry)
+      .filter((typeface) => registry[typeface][cutKey(400, "normal")])
+      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+  );
 }
 
 export async function scanFonts(dir, root = dir) {
@@ -531,20 +674,26 @@ export async function scanFonts(dir, root = dir) {
           const fileName = path.basename(file);
           const relativePath = path.relative(root, filePath);
           const p = relativePath.replace(/\\/g, "/");
-          const fontName = pickerFontName(file);
-          if (fontName && p.startsWith("main-fonts/")) {
-            mainFonts[fontName] = "assets/" + p;
-            mainFontsArray.push(fontName);
+          const cut = parseFontFile(file);
+          if (cut && p.startsWith("main-fonts/")) {
+            recordFont(mainFonts, cut.typeface, cut.weight, cut.style, cut.container, "assets/" + p);
           }
-          if (fontName && p.startsWith("nav-fonts/")) {
-            navFonts[fontName] = "assets/" + p;
-            navFontsArray.push(fontName);
+          if (cut && p.startsWith("nav-fonts/")) {
+            recordFont(navFonts, cut.typeface, cut.weight, cut.style, cut.container, "assets/" + p);
           }
         }
       }
     } catch (err) {
       console.error(`Error reading file while scanning fonts ${file}`, err);
     }
+  }
+
+  // The outermost call, once every subdirectory has been walked: the offered
+  // order is decided here rather than as files arrive, because it is a property
+  // of the whole directory and not of the order it was enumerated in.
+  if (dir === root) {
+    fillFontArray(mainFonts, mainFontsArray);
+    fillFontArray(navFonts, navFontsArray);
   }
 }
 
@@ -786,20 +935,26 @@ function scanFilesInternal(dir, root = dir) {
           } else {
             filesMap[fileName] = [p];
           }
-          const fontName = pickerFontName(file);
-          if (fontName && p.startsWith("assets/main-fonts/")) {
-            mainFonts[fontName] = p;
-            mainFontsArray.push(fontName);
+          const cut = parseFontFile(file);
+          if (cut && p.startsWith("assets/main-fonts/")) {
+            recordFont(mainFonts, cut.typeface, cut.weight, cut.style, cut.container, p);
           }
-          if (fontName && p.startsWith("assets/nav-fonts/")) {
-            navFonts[fontName] = p;
-            navFontsArray.push(fontName);
+          if (cut && p.startsWith("assets/nav-fonts/")) {
+            recordFont(navFonts, cut.typeface, cut.weight, cut.style, cut.container, p);
           }
         }
       }
     } catch (err) {
       console.error(`Error reading file ${file}`, err);
     }
+  }
+
+  // As in `scanFonts`, and for the same reason: the offered order belongs to the
+  // whole directory, so it is settled once the walk is over. The two scans reach
+  // the same files by different paths and must leave the same structures behind.
+  if (dir === root) {
+    fillFontArray(mainFonts, mainFontsArray);
+    fillFontArray(navFonts, navFontsArray);
   }
 }
 
@@ -1996,49 +2151,72 @@ function getContentListing() {
   return list.join("<br>");
 }
 
+/**
+ * Every face this deployment ships, as one `@font-face` per cut.
+ *
+ * All cuts of a typeface share one family name and differ only in their
+ * descriptors, which is what lets the browser select between them: four faces
+ * under `"main Inter"` rather than four families under four names. A page
+ * setting a heading then gets the 700 Inter somebody drew instead of the 400
+ * smeared outward, and an emphasised word gets the italic instead of the upright
+ * sheared.
+ *
+ * The regular carries `font-weight: 400; font-style: normal` explicitly although
+ * those are the defaults. Stating them changes nothing on its own — it is what
+ * stops the browser from treating the regular as a candidate for a 700 request
+ * once a 700 face stands beside it.
+ *
+ * A declared face is not fetched until something on the page selects it, so the
+ * size of this block is not a page's download: a page that sets no italic never
+ * requests one.
+ */
 function getFontImports() {
-  let result = "";
-  for (const font in navFonts) {
-    const f = navFonts[font];
-    result += `
+  const faces = (prefix, registry) => {
+    let result = "";
+    for (const typeface of Object.keys(registry).sort()) {
+      const cuts = registry[typeface];
+      for (const key of Object.keys(cuts).sort()) {
+        const [, weight, style] = /^(\d+)(normal|italic)$/.exec(key);
+        // Every container this cut arrived in, smallest first. The browser takes
+        // the first it understands and fetches nothing else.
+        const src = cuts[key]
+          .map((source) => `url(/${source.path.replaceAll(" ", "\\ ")}) format("${source.format}")`)
+          .join(", ");
+        result += `
         @font-face {
-          font-family: "nav ${font}";
-          src: url(/${f.replaceAll(" ", "\\ ")}) format("truetype");
+          font-family: "${prefix} ${typeface}";
+          font-weight: ${weight};
+          font-style: ${style};
+          src: ${src};
         }
       `;
-  }
-  for (const font in mainFonts) {
-    const f = mainFonts[font];
-    result += `
-        @font-face {
-          font-family: "main ${font}";
-          src: url(/${f.replaceAll(" ", "\\ ")}) format("truetype");
-        }
-      `;
-  }
-  return result;
+      }
+    }
+    return result;
+  };
+  return faces("nav", navFonts) + faces("main", mainFonts);
+}
+
+/**
+ * The picker's options, valued by typeface name rather than by position.
+ *
+ * A position is what the preference used to store, and it is only as stable as
+ * the order the array was filled in: adding a file could move the entries
+ * already in it and silently change the font every reader had chosen. The name
+ * denotes the same typeface however the list is sorted or how many files arrive.
+ */
+function getFontsSelection(fontsArray) {
+  return fontsArray
+    .map((font) => `<option value="${font}">${font}</option>`)
+    .join("\n    ");
 }
 
 function getNavFontsSelection() {
-  let result = "";
-  let c = 0;
-  for (const font of navFontsArray) {
-    result += `<option value="${c}">${font}</option>
-    `;
-    c++;
-  }
-  return result;
+  return getFontsSelection(navFontsArray);
 }
 
 function getMainFontsSelection() {
-  let result = "";
-  let c = 0;
-  for (const font of mainFontsArray) {
-    result += `<option value="${c}">${font}</option>
-    `;
-    c++;
-  }
-  return result;
+  return getFontsSelection(mainFontsArray);
 }
 
 async function getTopdownMenu(req) {
@@ -2529,7 +2707,7 @@ export async function wrapInPage(html, startPage, req) {
         <script lang="javascript">
         initFonts('${JSON.stringify(mainFontsArray)}', '${JSON.stringify(
     navFontsArray
-  )}');
+  )}', '${JSON.stringify(typefaces)}');
         init();
         </script>
         ${openNavTreeScript}
@@ -2567,7 +2745,7 @@ export async function wrapAsDocument(html, req) {
         <script lang="javascript">
         initFonts('${JSON.stringify(mainFontsArray)}', '${JSON.stringify(
     navFontsArray
-  )}');
+  )}', '${JSON.stringify(typefaces)}');
         init();
         </script>
       </body>

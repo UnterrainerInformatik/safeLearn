@@ -113,9 +113,17 @@ function hostKind(host) {
  * `sl: 0` keeps `/` from resolving to the shared account's `lastVisitedUrl`.
  * `vt: 1` is the teacher view; `vt == 0` is what downgrades a teacher to a
  * student.
+ *
+ * `tf`/`ntf` are the reader's two font choices by name and `t`/`nt` the
+ * positions they used to be stored as. Both are stated, and they agree: 2 and 1
+ * were Inter in the two directories on the day the enumeration order was
+ * captured. A check that wants the migration path instead passes `tf: undefined`
+ * and leaves the number to speak for itself.
  */
 export const preferenceBaseline = Object.freeze({
   fs: 18,
+  tf: "Inter",
+  ntf: "Inter",
   t: 2,
   nt: 1,
   s: 1.6,
@@ -778,13 +786,20 @@ export async function setPreferences(session, values = {}) {
   // against the block the application is actually reading.
   await session.page.reload({ waitUntil: "domcontentloaded" });
 
+  // A preference is a number or a name. Numbers are compared as numbers, because
+  // the page may hand back "18" for 18; anything else is compared as it stands.
+  // Not `Number(a) !== Number(b)` for both: `Number("Inter")` is NaN, and NaN
+  // matches nothing, so a font stored by name would never be seen to arrive.
+  const differs = (got, wantedValue) => {
+    if (typeof wantedValue === "number") return Number(got) !== wantedValue;
+    return String(got) !== String(wantedValue);
+  };
+
   let effective = null;
   let mismatch = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     effective = await effectivePreferences(session);
-    mismatch = Object.entries(wanted).find(
-      ([key, value]) => Number(effective?.[key]) !== Number(value)
-    );
+    mismatch = Object.entries(wanted).find(([key, value]) => differs(effective?.[key], value));
     if (!mismatch) return wanted;
     await delay(250);
   }

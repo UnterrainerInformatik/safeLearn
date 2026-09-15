@@ -83,12 +83,21 @@ const published = [
   { reference: "/node_modules/reveal.js/dist/reset.css", type: /css/i },
   { reference: "/node_modules/reveal.js/dist/theme/fonts/league-gothic/league-gothic.css", type: /css/i },
   { reference: "/node_modules/reveal.js/plugin/notes/notes.js", type: /javascript|ecmascript/i },
-  // The three weights of Lato the derived theme declares. Addressed from that
-  // stylesheet and from nowhere in any markup, so a page that lost them would
-  // render in a fallback font without anything else here noticing.
+  // The six faces of Lato the derived theme declares — three weights and the
+  // italic of each. Addressed from that stylesheet and from nowhere in any
+  // markup, so a page that lost them would render in a fallback font without
+  // anything else here noticing.
+  //
+  // The 300s are the theme's alone: `.reveal` sets font-weight 300, so a deck's
+  // emphasis, blockquote and `q` resolve to 300 italic. The page view never asks
+  // for that weight, and getFontImports() composes a family out of 400 and 700
+  // only, so nothing but this list would notice either file going missing.
   { reference: "/assets/main-fonts/Lato.ttf", type: /font|ttf|octet-stream/i },
   { reference: "/assets/main-fonts/Lato-300.ttf", type: /font|ttf|octet-stream/i },
   { reference: "/assets/main-fonts/Lato-700.ttf", type: /font|ttf|octet-stream/i },
+  { reference: "/assets/main-fonts/Lato-italic.ttf", type: /font|ttf|octet-stream/i },
+  { reference: "/assets/main-fonts/Lato-300italic.ttf", type: /font|ttf|octet-stream/i },
+  { reference: "/assets/main-fonts/Lato-700italic.ttf", type: /font|ttf|octet-stream/i },
 ];
 
 /**

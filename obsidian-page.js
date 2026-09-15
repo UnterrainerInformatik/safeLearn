@@ -692,9 +692,108 @@ let mainFontsArray = [];
 
 let navFontsArray = [];
 
-function initFonts(mainFonts, navFonts) {
+/**
+ * What each shipped typeface is, as `obsidian.js`'s `typefaces` records it, by
+ * typeface name. Read here for one column of it — the generic family a chain
+ * naming that typeface ends in, a serif behind a serif and a monospace behind a
+ * monospace — because the two declarations below are inline styles and no
+ * stylesheet can reach them. The rest of a row is for the checks.
+ */
+let typefaceTable = {};
+
+/**
+ * The order the deployment enumerated its two font directories in before this
+ * page stored a reader's choice by name, captured from the `initFonts(...)` call
+ * of the running safeLearn and secureLectures instances on 2026-09-15. Both
+ * enumerated identically, so one constant serves both.
+ *
+ * It exists for one purpose: turning a stored number into the typeface it
+ * denoted. A preference used to be a position in an array filled in
+ * `fs.readdirSync()` order, and that array is now sorted — so the number a
+ * reader has stored means something different than it did, and there is nothing
+ * left on disk to recover it from. `NotoSans` and `NotoSans Condensed` trade
+ * places under the sort, which is the whole of the damage and enough of it.
+ *
+ * Dead weight once every stored value has turned over: a reader who changes any
+ * preference is written back carrying `tf`/`ntf`, and from then on this is never
+ * read for them. Removable in a later change, together with the two numeric keys.
+ */
+const LEGACY_FONT_ORDER = {
+  main: [
+    "EB Garamond",
+    "FiraCode",
+    "Inter",
+    "Lato",
+    "Montserrat",
+    "NotoSans Condensed",
+    "NotoSans",
+    "Open Sans",
+    "OpenDyslexic3-Regular",
+    "Oswald",
+    "Ubuntu Mono",
+  ],
+  nav: [
+    "FiraCode",
+    "Inter",
+    "Lato",
+    "NotoSans Condensed",
+    "NotoSans",
+    "OpenDyslexic3-Regular",
+    "Oswald",
+    "PT Sans Narrow",
+  ],
+};
+
+function initFonts(mainFonts, navFonts, table) {
   mainFontsArray = JSON.parse(mainFonts);
   navFontsArray = JSON.parse(navFonts);
+  typefaceTable = table ? JSON.parse(table) : {};
+}
+
+/**
+ * The typeface a stored preference denotes, as a name.
+ *
+ * `name` is what the reader chose, and it is preferred whenever the deployment
+ * still offers it. `index` is the same choice as this page used to store it —
+ * read only when there is no name, and only through `legacyOrder`, never as a
+ * position in the sorted array it would now mean something else in.
+ *
+ * Anything that lands nowhere falls to the first offered typeface, which is what
+ * the index path did on its own when the array had shrunk: a page in the
+ * deployment's first font is a page, and a page in no font is the browser's
+ * default, typically a serif where a sans was meant.
+ */
+function chosenTypeface(name, index, offered, legacyOrder) {
+  if (typeof name === "string" && offered.includes(name)) return name;
+  if (typeof name !== "string" && Number.isInteger(index)) {
+    const migrated = legacyOrder[index];
+    if (offered.includes(migrated)) return migrated;
+  }
+  return offered[0];
+}
+
+/** The reader's main typeface, by name. */
+function chosenMainTypeface() {
+  return chosenTypeface(attributes.tf, attributes.t, mainFontsArray, LEGACY_FONT_ORDER.main);
+}
+
+/** The reader's navigation typeface, by name. */
+function chosenNavTypeface() {
+  return chosenTypeface(attributes.ntf, attributes.nt, navFontsArray, LEGACY_FONT_ORDER.nav);
+}
+
+/**
+ * The value written into an inline `font-family`: the family `getFontImports()`
+ * declared for that typeface, with the generic it belongs to behind it.
+ *
+ * An inline style beats every stylesheet rule, so nothing in `css/` can supply a
+ * fallback for these two declarations. Without the generic, a font file that
+ * does not arrive drops the text onto whatever the browser defaults to — which
+ * differs from reader to reader and is typically a serif where a sans was meant.
+ */
+function fontFamilyChain(prefix, typeface) {
+  const generic = typefaceTable[typeface]?.generic || "sans-serif";
+  return `"${prefix} ${typeface}", ${generic}`;
 }
 
 async function getUserAttributes() {
@@ -726,8 +825,20 @@ async function setUserAttributes(attributesObject) {
     location.reload();
   }
 }
+/**
+ * Persists one preference, and carries the reader's two font choices over to
+ * their names while it is there.
+ *
+ * Whatever the save was for: a reader who came in with only the numeric `t`/`nt`
+ * leaves with `tf`/`ntf` beside them, so `LEGACY_FONT_ORDER` is read once per
+ * reader and then never again. The numbers are left where they are rather than
+ * removed — they are what a rollback of this change would read, and they cost a
+ * few bytes of an attribute nobody is short of.
+ */
 async function setParam(key, value) {
   attributes[key] = value;
+  attributes.tf = chosenMainTypeface();
+  attributes.ntf = chosenNavTypeface();
   await setUserAttributes(attributes);
   applyAttributes();
 }
@@ -803,8 +914,21 @@ function init() {
       : {};
     attributes = {
       fs: a.fs || 18,
-      t: a.t || 2,
-      nt: a.nt || 1,
+      // The reader's font choice, by name, and the position it used to be
+      // stored as. The name wins where there is one; the number is read through
+      // LEGACY_FONT_ORDER for a reader who has not saved anything since, and its
+      // defaults are what a reader who has never chosen a font still gets — 2
+      // and 1 were Inter in both directories on the day the order was captured.
+      tf: a.tf,
+      ntf: a.ntf,
+      // `??` and not `||`: 0 is a position, and the first entry of either
+      // directory is the one it addresses. Read with `||` a stored 0 was
+      // indistinguishable from nothing stored, so a reader who picked the first
+      // font in the picker saw it until they reloaded and Inter afterwards. It
+      // matters here beyond the old bug: a number is migrated to a name once,
+      // and a wrong reading would be written back as the reader's settled choice.
+      t: a.t ?? 2,
+      nt: a.nt ?? 1,
       s: a.s || 1.6,
       dm: a.dm || 0,
       sl: a.sl || 1,
@@ -839,13 +963,13 @@ function applyAttributes() {
       }
     });
   }
+  const mainTypeface = chosenMainTypeface();
+  const navTypeface = chosenNavTypeface();
+
   const mainContent = document.getElementById("markdown-content");
   if (mainContent) {
     mainContent.style.fontSize = attributes.fs + "px";
-    let index = attributes.t;
-    if (mainFontsArray.length <= index) index = 0;
-    let font = mainFontsArray[index];
-    mainContent.style.fontFamily = "main " + font;
+    mainContent.style.fontFamily = fontFamilyChain("main", mainTypeface);
     mainContent.style.lineHeight = attributes.s;
   }
 
@@ -867,21 +991,19 @@ function applyAttributes() {
     tscb.checked = attributes.ve === 0;
   }
 
+  const navChain = fontFamilyChain("nav", navTypeface);
   const navFont = document.querySelectorAll(".nav-font");
   navFont.forEach((item) => {
-    let index = attributes.nt;
-    if (navFontsArray.length <= index) index = 0;
-    let font = navFontsArray[index];
-    item.style.fontFamily = "nav " + font;
+    item.style.fontFamily = navChain;
   });
 
   const selectControl = document.getElementById("mainFontSelect");
   if (selectControl) {
-    selectControl.value = attributes.t;
+    selectControl.value = mainTypeface;
   }
   const navSelectControl = document.getElementById("navFontSelect");
   if (navSelectControl) {
-    navSelectControl.value = attributes.nt;
+    navSelectControl.value = navTypeface;
   }
 }
 function fontBigger() {
@@ -911,11 +1033,11 @@ function spacingSmaller() {
   setParam("s", v);
 }
 
-function mainFontChange(index) {
-  setParam("t", index);
+function mainFontChange(typeface) {
+  setParam("tf", typeface);
 }
-function navFontChange(index) {
-  setParam("nt", index);
+function navFontChange(typeface) {
+  setParam("ntf", typeface);
 }
 
 function toggleLightDark() {

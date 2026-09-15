@@ -25,11 +25,16 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { before, describe, test } from "node:test";
+import { brotliDecompressSync, inflateSync } from "node:zlib";
 
+import { typefaces } from "../../obsidian.js";
 import { applicationUrl, render, setPreferences, sharedSession } from "../harness.js";
 
 const projectRoot = path.resolve(import.meta.dirname, "..", "..");
 const styleDir = path.join(projectRoot, "css");
+
+/** The two directories the deployment serves fonts out of. */
+const fontDirs = ["assets/main-fonts", "assets/nav-fonts"];
 
 /** The corpus page this file reads: it carries prose, links, a code block and inline code. */
 const corpusPath = "/md/test-md-file.md";
@@ -183,6 +188,146 @@ function familiesDeclaredByStyleSheets(sheets) {
     }
   }
   return declared;
+}
+
+// ################### Reading the font files themselves ###################
+
+/**
+ * What a font file says it is: `{ weight, italic }`, read out of its `OS/2`
+ * table.
+ *
+ * A filename is a claim, and this is the only thing that can check it. The
+ * mistake this exists to catch is the one most likely to be made while fetching
+ * three dozen files by hand — a `-700` that is really the regular under a new
+ * name, or an `-italic` that is the upright. Neither is visible in a listing and
+ * both are obvious here.
+ *
+ * Parsed against the sfnt table directory directly rather than through a
+ * dependency: the two fields wanted are at fixed offsets in one table, and the
+ * whole of it is the forty lines below.
+ *
+ * Four containers, because the scanner accepts four. `.ttf` and `.otf` are sfnt
+ * as it stands. A `.woff` wraps the same tables, each one zlib-deflated on its
+ * own, behind a directory that gives every table's offset. A `.woff2` brotlis
+ * all of them into one stream and gives lengths but no offsets, so the tables
+ * are walked in directory order to find where each begins. Neither web format
+ * transforms `OS/2`, so what comes out is the table as the sfnt would have held
+ * it.
+ */
+function fontFacts(file) {
+  const bytes = readFileSync(file);
+  const signature = bytes.toString("latin1", 0, 4);
+  const os2 =
+    signature === "wOFF"
+      ? woffTable(bytes, "OS/2")
+      : signature === "wOF2"
+        ? woff2Table(bytes, "OS/2")
+        : sfntTable(bytes, "OS/2");
+  assert.ok(
+    os2 && os2.length >= 64,
+    `${file} carries no usable OS/2 table, so nothing can say what weight or style it is. ` +
+      `Every file in ${fontDirs.join(" and ")} is a font this deployment declares a face for.`
+  );
+  return { weight: os2.readUInt16BE(4), italic: Boolean(os2.readUInt16BE(62) & 0x01) };
+}
+
+/** One table out of a plain sfnt (`.ttf`, `.otf`), by tag. */
+function sfntTable(bytes, tag) {
+  const count = bytes.readUInt16BE(4);
+  for (let i = 0; i < count; i++) {
+    const record = 12 + i * 16;
+    if (bytes.toString("latin1", record, record + 4) !== tag) continue;
+    const offset = bytes.readUInt32BE(record + 8);
+    return bytes.subarray(offset, offset + bytes.readUInt32BE(record + 12));
+  }
+  return null;
+}
+
+/** One table out of a `.woff`, inflated. Its directory carries real offsets. */
+function woffTable(bytes, tag) {
+  const count = bytes.readUInt16BE(12);
+  for (let i = 0; i < count; i++) {
+    const record = 44 + i * 20;
+    if (bytes.toString("latin1", record, record + 4) !== tag) continue;
+    const offset = bytes.readUInt32BE(record + 4);
+    const stored = bytes.readUInt32BE(record + 8);
+    const original = bytes.readUInt32BE(record + 12);
+    const table = bytes.subarray(offset, offset + stored);
+    // A table the encoder could not shrink is stored as it was.
+    return stored === original ? table : inflateSync(table);
+  }
+  return null;
+}
+
+/** The 63 tags a `.woff2` directory addresses by index rather than by name. */
+const woff2Tags = [
+  "cmap", "head", "hhea", "hmtx", "maxp", "name", "OS/2", "post", "cvt ", "fpgm",
+  "glyf", "loca", "prep", "CFF ", "VORG", "EBDT", "EBLC", "gasp", "hdmx", "kern",
+  "LTSH", "PCLT", "VDMX", "vhea", "vmtx", "BASE", "GDEF", "GPOS", "GSUB", "EBSC",
+  "JSTF", "MATH", "CBDT", "CBLC", "COLR", "CPAL", "SVG ", "sbix", "acnt", "avar",
+  "bdat", "bloc", "bsln", "cvar", "fdsc", "feat", "fmtx", "fvar", "gvar", "hsty",
+  "just", "lcar", "mort", "morx", "opbd", "prop", "trak", "Zapf", "Silf", "Glat",
+  "Gloc", "Feat", "Sill",
+];
+
+/**
+ * One table out of a `.woff2`. The whole font is one brotli stream and the
+ * directory gives lengths but not offsets, so every table before the wanted one
+ * is measured to find where it starts.
+ */
+function woff2Table(bytes, tag) {
+  const count = bytes.readUInt16BE(12);
+  let cursor = 48;
+  const readBase128 = () => {
+    let value = 0;
+    for (;;) {
+      const byte = bytes[cursor++];
+      value = (value << 7) | (byte & 0x7f);
+      if ((byte & 0x80) === 0) return value >>> 0;
+    }
+  };
+  const entries = [];
+  for (let i = 0; i < count; i++) {
+    const flags = bytes[cursor++];
+    const index = flags & 0x3f;
+    const name = index === 0x3f ? bytes.toString("latin1", (cursor += 4) - 4, cursor) : woff2Tags[index];
+    const original = readBase128();
+    // A transformed glyf/loca stores its transformed length as well; every other
+    // table, OS/2 included, is stored at its original length.
+    const transformed = (flags >> 6) !== 0 && (name === "glyf" || name === "loca") ? readBase128() : null;
+    entries.push({ name, length: transformed ?? original });
+  }
+  const decompressed = brotliDecompressSync(bytes.subarray(cursor));
+  let at = 0;
+  for (const entry of entries) {
+    if (entry.name === tag) return decompressed.subarray(at, at + entry.length);
+    at += entry.length + ((4 - (entry.length % 4)) % 4);
+  }
+  return null;
+}
+
+/**
+ * Every font file in the two directories, as
+ * `{ file, dir, typeface, weight, italic }` — the cut its name claims, not yet
+ * checked against the cut it is.
+ */
+function fontFilesOnDisk() {
+  const files = [];
+  for (const dir of fontDirs) {
+    for (const entry of readdirSync(path.join(projectRoot, dir))) {
+      if (!/\.(ttf|otf|woff2?)$/i.test(entry)) continue;
+      const name = entry.replace(/\.(ttf|otf|woff2?)$/i, "");
+      const cut = /^(.+)-(?:(\d{3})(italic)?|(italic))$/.exec(name);
+      files.push({
+        file: `${dir}/${entry}`,
+        dir,
+        typeface: cut ? cut[1] : name,
+        weight: cut && cut[2] ? Number(cut[2]) : 400,
+        italic: Boolean(cut && (cut[3] || cut[4])),
+      });
+    }
+  }
+  return files;
 }
 
 // ################### Reading colour off the page ###################
@@ -369,10 +514,16 @@ describe("legibility", () => {
     await setPreferences(session, { fs: readerSize, dm: 0 });
   });
 
-  /** Puts the session on the corpus page and waits until its owner has shown it. */
-  async function showCorpus({ dark = false, width = null } = {}) {
+  /**
+   * Puts the session on the corpus page and waits until its owner has shown it.
+   *
+   * `preferences` is written with the rest of the block rather than before it:
+   * `setPreferences` sends the whole baseline every time, so a preference set in
+   * a separate call beforehand is overwritten by this one.
+   */
+  async function showCorpus({ dark = false, width = null, preferences = {} } = {}) {
     if (width) await session.page.setViewport({ width, height: 900 });
-    await setPreferences(session, { fs: readerSize, dm: dark ? 1 : 0 });
+    await setPreferences(session, { fs: readerSize, dm: dark ? 1 : 0, ...preferences });
     const rendered = await render(session, corpusPath);
     await session.page.waitForFunction(() => document.body.style.display === "", {
       timeout: 30000,
@@ -560,6 +711,107 @@ describe("legibility", () => {
     }
   });
 
+  // ---- Bold and italic are cuts this deployment ships ----
+
+  test("every font file is the cut its name claims", () => {
+    const files = fontFilesOnDisk();
+    assert.ok(
+      files.length > 0,
+      `${fontDirs.join(" and ")} should hold the fonts this deployment serves; they hold none`
+    );
+
+    for (const claimed of files) {
+      const actual = fontFacts(path.join(projectRoot, claimed.file));
+      assert.equal(
+        actual.italic,
+        claimed.italic,
+        `${claimed.file} is named as ${claimed.italic ? "an italic" : "an upright"} and its OS/2 ` +
+          `table says it is ${actual.italic ? "an italic" : "an upright"}. A file renamed into a slot ` +
+          `it was not drawn for is emitted under that slot's descriptors, and the browser sets the ` +
+          `page in it without complaint.`
+      );
+
+      // A family whose cuts had to be taken from a neighbouring build is held to
+      // the weaker statement it can actually satisfy: the bold is heavier than
+      // the regular. assets/main-fonts/SOURCES.md says what was accepted and why.
+      const exception = typefaces[claimed.typeface]?.cutsFromAnotherBuild;
+      if (exception && claimed.weight === 700) {
+        assert.ok(
+          actual.weight > 400,
+          `${claimed.file} is named as a bold and its OS/2 table says weight ${actual.weight}, ` +
+            `which is no heavier than the regular. ${claimed.typeface}: ${exception}`
+        );
+        continue;
+      }
+      assert.equal(
+        actual.weight,
+        claimed.weight,
+        `${claimed.file} is named as weight ${claimed.weight} and its OS/2 table says ` +
+          `${actual.weight}. getFontImports() emits the name's weight as the face's descriptor, so a ` +
+          `file that disagrees is selected for a weight it was not drawn at.`
+      );
+    }
+  });
+
+  test("every typeface offered ships a bold and an italic, or is recorded as having none", async () => {
+    await showCorpus();
+    // Read off the page, the way the families check above reads it: what the
+    // deployment declares is what getFontImports() emitted, not a list kept here.
+    const declared = await session.page.evaluate(() =>
+      [...document.querySelectorAll("head style")]
+        .flatMap((style) => [...style.textContent.matchAll(/@font-face\s*\{([^}]*)\}/g)])
+        .map((match) => {
+          const read = (property) =>
+            (match[1].match(new RegExp(`${property}\\s*:\\s*([^;]+)`)) || [])[1]?.trim();
+          return { family: read("font-family").replace(/^"|"$/g, ""), weight: read("font-weight"), style: read("font-style") };
+        })
+    );
+    assert.ok(declared.length > 0, "the page should declare the fonts this deployment ships; none were emitted");
+
+    const cuts = new Map();
+    for (const face of declared) {
+      if (!cuts.has(face.family)) cuts.set(face.family, new Set());
+      cuts.get(face.family).add(`${face.weight}/${face.style}`);
+    }
+
+    for (const [family, have] of cuts) {
+      const typeface = family.replace(/^(main|nav) /, "");
+      const row = typefaces[typeface];
+      assert.ok(
+        row,
+        `the page declares "${family}" and obsidian.js has no row for ${typeface}. The table is what ` +
+          `says which generic a chain naming it ends in and which of its cuts upstream never drew.`
+      );
+      assert.ok(
+        have.has("400/normal"),
+        `"${family}" is declared without a 400 upright, which is what its prose is set in. It has: ${[...have].join(", ")}`
+      );
+      assert.ok(
+        have.has("700/normal"),
+        `"${family}" is declared without a 700 face, so every heading set in it is the regular smeared ` +
+          `outward by the browser. Its bold belongs in the directory as "${typeface}-700.ttf"; see ` +
+          `docs-development.md.`
+      );
+
+      // The navigation asks for no italic anywhere, so it ships none on purpose.
+      if (family.startsWith("nav ")) continue;
+      if (row.noItalic) {
+        assert.ok(
+          !have.has("400/italic"),
+          `obsidian.js records ${typeface} as having no italic upstream, and the page declares one. ` +
+            `Either the note is stale or the file is not what it claims — the two have to agree.`
+        );
+        continue;
+      }
+      assert.ok(
+        have.has("400/italic") && have.has("700/italic"),
+        `"${family}" is declared without ${have.has("400/italic") ? "a bold italic" : "an italic"}, so ` +
+          `emphasis set in it is the upright sheared. Either the cut belongs in the directory, or ` +
+          `${typeface} belongs in obsidian.js's table as a typeface whose italic upstream never drew.`
+      );
+    }
+  });
+
   // ---- Every font family a stylesheet names resolves ----
 
   test("every family css/ names is one this deployment declares, a generic, or a named system face", async () => {
@@ -614,6 +866,77 @@ describe("legibility", () => {
           `generic family, so a font that fails to load degrades to a related shape.`
       );
     }
+  });
+
+  test("the two chains the renderer writes onto the page end in a generic of the right kind", async () => {
+    // The declarations applyAttributes() writes are inline styles, so they
+    // outrank every rule in css/ and nothing in css/ can supply a fallback for
+    // them. The check above reads stylesheets and cannot see either one.
+    await showCorpus();
+    const offered = await session.page.evaluate(() => ({ main: mainFontsArray, nav: navFontsArray }));
+    assert.ok(offered.main.length > 0 && offered.nav.length > 0, "the page should offer fonts to pick from");
+
+    // A serif, a monospace and a sans, so a table applied blindly to all of them
+    // would fail here rather than pass.
+    const kinds = new Map();
+    for (const typeface of offered.main) {
+      const generic = typefaces[typeface]?.generic;
+      if (generic && !kinds.has(generic)) kinds.set(generic, typeface);
+    }
+    assert.ok(
+      kinds.size > 1,
+      `the picker offers ${offered.main.length} typefaces and obsidian.js gives them all the same ` +
+        `generic (${[...kinds.keys()].join(", ")}). Which generic a font falls back to follows from ` +
+        `what that font is, so more than one kind is expected here.`
+    );
+
+    for (const [generic, typeface] of kinds) {
+      const navTypeface = offered.nav[0];
+      await showCorpus({ preferences: { tf: typeface, ntf: navTypeface } });
+      const written = await session.page.evaluate(() => {
+        const nav = document.querySelector(".nav-font");
+        return {
+          main: document.getElementById("markdown-content")?.style.fontFamily ?? null,
+          nav: nav ? nav.style.fontFamily : null,
+        };
+      });
+
+      for (const [where, value, expected, family] of [
+        ["the content", written.main, generic, `main ${typeface}`],
+        ["the chrome", written.nav, typefaces[navTypeface]?.generic, `nav ${navTypeface}`],
+      ]) {
+        assert.ok(
+          value,
+          `applyAttributes() should write ${where}'s font onto it as an inline style; it wrote nothing`
+        );
+        const names = familyNames(value);
+        assert.equal(
+          names[0],
+          family,
+          `${where} was written as "${value}", which does not begin at the family getFontImports() ` +
+            `declared for it ("${family}")`
+        );
+        const ends = names[names.length - 1].toLowerCase();
+        assert.ok(
+          genericFamilies.has(ends),
+          `${where} was written as "${value}", which ends at "${names[names.length - 1]}". An inline ` +
+            `style outranks every stylesheet, so this chain is the only fallback the text has: without ` +
+            `a generic at the end, a font that fails to load drops the text onto the browser's ` +
+            `default, typically a serif where a sans was meant.`
+        );
+        assert.equal(
+          ends,
+          expected,
+          `${where} was written as "${value}", but obsidian.js records that typeface as ${expected}. ` +
+            `A serif falls back to a serif and a monospace to a monospace; one generic behind all of ` +
+            `them lands the text on the wrong kind of shape.`
+        );
+      }
+    }
+
+    // The session is shared with every check that runs after this one, and a
+    // navigation set in a monospace is not the page any of them means.
+    await setPreferences(session, { fs: readerSize, dm: 0 });
   });
 
   test("the bar above the page, the navigation column and the menu share the reader's navigation font", async () => {

@@ -132,7 +132,7 @@ Mount the narrowest thing that covers the reference rather than widening an exis
 
 ## Naming a font in a stylesheet
 
-A font this deployment ships is **not** called what its file is called. `getFontImports()` in `obsidian.js` walks `assets/main-fonts/` and `assets/nav-fonts/` and emits one `@font-face` per file, naming the family after the directory it came from and the file's own basename:
+A font this deployment ships is **not** called what its file is called. `getFontImports()` in `obsidian.js` walks `assets/main-fonts/` and `assets/nav-fonts/` and emits `@font-face` rules naming each family after the directory it came from and the typeface's own name:
 
 | file | family a stylesheet has to name |
 | --- | --- |
@@ -141,12 +141,50 @@ A font this deployment ships is **not** called what its file is called. `getFont
 
 A stylesheet that names `FiraCode`, or `Inter`, or `Fira-Code`, matches nothing. Nothing goes wrong loudly: the browser silently falls back to its own default, which is typically a serif where a sans was meant and which differs from one reader's machine to the next. Both of those exact names were in `css/` for a long time before anybody noticed.
 
-Two rules follow from that, and `test/checks/legibility.js` holds the code to both:
+### One family, one typeface, several faces
+
+A family is a typeface, not a file. The filename says which cut of it a file is, and the scanner reads that:
+
+| file | cut |
+| --- | --- |
+| `Inter.ttf` | 400 upright — the regular |
+| `Inter-700.ttf` | 700 upright |
+| `Inter-italic.ttf` | 400 italic |
+| `Inter-700italic.ttf` | 700 italic |
+
+All four are emitted under `"main Inter"`, differing only in their `font-weight` and `font-style` descriptors, so the browser selects between them instead of deriving a bold by smearing the regular outward and an italic by shearing it. **The regular carries its descriptors explicitly.** A face declared without them defaults to 400 upright anyway — but stating it is what stops the browser treating the regular as a candidate for a 700 request once a 700 face stands beside it.
+
+Adding a cut is putting the file in the directory. Nothing is declared beside it, so a file that is missing cannot be claimed and a file that is added is emitted. Four containers are understood — `.ttf`, `.otf`, `.woff`, `.woff2` — and where one cut ships in several, they go into one `src` smallest-first and the browser fetches only the first it understands. Everything shipped today is `.ttf` apart from OpenDyslexic3's cuts; converting the payload to `woff2` would cut it to roughly a quarter and is worth its own change, but the pipeline no longer has to be taught what those files are.
+
+A weight that is neither 400 nor 700 is **not** composed into the family. `Lato-300.ttf` and `Lato-300italic.ttf` are there for `css/reveal-theme-moon.css`, which declares `Lato` itself at the weight a deck reads at; the page view never asks for 300. Those files are named one by one in `test/checks/deployment-surface.js`, because nothing else would notice them going missing.
+
+### The typeface table
+
+Two things about a shipped typeface do not follow from its files, so `obsidian.js` keeps a row per typeface beside the parse:
+
+- **`generic`** — which generic family a chain naming it ends in. A serif behind a serif, a monospace behind a monospace; one generic applied to all of them lands the text on the wrong kind of shape.
+- **`noItalic`** — that the upstream project draws no italic for it, so a page setting italic there falls to the browser's slant because that is the only thing there is. `FiraCode`, `Oswald` and `PT Sans Narrow` carry it. It is a statement about the release, not about the directory: it is what tells a missing cut apart from a cut nobody drew.
+- **`cutsFromAnotherBuild`** — that the family's cuts and its regular come from different releases, because no one release publishes both. Only `OpenDyslexic3-Regular` carries it; `assets/main-fonts/SOURCES.md` says what was accepted in taking them.
+
+Every typeface the scan finds has a row, and no row lacks a typeface. The table travels to the page through the `initFonts(...)` call the page is rendered with, because `applyAttributes()` runs in the browser and needs the generic there.
+
+### Three rules, and the check that holds the code to them
+
+`test/checks/legibility.js` asserts all of these:
 
 - **Name a shipped family with its prefix.** Every name a `css/` declaration reaches for has to be a family this deployment declares — one of `getFontImports()`'s, or one a stylesheet declares itself with its own `@font-face` — a generic keyword, or one of the system faces the check names one by one. Reaching for a system face that is not on that list means adding it there, deliberately.
-- **End the chain in a generic family.** A declaration naming a shipped family carries a fallback chain after it, ending in `sans-serif`, `serif` or `monospace`, so a font file that does not arrive degrades to a face of the same kind rather than to whatever the browser defaults to.
+- **End the chain in the right generic.** A declaration naming a shipped family carries a fallback chain after it, ending in the generic *that typeface belongs to* rather than a blanket `sans-serif`. This holds for the two declarations `applyAttributes()` writes as inline styles as well, and there it matters most: an inline style outranks every stylesheet, so that chain is the only fallback the text has.
+- **Ship the cut, or record that it does not exist.** Every family the renderer declares has a 700 face and an italic face, unless its row says upstream drew none. And every file is read out of its own `OS/2` table and held against the cut its name claims, because a `-700` that is really the regular under a new name is invisible in a listing and is the mistake most likely to be made while fetching three dozen files by hand.
+
+### The reader's own two fonts
 
 Two of the reader's preferences arrive as inline styles rather than as stylesheet rules — `applyAttributes()` in `obsidian-page.js` writes the chosen text size and main font onto `#markdown-content`, and the chosen navigation font onto every `.nav-font` element. An inline style beats any stylesheet rule, so a rule meant to reach content the reader has sized has to be relative (`em`) rather than absolute.
+
+**A reader's font choice is stored by name**, under `tf` (main) and `ntf` (navigation). It used to be stored as a position in `mainFontsArray`/`navFontsArray`, which were filled in `fs.readdirSync()` order and never sorted — so adding a file to either directory could move the entries already in it and silently change the font every reader had chosen. The arrays are sorted now, and sorting *is itself* such a reordering, which is why the stored value had to stop being a position at all.
+
+`LEGACY_FONT_ORDER` in `obsidian-page.js` exists only to read the values stored before that. It is the order the running instances enumerated their two directories in, captured from their `initFonts(...)` call before any file was added; a reader who has only the old numeric `t`/`nt` is read through it once, and `tf`/`ntf` are written back beside the numbers the next time they change any preference at all. It is dead weight once the stored values have turned over, and removable then — together with `t` and `nt`, which are kept meanwhile because they are what a rollback of this would read.
+
+A stored name matching nothing falls to the first typeface the picker offers, which is what the index path did on its own when the array had shrunk.
 
 ## Searching the corpus
 

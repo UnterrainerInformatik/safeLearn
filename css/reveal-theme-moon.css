@@ -13,9 +13,17 @@
  *
  * What was changed:
  * - the @import of fonts.googleapis.com is replaced by the @font-face block
- *   below, over the Lato files in assets/main-fonts/. Upstream asks for 400,
- *   700 and both italics; the three files here are upright, so italic Lato is
- *   the browser's slant of the upright face.
+ *   below, over the Lato files in assets/main-fonts/. Upstream asks Google for
+ *   400, 700 and both italics, and all of them are declared here now: three
+ *   upright weights and the italic of each. Nothing on a deck is a slant of the
+ *   upright face any more.
+ *
+ *   300 is in the block because it is the weight this theme actually reads at.
+ *   `.reveal` sets font-weight: 300, so `.reveal em`, `.reveal q` and a
+ *   blockquote — the three places below that set font-style: italic — resolve to
+ *   *300 italic*, not to the 400 italic upstream's @import would have supplied.
+ *   Lato-300italic.ttf exists for those three rules and for nothing else; the
+ *   page view never asks for weight 300.
  * - the @import of ./fonts/league-gothic/league-gothic.css, which was relative
  *   to the file's place inside the package, now addresses that file where the
  *   deployment serves it. The .eot/.woff/.ttf it names in turn are relative to
@@ -23,8 +31,18 @@
  *
  * On a reveal.js upgrade: diff dist/theme/moon.css of the new version against
  * this file, take the upstream changes over, and keep the two declarations
- * below. If upstream stops importing a hosted font, this derivation stops
- * having a reason to exist and the package's file can be served directly.
+ * below — the @import and the whole six-face @font-face block. Dropping the
+ * italics restores the slant silently: nothing fails, the decks just stop being
+ * set in the face somebody drew. If the new version's `.reveal` moves off
+ * font-weight: 300, the weight the italic rules resolve to moves with it, and
+ * the file this block needs changes accordingly.
+ *
+ * These six files are also the reason test/checks/deployment-surface.js names
+ * them one by one: they are addressed from this stylesheet and from no markup,
+ * so nothing else in the suite would notice them going missing.
+ *
+ * If upstream stops importing a hosted font, this derivation stops having a
+ * reason to exist and the package's file can be served directly.
  * ---------------------------------------------------------------------------
  */
 @import url(/node_modules/reveal.js/dist/theme/fonts/league-gothic/league-gothic.css);
@@ -45,6 +63,24 @@
   font-style: normal;
   font-weight: 700;
   src: url(/assets/main-fonts/Lato-700.ttf) format("truetype");
+}
+@font-face {
+  font-family: "Lato";
+  font-style: italic;
+  font-weight: 300;
+  src: url(/assets/main-fonts/Lato-300italic.ttf) format("truetype");
+}
+@font-face {
+  font-family: "Lato";
+  font-style: italic;
+  font-weight: 400;
+  src: url(/assets/main-fonts/Lato-italic.ttf) format("truetype");
+}
+@font-face {
+  font-family: "Lato";
+  font-style: italic;
+  font-weight: 700;
+  src: url(/assets/main-fonts/Lato-700italic.ttf) format("truetype");
 }
 /**
  * Solarized colors by Ethan Schoonover
