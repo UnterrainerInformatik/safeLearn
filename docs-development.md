@@ -184,7 +184,13 @@ Two of the reader's preferences arrive as inline styles rather than as styleshee
 
 `LEGACY_FONT_ORDER` in `obsidian-page.js` exists only to read the values stored before that. It is the order the running instances enumerated their two directories in, captured from their `initFonts(...)` call before any file was added; a reader who has only the old numeric `t`/`nt` is read through it once, and `tf`/`ntf` are written back beside the numbers the next time they change any preference at all. It is dead weight once the stored values have turned over, and removable then — together with `t` and `nt`, which are kept meanwhile because they are what a rollback of this would read.
 
-A stored name matching nothing falls to the first typeface the picker offers, which is what the index path did on its own when the array had shrunk.
+**The deployment nominates the two typefaces a reader who has chosen none reads in**, as `defaultTypefaces` in `obsidian.js`, beside the `typefaces` table: `Open Sans` for prose and `Inter` for the page's chrome. Named, not numbered — the default used to be two positions in `init()` (`t: a.t ?? 2`, `nt: a.nt ?? 1`), which meant it moved whenever the shipped set changed and said nothing about why either face was chosen. The two are separate nominations because a paragraph is read across and wants a face drawn for running text, while the bar, the navigation column and the menu are read at and want a user-interface face.
+
+So `chosenTypeface()` resolves in this order: the stored name if the picker still offers it, then the stored *number* through `LEGACY_FONT_ORDER`, then the nomination, and only then the first typeface the picker offers. That last step is for a fork that removes a font without touching the nomination; `test/checks/legibility.js` holds each nomination to a typeface its picker actually offers, because a nomination nobody offers is fallen past in silence.
+
+A number is read as a number and only as a number. Some stored preferences hold their position as a string (`"7"` rather than `7`), and those are *not* migrated: a string here is as likely to be the name of a font this deployment no longer ships as a position, and guessing between them would write the wrong typeface back as the reader's settled choice. They fall to the nomination instead.
+
+Changing either nomination changes what an unconfigured reader sees, and nothing else — a reader who has chosen a font keeps it. Clearing a reader's stored preference, by removing the `config` user attribute, is what puts them back on the nomination.
 
 ## Searching the corpus
 

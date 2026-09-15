@@ -529,6 +529,34 @@ export function genericOf(typeface) {
 }
 
 /**
+ * The typefaces a reader who has chosen none reads in, by name.
+ *
+ * Named rather than numbered, and that is the whole point of them. The default
+ * used to live in the page as two positions — index 2 of the main directory and
+ * index 1 of the navigation directory, both of which happened to be Inter on
+ * the day the order was captured. A position is a fact about how a directory
+ * was enumerated and how many files are in it, so a default expressed as one
+ * moves whenever the shipped set changes, and it says nothing about why that
+ * face was chosen. These say why by saying what.
+ *
+ * The two are separate nominations because the two are read differently. A
+ * paragraph is read across and wants a face drawn for running text, which is
+ * Open Sans; the bar, the navigation column and the menu are read at rather
+ * than through, and want the tighter spacing and larger x-height of a
+ * user-interface face, which is Inter.
+ *
+ * Each must be a typeface the directory it is nominated for actually offers —
+ * `Open Sans` in `assets/main-fonts/`, `Inter` in `assets/nav-fonts/`. Nothing
+ * here enforces that: a font directory is content, and a content problem should
+ * not stop a deployment from starting. `test/checks/legibility.js` enforces it
+ * instead, which is where a mis-nomination should surface.
+ */
+export const defaultTypefaces = {
+  main: "Open Sans",
+  nav: "Inter",
+};
+
+/**
  * The weights a rendered page can ask for, and therefore the ones a shipped
  * typeface is composed out of: 400 is what prose is set in and 700 is what a
  * heading, a table header and a `strong` resolve to. A file at any other weight
@@ -2230,17 +2258,17 @@ async function getTopdownMenu(req) {
     )}<span style="margin-left: 6px; margin-right: 6px; position: relative; top: -2px;">light/dark</span></button>
 
     <div style="padding: 0px; margin: 0px; margin-top: 10px; width: 95%; text-align: left; display: flex;">
-      <span style="top: 1px; position: relative; cursor: pointer;" onclick="navFontChange(4)">${lucideIcon(
-        "PanelsTopLeft"
-      )}</span>
+      <span style="top: 1px; position: relative; cursor: pointer;" onclick="navFontChange('${
+        defaultTypefaces.nav
+      }')">${lucideIcon("PanelsTopLeft")}</span>
       <select class="sl-select" style="width: auto; flex-grow: 1;" id="navFontSelect" onchange="navFontChange(this.value)">
         ${getNavFontsSelection()}
       </select>
     </div>
     <div style="padding: 0px; margin: 0px; margin-top: 2px; width: 95%; padding-right: 100px; text-align: left; display: flex;">
-      <span style="top: 1px; position: relative; cursor: pointer;" onclick="mainFontChange(0)">${lucideIcon(
-        "SquareMenu"
-      )}</span>
+      <span style="top: 1px; position: relative; cursor: pointer;" onclick="mainFontChange('${
+        defaultTypefaces.main
+      }')">${lucideIcon("SquareMenu")}</span>
       <select class="sl-select" style="width: auto; flex-grow: 1;" id="mainFontSelect" onchange="mainFontChange(this.value)">
         ${getMainFontsSelection()}
       </select>
@@ -2707,7 +2735,7 @@ export async function wrapInPage(html, startPage, req) {
         <script lang="javascript">
         initFonts('${JSON.stringify(mainFontsArray)}', '${JSON.stringify(
     navFontsArray
-  )}', '${JSON.stringify(typefaces)}');
+  )}', '${JSON.stringify(typefaces)}', '${JSON.stringify(defaultTypefaces)}');
         init();
         </script>
         ${openNavTreeScript}
@@ -2745,7 +2773,7 @@ export async function wrapAsDocument(html, req) {
         <script lang="javascript">
         initFonts('${JSON.stringify(mainFontsArray)}', '${JSON.stringify(
     navFontsArray
-  )}', '${JSON.stringify(typefaces)}');
+  )}', '${JSON.stringify(typefaces)}', '${JSON.stringify(defaultTypefaces)}');
         init();
         </script>
       </body>

@@ -27,7 +27,7 @@ import path from "node:path";
 import { before, describe, test } from "node:test";
 import { brotliDecompressSync, inflateSync } from "node:zlib";
 
-import { typefaces } from "../../obsidian.js";
+import { defaultTypefaces, typefaces } from "../../obsidian.js";
 import { applicationUrl, render, setPreferences, sharedSession } from "../harness.js";
 
 const projectRoot = path.resolve(import.meta.dirname, "..", "..");
@@ -934,6 +934,135 @@ describe("legibility", () => {
     // The session is shared with every check that runs after this one, and a
     // navigation set in a monospace is not the page any of them means.
     await setPreferences(session, { fs: readerSize, dm: 0 });
+  });
+
+  test("each nominated typeface is one the picker it belongs to offers", async () => {
+    // Held against what the picker offers rather than against the directory
+    // listing, because the offered array is what `chosenTypeface` consults and
+    // the scanner has already applied the naming convention to build it. This
+    // is the one thing about the nomination a running deployment cannot say for
+    // itself: a nomination nobody offers is fallen past in silence, onto
+    // `offered[0]`, which is a working page in a font nobody chose.
+    await showCorpus();
+    const offered = await session.page.evaluate(() => ({
+      main: mainFontsArray,
+      nav: navFontsArray,
+    }));
+
+    for (const [part, typeface, picker] of [
+      ["prose", defaultTypefaces.main, offered.main],
+      ["the page's chrome", defaultTypefaces.nav, offered.nav],
+    ]) {
+      assert.ok(
+        typeface,
+        `obsidian.js should nominate a typeface for ${part}; defaultTypefaces names none`
+      );
+      assert.ok(
+        picker.includes(typeface),
+        `obsidian.js nominates "${typeface}" for ${part}, but that picker offers only ` +
+          `${picker.join(", ")}. A nomination the deployment does not offer is not a default: the ` +
+          `page falls past it to "${picker[0]}", whichever that happens to be.`
+      );
+      assert.ok(
+        typefaces[typeface],
+        `"${typeface}" is nominated for ${part} but has no row in the typeface table, so nothing ` +
+          `knows what generic family to put behind it`
+      );
+    }
+  });
+
+  test("a reader who has chosen no font reads in the typefaces the deployment nominates", async () => {
+    // The accounts are shared and `setPreferences` writes the whole block, so
+    // no session here can actually be one that has never chosen. What can be
+    // had is the resolution itself: the page's own `chosenTypeface`, over the
+    // page's own font arrays, against the attribute block `init()` builds when
+    // the stored `config` is absent or empty. That block is what the 77 reset
+    // accounts will hand it, so this is the question the reset asks.
+    await showCorpus();
+    const resolved = await session.page.evaluate(() => {
+      // Exactly what init() constructs from an empty config, for the two keys
+      // that decide a typeface and the two that used to.
+      const empty = { tf: undefined, ntf: undefined, t: undefined, nt: undefined };
+      return {
+        main: chosenTypeface(empty.tf, empty.t, mainFontsArray, LEGACY_FONT_ORDER.main, defaultTypefaces.main),
+        nav: chosenTypeface(empty.ntf, empty.nt, navFontsArray, LEGACY_FONT_ORDER.nav, defaultTypefaces.nav),
+        offeredFirst: { main: mainFontsArray[0], nav: navFontsArray[0] },
+      };
+    });
+
+    for (const [part, got, nominated, first] of [
+      ["prose", resolved.main, defaultTypefaces.main, resolved.offeredFirst.main],
+      ["the page's chrome", resolved.nav, defaultTypefaces.nav, resolved.offeredFirst.nav],
+    ]) {
+      assert.equal(
+        got,
+        nominated,
+        `a session with no stored font choice resolves ${part} to "${got}", not to the nominated ` +
+          `"${nominated}". ${
+            got === first
+              ? `"${first}" is simply what sorts first in that directory, which is an accident of ` +
+                `the alphabet rather than a decision.`
+              : `Something ahead of the nomination is still answering — a numeric default in init() ` +
+                `would do it, by resolving through LEGACY_FONT_ORDER before the nomination is read.`
+          }`
+      );
+    }
+
+    // The block above is handed `undefined` by hand, so on its own it cannot see
+    // the mistake that made the nomination unreachable in the first place: a
+    // default on `t`/`nt` in `init()`, which hands `chosenTypeface` a position
+    // for a reader who stored none and returns through LEGACY_FONT_ORDER before
+    // the nomination is ever read. Read off the source, because `init()` runs
+    // once per page load against a session that does have preferences, and
+    // there is no way to ask the running page what it would have built.
+    const pageSource = readFileSync(path.join(projectRoot, "obsidian-page.js"), "utf8");
+    const initBody = pageSource.slice(
+      pageSource.indexOf("function init()"),
+      pageSource.indexOf("const darkModeAffectedElements")
+    );
+    assert.ok(initBody.includes("tf: a.tf"), "init() should still read the stored names");
+    for (const key of ["t", "nt"]) {
+      const defaulted = new RegExp(`\\b${key}:\\s*a\\.${key}\\s*(\\?\\?|\\|\\|)`);
+      assert.ok(
+        !defaulted.test(initBody),
+        `init() gives "${key}" a default. A reader who has stored no font then arrives carrying a ` +
+          `position anyway, LEGACY_FONT_ORDER resolves it, and chosenTypeface returns before it ` +
+          `reaches the nomination — so "${defaultTypefaces.main}" and "${defaultTypefaces.nav}" ` +
+          `become unreachable and the old default is silently back.`
+      );
+    }
+  });
+
+  test("a font choice stored as a string does not resolve to an unrelated typeface", async () => {
+    // 20 of the 77 accounts carrying preferences in the production realm stored
+    // their position as "7" rather than 7, from a writer that did not coerce it.
+    // A string is as likely to be a name this deployment no longer offers as a
+    // position, so the contract is that it is not guessed at: it falls to the
+    // nomination, and the reader reads in the deployment's font rather than in
+    // whatever LEGACY_FONT_ORDER holds at that index.
+    await showCorpus();
+    const resolved = await session.page.evaluate(() => {
+      const at = (order, index) => order[index];
+      return {
+        stringIndex: chosenTypeface(undefined, "7", mainFontsArray, LEGACY_FONT_ORDER.main, defaultTypefaces.main),
+        numberIndex: chosenTypeface(undefined, 7, mainFontsArray, LEGACY_FONT_ORDER.main, defaultTypefaces.main),
+        sevenDenotes: at(LEGACY_FONT_ORDER.main, 7),
+      };
+    });
+
+    assert.equal(
+      resolved.numberIndex,
+      resolved.sevenDenotes,
+      `a genuinely numeric stored position should still migrate: 7 denotes "${resolved.sevenDenotes}"`
+    );
+    assert.equal(
+      resolved.stringIndex,
+      defaultTypefaces.main,
+      `a position stored as the string "7" resolved to "${resolved.stringIndex}". It should fall to ` +
+        `the nominated "${defaultTypefaces.main}": the page cannot tell a stringified position from ` +
+        `the name of a font that is no longer shipped, and writing the wrong one back records it as ` +
+        `the reader's settled choice.`
+    );
   });
 
   test("the bar above the page, the navigation column and the menu share the reader's navigation font", async () => {

@@ -130,6 +130,7 @@ Each entry is marked with its implementation status:
 | `/convert` API — GET by URL, POST by URL, POST by content | **[verified]** | `app.js` — all three forms exist as documented in `docs-technical-details.md` |
 | Print a presentation as PDF via `?print-pdf` | **[verified]** | Reveal 5 reads the query string itself and switches to its print view; `obsidian.js` `wrapInReveal` adds `pdfMaxPagesPerSlide: 1` for one slide per page |
 | Drop-in fonts (`assets/main-fonts/`, `assets/nav-fonts/`) | **[verified]** | `obsidian.js` `scanFonts`, picked up on restart or rescan. A new typeface needs a row in the `typefaces` table for its generic family; a new cut of one already there needs nothing but the file |
+| Nominated default typefaces | **[verified]** | `obsidian.js` `defaultTypefaces` — `Open Sans` for prose, `Inter` for the chrome, by name rather than by picker position. Reached by `chosenTypeface()` in `obsidian-page.js` only for a reader carrying no stored choice, so changing one moves an unconfigured reader and nobody else |
 | Docker image build and SSH deployment pipeline | **[verified]** | `.github/workflows/docs-local.yml`, `deploy/docker-compose.yml`, `deploy/up.sh` |
 | Optional OpenVPN hop before SSH deploy | **[verified]** | `.github/workflows/docs-local.yml`, gated by the `NO_VPN` secret |
 | `NEXT_AUTOSCAN` file watcher with selective SSE reload | **[verified]** | `app.js` — `chokidar` diff drives either a full or a per-file reload broadcast |

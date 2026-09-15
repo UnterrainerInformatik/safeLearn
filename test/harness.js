@@ -119,6 +119,13 @@ function hostKind(host) {
  * were Inter in the two directories on the day the enumeration order was
  * captured. A check that wants the migration path instead passes `tf: undefined`
  * and leaves the number to speak for itself.
+ *
+ * `tf` is deliberately not the typeface the deployment nominates for prose.
+ * Every check downstream of this baseline reads a font off a page and means by
+ * it "the one the reader chose"; if the baseline named the nominated face, a
+ * page that had fallen back and a page that had honoured the choice would look
+ * identical, and none of them could tell the two apart. Inter is a real choice
+ * here precisely because Open Sans is the default.
  */
 export const preferenceBaseline = Object.freeze({
   fs: 18,

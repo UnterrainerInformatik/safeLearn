@@ -744,10 +744,19 @@ const LEGACY_FONT_ORDER = {
   ],
 };
 
-function initFonts(mainFonts, navFonts, table) {
+/**
+ * The typefaces this deployment nominates for a reader who has chosen none, as
+ * `obsidian.js`'s `defaultTypefaces` records them. Two names, one for prose and
+ * one for the page's chrome; the reasoning for both is there rather than here,
+ * beside the table that says what each shipped face is.
+ */
+let defaultTypefaces = {};
+
+function initFonts(mainFonts, navFonts, table, defaults) {
   mainFontsArray = JSON.parse(mainFonts);
   navFontsArray = JSON.parse(navFonts);
   typefaceTable = table ? JSON.parse(table) : {};
+  defaultTypefaces = defaults ? JSON.parse(defaults) : {};
 }
 
 /**
@@ -758,28 +767,50 @@ function initFonts(mainFonts, navFonts, table) {
  * read only when there is no name, and only through `legacyOrder`, never as a
  * position in the sorted array it would now mean something else in.
  *
- * Anything that lands nowhere falls to the first offered typeface, which is what
- * the index path did on its own when the array had shrunk: a page in the
+ * Anything that lands nowhere falls to what the deployment nominated, which is
+ * what a reader who has chosen nothing is reading and so the right thing for a
+ * choice that no longer means anything to fall back to. `offered[0]` sits
+ * behind that for the one case the nomination itself is not shipped — a fork
+ * that removes a font without touching the nomination — because a page in the
  * deployment's first font is a page, and a page in no font is the browser's
  * default, typically a serif where a sans was meant.
+ *
+ * `index` is read as a number and only as a number. Some stored preferences
+ * hold their position as a string, from a writer that did not coerce it; those
+ * are not migrated, because a string here is as likely to be a name this
+ * deployment no longer offers as a position, and guessing between them would
+ * write the wrong typeface back as the reader's settled choice.
  */
-function chosenTypeface(name, index, offered, legacyOrder) {
+function chosenTypeface(name, index, offered, legacyOrder, nominated) {
   if (typeof name === "string" && offered.includes(name)) return name;
   if (typeof name !== "string" && Number.isInteger(index)) {
     const migrated = legacyOrder[index];
     if (offered.includes(migrated)) return migrated;
   }
+  if (offered.includes(nominated)) return nominated;
   return offered[0];
 }
 
 /** The reader's main typeface, by name. */
 function chosenMainTypeface() {
-  return chosenTypeface(attributes.tf, attributes.t, mainFontsArray, LEGACY_FONT_ORDER.main);
+  return chosenTypeface(
+    attributes.tf,
+    attributes.t,
+    mainFontsArray,
+    LEGACY_FONT_ORDER.main,
+    defaultTypefaces.main
+  );
 }
 
 /** The reader's navigation typeface, by name. */
 function chosenNavTypeface() {
-  return chosenTypeface(attributes.ntf, attributes.nt, navFontsArray, LEGACY_FONT_ORDER.nav);
+  return chosenTypeface(
+    attributes.ntf,
+    attributes.nt,
+    navFontsArray,
+    LEGACY_FONT_ORDER.nav,
+    defaultTypefaces.nav
+  );
 }
 
 /**
@@ -916,19 +947,20 @@ function init() {
       fs: a.fs || 18,
       // The reader's font choice, by name, and the position it used to be
       // stored as. The name wins where there is one; the number is read through
-      // LEGACY_FONT_ORDER for a reader who has not saved anything since, and its
-      // defaults are what a reader who has never chosen a font still gets — 2
-      // and 1 were Inter in both directories on the day the order was captured.
+      // LEGACY_FONT_ORDER for a reader who has not saved anything since.
       tf: a.tf,
       ntf: a.ntf,
-      // `??` and not `||`: 0 is a position, and the first entry of either
-      // directory is the one it addresses. Read with `||` a stored 0 was
-      // indistinguishable from nothing stored, so a reader who picked the first
-      // font in the picker saw it until they reloaded and Inter afterwards. It
-      // matters here beyond the old bug: a number is migrated to a name once,
-      // and a wrong reading would be written back as the reader's settled choice.
-      t: a.t ?? 2,
-      nt: a.nt ?? 1,
+      // Carried across exactly as stored, with no default behind them. A
+      // default here used to stand in for the deployment's own font — 2 and 1
+      // were Inter in both directories on the day the order was captured — and
+      // that is now nominated by name in `defaultTypefaces`. While a default
+      // stood here it could not be reached: every reader arrived carrying a
+      // position, LEGACY_FONT_ORDER resolved it, and `chosenTypeface` returned
+      // before it ever looked at the nomination. So these read a stored number
+      // and nothing else, and a reader who stored none falls through to the
+      // nominated typeface, which is the point.
+      t: a.t,
+      nt: a.nt,
       s: a.s || 1.6,
       dm: a.dm || 0,
       sl: a.sl || 1,
