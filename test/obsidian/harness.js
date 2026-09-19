@@ -1594,6 +1594,10 @@ export async function seedLoginFacts({
   serverClientId = undefined,
   accessToken = undefined,
   refreshToken = undefined,
+  // The plugin no longer writes this key - which is why it is still seedable
+  // here. Planting it is the only way a check can put an installation into the
+  // state an older version left behind, and assert a login started afterwards
+  // is unaffected by it.
   refreshTokenLifetimeSeconds = undefined,
   lastFailure = undefined,
   pending = undefined,
@@ -1886,12 +1890,22 @@ export async function agePendingLogins() {
   return aged;
 }
 
-/** The two lifetimes the realm answered with on the exchange the plugin last completed, in seconds. */
+/**
+ * The two figures a check can read off the plugin after a login, in seconds.
+ *
+ * `loginDeadlineSeconds` is the deadline actually stamped on the login in
+ * progress - `expiresAt - startedAt`, read off the entry rather than off the
+ * constant, since the whole question is whether anything else got to decide it.
+ * `null` when no login is in progress, which is a different observation from a
+ * deadline of zero. There is no figure here for how long a refresh token lives:
+ * the plugin stopped storing one, which is what this change is about.
+ */
 export async function loginTokenFigures() {
   return page.evaluate((id) => {
     const plugin = window.app.plugins.plugins[id];
+    const [pending] = [...plugin.pendingLogins.values()];
     return {
-      refreshTokenLifetimeSeconds: plugin.data.refreshTokenLifetimeSeconds,
+      loginDeadlineSeconds: pending ? Math.round((pending.expiresAt - pending.startedAt) / 1000) : null,
       // `applyTokenResponse` keeps `expires_in` only as the moment it lands on,
       // and takes thirty seconds off it so a token is renewed before it dies.
       // Both are put back here, which is the nearest a check gets to the number
@@ -1931,9 +1945,12 @@ const teacherAccount = Object.freeze({
  * Puppeteer session, and that stays true of driving the *system* browser
  * through it. This does not: the login form is HTML and a redirect is a header.
  */
-export async function completeRealLogin(account = teacherAccount) {
+export async function completeRealLogin(account = teacherAccount, started = null) {
   doing(`completing a real login as ${JSON.stringify(account.username)}`);
-  const { url, state } = await startLoginWithoutBrowser();
+  // `started` is for a check that had to start the login itself - because what
+  // it is about happens between the start and the callback. Everything else
+  // hands this the whole round trip and never sees the two halves.
+  const { url, state } = started ?? (await startLoginWithoutBrowser());
   const code = await authorizationCodeFor(url, account);
   await deliverAuthCallback({ state, code });
   return { state, code };
@@ -2352,6 +2369,16 @@ export async function directoryStatus() {
  * poll, so a check that read one of them once, immediately, would report a wait
  * that is working exactly as it would report one that never resolves.
  */
+/**
+ * Lets real time pass, for a check whose subject is a deadline.
+ *
+ * Nothing to poll for: the assertion is that something did *not* happen while
+ * the plugin's own expiry sweep ran, so the waiting is the check. Anything
+ * waiting for a state to arrive uses `waitForValue` or `waitForLoginState`
+ * instead, which come back the moment it does.
+ */
+export const passTime = (ms) => sleep(ms);
+
 export async function waitForValue(read, accept, what, { timeout = 15000 } = {}) {
   const deadline = Date.now() + timeout;
   let last;

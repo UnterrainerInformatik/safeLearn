@@ -119,6 +119,7 @@ import {
   settingsFieldNames,
   settingsTextFields,
   shutdown,
+  passTime,
   startLoginWithoutBrowser,
   start,
   storedPluginData,
@@ -3877,13 +3878,24 @@ const NOTHING_LISTENING = "https://127.0.0.1:1/";
  * the lifetime a login in progress gets is a known number rather than a guessed
  * one. `docs-keycloak.md` carries the same two figures.
  *
- * The refresh figure doubles as Keycloak's own default for SSO Session Idle,
- * which is what the plugin seeds a fresh installation with - so the seed is
- * right for this realm, and the check below is what would say so if it stopped
- * being.
+ * The refresh figure is recorded for documentation and is what a stored login
+ * is seeded with below; nothing in the plugin derives from it any more. How
+ * long a login in progress may take is `LOGIN_DEADLINE_SECONDS`, which is the
+ * plugin's own and is deliberately not a realm figure at all.
  */
 const REALM_ACCESS_TOKEN_SECONDS = 300;
 const REALM_REFRESH_TOKEN_SECONDS = 1800;
+
+/**
+ * The deadline the plugin gives a login in progress - `LOGIN_DEADLINE_MS` in
+ * `main.ts`, in seconds.
+ *
+ * Written down here rather than read from the plugin, for the reason the
+ * command names above are: a check that took the figure from the same constant
+ * the plugin stamps with would agree with any value, including the one second a
+ * realm once talked it into.
+ */
+const LOGIN_DEADLINE_SECONDS = 600;
 
 /** Only the plugin's own notices - Obsidian and other plugins raise their own, and none of them are what a check here asked about. */
 const ours = (notices) => notices.filter((notice) => notice.startsWith("SafeLearn:"));
@@ -4561,9 +4573,9 @@ describe("a stored login is restored as a login in progress", () => {
     }));
 });
 
-describe("the realm's own figure for how long a login may take", () => {
-  test("a fresh installation carries the seed until a realm has answered", async () =>
-    watched("login-lifetime-seed", async () => {
+describe("how long a login in progress may take is the plugin's own to decide", () => {
+  test("a fresh installation's first login gets the ten minutes, with nothing in data.json having decided it", async () =>
+    watched("login-deadline-fresh-install", async () => {
       await restart();
       assert.equal(
         storedPluginData(),
@@ -4572,23 +4584,33 @@ describe("the realm's own figure for how long a login may take", () => {
       );
 
       // Writing any setting is what puts the file on disk for the first time,
-      // and what it carries then is the seed.
+      // and what it carries then is what a fresh installation persists.
       await openPluginSettings();
       await fillSettingsField("safeLearn instance URL", INSTANCE);
       await closePluginSettings();
 
       const stored = storedPluginData();
       assert.equal(
-        stored.refreshTokenLifetimeSeconds,
-        REALM_REFRESH_TOKEN_SECONDS,
-        "Nothing has answered yet, so a login in progress is given Keycloak's own default for " +
-          "`refresh_expires_in` - the realm's SSO Session Idle, thirty minutes out of the box. A " +
-          "wrong seed costs exactly one attempt, and only the very first one."
+        "refreshTokenLifetimeSeconds" in stored,
+        false,
+        "No figure for how long a login may take is written at all any more. The key used to be " +
+          "seeded here and overwritten by whatever the realm last answered, which is how an " +
+          `installation ended up unable to log in. It carries ${JSON.stringify(Object.keys(stored))}.`
+      );
+
+      await seedLoginFacts({ instanceUrl: INSTANCE });
+      await startLoginWithoutBrowser();
+      const figures = await loginTokenFigures();
+      assert.equal(
+        figures.loginDeadlineSeconds,
+        LOGIN_DEADLINE_SECONDS,
+        "The first login of a fresh installation is given the plugin's own ten minutes, decided by " +
+          `nothing on disk. It was given ${figures.loginDeadlineSeconds}.`
       );
     }));
 
-  test("a real login against the configured realm completes, and what the realm answered is kept", async () =>
-    watched("login-lifetime-from-realm", async () => {
+  test("a real login against the configured realm completes, and only the refresh token is written", async () =>
+    watched("login-deadline-real-login", async () => {
       await restart();
       await seedLoginFacts({ instanceUrl: INSTANCE });
 
@@ -4608,19 +4630,11 @@ describe("the realm's own figure for how long a login may take", () => {
 
       const figures = await loginTokenFigures();
       assert.equal(
-        figures.refreshTokenLifetimeSeconds,
-        REALM_REFRESH_TOKEN_SECONDS,
-        "This is the figure a login in progress is given to conclude in, and it comes from the realm " +
-          "rather than from a constant in the plugin. If the realm's Session Idle has been changed, " +
-          "this is where it shows - update REALM_REFRESH_TOKEN_SECONDS here and the same figure in " +
-          `docs-keycloak.md. The realm now answers ${figures.refreshTokenLifetimeSeconds}.`
-      );
-      assert.equal(
         figures.accessTokenLifetimeSeconds,
         REALM_ACCESS_TOKEN_SECONDS,
-        "Recorded for the same reason, though nothing derives from it: it is what tells somebody " +
-          "reading `docs-keycloak.md` that the two lifetimes are five minutes and thirty, and not " +
-          `the other way round. The realm now answers ${figures.accessTokenLifetimeSeconds}.`
+        "Recorded though nothing derives from it: it is what tells somebody reading " +
+          "`docs-keycloak.md` that the access token lives five minutes. The realm now answers " +
+          `${figures.accessTokenLifetimeSeconds}.`
       );
 
       const stored = storedPluginData();
@@ -4629,9 +4643,68 @@ describe("the realm's own figure for how long a login may take", () => {
         "The refresh token is what survives a restart, and it is the only token written to disk."
       );
       assert.equal(
-        stored.refreshTokenLifetimeSeconds,
-        REALM_REFRESH_TOKEN_SECONDS,
-        "It is kept beside the refresh token it describes, so the next start knows it too."
+        "refreshTokenLifetimeSeconds" in stored,
+        false,
+        "And a completed exchange writes no lifetime beside it. This is the write that poisoned an " +
+          "installation: `refresh_expires_in` off a refresh at the end of a session was a handful " +
+          `of seconds, and it governed every login afterwards. Stored: ${JSON.stringify(Object.keys(stored))}.`
+      );
+    }));
+
+  test("a lifetime an earlier version stored does not shorten the deadline a login gets", async () =>
+    watched("login-deadline-ignores-stored-figure", async () => {
+      await restart();
+      // What the vault this was reported from held: one second, written by the
+      // old code off a realm answering how little of the session was left.
+      await seedLoginFacts({ instanceUrl: INSTANCE, refreshTokenLifetimeSeconds: 1 });
+
+      await startLoginWithoutBrowser();
+
+      const figures = await loginTokenFigures();
+      assert.equal(
+        figures.loginDeadlineSeconds,
+        LOGIN_DEADLINE_SECONDS,
+        "The stored figure is not consulted, so an installation carrying a poisoned one is well " +
+          "again on the first run of this version, with nothing to reset and nothing to edit by " +
+          `hand. The login was given ${figures.loginDeadlineSeconds} seconds.`
+      );
+    }));
+
+  test("with that figure stored, a login is still in progress after the sweep has run, and the callback still logs the person in", async () =>
+    watched("login-deadline-survives-the-sweep", async () => {
+      await restart();
+      await seedLoginFacts({ instanceUrl: INSTANCE, refreshTokenLifetimeSeconds: 1 });
+
+      const started = await startLoginWithoutBrowser();
+
+      // Past two ticks of `EXPIRY_TICK_MS`, which is how long the reported
+      // failure took to happen: the browser had not finished opening.
+      await passTime(2500);
+
+      const state = await loginState();
+      assert.equal(
+        state.name,
+        "logging-in",
+        "This is the report, in the words it was reported in: the browser opens, the status bar " +
+          "says logging in, and immediately the plugin says nothing came back. It reads as " +
+          `${JSON.stringify(state)}.`
+      );
+      assert.equal(
+        await pendingLoginCount(),
+        1,
+        "The sweep found nothing to end, so the login is still the one this window is waiting on."
+      );
+
+      // The other half of the report: the callback arriving a while later was
+      // answered with *a login already given up on*, because the `state` it
+      // carried had been moved to the concluded ones by the sweep above.
+      await completeRealLogin(undefined, started);
+      const concluded = await waitForLoginState("logged-in");
+      assert.equal(
+        concluded.name,
+        "logged-in",
+        "A callback for a login that is still in progress completes it. It used to be told it " +
+          `belonged to a login no longer pending. It reads as ${JSON.stringify(concluded)}.`
       );
     }));
 });

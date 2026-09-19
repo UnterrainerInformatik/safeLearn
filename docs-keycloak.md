@@ -60,13 +60,15 @@ kcadm.sh update clients/$CLIENT_UUID -r safeLearn -s 'attributes."pkce.code.chal
 
 ### What this realm answers for token lifetimes
 
-Read out of one real exchange against `auth.unterrainer.info` on the `safeLearn` realm, and written down because the plugin now depends on the second figure rather than on a constant of its own:
+Read out of one real exchange against `auth.unterrainer.info` on the `safeLearn` realm, and written down so that a change to this realm's session settings is a known number rather than a guessed one. Nothing in the plugin derives from either figure beyond renewing the access token before it runs out:
 
 | Field | This realm answers | What it is |
 | --- | --- | --- |
 | `expires_in` | `300` (five minutes) | How long an issued access token is good for. The plugin keeps it in memory only, and renews thirty seconds before it runs out. |
 | `refresh_expires_in` | `1800` (thirty minutes) | How long the refresh token issued beside it is good for. This is the realm's SSO Session Idle, and it is also Keycloak's own default, so a deployment that has not touched it answers the same. |
 
-The plugin (`plugin-login-flow`) keeps `refresh_expires_in` in `data.json` beside the refresh token it describes, and gives a login in progress exactly that long to conclude before it gives up on it. A fresh installation has no such value yet, and is seeded with the same thirty minutes; the first successful exchange replaces the seed with whatever the realm actually answered, so a deployment on a realm with different session settings needs nothing configured here.
+The plugin does not keep `refresh_expires_in`, and a login in progress is not measured by it. A login is given ten minutes — `LOGIN_DEADLINE_MS` in `main.ts`, the plugin's own constant — and a deployment on a realm with different session settings needs nothing configured here.
 
-`test/obsidian/plugin.test.js` asserts both figures against a real exchange, so a change to this realm's session settings shows up as a red check naming the new number rather than as a lifetime nobody notices is wrong.
+The two quantities are not the same kind of thing, which is why one is not derived from the other. `refresh_expires_in` measures a session: how long an identity stays good for, or, on a refresh near the end of a session, how little of that session is left. The deadline measures a person: typing a password, clearing a second factor, and finding the phone the second factor is on. An earlier version of the plugin took the first for the second, and a realm that answered `1` on a refresh at the end of a session locked that installation out of logging in permanently — every login was over on the first tick after the browser opened, and only a successful exchange could have overwritten the figure. A realm must not be able to decide that, and now it cannot.
+
+`test/obsidian/plugin.test.js` asserts the access-token figure against a real exchange, so a change to this realm's session settings shows up as a red check naming the new number rather than as a lifetime nobody notices is wrong. The same block asserts that a lifetime stored by an earlier version does not shorten the deadline a login gets.
