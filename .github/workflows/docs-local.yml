@@ -87,18 +87,34 @@ jobs:
     if: ${{ needs.decide-deploy.outputs.do_deploy == 'true' }}
     env:
       NO_VPN: ${{ secrets.NO_VPN }}
+      WG_CONFIG: ${{ secrets.WG_CONFIG }}
+      VPN_OVPN_FILE: ${{ secrets.VPN_OVPN_FILE }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+      # VPN: WireGuard if WG_CONFIG is set, else OpenVPN if VPN_OVPN_FILE is set
+      - name: Install OpenVPN
+        if: ${{ env.NO_VPN != 'true' && env.WG_CONFIG == '' && env.VPN_OVPN_FILE != '' }}
+        run: |
+          sudo apt update
+          sudo apt install -y openvpn openvpn-systemd-resolved
+      - name: Write OVPN client-config file
+        if: ${{ env.NO_VPN != 'true' && env.WG_CONFIG == '' && env.VPN_OVPN_FILE != '' }}
+        run: printf '%s\n' "$VPN_OVPN_FILE" > client.ovpn
+      - name: Connect to OpenVPN 🔓
+        if: ${{ env.NO_VPN != 'true' && env.WG_CONFIG == '' && env.VPN_OVPN_FILE != '' }}
+        uses: "kota65535/github-openvpn-connect-action@v3"
+        with:
+          config_file: client.ovpn
+          username: ${{ secrets.VPN_USERNAME }}
+          password: ${{ secrets.VPN_PASSWORD }}
       - name: Install WireGuard
-        if: ${{ env.NO_VPN != 'true' }}
+        if: ${{ env.NO_VPN != 'true' && env.WG_CONFIG != '' }}
         run: |
           sudo apt update
           sudo apt install -y wireguard-tools
       - name: Connect to WireGuard 🔓
-        if: ${{ env.NO_VPN != 'true' }}
-        env:
-          WG_CONFIG: ${{ secrets.WG_CONFIG }}
+        if: ${{ env.NO_VPN != 'true' && env.WG_CONFIG != '' }}
         run: |
           # drop DNS lines (would need resolvconf and would hijack the runner's DNS)
           printf '%s\n' "$WG_CONFIG" | grep -viE '^\s*DNS\s*=' | sudo install -m 600 /dev/stdin /etc/wireguard/wg-deploy.conf
@@ -171,5 +187,5 @@ jobs:
           host: ${{ secrets.DEPLOY_SERVER }}
           port: ${{ secrets.DEPLOY_SSH_PORT }}
       - name: Disconnect WireGuard 🔒
-        if: ${{ always() && env.NO_VPN != 'true' }}
+        if: ${{ always() && env.NO_VPN != 'true' && env.WG_CONFIG != '' }}
         run: sudo wg-quick down wg-deploy || true
