@@ -293,7 +293,7 @@ When `allowOverride` is set and the teacher's preference `vt == 0`, `hasRoles` s
 1. **bump** — `anothrNick/github-tag-action`, patch by default.
 2. **docker-build** — materializes `site/.env` and `site/keycloak.json` from secrets, then builds and pushes `linux/amd64` + `linux/arm64/v8` to Docker Hub as `:latest`.
 3. **decide-deploy** — reads the `NO_DEPLOY` secret and emits a boolean.
-4. **deploy** — optional OpenVPN connect (skipped when `NO_VPN=true`), SSH key setup, remote `mkdir` of the deploy and data directories, generates `deploy/.env`, normalizes line endings with `dos2unix`, uploads `deploy/` and runs `up.sh`.
+4. **deploy** — optional WireGuard connect (skipped when `NO_VPN=true`), SSH key setup, remote `mkdir` of the deploy and data directories, generates `deploy/.env`, normalizes line endings with `dos2unix`, uploads `deploy/` and runs `up.sh`.
 
 `docs-building.md` documents all 20 required secrets.
 

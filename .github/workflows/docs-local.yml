@@ -90,25 +90,20 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-      - name: Install OpenVPN
+      - name: Install WireGuard
         if: ${{ env.NO_VPN != 'true' }}
         run: |
           sudo apt update
-          sudo apt install -y openvpn openvpn-systemd-resolved
-      - name: Touch OVPN client-config file
+          sudo apt install -y wireguard-tools
+      - name: Connect to WireGuard 🔓
         if: ${{ env.NO_VPN != 'true' }}
-        run: touch client.ovpn
-      - name: Fill OVPN client-config file
-        if: ${{ env.NO_VPN != 'true' }}
+        env:
+          WG_CONFIG: ${{ secrets.WG_CONFIG }}
         run: |
-            echo "${{ secrets.VPN_OVPN_FILE }}" >> client.ovpn
-      - name: Connect to VPN 🔓
-        if: ${{ env.NO_VPN != 'true' }}
-        uses: "kota65535/github-openvpn-connect-action@v3"
-        with:
-          config_file: client.ovpn
-          username: ${{ secrets.VPN_USERNAME }}
-          password: ${{ secrets.VPN_PASSWORD }}
+          # drop DNS lines (would need resolvconf and would hijack the runner's DNS)
+          printf '%s\n' "$WG_CONFIG" | grep -viE '^\s*DNS\s*=' | sudo install -m 600 /dev/stdin /etc/wireguard/wg-deploy.conf
+          sudo wg-quick up wg-deploy
+          sudo wg show wg-deploy
       - name: Installing SSH key 🔑
         uses: UnterrainerInformatik/setup-ssh-action@v1
         with:
@@ -175,4 +170,6 @@ jobs:
           user: ${{ secrets.DEPLOY_SSH_USER }}
           host: ${{ secrets.DEPLOY_SERVER }}
           port: ${{ secrets.DEPLOY_SSH_PORT }}
-
+      - name: Disconnect WireGuard 🔒
+        if: ${{ always() && env.NO_VPN != 'true' }}
+        run: sudo wg-quick down wg-deploy || true
