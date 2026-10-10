@@ -63,14 +63,15 @@
       ]
     },
     "test/checks/rendering.js": {
-      "what": "Callouts and their collapsible forms, highlighted code, fragment indices, side-by-side columns, the image forms, and the emitted PlantUML and Mermaid markup. That a page view is shown by its one owner with the value that defers to the stylesheets, and that the wait for it is bounded: a preference request left unanswered still produces a visible page and a console message naming what it waited for, while a page that came up normally reports nothing.",
+      "what": "Callouts and their collapsible forms, highlighted code, ==highlights== with and without one of the six colour emoji, fragment indices, side-by-side columns, the image forms, and the emitted PlantUML and Mermaid markup. That a page view is shown by its one owner with the value that defers to the stylesheets, and that the wait for it is bounded: a preference request left unanswered still produces a visible page and a console message naming what it waited for, while a page that came up normally reports nothing.",
       "guards": [
         "obsidian.js",
         "app.js",
         "obsidian-page.js",
         "css/callouts.css",
         "css/main.css",
-        "test/harness.js"
+        "test/harness.js",
+        "css/highlights.css"
       ],
       "corpus": [
         "md/test-md-file.md",

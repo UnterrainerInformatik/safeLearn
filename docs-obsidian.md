@@ -127,6 +127,17 @@ You can see all the variations [here](https://help.obsidian.md/Editing+and+forma
 
 They all work with one exception:
 ![](md/assets/Pasted%20image%2020240315082944.png)
+## Highlights And Their Colors
+Text between two `==` is [highlighted](https://obsidian.md/help/syntax), just as in Obsidian.
+Since Obsidian 1.14 a highlight can carry one of six colors: put the color's emoji directly after the opening `==`. The emoji selects the color and is not shown.
+
+```markdown
+==Default highlight==
+==🔴Red== ==🟠Orange== ==🟡Yellow== ==🟢Green== ==🔵Blue== ==🟣Purple==
+```
+
+Obsidian's own `==` suggestions and the formatting menu write exactly this, so whatever you color in the editor is colored on the page, in light and dark mode and in the presentation view.
+A highlight stays on one line, may contain other formatting (`==🔵**bold** and a [link](...)==`), and is left alone inside code.
 ## Image Sizing
 The renderer will never touch the image's size, until it won't fit the display. If that occurs, it will just resize it proportionally to fit it.
 

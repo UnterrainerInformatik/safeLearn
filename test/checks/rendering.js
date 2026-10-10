@@ -2,7 +2,8 @@
  * The render pipeline, one feature at a time.
  *
  * Reads `md/test-md-file.md`, which demonstrates every callout type, the
- * collapsible forms, highlighted code, the fragment indices and their reset at
+ * collapsible forms, highlighted code, the `==highlight==` in its plain form and
+ * its six colours, the fragment indices and their reset at
  * headings, the two- and three-column side-by-side layouts, the four image
  * forms, and the PlantUML and Mermaid blocks.
  *
@@ -527,6 +528,48 @@ describe("rendering", () => {
 
     const shown = await session.page.evaluate(() => document.body.style.display);
     assert.equal(shown, "", "the page should still be showing the value its owner wrote");
+  });
+
+  // ---- Highlights ----
+
+  test("a highlight renders as a mark, and a colour emoji after its opening == picks one of six tints", async () => {
+    await showCorpus();
+    const marks = await session.page.evaluate(() =>
+      [...document.querySelectorAll("#markdown-content mark")].map((mark) => ({
+        text: mark.textContent,
+        classes: [...mark.classList],
+        bold: Boolean(mark.querySelector("strong")),
+        background: getComputedStyle(mark).backgroundColor,
+        color: getComputedStyle(mark).color,
+        around: getComputedStyle(mark.parentElement).color,
+      }))
+    );
+
+    const plain = marks.find((mark) => mark.text === "A plain highlight");
+    assert.ok(plain, `${corpusPath} declares a plain highlight, so it should render as a mark`);
+    assert.deepEqual(plain.classes, ["sl-mark"], "a highlight without an emoji should carry no colour");
+
+    const backgrounds = new Set([plain.background]);
+    for (const color of ["red", "orange", "yellow", "green", "blue", "purple"]) {
+      const found = marks.find((mark) => mark.classes.includes(`sl-mark-${color}`));
+      assert.ok(found, `${corpusPath} declares a ${color} highlight, so a mark carrying sl-mark-${color} should render`);
+      assert.ok(found.text.startsWith(color), `the emoji should not be part of the ${color} highlight's text, got "${found.text}"`);
+      assert.equal(found.color, found.around, `the ${color} highlight should keep the colour of the text around it`);
+      backgrounds.add(found.background);
+    }
+    assert.equal(backgrounds.size, 7, "the plain highlight and the six colours should each have a tint of their own");
+
+    const purple = marks.find((mark) => mark.classes.includes("sl-mark-purple"));
+    assert.ok(purple.bold, "inline formatting inside a highlight should still be rendered");
+
+    assert.ok(
+      !marks.some((mark) => mark.text.includes("not in code") || mark.text.trim() === "b"),
+      "neither a code span nor a run of === should turn into a highlight"
+    );
+    const code = await session.page.$$eval("#markdown-content :not(pre) > code", (codes) =>
+      codes.map((element) => element.textContent)
+    );
+    assert.ok(code.includes("==not in code=="), "a code span should keep its == as written");
   });
 
   // ---- Nothing outside the application was needed ----

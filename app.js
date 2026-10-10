@@ -39,6 +39,7 @@ markedLight.use({
   gfm: true,
   pedantic: false,
 });
+markedLight.use(highlightExtension);
 markedLight.use(
   markedShiki({
     highlight(code, lang, props) {
@@ -66,6 +67,7 @@ markedDark.use({
   gfm: true,
   pedantic: false,
 });
+markedDark.use(highlightExtension);
 markedDark.use(
   markedShiki({
     highlight(code, lang, props) {
@@ -102,7 +104,7 @@ const DOMPurify = createDOMPurify(window);
 const app = express();
 app.set("trust proxy", true);
 
-import { scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions, wrapAsDocument, resolveFileVisibility, registerVisibilityChangeCallback, searchCorpus, minimumQueryLength } from "./obsidian.js";
+import { highlightExtension, scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions, wrapAsDocument, resolveFileVisibility, registerVisibilityChangeCallback, searchCorpus, minimumQueryLength } from "./obsidian.js";
 
 import chokidar from "chokidar";
 

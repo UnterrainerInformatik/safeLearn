@@ -993,6 +993,61 @@ export function lucideIcon(name, color, size = 18) {
   return `<span style="color: ${color};">${svg}</span>`;
 }
 
+/**
+ * The six colours Obsidian 1.14 gives a highlight, keyed by the emoji that
+ * selects them. The emoji stands directly after the opening `==` and is not
+ * part of the text: `==🔴Important==`.
+ */
+export const highlightColors = {
+  "🔴": "red",
+  "🟠": "orange",
+  "🟡": "yellow",
+  "🟢": "green",
+  "🔵": "blue",
+  "🟣": "purple",
+};
+
+// `==` not followed by a third `=`, an optional colour emoji (with the variation
+// selector some keyboards append), then text that holds no `==` of its own and
+// no line break. Requiring a non-blank character keeps `== ==` and `a === b`
+// from turning into an empty mark.
+const highlightRegex = new RegExp(
+  `^==(?!=)(${Object.keys(highlightColors).join("|")})?\\uFE0F?((?:[^=\\n]|=(?!=))*?[^\\s=])==`,
+  "u"
+);
+
+/**
+ * A `marked` extension for Obsidian's `==highlight==`. Being an inline token is
+ * what keeps it out of code spans and fenced blocks without parking them first:
+ * the lexer never hands those to an inline tokenizer.
+ */
+export const highlightExtension = {
+  extensions: [
+    {
+      name: "highlight",
+      level: "inline",
+      start(src) {
+        const index = src.indexOf("==");
+        return index < 0 ? undefined : index;
+      },
+      tokenizer(src) {
+        const match = highlightRegex.exec(src);
+        if (!match || !match[2].trim()) return undefined;
+        return {
+          type: "highlight",
+          raw: match[0],
+          color: match[1] ? highlightColors[match[1]] : null,
+          tokens: this.lexer.inlineTokens(match[2]),
+        };
+      },
+      renderer(token) {
+        const color = token.color ? ` sl-mark-${token.color}` : "";
+        return `<mark class="sl-mark${color}">${this.parser.parseInline(token.tokens)}</mark>`;
+      },
+    },
+  ],
+};
+
 export async function preParse(md, req) {
   let r = md;
   r = await removeForbiddenContent(r, req);
@@ -2800,6 +2855,7 @@ export async function wrapInReveal(reveal, req) {
     <link rel="stylesheet" href="/node_modules/reveal.js/dist/reset.css">
     <link rel="stylesheet" href="/node_modules/reveal.js/dist/reveal.css">
     <link rel="stylesheet" href="/css/reveal-theme-moon.css">
+    <link rel="stylesheet" href="/css/highlights.css">
 
     <style>
       ${getFontImports()}

@@ -1,0 +1,36 @@
+/* Obsidian's `==highlight==` and the six colours 1.14 added to it
+   (`==🔴text==`), rendered by highlightExtension in obsidian.js.
+
+   The tints are Obsidian's own base colours laid over the text at a fraction
+   of their strength, so the glyphs keep the colour of the text around them and
+   the contrast it has. A browser's default <mark> paints the text black, which
+   on the dark backgrounds below would be black on dark grey. */
+mark.sl-mark {
+  color: inherit;
+  background-color: rgba(255, 208, 0, 0.4);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+mark.sl-mark-red    { background-color: rgba(233, 49, 71, 0.25); }
+mark.sl-mark-orange { background-color: rgba(236, 117, 0, 0.25); }
+mark.sl-mark-yellow { background-color: rgba(224, 172, 0, 0.3); }
+mark.sl-mark-green  { background-color: rgba(8, 185, 78, 0.25); }
+mark.sl-mark-blue   { background-color: rgba(8, 109, 221, 0.22); }
+mark.sl-mark-purple { background-color: rgba(120, 82, 238, 0.22); }
+
+/* Dark mode and the deck, whose moon theme is dark as well: Obsidian's dark
+   variants of the same colours, a little stronger to read against #1e1e1e. */
+.dark-mode mark.sl-mark,
+.reveal mark.sl-mark            { background-color: rgba(255, 208, 0, 0.3); }
+.dark-mode mark.sl-mark-red,
+.reveal mark.sl-mark-red        { background-color: rgba(251, 70, 76, 0.35); }
+.dark-mode mark.sl-mark-orange,
+.reveal mark.sl-mark-orange     { background-color: rgba(233, 151, 63, 0.35); }
+.dark-mode mark.sl-mark-yellow,
+.reveal mark.sl-mark-yellow     { background-color: rgba(224, 222, 113, 0.3); }
+.dark-mode mark.sl-mark-green,
+.reveal mark.sl-mark-green      { background-color: rgba(68, 207, 110, 0.3); }
+.dark-mode mark.sl-mark-blue,
+.reveal mark.sl-mark-blue       { background-color: rgba(2, 122, 255, 0.35); }
+.dark-mode mark.sl-mark-purple,
+.reveal mark.sl-mark-purple     { background-color: rgba(168, 130, 255, 0.35); }

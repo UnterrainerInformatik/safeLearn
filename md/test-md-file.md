@@ -71,6 +71,10 @@ public class TestClass {
 }
 ```
 
+## Test Highlights
+==A plain highlight== and ==🔴red==, ==🟠orange==, ==🟡yellow==, ==🟢green==, ==🔵blue==, ==🟣purple **with bold inside**==.
+`==not in code==` and a === b == c stay as they are.
+
 ## Test Callouts
 > [!Note]
 > test

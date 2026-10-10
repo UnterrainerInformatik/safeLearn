@@ -86,6 +86,7 @@ Each entry is marked with its implementation status:
 | --- | --- | --- |
 | All material as Markdown in one place | **[verified]** | `obsidian.js` `scanFiles()` walks `md/` recursively and builds the file maps |
 | Obsidian-flavor Markdown (callouts, `[[wiki-links]]`, `![[embeds]]`, image sizing) | **[verified]** | `obsidian.js` — `preMarkCallouts`/`replacePreMarkCallouts`, `preReplaceObsidianFileLinks`, `replaceObsidianImageLinks`, `replaceObsidianImageAltResizeValues` |
+| Highlights `==text==` and the six highlight colors of Obsidian 1.14 (`==🔴text==`) | **[verified]** | `obsidian.js` — `highlightExtension`, a `marked` inline extension registered on both instances in `app.js`; tints in `css/highlights.css`, which the page gets through `css/main.css` and the deck through its own link |
 | Reveal.js presentations from the same file | **[verified]** | `?reveal=true` → `splitForReveal()` splits on `h2`/`h3` into nested `<section>`s, `wrapInReveal()` builds the deck |
 | Presentation fragments (`##fragment`) | **[verified]** | `obsidian.js` `preprocessFragments`/`postprocessFragments` |
 | Side-by-side columns (`##side-by-side-start` / `##separator` / `##side-by-side-end`) | **[verified]** | `obsidian.js` `preprocessSideBySide` |
@@ -148,7 +149,7 @@ Each entry is marked with its implementation status:
 | `utils.js` | Role resolution. `hasSomeRoles` merges Keycloak client roles, LDAP-derived groups and the user's own name into one role set, then applies the teacher/admin downgrade and the `#exam`/`#practice`/`#answer` view rules, the last two as one rule and its complement. |
 | `middlewares/keycloak-middleware.js` | The whole authentication flow: OIDC discovery, session, Passport strategy, `/test` login trigger, `/auth/callback`, logout, token refresh, LDAP group extraction, and Keycloak account-attribute read/write. |
 | `middlewares/extract-filename-middleware.js` | Small helper: parses the request path into `req.filePath` and `req.file`, used for page titles. |
-| `css/` | 14 stylesheets. `css/main.css` is the single entry point linked by the page and document wrappers and `@import`s 11 of them: layout (`body`, `topbar`, `sidebar`, `media`), content (`markdown`, `callouts`, `fixes`), controls (`buttons`, `flipswitch`), animation (`movement`, `reveals-rotates`). Two are outside that chain and linked by `wrapInReveal` alone: `css/reveal-theme-moon.css`, the derivation of Reveal's `moon` theme, and `css/reveal.css`, this deck's rules over it — linked last, because that is what makes them overrides. |
+| `css/` | 16 stylesheets. `css/main.css` is the single entry point linked by the page and document wrappers and `@import`s 13 of them: layout (`body`, `topbar`, `sidebar`, `media`), content (`markdown`, `callouts`, `highlights`, `fixes`), controls (`search`, `buttons`, `flipswitch`), animation (`movement`, `reveals-rotates`). Two are outside that chain and linked by `wrapInReveal` alone: `css/reveal-theme-moon.css`, the derivation of Reveal's `moon` theme, and `css/reveal.css`, this deck's rules over it — linked last, because that is what makes them overrides. `css/highlights.css` is the one file in both: imported by `main.css` and linked by `wrapInReveal` as well, because a deck shows highlights too. |
 | `assets/` | `favicon.ico` plus `main-fonts/` (11 offered typefaces in 42 files) and `nav-fonts/` (8 typefaces in 16), each with its licence beside it and a `SOURCES.md` recording which release every family came from. A typeface is one family carrying the cuts it ships: `<Name>.ttf` is the regular and `<Name>-700`, `-italic`, `-700italic` are the others, in any of `.ttf`/`.otf`/`.woff`/`.woff2`. `getFontImports()` emits one `@font-face` per cut under one family name, so the browser selects a bold rather than smearing one. A weight that is neither 400 nor 700 is not composed into a family — `Lato-300.ttf` and `Lato-300italic.ttf` belong to the deck theme, which declares `Lato` itself. The reader's choice is stored by typeface name (`tf`/`ntf`), not as a position: the arrays are sorted, so a position would have meant something different the moment they were. |
 | `md/` | The content root and the test corpus — permission tests, a presentation, folder-name edge cases (spaces, special characters, empty folders), and `assets/` with pasted images. In production this directory is replaced or bind-mounted. |
 | `deploy/` | Server-side deployment artifacts: `docker-compose.yml` (image, port mapping, `TZ=Europe/Vienna`) and `up.sh` (pull + recreate). Uploaded by the GitHub Action. |
@@ -201,7 +202,8 @@ read file (app.js)
        7. preprocessFragments         ##fragment  → HTML comment marker
        8. preprocessSideBySide        ##side-by-side-* → column divs
        9. unmarkCode                  restore the parked code blocks
-  └─ marked.parse                  markedDark or markedLight, chosen by preference `dm`
+  └─ marked.parse                  markedDark or markedLight, chosen by preference `dm`;
+                                   both carry highlightExtension (==text==, ==🔴text==)
   └─ manipulateHtml (obsidian.js)
        1. replacePreMarkCallouts        markers → styled callout markup with a Lucide icon
        2. replaceObsidianImageLinks     ![[embeds]] → img / video / audio / link by extension
