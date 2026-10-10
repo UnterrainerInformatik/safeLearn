@@ -36,6 +36,18 @@ import { after, before, describe, test } from "node:test";
 
 import {
   accessTokenFor,
+  clipboardText,
+  confirmInvitationList,
+  forgetInvitationFormat,
+  invitationConfirmations,
+  invitationDialogPresent,
+  invitationFields,
+  invitationPreview,
+  invitationTexts,
+  moveInvitationField,
+  setClipboardText,
+  setInvitationTexts,
+  switchInvitationField,
   addVisibleDirectoryResults,
   advanceDirectoryFetch,
   agePendingLogins,
@@ -139,8 +151,8 @@ import {
 /** The one entry the plugin contributes to the editor's context menu. */
 const MENU_ENTRY = "SafeLearn";
 
-/** That entry and the six commands under it. */
-const MENU_ENTRY_COUNT = 7;
+/** That entry and the seven commands under it. */
+const MENU_ENTRY_COUNT = 8;
 
 /**
  * What the commands are called, in both surfaces that show them.
@@ -156,6 +168,7 @@ const MENU_COMMAND_NAMES = [
   "Fragment marker",
   "Semester table…",
   "Restricted section per name…",
+  "Invitation list…",
   "Restrict selection…",
 ];
 
@@ -3904,6 +3917,200 @@ describe("the directory search strip", () => {
 
       await confirmNameList();
       await clearDirectoryLoginFixture();
+    }));
+});
+
+describe("the invitation list", () => {
+  // In the directory's own order, which is not surname order. Grace has no
+  // address in the directory, the way some students have none.
+  const CLASS = [
+    { name: "Ben Huber", firstName: "Ben", lastName: "Huber", email: "ben.huber@example.org", roles: { student: true, "2b": true } },
+    { name: "Anna Bauer", firstName: "Anna", lastName: "Bauer", email: "anna.bauer@example.org", roles: { student: true, "2b": true } },
+  ];
+  const GRACE = { name: "Grace Hopper", firstName: "Grace", lastName: "Hopper", email: "", roles: { student: true, "2b": true } };
+
+  /** Opens a fresh document with the cursor after its one line, and the dialog on it with the class taken over. */
+  async function openWithClass(name, entries = CLASS) {
+    await setDirectoryLoginFixture(entries);
+    await forgetInvitationFormat();
+    await writeDocument(name, "Invite: ");
+    await open(name, views.livePreview);
+    await placeCursorAfter("Invite: ");
+    await runCommand("insert-invitation-list", { expectEdit: false });
+    assert.ok(await invitationDialogPresent(), "The command opens its dialog.");
+    await searchDirectoryStrip("", ["2b"]);
+    await addVisibleDirectoryResults();
+  }
+
+  test("the author's example format is written one entry per person, in surname order", async () =>
+    watched("invitation-example-format", async () => {
+      await openWithClass("constructed-invitation-example.md");
+      await switchInvitationField("firstName", true);
+      await switchInvitationField("lastName", true);
+      // Given name, surname, e-mail - class stays off and keeps its row.
+      await moveInvitationField("email", "down");
+      await moveInvitationField("email", "down");
+      await setInvitationTexts({ fieldSeparator: ",", prefix: ",,,", postfix: ",,\\n", entrySeparator: "" });
+
+      const expected = ",,,Anna,Bauer,anna.bauer@example.org,,\n,,,Ben,Huber,ben.huber@example.org,,\n";
+      assert.equal(await invitationPreview(), expected, "The preview is the list as it will be written.");
+
+      await confirmInvitationList("insert");
+      assert.equal(await documentText(), "Invite: " + expected, "The list stands at the cursor.");
+      const cursor = await cursorPosition();
+      assert.deepEqual(
+        [cursor.to.line, cursor.to.ch],
+        [2, 0],
+        `The cursor stands after the list. It is at ${JSON.stringify(cursor)}.`
+      );
+      await clearDirectoryLoginFixture();
+    }));
+
+  test("addresses are written one per line by default, and comma-joined when asked", async () =>
+    watched("invitation-addresses", async () => {
+      await openWithClass("constructed-invitation-lines.md");
+      assert.deepEqual(
+        (await invitationFields()).filter((row) => row.on).map((row) => row.field),
+        ["email"],
+        "Before any format was confirmed, the address is the only field."
+      );
+      await confirmInvitationList("insert");
+      assert.equal(
+        await documentText(),
+        "Invite: anna.bauer@example.org\nben.huber@example.org",
+        "One address per line, with no line break after the last."
+      );
+
+      await openWithClass("constructed-invitation-commas.md");
+      await setInvitationTexts({ entrySeparator: "comma" });
+      await confirmInvitationList("insert");
+      assert.equal(
+        await documentText(),
+        "Invite: anna.bauer@example.org,ben.huber@example.org",
+        "The addresses joined by commas, with no comma after the last."
+      );
+      await clearDirectoryLoginFixture();
+    }));
+
+  test("\\t puts a tab between the fields, and the fields follow the order of their rows", async () =>
+    watched("invitation-tab-and-order", async () => {
+      await openWithClass("constructed-invitation-tab.md");
+      await switchInvitationField("firstName", true);
+      await moveInvitationField("email", "down");
+      await setInvitationTexts({ fieldSeparator: "\\t" });
+      assert.equal(
+        (await invitationPreview()).split("\n")[0],
+        "Anna\tanna.bauer@example.org",
+        "A tab, not a backslash and a t."
+      );
+
+      await moveInvitationField("email", "up");
+      assert.equal((await invitationFields())[0].field, "email", "Moved up, the address stands first.");
+      await confirmInvitationList("insert");
+      assert.equal(
+        (await documentText()).split("\n")[0],
+        "Invite: anna.bauer@example.org\tAnna",
+        "Every entry now starts with the address."
+      );
+      await clearDirectoryLoginFixture();
+    }));
+
+  test("a missing address is written empty, with its separators, and reported", async () =>
+    watched("invitation-missing-address", async () => {
+      await openWithClass("constructed-invitation-missing.md", [...CLASS, GRACE]);
+      await switchInvitationField("firstName", true);
+      await moveInvitationField("firstName", "up");
+      await setInvitationTexts({ fieldSeparator: ";", postfix: ";" });
+      await forgetNotices();
+      await confirmInvitationList("insert");
+      assert.ok(
+        (await documentText()).includes("Grace;;"),
+        `Grace is written, with an empty address between its separators. Document: ${JSON.stringify(await documentText())}`
+      );
+      const reported = await noticesShown();
+      assert.ok(
+        reported.some((notice) => /1 entry has an empty e-mail address/.test(notice)),
+        `The author is told how many entries lack an address. Reported: ${JSON.stringify(reported)}`
+      );
+      await clearDirectoryLoginFixture();
+    }));
+
+  test("the format confirmed last is offered again, and nobody is chosen", async () =>
+    watched("invitation-remembered", async () => {
+      await openWithClass("constructed-invitation-remembered.md");
+      await switchInvitationField("lastName", true);
+      await moveInvitationField("lastName", "down");
+      await setInvitationTexts({ fieldSeparator: "\\t", prefix: "- ", postfix: ",,\\n", entrySeparator: " | " });
+      await confirmInvitationList("insert");
+
+      const stored = storedPluginData()?.invitationFormat;
+      assert.deepEqual(
+        stored,
+        { fields: ["email", "lastName"], fieldSeparator: "\\t", prefix: "- ", postfix: ",,\\n", entrySeparator: " | " },
+        "The format is written to data.json as typed, so it survives a restart."
+      );
+
+      await runCommand("insert-invitation-list", { expectEdit: false });
+      assert.deepEqual(
+        (await invitationFields()).filter((row) => row.on).map((row) => row.field),
+        ["email", "lastName"],
+        "The fields and their order are those of the last list."
+      );
+      assert.deepEqual(await invitationTexts(), {
+        fieldSeparator: "\\t",
+        prefix: "- ",
+        postfix: ",,\\n",
+        entrySeparatorChoice: "custom",
+        entrySeparatorCustom: " | ",
+      });
+      assert.deepEqual(await chosenDirectoryNames(), [], "Nobody is chosen.");
+      assert.equal(
+        await invitationPreview(),
+        "- anna.beispiel@example.org\tBeispiel,,\n",
+        "With nobody chosen, the preview shows the format applied to a placeholder person."
+      );
+      await closeOpenModal();
+      await clearDirectoryLoginFixture();
+    }));
+
+  test("copying puts the list on the clipboard and leaves the document unchanged", async () =>
+    watched("invitation-copy", async () => {
+      await openWithClass("constructed-invitation-copy.md", [...CLASS, GRACE]);
+      await setClipboardText("before");
+      const before = await documentText();
+      await forgetNotices();
+      await confirmInvitationList("copy");
+
+      assert.equal(
+        await clipboardText(),
+        "anna.bauer@example.org\n\nben.huber@example.org",
+        "The clipboard holds the list - Grace's empty address included, in surname order."
+      );
+      assert.equal(await documentText(), before, "The document is unchanged.");
+      const reported = await noticesShown();
+      assert.ok(
+        reported.some((notice) => /\b3 entries\b/.test(notice)),
+        `A notice says how many entries were copied. Reported: ${JSON.stringify(reported)}`
+      );
+      await clearDirectoryLoginFixture();
+    }));
+
+  test("the dialog cannot be confirmed with no field switched on, or without a login", async () =>
+    watched("invitation-not-confirmable", async () => {
+      await openWithClass("constructed-invitation-no-field.md");
+      await switchInvitationField("email", false);
+      assert.deepEqual(await invitationConfirmations(), { Insert: false, Copy: false });
+      await closeOpenModal();
+      await clearDirectoryLoginFixture();
+
+      await runCommand("insert-invitation-list", { expectEdit: false });
+      assert.equal(await directorySearchStripPresent(), false, "Without a login there is no picker.");
+      assert.ok(
+        (await visibleText(".modal-container")).includes("needs a directory login"),
+        "The dialog says the command needs a directory login."
+      );
+      assert.deepEqual(await invitationConfirmations(), { Insert: false, Copy: false });
+      await closeOpenModal();
     }));
 });
 

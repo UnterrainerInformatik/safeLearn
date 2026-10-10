@@ -2,7 +2,7 @@
  * `GET /api/admin/directory/search` and `GET /api/admin/directory/status`: the
  * caller's identity is proven by a bearer token, introspected independently of
  * the browser session; the directory itself is matched by name or by role/group
- * and mapped down to `{ name, firstName, lastName, roles }`, and its state is readable without
+ * and mapped down to `{ name, firstName, lastName, email, roles }`, and its state is readable without
  * transferring any of it.
  *
  * Unlike every other check in this suite, this one calls the application
@@ -220,18 +220,19 @@ describe("directory search", () => {
     );
   });
 
-  // ---- 7.2 A match's response carries only the display name, its two parts, and roles ----
+  // ---- 7.2 A match's response carries only the display name, its two parts, the address, and roles ----
 
-  test("a match's response entry carries only the display name, its two parts, and roles", async () => {
+  test("a match's response entry carries only the display name, its two parts, the address, and roles", async () => {
     const { status, body } = await search(teacherToken, studentName);
     assert.equal(status, 200, `the search should succeed for a teacher token, got ${status}`);
     const match = body.find((entry) => entry.name.toLowerCase().includes(studentName.toLowerCase()));
     assert.ok(match, "the student should be found by their own display name");
     assert.deepEqual(
       Object.keys(match).sort(),
-      ["firstName", "lastName", "name", "roles"],
-      `a result entry should carry only name, firstName, lastName and roles, got ${JSON.stringify(Object.keys(match))}`
+      ["email", "firstName", "lastName", "name", "roles"],
+      `a result entry should carry only name, firstName, lastName, email and roles, got ${JSON.stringify(Object.keys(match))}`
     );
+    assert.equal(typeof match.email, "string", "the address should be a string, empty where the directory holds none");
     assert.equal(
       [match.firstName, match.lastName].filter((part) => part !== "").join(" "),
       match.name,

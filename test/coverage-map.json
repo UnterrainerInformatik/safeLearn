@@ -163,7 +163,7 @@
       ]
     },
     "test/checks/directory-search.js": {
-      "what": "GET /api/admin/directory/search: a teacher token searching by name and by a role/group value that is not a class or teacher/admin, an admin token succeeding without holding teacher, a student token refused, a missing bearer refused, an invalidated (expired/revoked-shaped) token refused indistinguishably from a missing one, a match's response carrying only name and roles, and an empty or unmatched query answering with an empty list rather than an error. That a search the server cannot answer yet reports the running fetch (202) instead of being held open, and is answered once the caller repeats it. GET /api/admin/directory/status: a teacher token reading what the directory holds without transferring any of it, the payload carrying figures only and no record from the directory, and a student token refused indistinguishably from a request carrying no identity at all.",
+      "what": "GET /api/admin/directory/search: a teacher token searching by name and by a role/group value that is not a class or teacher/admin, an admin token succeeding without holding teacher, a student token refused, a missing bearer refused, an invalidated (expired/revoked-shaped) token refused indistinguishably from a missing one, a match's response carrying only name, its two parts, the e-mail address and roles, and an empty or unmatched query answering with an empty list rather than an error. That a search the server cannot answer yet reports the running fetch (202) instead of being held open, and is answered once the caller repeats it. GET /api/admin/directory/status: a teacher token reading what the directory holds without transferring any of it, the payload carrying figures only and no record from the directory, and a student token refused indistinguishably from a request carrying no identity at all.",
       "guards": [
         "app.js",
         "middlewares/directory-service.js",
@@ -219,6 +219,13 @@
       "what": "The dates a semester table is made of: the walk from the first lesson to the last, the weekdays it keeps, and the shape of the table written from them. Taken out of the plugin's own main.ts rather than reimplemented, so the check cannot drift away from the code it is about. Covers the cases that are invisible while writing it - both ends of the range, the daylight-saving switch a semester crosses twice, the turn of the month and of the year, and five timezones that have to produce one identical table because the corpus is shared. Also that the generated Markdown is a table to a GitHub-flavoured renderer, standalone and under a paragraph. Needs no browser, no login and no server; it does need the plugin checkout the AI/plugin symlink points at. What the command does to a document is in test/obsidian/plugin.test.js, which drives the real editor.",
       "guards": [
         "app.js"
+      ],
+      "corpus": []
+    },
+    "test/invitation-list.test.js": {
+      "what": "The text the plugin's \"Invitation list…\" command writes: the author's example format (prefix, fields joined by the field separator, postfix), addresses one per line and comma-joined with nothing after the last entry, \\n and \\t resolved in one left-to-right pass so \\\\n stays a backslash and an n, field order, surname order and a person chosen twice written once, the class as every class-like value joined by /, values written verbatim, a missing address written empty with its separators and counted, an instance that sends no addresses reported as such rather than counted, and a stored format read back with anything malformed replaced by the default. Taken out of the plugin's own main.ts rather than reimplemented. Needs no browser, no login and no server; it does need the plugin checkout the AI/plugin symlink points at.",
+      "guards": [
+        "middlewares/directory-service.js"
       ],
       "corpus": []
     },

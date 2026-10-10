@@ -1,6 +1,10 @@
 ###
 # @name API Query
-# Answers 200 with the matches once the directory has data to match against.
+# Answers 200 with the matches once the directory has data to match against:
+#   [{ "name": "Anna Maria Gruber", "firstName": "Anna Maria", "lastName": "Gruber",
+#      "email": "anna.gruber@example.org", "roles": { "2B": true, "student": true } }]
+# `email` is returned for the plugin's invitation list (institutional address,
+# teacher/admin callers only); "" where the directory holds none.
 # Answers 202 with the status payload below while it has none yet - a fetch of
 # a realm this size takes minutes, and the request is no longer held open for
 # it. Repeat the same request; it answers 200 once the fetch has finished.

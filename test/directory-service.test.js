@@ -714,11 +714,20 @@ describe("searchDirectory", () => {
     );
   });
 
-  test("hands back the two name parts beside the display name, as the directory holds them", async () => {
+  test("hands back the two name parts and the address beside the display name, as the directory holds them", async () => {
     const service = await freshDirectoryService();
     stubWholeRealm([
-      { id: "user-a", firstName: "Anna Maria", lastName: "Gruber" },
-      { id: "user-b", firstName: "Lisa", lastName: "Huber Moser" },
+      { id: "user-a", firstName: "Anna Maria", lastName: "Gruber", email: "anna.gruber@example.org" },
+      {
+        id: "user-b",
+        username: "lhuber",
+        firstName: "Lisa",
+        lastName: "Huber Moser",
+        email: " lisa.huber@example.org ",
+        emailVerified: true,
+        attributes: { ldap: ["CN=Lisa,OU=2B"], phone: ["0664 123"] },
+        createdTimestamp: 1,
+      },
       { id: "user-c", firstName: "Solo" },
     ]);
     await service.startDirectoryRefresh(async () => "token");
@@ -729,9 +738,12 @@ describe("searchDirectory", () => {
     assert.deepEqual(Object.keys(byName).sort(), ["Anna Maria Gruber", "Lisa Huber Moser", "Solo"]);
     assert.deepEqual(
       Object.keys(byName["Lisa Huber Moser"]).sort(),
-      ["firstName", "lastName", "name", "roles"],
-      "an entry carries the display name, its two parts and the roles - nothing else"
+      ["email", "firstName", "lastName", "name", "roles"],
+      "an entry carries the display name, its two parts, the address and the roles - nothing else"
     );
+    assert.equal(byName["Lisa Huber Moser"].email, "lisa.huber@example.org", "the address comes through trimmed");
+    assert.equal(byName["Anna Maria Gruber"].email, "anna.gruber@example.org");
+    assert.equal(byName["Solo"].email, "", "an address the directory does not hold is empty, not missing");
     assert.equal(byName["Lisa Huber Moser"].lastName, "Huber Moser", "a two-word surname comes through whole");
     assert.equal(byName["Anna Maria Gruber"].firstName, "Anna Maria", "a two-word given name comes through whole");
     assert.equal(byName["Solo"].lastName, "", "a part the directory does not hold is empty, not missing");

@@ -991,14 +991,20 @@ function displayName(user) {
 
 /**
  * What a search answers with for one directory user: the display name, the two
- * parts it is made of (empty where the directory holds none), and the
- * role/group map. See `searchDirectory`.
+ * parts it is made of, the e-mail address (each empty where the directory holds
+ * none), and the role/group map. See `searchDirectory`.
+ *
+ * The address is the one field here the display name does not already show. It
+ * is handed back deliberately, for the plugin's invitation list: it is the
+ * institutional address, and only a teacher or admin identity may search at all.
+ * Nothing else the directory holds is added on the strength of it.
  */
 function searchResultEntry(user) {
   return {
     name: displayName(user),
     firstName: namePart(user.firstName),
     lastName: namePart(user.lastName),
+    email: namePart(user.email),
     roles: directoryUserRoles(user),
   };
 }

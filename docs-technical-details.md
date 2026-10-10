@@ -88,7 +88,21 @@ Two endpoints back the Obsidian plugin's directory features (the person picker, 
 GET /api/admin/directory/search?q=gera
 Authorization: Bearer <access token>
 ```
-`q` is matched case-insensitively against a person's display name *or* any role/group value the directory holds for them (a class name, `teacher`, `examParticipant`, ...). An empty `q` returns the whole directory, which is what "List classes" and the class filter build on. A match carries a display name and a role/group map, and nothing else the directory knows about that person.
+`q` is matched case-insensitively against a person's display name *or* any role/group value the directory holds for them (a class name, `teacher`, `examParticipant`, ...). An empty `q` returns the whole directory, which is what "List classes" and the class filter build on. A match carries a display name, the given name and surname it is made of, the person's e-mail address and a role/group map, and nothing else the directory knows about that person:
+
+```json
+[
+  {
+    "name": "Anna Maria Gruber",
+    "firstName": "Anna Maria",
+    "lastName": "Gruber",
+    "email": "anna.gruber@example.org",
+    "roles": { "2B": true, "student": true }
+  }
+]
+```
+
+`firstName`/`lastName` are there so the plugin can write chosen people in surname order without splitting the display name, which misfiles every two-word surname. `email` is the one field that shows more than the display name does. It is returned deliberately, for the plugin's "Invitation list…", which writes chosen people with their addresses: it is the institutional address, and only a teacher or admin may search at all. A part or an address the directory does not hold comes back as `""`, never omitted.
 
 It answers one of three ways:
 

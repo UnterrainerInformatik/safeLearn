@@ -1564,6 +1564,159 @@ export async function clearDirectoryLoginFixture() {
   }, pluginId);
 }
 
+// ################### The invitation list (plugin-invitation-list) ###################
+
+/** Whether the invitation-list dialog is the one standing open. */
+export async function invitationDialogPresent() {
+  return page.evaluate(() => !!document.querySelector(".modal-container .safelearn-invitation-list"));
+}
+
+/**
+ * Forgets the format the invitation list was last confirmed with, so a check
+ * starts from the first-run format whatever an earlier check left behind.
+ */
+export async function forgetInvitationFormat() {
+  doing("forgetting the invitation list's remembered format");
+  await page.evaluate(async (id) => {
+    const plugin = window.app.plugins.plugins[id];
+    delete plugin.data.invitationFormat;
+    await plugin.saveSettings();
+  }, pluginId);
+}
+
+/** The field rows, in the order they stand, each with whether it is switched on. */
+export async function invitationFields() {
+  return page.evaluate(() =>
+    [...document.querySelectorAll(".modal-container .safelearn-invitation-field")].map((row) => ({
+      field: row.getAttribute("data-safelearn-field"),
+      on: row.querySelector("input[type=checkbox]").checked,
+    }))
+  );
+}
+
+/** Switches one field on or off, the way clicking its checkbox does. */
+export async function switchInvitationField(field, on) {
+  doing(`switching the invitation field ${field} ${on ? "on" : "off"}`);
+  await page.evaluate(
+    ({ field, on }) => {
+      const box = document.querySelector(
+        `.modal-container .safelearn-invitation-field[data-safelearn-field="${field}"] input[type=checkbox]`
+      );
+      if (!box) throw new Error(`The invitation dialog has no row for the field ${field}.`);
+      if (box.checked !== on) box.click();
+    },
+    { field, on }
+  );
+  await settle();
+}
+
+/** Moves one field a row up or down with its button. */
+export async function moveInvitationField(field, direction) {
+  doing(`moving the invitation field ${field} ${direction}`);
+  await page.evaluate(
+    ({ field, direction }) => {
+      const button = document.querySelector(
+        `.modal-container .safelearn-invitation-field[data-safelearn-field="${field}"] .safelearn-invitation-field-${direction}`
+      );
+      if (!button) throw new Error(`The invitation dialog's row for ${field} has no ${direction} button.`);
+      button.click();
+    },
+    { field, direction }
+  );
+  await settle();
+}
+
+/**
+ * Types into the texts of the invitation dialog. `texts` names any of
+ * `fieldSeparator`, `prefix`, `postfix`; `entrySeparator` is `"line-break"`,
+ * `"comma"`, or any other string, which chooses "Custom" and types it.
+ */
+export async function setInvitationTexts(texts) {
+  doing(`setting the invitation texts to ${JSON.stringify(texts)}`);
+  await page.evaluate((texts) => {
+    const modal = document.querySelector(".modal-container .safelearn-invitation-list");
+    const input = (key) => modal.querySelector(`[data-safelearn-text="${key}"] input`);
+    const type = (element, value) => {
+      element.value = value;
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    if ("fieldSeparator" in texts) type(input("field-separator"), texts.fieldSeparator);
+    if ("prefix" in texts) type(input("prefix"), texts.prefix);
+    if ("postfix" in texts) type(input("postfix"), texts.postfix);
+    if ("entrySeparator" in texts) {
+      const choice = modal.querySelector('[data-safelearn-text="entry-separator"] select');
+      const preset = ["line-break", "comma"].includes(texts.entrySeparator);
+      choice.value = preset ? texts.entrySeparator : "custom";
+      choice.dispatchEvent(new Event("change", { bubbles: true }));
+      if (!preset) type(input("entry-separator"), texts.entrySeparator);
+    }
+  }, texts);
+  await settle();
+}
+
+/** The texts as the dialog currently shows them, as typed - escapes unresolved. */
+export async function invitationTexts() {
+  return page.evaluate(() => {
+    const modal = document.querySelector(".modal-container .safelearn-invitation-list");
+    const value = (key) => modal.querySelector(`[data-safelearn-text="${key}"] input`).value;
+    const custom = modal.querySelector('[data-safelearn-text="entry-separator"] input');
+    return {
+      fieldSeparator: value("field-separator"),
+      prefix: value("prefix"),
+      postfix: value("postfix"),
+      entrySeparatorChoice: modal.querySelector('[data-safelearn-text="entry-separator"] select').value,
+      entrySeparatorCustom: custom.hidden ? null : custom.value,
+    };
+  });
+}
+
+/** The preview, exactly as it stands - line breaks and tabs as characters. */
+export async function invitationPreview() {
+  return page.evaluate(
+    () => document.querySelector(".modal-container .safelearn-invitation-preview")?.textContent ?? null
+  );
+}
+
+/** Whether each confirmation can currently be used. */
+export async function invitationConfirmations() {
+  return page.evaluate(() => {
+    const buttons = [...document.querySelectorAll(".modal-container .modal-button-container button")];
+    return Object.fromEntries(buttons.map((button) => [button.textContent, !button.disabled]));
+  });
+}
+
+/**
+ * Confirms the invitation dialog with "Insert" or "Copy". The copy goes
+ * through the clipboard's promise, so this waits until the dialog has closed or
+ * a notice has said why it has not.
+ */
+export async function confirmInvitationList(how) {
+  doing(`confirming the invitation list with ${how}`);
+  await page.evaluate((how) => {
+    const label = how === "copy" ? "Copy" : "Insert";
+    const button = [...document.querySelectorAll(".modal-container .modal-button-container button")].find(
+      (candidate) => candidate.textContent === label
+    );
+    if (!button) throw new Error(`The invitation dialog has no ${label} button.`);
+    button.click();
+  }, how);
+  for (let attempt = 0; attempt < 20; attempt++) {
+    await settle();
+    if (!(await invitationDialogPresent())) break;
+    await sleep(50);
+  }
+}
+
+/** The system clipboard's text, read through Electron rather than through a permission prompt. */
+export async function clipboardText() {
+  return page.evaluate(() => window.require("electron").clipboard.readText());
+}
+
+/** Puts a text on the system clipboard, so a check can tell a copy from what was there before. */
+export async function setClipboardText(text) {
+  await page.evaluate((text) => window.require("electron").clipboard.writeText(text), text);
+}
+
 // ################### The login's state (plugin-login-state) ###################
 
 /**
