@@ -208,6 +208,13 @@
       ],
       "corpus": []
     },
+    "test/section-names.test.js": {
+      "what": "The order the per-name commands write names in and the content each section starts with: chosen people by surname then given name in German collation (umlauts beside their base letter, case ignored, two-word surnames whole), a display-name fallback for an instance that sends no name parts, typed names after them in their own order; and the content given once for every section - blank stays the single blank line, one trailing line break is dropped, a line opening or closing a restriction is caught. Taken out of the plugin's own main.ts rather than reimplemented. Needs no browser, no login and no server; it does need the plugin checkout the AI/plugin symlink points at.",
+      "guards": [
+        "middlewares/directory-service.js"
+      ],
+      "corpus": []
+    },
     "test/coverage.test.js": {
       "what": "The coverage record itself: every path it names exists, every test file appears in it, and no entry names a file that is gone.",
       "guards": [

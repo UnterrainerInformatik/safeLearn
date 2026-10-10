@@ -41,6 +41,7 @@ import {
   agePendingLogins,
   answerColumnCount,
   answerNameList,
+  answerSectionContent,
   answerSemesterTable,
   blockBoxes,
   callSearchDirectory,
@@ -2421,6 +2422,94 @@ describe("the plugin writes the tags it recognizes", () => {
       );
     }));
 
+  test("content given once is written into every section, as it was given", async () =>
+    watched("sections-with-content", async () => {
+      const name = "constructed-sections-content.md";
+      await writeDocument(name, ["# Chapter", "", "Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      assert.equal(
+        await answerSectionContent("| Criterion | Points |\n|---|---|\n| Effort |  |\n"),
+        true,
+        "The per-name dialog offers a field for content every section starts with."
+      );
+      await answerNameList(["Ada Byron", "Grace Hopper"]);
+
+      assert.deepEqual(
+        (await documentText()).split("\n"),
+        [
+          "# Chapter",
+          "",
+          "Text.",
+          "@@@ Ada Byron",
+          "| Criterion | Points |",
+          "|---|---|",
+          "| Effort |  |",
+          "@@@",
+          "",
+          "@@@ Grace Hopper",
+          "| Criterion | Points |",
+          "|---|---|",
+          "| Effort |  |",
+          "@@@",
+          "",
+        ],
+        "Every section holds the grid, unchanged, in place of its blank line - and the line break " +
+          "the paste brought along at its end puts no blank line before the closing marker."
+      );
+      assert.deepEqual(
+        await cursorPosition(),
+        { from: { line: 4, ch: "| Criterion | Points |".length }, to: { line: 4, ch: "| Criterion | Points |".length } },
+        "The cursor is on the first line of the first section's content, at its end - where every " +
+          "insertion leaves it."
+      );
+    }));
+
+  test("content holding a restriction marker is refused and nothing is written", async () =>
+    watched("sections-content-marker", async () => {
+      const name = "constructed-sections-content-marker.md";
+      const before = ["# Chapter", "", "Text.", ""].join("\n");
+      await writeDocument(name, before);
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await forgetNotices();
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      await answerSectionContent("Grid\n@@@\nRest of the grid");
+      await answerNameList(["Ada Byron"]);
+
+      assert.equal(
+        await documentText(),
+        before,
+        "A bare marker in the content would close the section around it and leave the rest of " +
+          "the grid outside it, readable by everyone. Nothing is written."
+      );
+      assert.equal(await dialogIsOpen(), true, "The dialog stays open, so the content can be corrected.");
+      assert.ok(
+        (await noticesShown()).some((notice) => notice.includes("@@@")),
+        "And it says why."
+      );
+      await closeOpenModal();
+    }));
+
+  test("the restricting command's dialog offers no content for every section", async () =>
+    watched("restrict-no-content", async () => {
+      const name = "constructed-restrict-no-content.md";
+      await writeDocument(name, ["Before.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Before.");
+
+      await runCommand("restrict-selection", { expectEdit: false });
+      assert.equal(
+        await answerSectionContent("anything"),
+        false,
+        "It encloses text that already exists; there are no sections to give content to."
+      );
+      await closeOpenModal();
+    }));
+
   test("the restricting command encloses a selection and restricts nothing else", async () =>
     watched("restrict-selection", async () => {
       const around = "constructed-restrict-selection.md";
@@ -3465,6 +3554,49 @@ describe("the directory search strip", () => {
       assert.ok(
         (await documentText()).includes("@@@ Ada Byron"),
         "What the one action chose is what the command writes."
+      );
+      await clearDirectoryLoginFixture();
+    }));
+
+  test("a class taken over in directory order is written in surname order", async () =>
+    watched("directory-search-strip-surname-order", async () => {
+      // The directory's own order, which is roughly by username and has nothing to do with
+      // anyone's name - the order a class arrives in when it is taken over whole.
+      const CLASS = [
+        { name: "Clemens Gugerbauer", firstName: "Clemens", lastName: "Gugerbauer", roles: { student: true, "5chif": true } },
+        { name: "Paul Öller", firstName: "Paul", lastName: "Öller", roles: { student: true, "5chif": true } },
+        { name: "Lisa Huber Moser", firstName: "Lisa", lastName: "Huber Moser", roles: { student: true, "5chif": true } },
+        { name: "Anna Aigner", firstName: "Anna", lastName: "Aigner", roles: { student: true, "5chif": true } },
+        { name: "Tim Oberhuber", firstName: "Tim", lastName: "Oberhuber", roles: { student: true, "5chif": true } },
+        { name: "Lukas Horvath", firstName: "Lukas", lastName: "Horvath", roles: { student: true, "5chif": true } },
+      ];
+      await setDirectoryLoginFixture(CLASS);
+      const name = "constructed-directory-surname-order.md";
+      await writeDocument(name, ["Text.", ""].join("\n"));
+      await open(name, views.livePreview);
+      await placeCursorAfter("Text.");
+
+      await runCommand("insert-sections-per-name", { expectEdit: false });
+      await searchDirectoryStrip("", ["5chif"]);
+      await addVisibleDirectoryResults();
+
+      assert.deepEqual(
+        await chosenDirectoryNames(),
+        CLASS.map((entry) => entry.name),
+        "The chosen list keeps the directory's order - in it a class stands together while it is " +
+          "being picked."
+      );
+
+      await confirmNameList();
+      const written = (await documentText())
+        .split("\n")
+        .filter((line) => line.startsWith("@@@ "))
+        .map((line) => line.slice(4));
+      assert.deepEqual(
+        written,
+        ["Anna Aigner", "Clemens Gugerbauer", "Lukas Horvath", "Lisa Huber Moser", "Tim Oberhuber", "Paul Öller"],
+        "The sections are written by surname - a two-word surname filed under its first word, an " +
+          "umlaut beside its base letter - and each is still addressed to the display name."
       );
       await clearDirectoryLoginFixture();
     }));

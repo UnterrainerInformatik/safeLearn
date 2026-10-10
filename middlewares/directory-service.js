@@ -990,6 +990,24 @@ function displayName(user) {
 }
 
 /**
+ * What a search answers with for one directory user: the display name, the two
+ * parts it is made of (empty where the directory holds none), and the
+ * role/group map. See `searchDirectory`.
+ */
+function searchResultEntry(user) {
+  return {
+    name: displayName(user),
+    firstName: namePart(user.firstName),
+    lastName: namePart(user.lastName),
+    roles: directoryUserRoles(user),
+  };
+}
+
+function namePart(part) {
+  return typeof part === "string" ? part.trim() : "";
+}
+
+/**
  * A directory user's role/group map, merging the same two sources
  * `verifyCallerIdentity` merges for the caller: whatever `deriveRoles` finds
  * in their `ldap` attribute, and their `safeLearn` client roles, canonicalized
@@ -1009,8 +1027,11 @@ function directoryUserRoles(user) {
 
 /**
  * Matches `query` against every directory user's display name or role/group
- * map, case-insensitively, and maps each match down to `{ name, roles }` —
- * nothing else the directory holds for them.
+ * map, case-insensitively, and maps each match down to
+ * `{ name, firstName, lastName, roles }` — nothing else the directory holds for
+ * them. The two name parts are the ones `name` is built from, handed over so a
+ * caller can order people by surname without splitting `name` after the fact,
+ * which misfiles every surname that has a space in it.
  *
  * An empty (or missing) query returns the whole directory mapped the same
  * way, rather than an empty list: a caller that wants to enumerate every
@@ -1052,19 +1073,18 @@ export async function searchDirectory(query) {
   if (!normalizedQuery) {
     return {
       ready: true,
-      results: users.map((user) => ({ name: displayName(user), roles: directoryUserRoles(user) })),
+      results: users.map(searchResultEntry),
     };
   }
 
   const matches = [];
 
   for (const user of users) {
-    const name = displayName(user);
-    const roles = directoryUserRoles(user);
-    const nameMatches = name.toLowerCase().includes(normalizedQuery);
-    const roleMatches = Object.keys(roles).some((role) => role.includes(normalizedQuery));
+    const entry = searchResultEntry(user);
+    const nameMatches = entry.name.toLowerCase().includes(normalizedQuery);
+    const roleMatches = Object.keys(entry.roles).some((role) => role.includes(normalizedQuery));
     if (nameMatches || roleMatches) {
-      matches.push({ name, roles });
+      matches.push(entry);
     }
   }
 

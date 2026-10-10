@@ -714,6 +714,37 @@ describe("searchDirectory", () => {
     );
   });
 
+  test("hands back the two name parts beside the display name, as the directory holds them", async () => {
+    const service = await freshDirectoryService();
+    stubWholeRealm([
+      { id: "user-a", firstName: "Anna Maria", lastName: "Gruber" },
+      { id: "user-b", firstName: "Lisa", lastName: "Huber Moser" },
+      { id: "user-c", firstName: "Solo" },
+    ]);
+    await service.startDirectoryRefresh(async () => "token");
+
+    const everyone = await service.searchDirectory("");
+    const byName = Object.fromEntries(everyone.results.map((entry) => [entry.name, entry]));
+
+    assert.deepEqual(Object.keys(byName).sort(), ["Anna Maria Gruber", "Lisa Huber Moser", "Solo"]);
+    assert.deepEqual(
+      Object.keys(byName["Lisa Huber Moser"]).sort(),
+      ["firstName", "lastName", "name", "roles"],
+      "an entry carries the display name, its two parts and the roles - nothing else"
+    );
+    assert.equal(byName["Lisa Huber Moser"].lastName, "Huber Moser", "a two-word surname comes through whole");
+    assert.equal(byName["Anna Maria Gruber"].firstName, "Anna Maria", "a two-word given name comes through whole");
+    assert.equal(byName["Solo"].lastName, "", "a part the directory does not hold is empty, not missing");
+    assert.equal(byName["Solo"].firstName, "Solo");
+
+    const matched = await service.searchDirectory("huber");
+    assert.deepEqual(
+      matched.results.map((entry) => [entry.firstName, entry.lastName]),
+      [["Lisa", "Huber Moser"]],
+      "a matching query maps its results the same way the empty one does"
+    );
+  });
+
   test("answers a query that matches nothing with an empty list, distinct from 'not ready'", async () => {
     const service = await freshDirectoryService();
     stubWholeRealm(Array.from({ length: 5 }, (_, index) => namedUser(0, index)));

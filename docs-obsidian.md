@@ -24,7 +24,7 @@ Right-click in the editor and open **SafeLearn**, or use the command palette, wh
 | **Side-by-side block** | Two columns. |
 | **Side-by-side, n columns…** | Asks how many, defaults to three. |
 | **Fragment marker** | `##fragment` above the block the cursor is in. |
-| **Restricted section per name…** | One restricted `@@@` block per name — paste a class list straight in. |
+| **Restricted section per name…** | One restricted `@@@` block per name, in surname order — paste a class list straight in, and optionally content every block starts with. |
 | **Restrict selection…** | Wraps what you selected in a directive. |
 ### It Shows A Restricted Block As A Block
 The `@@@` line stands as the heading of the block it opens, and every entry in it is shown as what it is: a plain chip is a permanent grant, a dashed one carries a time window, a red one is a window the server **cannot read** (it drops the window and grants the block permanently — nothing else anywhere tells you), and an italic one is a view switch rather than an audience.
@@ -47,6 +47,8 @@ In the reading view the tags are gone and the headings remain — which is close
 
 ![](md/assets/plugin-per-name-result.png)
 
+Below the names there is an optional field for content every section starts with. Paste a grading grid, a feedback table or a checklist there once and every student's section is created holding it, rather than you jumping into each one to paste it. Left empty, each section gets a single blank line. A line starting with `@@@` is refused there, because it would end the section early and leave the rest of the grid readable by everyone.
+
 `admin`, `teacher`, `teachers`, `student` and `students` are [reserved](docs-permissions.md): a display name equal to one of them is read as the role instead. The command writes your names unchanged and tells you when one of them was such a name.
 ### It Picks The People For You
 With a safeLearn instance configured and a login held, *Restricted section per name…* and *Restrict selection…* stop asking you to type the list and let you pick it instead. Typing in the search field searches the school directory; typing in the class filter narrows a list of classes to check, and checking more than one shows the people from any of them.
@@ -58,6 +60,8 @@ The chosen list is what gets inserted, and it stays in front of you the whole ti
 - Click somebody there to take them back out.
 - Somebody you chose under a class filter that no longer shows them stays on the list, and is counted on it, rather than disappearing into a mark you cannot see.
 - Choosing the same person twice leaves them on the list once.
+
+The chosen list keeps the directory's order, so the class you took over stands together while you pick. The sections are **written** in surname order, then first name — umlauts beside their base letter, a double surname under its first word — the way a class list is read.
 
 Somebody the directory has no entry for — a guest, or a student not yet enrolled — gets their block written by hand afterwards, alongside the ones the command wrote.
 

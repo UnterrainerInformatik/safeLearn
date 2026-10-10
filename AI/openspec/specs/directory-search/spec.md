@@ -101,15 +101,30 @@ The teacher/admin determination SHALL canonicalize the plural spelling of a clie
 - **WHEN** the caller's identity holds the client role `teachers` (and not the singular `teacher`)
 - **THEN** the search is performed and its result is returned, the same as if the identity held `teacher`
 
-### Requirement: Results carry only a display name and roles/groups
+### Requirement: Results carry only a display name, its two parts, and roles/groups
 
-Each person in a search result SHALL be represented by their display name and the roles/groups they hold, and by nothing else the directory records about them.
+Each person in a search result SHALL be represented by their display name, the given name and surname that display name is made of, and the roles/groups they hold — and by nothing else the directory records about them.
+
+The two parts SHALL be the ones the display name is built from, as the directory holds them, and never a split of the display name after the fact. Splitting after the fact misfiles everyone whose given name or surname contains a space. The parts disclose nothing the display name does not already show. They exist so that a caller can order people by surname. The display name itself SHALL stay exactly what it was, because it is what a restriction names and what the server compares a reader's identity against.
+
+A person the directory holds without one of the parts SHALL carry that part as empty, not omitted, and the display name SHALL still be formed as it is today.
 
 #### Scenario: A match's result fields
 
 - **WHEN** a person is included in a search result
-- **THEN** the result entry for that person contains their display name and their roles/groups
+- **THEN** the result entry for that person contains their display name, their given name, their surname and their roles/groups
 - **AND** it contains no other attribute the directory holds for that person
+
+#### Scenario: A surname contains a space
+
+- **WHEN** a person whose surname consists of two words is included in a search result
+- **THEN** the entry's surname is both words, as the directory holds it
+- **AND** the display name is the given name, a space, and that surname — unchanged from before
+
+#### Scenario: A person has no surname in the directory
+
+- **WHEN** a person whose directory entry holds a given name but no surname is included in a search result
+- **THEN** the entry's surname is empty and its display name is the given name alone
 
 ### Requirement: Searching does not depend on the caller's own directory access
 
@@ -129,7 +144,7 @@ This exists so a caller can enumerate every role/group value the directory curre
 #### Scenario: An empty query is sent by an authorized caller
 
 - **WHEN** a teacher or admin identity searches with no query or an empty one
-- **THEN** the result contains every person the directory holds, each with their display name and roles/groups
+- **THEN** the result contains every person the directory holds, each with their display name, its two parts and their roles/groups
 
 #### Scenario: An empty query from an unauthorized caller
 

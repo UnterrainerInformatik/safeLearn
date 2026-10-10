@@ -1172,7 +1172,10 @@ export async function editorMenuIcons() {
  * The field is whatever that dialog answers with - a number field, a textarea,
  * or, where the directory picker replaced the textarea, the list of people
  * chosen in it. That is the one thing the dialogs are entitled to differ in,
- * and the geometry asserted around it is the same either way.
+ * and the geometry asserted around it is the same either way. Where a dialog
+ * carries more than one field - the per-name dialog's content for every
+ * section stands below its names - it is the last of them that the
+ * confirmation has to stand clear of.
  */
 export async function dialogBoxes() {
   await page.waitForFunction(
@@ -1187,8 +1190,9 @@ export async function dialogBoxes() {
     // The picker's chosen list before any input, since the picker's own search
     // and class fields stand above it and are not what the dialog is answered
     // with. Where there is no picker this falls through to the field itself.
+    const textareas = modal ? [...modal.querySelectorAll("textarea")] : [];
     const field =
-      modal?.querySelector("textarea") ??
+      textareas[textareas.length - 1] ??
       modal?.querySelector(".safelearn-directory-chosen") ??
       modal?.querySelector("input");
     const button = modal?.querySelector("button");
@@ -1237,11 +1241,16 @@ export async function answerColumnCount(value) {
 export async function answerNameList(names) {
   doing(`answering the name list with ${JSON.stringify(names)}`);
   await page.waitForFunction(
-    () => !!document.querySelector(".modal-container textarea, .modal-container .safelearn-directory-chosen"),
+    () =>
+      !!document.querySelector(
+        ".modal-container .safelearn-name-list-typed textarea, .modal-container .safelearn-directory-chosen"
+      ),
     { timeout: 10000 }
   );
   const typed = await page.evaluate((lines) => {
-    const field = document.querySelector(".modal-container textarea");
+    // The names' own field, never the content field the per-name dialog
+    // carries below it: that one is answered by `answerSectionContent`.
+    const field = document.querySelector(".modal-container .safelearn-name-list-typed textarea");
     if (!field) return false;
     field.value = lines.join("\n");
     return true;
@@ -1259,7 +1268,25 @@ export async function answerNameList(names) {
  * no textarea at all, which is what a picker-only dialog looks like.
  */
 export async function nameListTextareaValue() {
-  return page.evaluate(() => document.querySelector(".modal-container textarea")?.value ?? null);
+  return page.evaluate(
+    () => document.querySelector(".modal-container .safelearn-name-list-typed textarea")?.value ?? null
+  );
+}
+
+/**
+ * Fills the per-name dialog's content for every section, without confirming:
+ * `answerNameList` confirms, so this goes first. `false` where the open dialog
+ * offers no such field, which is what the restrict-selection dialog looks like.
+ */
+export async function answerSectionContent(text) {
+  doing(`giving every section the content ${JSON.stringify(text)}`);
+  await page.waitForFunction(() => !!document.querySelector(".modal-container"), { timeout: 10000 });
+  return page.evaluate((value) => {
+    const field = document.querySelector(".modal-container .safelearn-name-list-content-field");
+    if (!field) return false;
+    field.value = value;
+    return true;
+  }, text);
 }
 
 /**
