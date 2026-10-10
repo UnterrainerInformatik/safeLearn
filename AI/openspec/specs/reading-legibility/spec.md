@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines what a rendered SafeLearn page must present to the person reading it: glyphs with nothing softening them, a layout sized to the device rather than scaled down onto it, font families that resolve to files the deployment actually ships — with the bold and the italic a page asks for drawn as such rather than derived by the browser — a picker offering one entry per typeface and a stored choice that still denotes that typeface once the shipped set changes, code at the size of the prose around it, a dark theme that stays comfortable over a long session, and a link that does not change appearance once it has been followed. `page-bootstrap` governs when a page becomes visible; this governs what it looks like once it is.
+Defines what a rendered SafeLearn page must present to the person reading it: glyphs with nothing softening them, a layout sized to the device rather than scaled down onto it, font families that resolve to files the deployment actually ships — with the bold and the italic a page asks for drawn as such rather than derived by the browser — a nominated typeface for prose and for chrome that a reader who has chosen nothing is served, a picker offering one entry per typeface and a stored choice that still denotes that typeface once the shipped set changes, code at the size of the prose around it, a dark theme that stays comfortable over a long session, and a link that does not change appearance once it has been followed. `page-bootstrap` governs when a page becomes visible; this governs what it looks like once it is.
 
 ## Requirements
 
@@ -177,7 +177,34 @@ A reader's stored choice of main font and of navigation font SHALL continue to d
 #### Scenario: A reader's stored choice names a font that is gone
 
 - **WHEN** a reader's stored choice does not correspond to any font the deployment currently offers
-- **THEN** the page is rendered in the deployment's first offered font rather than in nothing
+- **THEN** the page is rendered in the typeface the deployment nominates for that part of the page, rather than in nothing and rather than in whichever font happens to sort first
+
+### Requirement: The deployment nominates the typefaces a reader who has chosen none reads in
+
+The deployment SHALL nominate, by typeface name, the face its prose is set in and the face its chrome is set in, and a reader who has expressed no preference SHALL be served those two. The nomination SHALL be a name rather than a position in the list the picker offers: a position is a property of how a directory happened to be enumerated and of how many files are in it, so a default expressed as one changes whenever the shipped set changes, and says nothing about why that face was chosen. A face nominated for prose and a face nominated for chrome are two separate nominations, because the two are read differently — a paragraph is read across, a label is read at.
+
+Where a nominated typeface is not among those the deployment offers for that part of the page, the page SHALL still be set in a face the deployment ships rather than in none.
+
+#### Scenario: A reader who has never chosen a font opens a page
+
+- **WHEN** a reader with no stored font preference opens a corpus page
+- **THEN** its prose is set in the typeface the deployment nominates for prose
+- **AND** the bar above the page, its navigation column and its menu are set in the typeface the deployment nominates for chrome
+
+#### Scenario: Fonts are added to the deployment and an unconfigured reader returns
+
+- **WHEN** font files are added to or removed from the directories the deployment serves fonts from, and a reader with no stored preference opens a page
+- **THEN** that page is set in the same two typefaces as before, because neither is identified by its position among the offered fonts
+
+#### Scenario: A reader asks for the deployment's font back
+
+- **WHEN** a reader who has chosen a font uses the control that restores the deployment's own
+- **THEN** their stored preference becomes the nominated typeface, recorded the same way a preference chosen from the picker is recorded
+
+#### Scenario: A nominated typeface is not shipped
+
+- **WHEN** the deployment nominates a typeface that its font directories do not offer for that part of the page
+- **THEN** the page is set in one of the fonts that part of the page does offer, rather than in the browser's own default
 
 ### Requirement: The font picker offers one entry per typeface
 
