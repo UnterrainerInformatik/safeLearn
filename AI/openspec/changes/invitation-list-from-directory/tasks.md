@@ -4,7 +4,7 @@
 - [x] 1.2 Update `test/directory-service.test.js`: the exact result field set now includes `email`, a user without an address yields `""`, and no other attribute leaks
 - [x] 1.3 Update the live check `test/checks/directory-search.js` (and `test/coverage-map.json` if scenario ids change) to expect `email` among the result fields
 - [x] 1.4 Update the response shape in `docs-keycloak.md` / `docs-technical-details.md` and `http/plugin-query-api.http`, including why the address is returned
-- [ ] 1.5 Run `npm test`, then commit and push safeLearn; merge `public/master` into secureLectures and push
+- [x] 1.5 Run `npm test`, then commit and push safeLearn; merge `public/master` into secureLectures and push
 
 ## 2. Plugin: extract the directory picker
 
@@ -35,4 +35,4 @@
 - [x] 5.1 Obsidian tests in `test/obsidian/plugin.test.js`: the author's example format (`,,,` / `,` / `,,\n`), addresses one per line and comma-joined, `\t` separator, field reordering, empty address written and reported, format remembered across reopening, copy leaves the document unchanged
 - [x] 5.2 Document the command in the plugin `README.md`
 - [x] 5.3 Update `AI/architecture.md` (feature table and component map)
-- [ ] 5.4 Plugin release (version in the three usual places, tag, GitHub release with `main.js`, `manifest.json`, `styles.css`)
+- [x] 5.4 Plugin release (version in the three usual places, tag, GitHub release with `main.js`, `manifest.json`, `styles.css`)
