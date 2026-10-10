@@ -26,6 +26,17 @@ The distinguished name your LDAP federation stores in the user attribute `LDAP_E
 | Client -> Client Scopes -> ...-dedicated -> Add Mapper (User Attribute)<br>`lastVisitedUrl` | string | Holds the last-visited page of the current user.                                                      |
 | Client -> Client Scopes -> ...-dedicated -> Add Mapper (User Attribute)<br>`LDAP_ENTRY_DN` -> claim `ldap` | string | The distinguished name the LDAP federation fills in. The application reads the claim `ldap` from the ID token and derives the class and teacher roles from its `OU=` parts. |
 
+### When a session ends at Keycloak
+
+A user can sign out at Keycloak while a page of this application is still open, either directly or in another application on the same realm. The application notices on that user's next request: rendering a page renews the session's tokens, and every request that reads the account endpoint finds its token refused there. Keycloak then refuses to renew the session, and the application ends its own session for that user in the same request. No front-channel or back-channel logout has to be configured on the client for this.
+
+What the user gets depends on what asked:
+
+- **A navigation** (a click on a link, a reload, an address typed in) is redirected into the Keycloak login, and after logging in the user lands on the page that was asked for.
+- **Anything a page requests on its own** (scripts, modules, stylesheets, fonts, images, `fetch` calls) gets an empty `401` instead of a redirect to a login page it could not use. When the open page itself gets that answer for its preferences, it reloads, and the reload is a navigation into the login.
+
+A renewal that fails because Keycloak cannot be reached, or answers with a server error, does not end the session. The request is answered with the token it has, and the failure is logged.
+
 ## Directory search client
 
 `GET /api/admin/directory/search` needs a second, separate confidential client, because the endpoint's caller (a teacher or admin holding a bearer access token) and the identity the server uses to query the directory are deliberately not the same thing — a teacher's own Keycloak account is never used to reach the Admin REST API.

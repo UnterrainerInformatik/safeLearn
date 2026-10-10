@@ -6,7 +6,9 @@
  * and one process per concern would mean one server and two logins per concern.
  * Every login is a real round-trip against a public identity provider shared
  * with other people, so this one file imports them all: the whole content suite
- * runs in one process and logs in twice, once per role.
+ * runs in one process and logs in once per role - plus the one session
+ * `session-lifecycle.js` ends at the identity provider, which no other check
+ * can share.
  *
  * The accounts are public and their preferences live on the identity provider.
  * Every check therefore addresses its page by path and writes every preference
@@ -19,6 +21,13 @@ import { after, before, test } from "node:test";
 
 import { knownRoles, loginCount, shutdown } from "./harness.js";
 
+/**
+ * Logins beyond one per role, each named. `session-lifecycle.js` signs its
+ * session out at Keycloak, so that session cannot be one every later check
+ * shares.
+ */
+const ownSessions = ["session-lifecycle.js"];
+
 import "./checks/permissions.js";
 import "./checks/views.js";
 import "./checks/rendering.js";
@@ -28,6 +37,7 @@ import "./checks/presentation.js";
 import "./checks/search.js";
 import "./checks/search-keyboard.js";
 import "./checks/directory-search.js";
+import "./checks/session-lifecycle.js";
 // Last on purpose: its reference walk requests every page the navigation tree
 // links to, and each of those writes `lastVisitedUrl` back to the shared account
 // after the answer has been sent. Nothing that sets a preference may follow it.
@@ -46,8 +56,9 @@ before(() => {
 test("the content suite logged in once per role and no more", () => {
   assert.equal(
     loginCount(),
-    knownRoles.length,
-    `the content suite needs one session per role — ${knownRoles.join(", ")} — and performed ` +
+    knownRoles.length + ownSessions.length,
+    `the content suite needs one session per role — ${knownRoles.join(", ")} — plus one for each of ` +
+      `${ownSessions.join(", ")}, and performed ` +
       `${loginCount()} logins. Splitting checks into more files must not cost more round-trips ` +
       `against the identity provider.`
   );

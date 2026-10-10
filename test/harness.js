@@ -258,6 +258,22 @@ async function ensureServer() {
   );
 }
 
+/**
+ * Whether the instance under test is still the one this run started: its
+ * process has not exited. Sessions are held in that process's memory, so a
+ * restart - by a supervisor, or by a run that started it again - would discard
+ * every one of them, and answering again afterwards proves nothing. An adopted
+ * instance is not this run's process, so for it the question can only be
+ * whether it still answers.
+ */
+export async function applicationStillRunning() {
+  if (!server) return false;
+  if (!server.adopted) {
+    return server.child.exitCode === null && server.child.signalCode === null;
+  }
+  return answers(3000);
+}
+
 /** Stops the application, but only if this run is the one that started it. */
 async function stopServer() {
   const running = server;

@@ -1,5 +1,12 @@
 import fileNameExtractor from "./middlewares/extract-filename-middleware.js";
-import { initKeycloak, checkAuthenticated, refreshAccessToken, setUserAttribute } from "./middlewares/keycloak-middleware.js";
+import {
+  initKeycloak,
+  checkAuthenticated,
+  answerUnauthenticated,
+  refreshAccessToken,
+  setUserAttribute,
+  SessionEndedError,
+} from "./middlewares/keycloak-middleware.js";
 import { getPermissionContext } from "./permission-context.js";
 import {
   verifyCallerIdentity,
@@ -143,6 +150,11 @@ async function sanitizeAndParseMarkdown(data, req) {
     html = manipulateHtml(html, req);
     return DOMPurify.sanitize(html);
   } catch (error) {
+    // Not something to show on the page: the session it would be shown to has
+    // just ended, and the request is answered as one without a session.
+    if (error instanceof SessionEndedError) {
+      throw error;
+    }
     console.error(`Error parsing markdown: ${error}`);
     return `Error parsing markdown: ${error}`;
   }
@@ -177,7 +189,9 @@ async function mdGetToHtml(url, req) {
  * Not awaited - the answer does not wait on it, the way it never has.
  */
 function rememberLastVisited(req) {
-  setUserAttribute(req, "lastVisitedUrl", req.originalUrl);
+  setUserAttribute(req, "lastVisitedUrl", req.originalUrl).catch((error) => {
+    console.error("Error remembering the last visited page:", error);
+  });
 }
 
 function getStartPage() {
@@ -376,13 +390,15 @@ initKeycloak(app).then(() => {
       // endpoint actually answers with: every stored attribute lives under
       // `attributes`, so the `attributes.config` this route read before was
       // always undefined and "remember last visited page" never took effect.
-      getPermissionContext(req).then((context) => {
-        const lastVisitedUrl = context.account?.attributes?.lastVisitedUrl;
-        if (context.preferences.sl == 1 && lastVisitedUrl) {
-          startPage = lastVisitedUrl;
-        }
-        res.redirect(startPage);
-      });
+      getPermissionContext(req)
+        .then((context) => {
+          const lastVisitedUrl = context.account?.attributes?.lastVisitedUrl;
+          if (context.preferences.sl == 1 && lastVisitedUrl) {
+            startPage = lastVisitedUrl;
+          }
+          res.redirect(startPage);
+        })
+        .catch(next);
     } else {
       next();
     }
@@ -400,28 +416,30 @@ initKeycloak(app).then(() => {
         }
         const reveal = req.query.reveal;
         if (reveal) {
-          sanitizeAndParseMarkdown(data, req).then((html) => {
-            const h = splitForReveal(html);
-            wrapInReveal(h, req).then((r) => {
+          sanitizeAndParseMarkdown(data, req)
+            .then((html) => wrapInReveal(splitForReveal(html), req))
+            .then((r) => {
               res.send(r);
-            });
-          });
+            })
+            .catch(next);
         } else {
           const doc = req.query.document;
           if  (doc) {
-            sanitizeAndParseMarkdown(data, req).then((html) => {
-              wrapAsDocument(html, req).then((r) => {
+            sanitizeAndParseMarkdown(data, req)
+              .then((html) => wrapAsDocument(html, req))
+              .then((r) => {
                 rememberLastVisited(req);
                 res.send(r);
-              });
-            });
+              })
+              .catch(next);
           } else {
-            sanitizeAndParseMarkdown(data, req).then((html) => {
-              wrapInPage(html, getStartPage(), req).then((r) => {
+            sanitizeAndParseMarkdown(data, req)
+              .then((html) => wrapInPage(html, getStartPage(), req))
+              .then((r) => {
                 rememberLastVisited(req);
                 res.send(r);
-              });
-            });
+              })
+              .catch(next);
           }
         }
       });
@@ -533,7 +551,7 @@ initKeycloak(app).then(() => {
    * is the cheapest probe there is. `minimumQueryLength` in `obsidian.js` carries
    * the measurement that settled it, together with the debounce the field waits.
    */
-  app.get("/search", checkAuthenticated, (req, res) => {
+  app.get("/search", checkAuthenticated, (req, res, next) => {
     const query = typeof req.query.q === "string" ? req.query.q.trim() : "";
     if (query.length < minimumQueryLength) {
       res.status(400).json({
@@ -547,13 +565,17 @@ initKeycloak(app).then(() => {
         res.json({ results: answer.results });
       })
       .catch((error) => {
+        if (error instanceof SessionEndedError) {
+          next(error);
+          return;
+        }
         console.error(`Search failed: ${error}`);
         res.status(500).json({ error: "The search could not be answered." });
       });
   });
 
   // Convert markdown to HTML using marked.
-  app.get("/convert", checkAuthenticated, (req, res) => {
+  app.get("/convert", checkAuthenticated, (req, res, next) => {
     const fileUrl = req.query.url;
     if (!fileUrl) {
       res.send(
@@ -562,14 +584,18 @@ initKeycloak(app).then(() => {
       return;
     }
 
-    mdGetToHtml(fileUrl, req).then((html) => {
-      wrapInPage(html, getStartPage(), req).then((r) => {
+    mdGetToHtml(fileUrl, req)
+      .then((html) => wrapInPage(html, getStartPage(), req))
+      .then((r) => {
         res.send(r);
+      })
+      .catch((error) => {
+        if (error instanceof SessionEndedError) {
+          next(error);
+          return;
+        }
+        res.send(`Error: ${error}`);
       });
-    })
-    .catch((error) => {
-      res.send(`Error: ${error}`);
-    });
   });
 
   // Post the request as a JSON file following this format:
@@ -586,7 +612,7 @@ initKeycloak(app).then(() => {
   //   "html": "<html>...</html>"
   // }
   // The HTML will be sanitized using DOMPurify and will not contain any html, head or body tags.
-  app.post("/convert", checkAuthenticated, (req, res) => {
+  app.post("/convert", checkAuthenticated, (req, res, next) => {
     if (typeof req.body == "undefined" || req.body == null) {
       res.json({
         error:
@@ -599,40 +625,50 @@ initKeycloak(app).then(() => {
             res.json({ html: html });
           })
           .catch((error) => {
+            if (error instanceof SessionEndedError) {
+              next(error);
+              return;
+            }
             res.json({ error: error });
           });
       } else {
         const c = req.body.content;
         if (c !== undefined && c !== null) {
-          sanitizeAndParseMarkdown(c, req).then((html) => {
-            res.json({ html: html });
-          });
+          sanitizeAndParseMarkdown(c, req)
+            .then((html) => {
+              res.json({ html: html });
+            })
+            .catch(next);
         }
       }
     }
   });
 
-  app.get("/userattributes", checkAuthenticated, (req, res) => {
+  app.get("/userattributes", checkAuthenticated, (req, res, next) => {
     // send the user profile as response
-    refreshAccessToken(req).then(() => {
-      res.json(req.user);
-    });
+    refreshAccessToken(req)
+      .then(() => {
+        res.json(req.user);
+      })
+      .catch(next);
   });
 
-  app.post("/userattributes", checkAuthenticated, (req, res) => {
+  app.post("/userattributes", checkAuthenticated, (req, res, next) => {
     if (typeof req.body == "undefined" || req.body == null) {
       res.json({
         error:
           "No data found in body. You have to specify 'attribute' and 'value' in your body in order to save an client-attribute in your keycloak instance.",
       });
     } else {
-      setUserAttribute(req, 'config', JSON.stringify(req.body)).then((result) => {
-        if (result) {
-          res.json({ success: true });
-        } else {
-          res.json({ success: false });
-        }
-      });
+      setUserAttribute(req, 'config', JSON.stringify(req.body))
+        .then((result) => {
+          if (result) {
+            res.json({ success: true });
+          } else {
+            res.json({ success: false });
+          }
+        })
+        .catch(next);
     }
   });
 
@@ -645,4 +681,23 @@ initKeycloak(app).then(() => {
 
   // If file is not found, redirect to the start page.
   app.use((_, res) => res.redirect(getStartPage()));
+
+  // The end of every chain that fails. A session that ended while its request
+  // was being handled is answered the way checkAuthenticated answers a request
+  // without one. Anything else fails this request alone: it is recorded and
+  // answered with a 500, and the process - with every other user's session in
+  // its memory - keeps running.
+  app.use((error, req, res, next) => {
+    if (error instanceof SessionEndedError && !res.headersSent) {
+      answerUnauthenticated(req, res);
+      return;
+    }
+    console.error(`Request ${req.method} ${req.originalUrl} failed:`, error);
+    if (res.headersSent) {
+      // Express's own handler closes a response that has already started.
+      next(error);
+      return;
+    }
+    res.status(500).end();
+  });
 });

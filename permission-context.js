@@ -1,4 +1,4 @@
-import { fetchAccount, keycloakConfig } from "./middlewares/keycloak-middleware.js";
+import { fetchAccount, keycloakConfig, SessionEndedError } from "./middlewares/keycloak-middleware.js";
 
 /**
  * The context one request decides every one of its directives against.
@@ -207,6 +207,12 @@ async function buildPermissionContext(req) {
     try {
       account = await fetchAccount(req);
     } catch (error) {
+      // Not a failed lookup: the session itself is gone, and there is nobody
+      // left to settle preferences for. The request is answered as one without
+      // a session.
+      if (error instanceof SessionEndedError) {
+        throw error;
+      }
       lookupFailed = true;
       console.error(`Error fetching current attributes: ${error}`);
     }

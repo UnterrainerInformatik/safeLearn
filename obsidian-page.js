@@ -835,6 +835,12 @@ async function getUserAttributes() {
         "Content-type": "application/json; charset=UTF-8",
       },
     });
+    // The session has ended. A reload is a navigation, and the server sends a
+    // navigation into the login.
+    if (r.status === 401) {
+      location.reload();
+      return;
+    }
     const result = r.json();
     return result;
   } catch (error) {
@@ -844,13 +850,16 @@ async function getUserAttributes() {
 }
 async function setUserAttributes(attributesObject) {
   try {
-    await fetch("/userattributes", {
+    const r = await fetch("/userattributes", {
       method: "POST",
       body: JSON.stringify(attributesObject),
       headers: {
         "Content-type": "application/json; charset=UTF-8",
       },
     });
+    if (r.status === 401) {
+      location.reload();
+    }
   } catch (error) {
     console.error("An error occurred:", error);
     location.reload();

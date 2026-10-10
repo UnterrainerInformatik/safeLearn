@@ -25,6 +25,7 @@
         "test/checks/navigation.js",
         "test/checks/presentation.js",
         "test/checks/directory-search.js",
+        "test/checks/session-lifecycle.js",
         "test/checks/deployment-surface.js"
       ],
       "corpus": []
@@ -129,6 +130,19 @@
       ],
       "corpus": [
         "md/presentations/test-presentation.md",
+        "md/test-md-file.md"
+      ]
+    },
+    "test/checks/session-lifecycle.js": {
+      "what": "A session signed out at Keycloak while its page is open: the next click lands at the login, a sub-resource asked for with the ended session's cookie gets 401 instead of a redirect, and the application keeps running with every other session intact.",
+      "guards": [
+        "middlewares/keycloak-middleware.js",
+        "app.js",
+        "permission-context.js",
+        "obsidian-page.js",
+        "test/harness.js"
+      ],
+      "corpus": [
         "md/test-md-file.md"
       ]
     },

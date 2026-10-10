@@ -121,14 +121,25 @@ export async function initKeycloak(app) {
     done(null, user);
   });
   //################### REFRESH ###################
+  // Express 4 does not catch a rejected async middleware, and Node terminates
+  // on an unhandled rejection - which took every other user's session with it.
+  // So nothing in here may reject: an ended session continues to
+  // checkAuthenticated as a request without one, everything else goes to the
+  // error handler.
   app.use(async (req, res, next) => {
-    if (req.user) {
-      const now = Math.floor(Date.now() / 1000);
-      const diff = req.user.accessTokenDecoded.exp - now;
-      if (diff <= 60) {
-        await refreshAccessToken(req);
-      } else {
-        // console.log("Token still valid for ", diff, " seconds");
+    try {
+      if (req.user) {
+        const exp = req.user.accessTokenDecoded?.exp;
+        if (typeof exp !== "number") {
+          // Nothing left to renew from, so there is nothing to keep either.
+          await endSession(req);
+        } else if (exp - Math.floor(Date.now() / 1000) <= 60) {
+          await refreshAccessToken(req);
+        }
+      }
+    } catch (error) {
+      if (!(error instanceof SessionEndedError)) {
+        return next(error);
       }
     }
     next();
@@ -157,7 +168,7 @@ export async function initKeycloak(app) {
   });
 
   // logout callback
-  app.get("/logout/callback", (req, res) => {
+  app.get("/logout/callback", (req, res, next) => {
     // clears the persisted user from the local storage and
     // redirects the user to a public route
     req.logout(function (err) {
@@ -167,13 +178,58 @@ export async function initKeycloak(app) {
       res.redirect("/");
     });
   });
-  // Before redirecting to the login page, store the original URL in the session
-  app.use((req, res, next) => {
-    if (!req.user && req.path !== "/auth/callback") {
-      req.session.originalUrl = req.originalUrl;
-    }
-    next();
+}
+
+/**
+ * Raised by `refreshAccessToken` once the identity provider has refused to
+ * renew a session and the local session has been ended because of it. A route
+ * handler that runs into it stops where it is - it has no `req.user` left to
+ * render for - and the error handler in app.js answers the request the way
+ * `checkAuthenticated` answers one without a session.
+ */
+export class SessionEndedError extends Error {
+  constructor() {
+    super("the identity provider no longer honours this session");
+    this.name = "SessionEndedError";
+  }
+}
+
+/** Logs the user out locally. Passport regenerates the session while doing so. */
+function endSession(req) {
+  return new Promise((resolve, reject) => {
+    req.logout((error) => (error ? reject(error) : resolve()));
   });
+}
+
+/**
+ * Whether the browser is loading a page, as opposed to a page loading
+ * something. Read from Fetch Metadata, which every target browser sends; a
+ * client without it counts as navigating when it asks for HTML.
+ */
+function isNavigation(req) {
+  const mode = req.get("Sec-Fetch-Mode");
+  if (mode) {
+    return mode === "navigate";
+  }
+  return (req.get("Accept") ?? "").includes("text/html");
+}
+
+/**
+ * The answer to a request without a valid session. A navigation is sent into
+ * the login and comes back to the address it asked for. Anything a page
+ * requests on its own - a script, a module, a stylesheet, an image, a `fetch` -
+ * gets an empty 401: a redirect would hand it the identity provider's login
+ * page, which it can do nothing with.
+ */
+export function answerUnauthenticated(req, res) {
+  if (isNavigation(req)) {
+    // Remembered here and only here, so a sub-resource that arrives without a
+    // session cannot overwrite the page the login is supposed to return to.
+    req.session.originalUrl = req.originalUrl;
+    res.redirect("/test");
+    return;
+  }
+  res.status(401).end();
 }
 
 // function to check weather user is authenticated, req.isAuthenticated is populated by password.js
@@ -182,53 +238,63 @@ export var checkAuthenticated = (req, res, next) => {
   if (req.isAuthenticated()) {
     return next();
   }
-  res.redirect("/test");
+  answerUnauthenticated(req, res);
 };
 
 /**
  * Function ignores the expiration time of the access-token and refreshes it by force.
  * Used to get a new access-token when the current one holds claims or data that you know for sure is expired.
+ *
+ * Answers `true` once the tokens are renewed and `null` when they could not be
+ * for a reason that says nothing about the session (no answer, a server error).
+ * When the identity provider refuses the renewal because the session no longer
+ * exists there, the local session is ended and a `SessionEndedError` is thrown.
  */
 export async function refreshAccessToken(req) {
-  if (!req || !req.user.refreshToken) {
+  if (!req || !req.user) {
     return null;
   }
+  if (!req.user.refreshToken) {
+    await endSession(req);
+    throw new SessionEndedError();
+  }
+  let tokenSet;
   try {
-    const tokenSet = await client.refresh(req.user.refreshToken);
-    req.user.accessToken = tokenSet.access_token;
-    const access = jwtDecode(tokenSet.access_token);
-    req.user.accessTokenDecoded = access?.payload;
-    req.user.refreshToken = tokenSet.refresh_token;
-    req.user.rolesCalculated = JSON.stringify(getLdapGroups(req));
+    tokenSet = await client.refresh(req.user.refreshToken);
+  } catch (err) {
+    // invalid_grant / Token is not active -> RT expired/rotated/revoked, which
+    // is what a logout at the identity provider (or in another application of
+    // the realm) looks like from here.
+    if (err?.error === "invalid_grant") {
+      await endSession(req);
+      throw new SessionEndedError();
+    }
+    // Unreachable, or a server error: that says nothing about the session, and
+    // logging the user out would only send them to a login that is itself
+    // unreachable. The request goes on with the token it has.
+    console.error("Error refreshing token:", err);
+    return null;
+  }
+  req.user.accessToken = tokenSet.access_token;
+  const access = jwtDecode(tokenSet.access_token);
+  req.user.accessTokenDecoded = access?.payload;
+  req.user.refreshToken = tokenSet.refresh_token;
+  req.user.rolesCalculated = JSON.stringify(getLdapGroups(req));
+  try {
     // Get updated user information
     const userinfo = await client.userinfo(req.user.accessToken);
     // Merge the updated user information with the user profile
     req.user = { ...req.user, ...userinfo };
-    // The roles and the claims this request would be judged by have just been
-    // replaced, so a context assembled from the old ones must not be answered
-    // from. The next check builds one from what is now in the session.
-    req.permissionContext = null;
-    // console.log("Token refreshed", req.user);
   } catch (err) {
-    // invalid_grant / Token is not active -> RT expired/rotated/revoked
-    if (err?.error === "invalid_grant") {
-      // kill local auth and require full re-login
-      req.session.needsReauth = true;
-
-      // optional: clear stored tokens
-      if (req.user) {
-        req.user.accessToken = null;
-        req.user.accessTokenDecoded = null;
-        req.user.refreshToken = null;
-      }
-      return null;
-    }
-
-    console.error("Error refreshing token:", err);
-    // for other errors you might also reauth
-    req.session.needsReauth = true;
-    return null;
+    // The tokens are renewed; only the user information that follows failed.
+    console.error("Error refreshing user information:", err);
   }
+  // The roles and the claims this request would be judged by have just been
+  // replaced, so a context assembled from the old ones must not be answered
+  // from. The next check builds one from what is now in the session.
+  req.permissionContext = null;
+  // console.log("Token refreshed", req.user);
+  return true;
 }
 
 /**
@@ -292,12 +358,22 @@ export async function fetchAccount(req) {
   // test/checks/permissions.js. The count is diagnostic and nothing reads it to
   // decide anything.
   req.user.accountLookups = (req.user.accountLookups ?? 0) + 1;
-  const response = await fetch(accountUrl(req), {
-    headers: {
-      Authorization: "Bearer " + req.user.accessToken,
-      "Content-Type": "application/json",
-    },
-  });
+  const request = () =>
+    fetch(accountUrl(req), {
+      headers: {
+        Authorization: "Bearer " + req.user.accessToken,
+        "Content-Type": "application/json",
+      },
+    });
+  let response = await request();
+  // The account endpoint refuses a token whose session has ended at the
+  // identity provider, long before the token itself expires - which is the
+  // earliest a route that renews only near expiry can learn of a logout made
+  // elsewhere. One forced renewal settles it: refused, it ends the session and
+  // throws; granted, the lookup is asked once more with the new token.
+  if (response.status === 401 && (await refreshAccessToken(req))) {
+    response = await request();
+  }
   if (!response.ok) {
     throw new Error(`the account endpoint answered ${response.status}`);
   }
