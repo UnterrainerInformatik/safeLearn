@@ -45,3 +45,5 @@ Die damals vermuteten Ursachen (kaputtes LDAP-Attribut, langsame OU, Keycloak-Fe
 
 # Allgemein
 
+## Prüfungsmodul: Online-MC-Tests und Notenbuch (Plan liegt vor, noch nicht begonnen)
+Kurze Multiple-Choice-Tests (typisch 4 Fragen in 10 min), die in safeLearn geschrieben und am Server ausgewertet werden, dazu ein Notenbuch pro Kurs (Klasse × Fach × Schuljahr) mit Semesternoten-Vorschlag und Override. Der Fragenpool wird einmal aus Moodle-XML (`htl-claude/moodle-quiz-questions/`) importiert, danach ist die DB (SQLite) die Wahrheit und ein Online-Editor der Weg. Entscheidungen, Datenmodell, Schutz gegen Schummeln, Phasen (28–42 Arbeitstage) und Zeitplan stehen in `AI/exam-module-plan.md`. Gerald will sich das erst überlegen, bevor die erste Phase (P0) als Change angelegt wird. Harter Termin, falls es fürs WS 26/27 zählen soll: Noteneintragungsende 05.02.2027.
