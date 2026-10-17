@@ -1048,13 +1048,8 @@ body.sl-exam-screen-page {
   padding-top: 4px;
 }
 
-.sl-exam-editor-tools {
-  display: flex;
-  gap: 2px;
-  margin-top: 4px;
-}
-
-.sl-exam-editor-tools button {
+.sl-exam-editor-remove {
+  margin-left: 4px;
   padding: 0 6px;
 }
 

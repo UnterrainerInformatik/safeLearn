@@ -29,7 +29,7 @@ The question browser SHALL offer, on a question's preview, a way to edit that qu
 
 ### Requirement: Teachers edit both languages of a question side by side
 
-A teacher SHALL be able to create a question and edit any existing one, with the German and the English version side by side: short title, question text, every answer's text, which answers are correct, the type and the category. Answers SHALL be edited as pairs: one German and one English text per answer, with one correct flag that holds for both. A teacher SHALL be able to add, remove and reorder answers. Question and answer texts SHALL be edited as formatted text offering at least bold, italic, inline code, a code block, bulleted and numbered lists, and images. The editor SHALL NOT require the teacher to write markup.
+A teacher SHALL be able to create a question and edit any existing one, with the German and the English version side by side: short title, question text, every answer's text, which answers are correct, the type and the category. Answers SHALL be edited as pairs: one German and one English text per answer, with one correct flag that holds for both. A teacher SHALL be able to add and remove answers. The editor SHALL NOT offer to reorder them, because every attempt shuffles them. Question and answer texts SHALL be edited as formatted text offering at least bold, italic, inline code, a code block, bulleted and numbered lists, and images. The editor SHALL NOT require the teacher to write markup.
 
 #### Scenario: Correcting a wrong flag
 

@@ -2177,6 +2177,7 @@ describe("the question editor", () => {
         ...[...row.querySelectorAll("sl-rich-text")].map((el) => el.value),
       ]),
       toolbar: [...document.querySelector("sl-rich-text .sl-rich-text-toolbar").querySelectorAll("button")].map((b) => b.dataset.action),
+      answerTools: [...document.querySelectorAll('.sl-exam-editor-answer[data-answer="1"] .sl-exam-editor-label button')].map((b) => b.title),
     }));
     assert.deepEqual(shown, {
       heading: "Edit: Tippfehler-Frage",
@@ -2188,6 +2189,7 @@ describe("the question editor", () => {
         [false, "<p>jenes</p>", "<p>that</p>"],
       ],
       toolbar: ["bold", "italic", "code", "codeblock", "ul", "ol", "image"],
+      answerTools: ["Remove"],
     });
 
     // The second answer becomes the correct one, and a third is added.

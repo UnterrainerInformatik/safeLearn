@@ -4,7 +4,8 @@
  * - `question-editor`: one question of the pool, or a new one in the category
  *   the browser had chosen - German and English side by side per row: the
  *   title, the question text, and each answer as a pair with one correct flag
- *   for both. Answers are added, removed and reordered here; a true/false
+ *   for both. Answers are added and removed here, in no order that matters:
+ *   every attempt shuffles them. A true/false
  *   question has its two fixed answers and only says which one is right.
  *
  * A refused save shows every problem at its field and keeps the input. A save
@@ -193,8 +194,6 @@ class QuestionEditor extends ExamElement {
       answer.correct.type = single ? "radio" : "checkbox";
       answer.correct.name = single ? "correct" : "";
       answer.correct.setAttribute("aria-label", `Answer ${index + 1} is correct`);
-      const tool = (label, title, action, disabled = false) =>
-        h("button", { type: "button", title, "aria-label": `${title} (answer ${index + 1})`, disabled, onClick: action }, label);
       return h(
         "div",
         { class: "sl-exam-editor-row sl-exam-editor-answer", "data-answer": String(index + 1) },
@@ -203,11 +202,9 @@ class QuestionEditor extends ExamElement {
           { class: "sl-exam-editor-label" },
           h("label", {}, answer.correct, ` ${index + 1}`),
           h(
-            "span",
-            { class: "sl-exam-editor-tools" },
-            tool("↑", "Move up", () => this.moveAnswer(index, -1), index === 0),
-            tool("↓", "Move down", () => this.moveAnswer(index, 1), index === this.answers.length - 1),
-            tool("✕", "Remove", () => this.removeAnswer(index))
+            "button",
+            { type: "button", class: "sl-exam-editor-remove", title: "Remove", "aria-label": `Remove answer ${index + 1}`, onClick: () => this.removeAnswer(index) },
+            "✕"
           )
         ),
         h("div", { class: "sl-exam-editor-de", lang: "de" }, answer.de),
@@ -229,12 +226,6 @@ class QuestionEditor extends ExamElement {
 
   removeAnswer(index) {
     this.answers.splice(index, 1);
-    this.drawAnswers();
-  }
-
-  moveAnswer(index, by) {
-    const [answer] = this.answers.splice(index, 1);
-    this.answers.splice(index + by, 0, answer);
     this.drawAnswers();
   }
 

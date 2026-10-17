@@ -16,7 +16,7 @@ Each section ends deployable to secureLectures, where `EXAM_MODULE=on` already r
 - [x] 3.2 `saveQuestion` per D5: version check (409), answers replaced, images resolved through the editor's resolver (own images kept, foreign ones and `data:` refused), unreferenced images without `test_image` removed; `truefalse` with the fixed words; unit tests incl. "image a snapshot shows survives its removal from the text"
 - [x] 3.3 `exam/routes-pool-edit.js`: `PUT /pool/questions/:id` behind `requireTeacher`; editor page `GET /exam/pool/questions/:id` through `teacherShell` (D9); registered in `exam/index.js`
 - [x] 3.4 Client `<sl-rich-text>` per D3: toolbar (bold, italic, inline code, code block, lists, image), paste filter, value as HTML; CSS for both themes in `css/exam.css`
-- [x] 3.5 Client editor element: DE and EN side by side per row, type, category, answers as pairs with one correct flag, add/remove/reorder, problems shown at their fields, 409 keeps the form and offers the current version; "Edit" in the pool preview, return to the browser with `?category=`
+- [x] 3.5 Client editor element: DE and EN side by side per row, type, category, answers as pairs with one correct flag, add and remove (no reordering: every attempt shuffles the answers, decided 2026-10-17), problems shown at their fields, 409 keeps the form and offers the current version; "Edit" in the pool preview, return to the browser with `?category=`
 - [x] 3.6 Harness checks: a student and a teacher in student view refused on page and API, mismatch refused with the answer named, a stored text has no `style` and no script after a styled save, a written test's snapshot unchanged after an edit, the second of two concurrent saves refused
 
 ## 4. New questions and images
