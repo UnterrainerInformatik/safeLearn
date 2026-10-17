@@ -1242,3 +1242,88 @@ sl-rich-text {
   gap: 6px;
   margin: 0.4em 0;
 }
+
+/* Questions imported from a file and not reviewed yet (`question-import`): an
+   amber stripe on the row's left edge and a badge. The stripe sits on the
+   edge, the marked row's blue on the outline and the chosen row's green on the
+   background, so all three show at once. */
+
+.sl-exam-pool {
+  --sl-exam-unreviewed: #c77c00;
+  --sl-exam-unreviewed-badge-bg: #fdf0d5;
+  --sl-exam-unreviewed-badge-text: #6b4200;
+}
+
+#markdown-content.dark-mode .sl-exam-pool {
+  --sl-exam-unreviewed: #f0a830;
+  --sl-exam-unreviewed-badge-bg: #4a3510;
+  --sl-exam-unreviewed-badge-text: #ffd98a;
+}
+
+.sl-exam-pool-questions tbody tr.is-unreviewed > td:first-child {
+  box-shadow: inset 5px 0 0 var(--sl-exam-unreviewed);
+  padding-left: 12px;
+}
+
+.sl-exam-pool-questions tbody tr.is-unreviewed.is-marked > td:first-child {
+  box-shadow: inset 5px 0 0 var(--sl-exam-unreviewed), inset 0 2px 0 #4a90d9, inset 0 -2px 0 #4a90d9;
+}
+
+.sl-exam-pool-badge {
+  display: inline-block;
+  margin-left: 0.5em;
+  padding: 0 6px;
+  border: 1px solid var(--sl-exam-unreviewed);
+  border-radius: 8px;
+  font-size: 0.8em;
+  background-color: var(--sl-exam-unreviewed-badge-bg);
+  color: var(--sl-exam-unreviewed-badge-text);
+}
+
+.sl-exam-pool-review {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+  margin: 0.4em 0 0.6em;
+  padding: 6px 10px;
+  border-left: 5px solid var(--sl-exam-unreviewed);
+  border-radius: 4px;
+  background-color: var(--sl-exam-unreviewed-badge-bg);
+  color: var(--sl-exam-unreviewed-badge-text);
+}
+
+.sl-exam-pool-review p {
+  margin: 0;
+}
+
+/* The import page. */
+
+.sl-exam-import-drop {
+  display: block;
+  padding: 16px;
+  border: 2px dashed rgba(127, 127, 127, 0.5);
+  border-radius: 6px;
+}
+
+.sl-exam-import-drop.is-dragging {
+  border-color: #4a90d9;
+  background-color: rgba(74, 144, 217, 0.08);
+}
+
+.sl-exam-import-problem-list {
+  font-size: 0.9em;
+  user-select: text;
+}
+
+.sl-exam-import-new {
+  margin-left: 0.5em;
+  padding: 0 6px;
+  border: 1px solid #2e7d32;
+  border-radius: 8px;
+  font-size: 0.8em;
+}
+
+#markdown-content.dark-mode .sl-exam-import-new {
+  border-color: #81c784;
+}

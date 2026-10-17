@@ -28,6 +28,7 @@ import { registerClassRoutes } from "./routes-classes.js";
 import { registerGradebookRoutes } from "./routes-gradebook.js";
 import { registerPoolRoutes } from "./routes-pool.js";
 import { registerPoolEditRoutes } from "./routes-pool-edit.js";
+import { registerPoolImportRoutes } from "./routes-pool-import.js";
 import { purgeUploads, QuestionProblemsError } from "./pool-edit.js";
 import { registerTestRoutes } from "./routes-tests.js";
 import { registerAttemptRoutes } from "./routes-attempts.js";
@@ -100,6 +101,7 @@ function buildRouter(db, startPage) {
   registerGradebookRoutes(router, { db, handle, startPage });
   registerPoolRoutes(router, { db, handle, startPage });
   registerPoolEditRoutes(router, { db, handle, startPage });
+  registerPoolImportRoutes(router, { db, handle, startPage });
   registerTestRoutes(router, { db, handle, startPage });
   registerAttemptRoutes(router, { db, handle, startPage });
   registerLiveRoutes(router, { db, handle, startPage });

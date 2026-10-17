@@ -2424,6 +2424,274 @@ describe("the question editor", () => {
   });
 });
 
+describe("the question import", () => {
+  let student;
+  let teacher;
+  let course;
+  let scratch;
+
+  /** A connection to the run's database beside the instance, for what only the server knows. */
+  function database(fn) {
+    const { db } = openDatabase(run.databasePath);
+    try {
+      return fn(db);
+    } finally {
+      db.close();
+    }
+  }
+
+  /** A file of `questions` in the category Import-Checks / `sub`, in the format safelearn-questions/1. */
+  function questionFile(sub, questions) {
+    const block = ({ title, marks = ["x", "x", "-", "-"], hintDe = null, titleEn = `${title} (en)` }) => {
+      const correct = marks.filter((mark) => mark === "x").length;
+      const answers = (language) => marks.map((mark, index) => `- [${mark === "x" ? "x" : " "}] \`${language}-${index + 1}\``).join("\n");
+      return `## ${title}
+en: ${titleEn}
+type: multichoiceset
+
+### de
+
+Welche Antworten zu ${title} sind richtig? ${hintDe ?? `(${correct} richtige Antworten)`}
+
+${answers("de")}
+
+### en
+
+Which answers about ${title} are right? (${correct} correct answers)
+
+${answers("en")}
+`;
+    };
+    return `---\nformat: safelearn-questions/1\n---\n\n# Import-Checks / ${sub}\nen: Import checks / ${sub}\n\n${questions.map(block).join("\n")}`;
+  }
+
+  /** A file's text sent to the import API from inside the page, as the import page sends it. */
+  async function sendAs(session, reference, text, name = "questions.md") {
+    return session.page.evaluate(
+      async (address, text) => {
+        const response = await fetch(address, {
+          method: "POST",
+          credentials: "include",
+          headers: { Accept: "application/json", "Content-Type": "text/markdown; charset=utf-8" },
+          body: text,
+        });
+        let json = null;
+        try {
+          json = await response.json();
+        } catch {
+          // Not JSON.
+        }
+        return { status: response.status, json };
+      },
+      `${applicationUrl}${reference}?name=${encodeURIComponent(name)}`,
+      text
+    );
+  }
+
+  /** The import page with `text` chosen as the file `name`; resolves once the check answered. */
+  async function uploadInPage(text, name) {
+    const file = path.join(scratch, name);
+    writeFileSync(file, text);
+    await teacher.page.goto(`${applicationUrl}/exam/pool/import`, { waitUntil: "domcontentloaded" });
+    const input = await teacher.page.waitForSelector(".sl-exam-import input[type=file]", { timeout: 20000 });
+    await input.uploadFile(file);
+    await teacher.page.waitForSelector(".sl-exam-import-problem-list, .sl-exam-import-go", { timeout: 20000 });
+  }
+
+  const imports = async () => (await fetchAs(teacher, "/exam/api/pool/imports")).json;
+  const questionCount = () => database((db) => db.prepare("SELECT COUNT(*) AS n FROM question").get().n);
+
+  before(async () => {
+    student = await sharedSession("student");
+    teacher = await sharedSession("teacher");
+    await setPreferences(student, {});
+    await setPreferences(teacher, {});
+    const year = (await fetchAs(teacher, "/exam/api/years")).json.current;
+    const gbClass = (await fetchAs(teacher, `/exam/api/years/${year.id}/classes`)).json.find((c) => c.name === "9xgb");
+    course = (await fetchAs(teacher, `/exam/api/classes/${gbClass.id}`)).json.courses.find((c) => c.subject === "GB");
+    scratch = mkdtempSync(path.join(os.tmpdir(), "safelearn-import-"));
+  });
+
+  after(() => {
+    if (scratch) rmSync(scratch, { recursive: true, force: true });
+  });
+
+  test("no student, and no teacher in student view, reaches the import page, the format description or the import's API", async () => {
+    const content = questionFile("Verboten", [{ title: "Verboten" }]);
+    const before = questionCount();
+    const someQuestion = database((db) => db.prepare("SELECT id FROM question LIMIT 1").get().id);
+    const probe = async (session) => {
+      const nothing = await fetchAs(session, absent);
+      for (const page of ["/exam/pool/import", "/exam/pool/import/format"]) {
+        assert.deepEqual(await fetchAs(session, page), nothing, `${page} is not there`);
+      }
+      assert.equal((await sendAs(session, "/exam/api/pool/imports/check", content)).status, 403, "the check is refused");
+      assert.equal((await sendAs(session, "/exam/api/pool/imports", content)).status, 403, "the import is refused");
+      for (const [method, reference] of [
+        ["GET", "/exam/api/pool/imports"],
+        ["DELETE", "/exam/api/pool/imports/1"],
+        ["POST", `/exam/api/pool/questions/${someQuestion}/reviewed`],
+      ]) {
+        assert.equal((await fetchAs(session, reference, { method })).status, 403, `${method} ${reference} is refused`);
+      }
+    };
+    await probe(student);
+    await setPreferences(teacher, { vt: 0 });
+    try {
+      await probe(teacher);
+    } finally {
+      await setPreferences(teacher, {});
+    }
+    assert.equal(questionCount(), before, "the pool is unchanged");
+  });
+
+  test("a broken file lists its problems with lines and question, ready to copy, and stores nothing", async () => {
+    const before = { questions: questionCount(), imports: (await imports()).length };
+    const content = questionFile("Kaputt", [{ title: "Falscher Hinweis", hintDe: "(3 richtige Antworten)" }, { title: "Ohne Englisch", titleEn: "" }]);
+    await uploadInPage(content, "broken.md");
+    const shown = await teacher.page.evaluate(() => ({
+      problems: [...document.querySelectorAll(".sl-exam-import-problem-list li")].map((li) => li.textContent),
+      importButton: document.querySelector(".sl-exam-import-go") !== null,
+      copy: [...document.querySelectorAll(".sl-exam-import-problems button")].map((b) => b.textContent),
+    }));
+    const line = (needle) => content.slice(0, content.indexOf(needle)).split("\n").length;
+    assert.deepEqual(shown, {
+      problems: [
+        `Line ${line("### de")} (Falscher Hinweis): The German hint says 3, but 2 answers are marked correct.`,
+        `Line ${line("en: \n")} (Ohne Englisch): The English title is missing.`,
+      ],
+      importButton: false,
+      copy: ["Copy problems"],
+    });
+    assert.equal(questionCount(), before.questions, "nothing is stored");
+    assert.equal((await imports()).length, before.imports);
+  });
+
+  test("a clean file is previewed, imported, and the browser opens with only the unreviewed questions, highlighted", async () => {
+    const content = questionFile("Statuscodes", [{ title: "Import eins" }, { title: "Import zwei" }, { title: "Import drei" }]);
+    await uploadInPage(content, "statuscodes.md");
+    const preview = await teacher.page.evaluate(() => ({
+      button: document.querySelector(".sl-exam-import-go").textContent,
+      rows: [...document.querySelectorAll(".sl-exam-import-preview tbody tr")].map((tr) => tr.textContent),
+      created: [...document.querySelectorAll(".sl-exam-import-preview h3 + ul li")].map((li) => li.textContent),
+    }));
+    assert.equal(preview.button, "Import 3 questions");
+    assert.deepEqual(preview.rows, ["Import-Checks / Statuscodes / Import checks / Statuscodesnew3003"]);
+    assert.deepEqual(preview.created, ["Import-Checks at the top", "Statuscodes under Import-Checks (new as well)"]);
+    assert.equal((await imports()).length, 0, "the preview stores nothing");
+
+    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), teacher.page.click(".sl-exam-import-go")]);
+    assert.equal(new URL(teacher.page.url()).search, "?unreviewed=1");
+    await teacher.page.waitForSelector(".sl-exam-pool-questions tr.is-unreviewed", { timeout: 20000 });
+    const browser = await teacher.page.evaluate(() => ({
+      filter: document.querySelector(".sl-exam-pool-unreviewed-filter input").checked,
+      rows: [...document.querySelectorAll(".sl-exam-pool-questions tbody tr")].map((tr) => [
+        tr.querySelector("button").textContent,
+        tr.classList.contains("is-unreviewed"),
+        tr.querySelector(".sl-exam-pool-badge")?.textContent ?? null,
+      ]),
+      stripe: getComputedStyle(document.querySelector(".sl-exam-pool-questions tr.is-unreviewed > td")).boxShadow,
+    }));
+    assert.equal(browser.filter, true, "the filter is on");
+    assert.deepEqual(browser.rows, [
+      ["Import eins", true, "not reviewed"],
+      ["Import zwei", true, "not reviewed"],
+      ["Import drei", true, "not reviewed"],
+    ]);
+    assert.match(browser.stripe, /inset/, "the row carries the stripe");
+    const [record] = await imports();
+    assert.deepEqual({ fileName: record.fileName, questions: record.questions, unreviewed: record.unreviewed, inUse: record.inUse }, { fileName: "statuscodes.md", questions: 3, unreviewed: 3, inUse: false });
+  });
+
+  test("Mark as reviewed moves on to the next one, an editor save clears the mark too, and a chosen row shows both", async () => {
+    const listed = (await fetchAs(teacher, "/exam/api/pool/questions?unreviewed=1")).json.filter((q) => q.nameDe.startsWith("Import "));
+    const [first, second, third] = listed;
+    await teacher.page.goto(`${applicationUrl}/exam/pool?unreviewed=1&course=${course.id}`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(`.sl-exam-pool-questions tr[data-question="${first.id}"]`, { timeout: 20000 });
+    await teacher.page.click(`.sl-exam-pool-questions tr[data-question="${first.id}"] button`);
+    await teacher.page.waitForSelector(".sl-exam-pool-review button", { timeout: 10000 });
+    const state = await teacher.page.evaluate((id) => {
+      const row = document.querySelector(`.sl-exam-pool-questions tr[data-question="${id}"]`);
+      return {
+        chosen: row.classList.contains("is-chosen"),
+        unreviewed: row.classList.contains("is-unreviewed"),
+        banner: document.querySelector(".sl-exam-pool-review p").textContent,
+        count: document.querySelector(".sl-exam-pool-count").textContent,
+      };
+    }, first.id);
+    assert.equal(state.chosen && state.unreviewed, true, "chosen and not reviewed at once");
+    assert.match(state.banner, /^Imported on \d{2}\.\d{2}\.\d{4} by .+ from statuscodes\.md, not reviewed yet\.$/);
+    assert.equal(state.count, "1 question chosen. 1 of 1 chosen question is not reviewed yet.");
+
+    await teacher.page.click(".sl-exam-pool-review button");
+    await teacher.page.waitForFunction((id) => document.querySelector(".sl-exam-pool-question h2")?.textContent === id, { timeout: 10000 }, "Import zwei");
+    assert.equal((await fetchAs(teacher, `/exam/api/pool/questions/${first.id}`)).json.unreviewed, false);
+    assert.equal(await teacher.page.$eval(`.sl-exam-pool-questions tr[data-question="${first.id}"]`, (tr) => tr.classList.contains("is-unreviewed")), false);
+    assert.equal(await teacher.page.$eval(".sl-exam-pool-count", (el) => el.textContent), "1 question chosen.");
+
+    const q = (await fetchAs(teacher, `/exam/api/pool/questions/${second.id}`)).json;
+    const saved = await fetchAs(teacher, `/exam/api/pool/questions/${second.id}`, {
+      method: "PUT",
+      body: {
+        version: q.version,
+        categoryId: q.categoryId,
+        type: q.type,
+        nameDe: q.nameDe,
+        nameEn: q.nameEn,
+        textDe: q.textDe,
+        textEn: q.textEn,
+        answers: q.answers.map(({ textDe, textEn, correct }) => ({ textDe, textEn, correct })),
+      },
+    });
+    assert.equal(saved.status, 200, JSON.stringify(saved.json));
+    assert.equal(saved.json.question.unreviewed, false, "a save is a review");
+    assert.equal((await fetchAs(teacher, `/exam/api/pool/questions/${third.id}`)).json.unreviewed, true, "the third still waits");
+  });
+
+  test("taking back: refused while a question is in a test, then the questions and created categories go, and the same file is accepted again", async () => {
+    const content = questionFile("Zuruecknehmen", [{ title: "Zurück eins" }, { title: "Zurück zwei" }]);
+    const imported = await sendAs(teacher, "/exam/api/pool/imports", content, "back.md");
+    assert.equal(imported.status, 200, JSON.stringify(imported.json));
+    const again = await sendAs(teacher, "/exam/api/pool/imports/check", content, "back.md");
+    assert.match(again.json.problems[0].message, /^Exactly this file was imported on .* \(as "back\.md"\)/, "the same file is refused");
+
+    const used = (await fetchAs(teacher, "/exam/api/pool/questions?q=Zur%C3%BCck%20zwei")).json[0];
+    const test = await fetchAs(teacher, `/exam/api/courses/${course.id}/tests`, { method: "POST", body: { name: "Import: in use", questionIds: [used.id] } });
+    assert.equal(test.status, 200, JSON.stringify(test.json));
+    const refused = await fetchAs(teacher, `/exam/api/pool/imports/${imported.json.id}`, { method: "DELETE" });
+    assert.equal(refused.status, 409);
+    assert.equal(refused.json.error, 'This import cannot be taken back: its question "Zurück zwei" is in a test.');
+    assert.equal((await imports()).find((record) => record.id === imported.json.id).inUse, true);
+
+    await fetchAs(teacher, `/exam/api/tests/${test.json.id}`, { method: "DELETE" });
+    await teacher.page.goto(`${applicationUrl}/exam/pool/import`, { waitUntil: "domcontentloaded" });
+    const row = `.sl-exam-import-past tr[data-import="${imported.json.id}"]`;
+    await teacher.page.waitForSelector(`${row} button`, { timeout: 20000 });
+    await teacher.page.click(`${row} button`);
+    assert.match(await teacher.page.$eval(`${row} .sl-exam-import-take-back`, (el) => el.textContent), /^Delete its 2 questions/, "confirmed in the page");
+    await teacher.page.click(`${row} .sl-exam-import-take-back button`);
+    await teacher.page.waitForFunction((selector) => !document.querySelector(selector) && document.querySelector(".sl-exam-import"), { timeout: 10000 }, row);
+    assert.deepEqual((await fetchAs(teacher, "/exam/api/pool/questions?q=Zur%C3%BCck")).json, [], "its questions are gone");
+    const tree = (await fetchAs(teacher, "/exam/api/pool/categories")).json;
+    assert.deepEqual(tree.find((node) => node.nameDe === "Import-Checks").children.map((node) => node.nameDe), ["Statuscodes"], "its own category is gone");
+    const accepted = await sendAs(teacher, "/exam/api/pool/imports/check", content, "back.md");
+    assert.deepEqual(accepted.json.problems, [], "the same file is accepted again");
+  });
+
+  test("the downloaded description names the format and lists the current categories", async () => {
+    const download = await teacher.page.evaluate(async (address) => {
+      const response = await fetch(address, { credentials: "include" });
+      return { status: response.status, type: response.headers.get("content-type"), disposition: response.headers.get("content-disposition"), text: await response.text() };
+    }, `${applicationUrl}/exam/pool/import/format`);
+    assert.equal(download.status, 200);
+    assert.equal(download.type, "text/markdown; charset=utf-8");
+    assert.equal(download.disposition, 'attachment; filename="safelearn-question-format.md"');
+    assert.ok(download.text.includes("format: safelearn-questions/1"));
+    assert.ok(download.text.includes("- Import-Checks / Statuscodes — Import checks / Statuscodes"), "the tree as it is now");
+    assert.ok(download.text.includes("(2 richtige Antworten)"));
+  });
+});
+
 // Last in the file: it restarts the instance, and every session has to come
 // back through the identity provider afterwards.
 describe("online tests: a restart", () => {

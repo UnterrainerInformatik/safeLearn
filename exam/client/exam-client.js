@@ -19,6 +19,7 @@ import "./gradebook.js";
 import "./pool.js";
 import "./question-editor.js";
 import "./pool-categories.js";
+import "./pool-import.js";
 import "./tests.js";
 import "./attempt.js";
 import "./live.js";

@@ -137,14 +137,14 @@ describe("the migration to the question editor", () => {
     migrate(db, dbPath, readMigrations().slice(0, 6));
     importPool(db, poolXml("de"), poolXml("en"));
     const wmc = course(db);
-    const ids = listQuestions(db).map((q) => q.id);
+    const ids = db.prepare("SELECT q.id FROM question q JOIN question_category c ON c.id = q.category_id ORDER BY c.position, c.id, q.position, q.id").all().map((q) => q.id);
     const test = createTest(db, wmc.id, { name: "1st test", questionIds: ids });
     fakeAttempt(db, test.id, "anna");
     const questions = db.prepare("SELECT * FROM question ORDER BY id").all();
     const before = poolAndSnapshots(db);
     assert.ok(before.test_image.length > 0, "the test shows an image");
 
-    assert.deepEqual(migrate(db, dbPath), { from: 6, to: 7 });
+    assert.deepEqual(migrate(db, dbPath, readMigrations().slice(0, 7)), { from: 6, to: 7 });
     assert.deepEqual(poolAndSnapshots(db), before);
     assert.deepEqual(
       db.prepare("SELECT * FROM question ORDER BY id").all().map((row) => ({ ...row })),
@@ -152,7 +152,7 @@ describe("the migration to the question editor", () => {
       "every question is as it was, at version 1"
     );
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM image_upload").get().n, 0);
-    assert.equal(getQuestion(db, ids[0]).version, 1);
+    assert.equal(db.prepare("SELECT version FROM question WHERE id = ?").get(ids[0]).version, 1);
   });
 });
 

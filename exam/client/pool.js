@@ -11,6 +11,11 @@
  *   It leads into the editor (`question-editor`): "Edit" on the preview, "New
  *   question" with a category chosen, and the category page; retired
  *   questions are listed, marked, only when asked for.
+ * - Questions imported from a file (`question-import`) and not reviewed yet
+ *   carry an amber stripe and a badge in their rows, a filter shows only them
+ *   (on from the start with `data-sl-unreviewed`, as after an import), and
+ *   their preview says where they came from and offers "Mark as reviewed",
+ *   which moves on to the next one. "Import questions" leads to the import.
  *
  * The API refuses every session not acting as a teacher; this element only
  * draws what it answers.
@@ -34,6 +39,11 @@ function displayDate(iso) {
   if (!iso) return "–";
   const [year, month, day] = iso.split("-");
   return `${day}.${month}.${year}`;
+}
+
+/** The day of an ISO timestamp, as the module writes dates. */
+function displayDay(iso) {
+  return iso ? new Date(iso).toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit", year: "numeric" }) : "–";
 }
 
 /** Stored, sanitized markup as a node. */
@@ -60,6 +70,9 @@ class PoolView extends ExamElement {
     this.assembly = course ? this.assemblyPanel(course, tests) : null;
     this.categoryId = this.params.category ? Number(this.params.category) : null;
     this.includeRetired = false;
+    this.onlyUnreviewed = this.params.unreviewed === "1";
+    // The questions known not to be reviewed, for the assembly's reminder.
+    this.unreviewedIds = new Set();
     this.query = "";
     this.language = "de";
     this.list = h("div", { class: "sl-exam-pool-list" });
@@ -122,9 +135,11 @@ class PoolView extends ExamElement {
       )
     );
 
-    const categories = h("a", { href: `/exam/pool/categories${this.params.course ? `?course=${this.params.course}` : ""}`, class: "sl-exam-pool-categories-link" }, "Edit categories");
+    const courseQuery = this.params.course ? `?course=${this.params.course}` : "";
+    const categories = h("a", { href: `/exam/pool/categories${courseQuery}`, class: "sl-exam-pool-categories-link" }, "Edit categories");
+    const importing = h("a", { href: `/exam/pool/import${courseQuery}`, class: "sl-exam-pool-import-link" }, "Import questions");
     if (tree.length === 0) {
-      return h("div", { class: "sl-exam" }, h("p", {}, "The question pool is empty. Create a category to start: "), categories);
+      return h("div", { class: "sl-exam" }, h("p", {}, "The question pool is empty. Create a category to start, or import questions: "), categories, " · ", importing);
     }
     this.newQuestion = h("a", { class: "sl-exam-pool-new", hidden: this.categoryId === null }, "New question");
     this.updateNewQuestion();
@@ -135,16 +150,34 @@ class PoolView extends ExamElement {
         this.refreshList();
       },
     });
+    this.unreviewedBox = h("input", {
+      type: "checkbox",
+      checked: this.onlyUnreviewed,
+      onChange: () => {
+        this.onlyUnreviewed = this.unreviewedBox.checked;
+        this.refreshList();
+      },
+    });
+    this.unreviewedLabel = h("span", {}, " Not reviewed");
+    this.unreviewedFilter = h("label", { class: "sl-exam-pool-unreviewed-filter", hidden: true }, this.unreviewedBox, this.unreviewedLabel);
     this.refreshList();
+    this.countUnreviewed();
     return h(
       "div",
       { class: "sl-exam sl-exam-pool" },
-      h("div", {}, this.tree, h("p", { class: "sl-exam-pool-tree-tools" }, categories)),
+      h("div", {}, this.tree, h("p", { class: "sl-exam-pool-tree-tools" }, categories, " · ", importing)),
       h(
         "div",
         { class: "sl-exam-pool-main" },
         this.assembly,
-        h("div", { class: "sl-exam-pool-tools" }, search, h("label", { class: "sl-exam-quiet" }, retired, " show retired"), this.newQuestion),
+        h(
+          "div",
+          { class: "sl-exam-pool-tools" },
+          search,
+          h("label", { class: "sl-exam-quiet" }, retired, " show retired"),
+          this.unreviewedFilter,
+          this.newQuestion
+        ),
         this.list
       ),
       this.preview
@@ -231,8 +264,31 @@ class PoolView extends ExamElement {
     const chosen = this.chosen.has(id);
     row.classList.toggle("is-chosen", chosen);
     row.setAttribute("aria-selected", String(chosen));
+    this.updateCount();
+  }
+
+  /** How many questions are chosen, and how many of them are not reviewed yet. */
+  updateCount() {
+    if (!this.count) return;
     const n = this.chosen.size;
-    this.count.textContent = n === 0 ? "No question chosen - click a question to choose it." : n === 1 ? "1 question chosen." : `${n} questions chosen.`;
+    const unreviewed = [...this.chosen].filter((id) => this.unreviewedIds.has(id)).length;
+    const reminder =
+      unreviewed === 0 ? "" : ` ${unreviewed} of ${n} chosen question${n === 1 ? " is" : unreviewed === 1 ? "s is" : "s are"} not reviewed yet.`;
+    this.count.textContent = (n === 0 ? "No question chosen - click a question to choose it." : n === 1 ? "1 question chosen." : `${n} questions chosen.`) + reminder;
+  }
+
+  /** The filter "Not reviewed (n)", shown while any question awaits review or the filter is on. */
+  async countUnreviewed() {
+    let questions;
+    try {
+      questions = await examApi("/pool/questions?unreviewed=1");
+    } catch (error) {
+      console.error("[exam] the unreviewed questions could not be counted:", error);
+      return;
+    }
+    for (const question of questions) this.unreviewedIds.add(question.id);
+    this.unreviewedLabel.textContent = ` Not reviewed (${questions.length})`;
+    this.unreviewedFilter.hidden = questions.length === 0 && !this.onlyUnreviewed;
   }
 
   chooseCategory(categoryId, button) {
@@ -265,6 +321,7 @@ class PoolView extends ExamElement {
     if (this.categoryId !== null) params.set("category", String(this.categoryId));
     if (this.query.trim()) params.set("q", this.query.trim());
     if (this.includeRetired) params.set("retired", "1");
+    if (this.onlyUnreviewed) params.set("unreviewed", "1");
     const asked = params.toString();
     this.asked = asked;
     let questions;
@@ -277,6 +334,10 @@ class PoolView extends ExamElement {
     }
     // A slower answer to an older question does not overwrite a newer one.
     if (this.asked !== asked) return;
+    for (const question of questions) {
+      if (question.unreviewed) this.unreviewedIds.add(question.id);
+      else this.unreviewedIds.delete(question.id);
+    }
     if (questions.length === 0) {
       this.list.replaceChildren(h("p", { class: "sl-exam-quiet" }, "No question matches."));
       return;
@@ -303,7 +364,14 @@ class PoolView extends ExamElement {
             "tr",
             {
               "data-question": String(question.id),
-              class: [this.course && this.chosen.has(question.id) ? "is-chosen" : null, question.retired ? "is-retired" : null].filter(Boolean).join(" ") || null,
+              class:
+                [
+                  this.course && this.chosen.has(question.id) ? "is-chosen" : null,
+                  question.retired ? "is-retired" : null,
+                  question.unreviewed ? "is-unreviewed" : null,
+                ]
+                  .filter(Boolean)
+                  .join(" ") || null,
               "aria-selected": this.course ? String(this.chosen.has(question.id)) : null,
               // Anywhere on the row: the preview, and with a course in the
               // bar, choosing or unchoosing the question for the test.
@@ -316,6 +384,7 @@ class PoolView extends ExamElement {
               "td",
               {},
               h("button", { type: "button", class: "sl-exam-link" }, question.nameDe),
+              question.unreviewed ? h("span", { class: "sl-exam-pool-badge" }, "not reviewed") : null,
               h("div", { class: "sl-exam-quiet" }, question.excerptDe),
               h(
                 "div",
@@ -393,6 +462,7 @@ class PoolView extends ExamElement {
           ` · ${typeLabels[question.type] ?? question.type}`,
           question.retired ? " · retired" : ""
         ),
+        question.unreviewed ? this.reviewBanner(question) : null,
         h("div", { class: "sl-exam-pool-question-tools" }, switcher, h("a", { href: this.editAddress(question), class: "sl-exam-pool-edit" }, "Edit")),
         storedMarkup(de ? question.textDe : question.textEn, "sl-exam-pool-text"),
         h(
@@ -411,6 +481,57 @@ class PoolView extends ExamElement {
         usage
       )
     );
+  }
+
+  /** Above an imported question not reviewed yet: where it came from, and "Mark as reviewed". */
+  reviewBanner(question) {
+    const message = h("span", { role: "status" });
+    return h(
+      "div",
+      { class: "sl-exam-pool-review" },
+      h(
+        "p",
+        {},
+        question.importedAt ? `Imported on ${displayDay(question.importedAt)} by ${question.importedBy} from ` : "Imported, ",
+        question.importFileName ? h("code", {}, question.importFileName) : null,
+        question.importedAt ? ", not reviewed yet." : "not reviewed yet."
+      ),
+      h("button", { type: "button", onClick: () => this.markReviewed(question.id, message) }, "Mark as reviewed"),
+      message
+    );
+  }
+
+  /**
+   * Clears the mark of the question `id`, in its row too, and shows the next
+   * question below it in the list that is not reviewed yet - from the top
+   * again past the last - so a batch can be read through in order.
+   */
+  async markReviewed(id, message) {
+    try {
+      await examApi(`/pool/questions/${id}/reviewed`, { method: "POST" });
+    } catch (error) {
+      message.textContent = error instanceof ExamApiError && error.status < 500 ? error.message : "That did not work. Please try again.";
+      return;
+    }
+    this.unreviewedIds.delete(id);
+    this.updateCount();
+    const rows = [...this.list.querySelectorAll("tbody tr[data-question]")];
+    const row = rows.find((candidate) => candidate.dataset.question === String(id));
+    if (row) {
+      row.classList.remove("is-unreviewed");
+      row.querySelector(".sl-exam-pool-badge")?.remove();
+    }
+    this.countUnreviewed();
+    const start = row ? rows.indexOf(row) : -1;
+    const next = [...rows.slice(start + 1), ...rows.slice(0, Math.max(start, 0))].find((candidate) => candidate.classList.contains("is-unreviewed"));
+    if (next) {
+      for (const marked of this.list.querySelectorAll("tr.is-marked")) marked.classList.remove("is-marked");
+      next.classList.add("is-marked");
+      next.scrollIntoView({ block: "nearest" });
+      this.showQuestion(Number(next.dataset.question));
+    } else {
+      this.showQuestion(id);
+    }
   }
 }
 

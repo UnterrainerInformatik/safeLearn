@@ -83,6 +83,9 @@ function imageProblem(db, questionId, src) {
 
 /** Every image source a text names, before cleaning. */
 function imageSources(html) {
+  // Without "<img" no parser makes an image of it, and sanitizing is the
+  // costly part of checking a file of 200 questions.
+  if (!/<img/i.test(String(html ?? ""))) return [];
   const sources = [];
   cleanStoredHtml(String(html ?? ""), (src) => {
     sources.push(src);
@@ -250,7 +253,8 @@ function saved(db, questionId) {
 /**
  * Saves the edited question `id` (design D5). Refused with every problem
  * before anything is written, and with a conflict when `input.version` is not
- * the stored version - the question was changed in between.
+ * the stored version - the question was changed in between. A save is a
+ * review: it clears an imported question's "not reviewed" mark.
  */
 export function saveQuestion(db, id, input = {}) {
   questionRow(db, id);
@@ -263,7 +267,7 @@ export function saveQuestion(db, id, input = {}) {
     const { changes } = db
       .prepare(
         `UPDATE question SET category_id = ?, type = ?, name_de = ?, name_en = ?, position = ?,
-           version = version + 1, updated_at = ?
+           version = version + 1, updated_at = ?, unreviewed = 0
          WHERE id = ? AND version = ?`
       )
       .run(value.categoryId, value.type, value.nameDe, value.nameEn, position, now(), id, Number.isInteger(value.version) ? value.version : -1);
@@ -275,22 +279,41 @@ export function saveQuestion(db, id, input = {}) {
   });
 }
 
+/**
+ * Inserts the checked question `input` at the end of its category, inside the
+ * caller's transaction, and answers its id. Shared by the editor's create and
+ * the Markdown import (exam-question-import design D5), which records the
+ * import it came from and marks it as not reviewed.
+ */
+export function insertQuestion(db, input, { importId = null, unreviewed = false } = {}) {
+  const value = normalizedInput(input);
+  const at = now();
+  const { id } = db
+    .prepare(
+      `INSERT INTO question (category_id, type, name_de, name_en, text_de, text_en, position, created_at, updated_at, import_id, unreviewed)
+       VALUES (?, ?, ?, ?, '', '', ?, ?, ?, ?, ?) RETURNING id`
+    )
+    .get(value.categoryId, value.type, value.nameDe, value.nameEn, endOfCategory(db, value.categoryId), at, at, importId, unreviewed ? 1 : 0);
+  writeContent(db, id, value);
+  return id;
+}
+
 /** Creates a question in its category, at the end of it. Refused like a save. */
 export function createQuestion(db, input = {}) {
   const problems = questionProblems(db, input, null);
   if (problems.length > 0) throw new QuestionProblemsError(problems);
-  const value = normalizedInput(input);
-  return inTransaction(db, () => {
-    const at = now();
-    const { id } = db
-      .prepare(
-        `INSERT INTO question (category_id, type, name_de, name_en, text_de, text_en, position, created_at, updated_at)
-         VALUES (?, ?, ?, ?, '', '', ?, ?, ?) RETURNING id`
-      )
-      .get(value.categoryId, value.type, value.nameDe, value.nameEn, endOfCategory(db, value.categoryId), at, at);
-    writeContent(db, id, value);
-    return saved(db, id);
-  });
+  return inTransaction(db, () => saved(db, insertQuestion(db, input)));
+}
+
+/**
+ * Clears the "not reviewed" mark of an imported question (exam-question-import
+ * design D7). The content is unchanged, so the version is too: an editor open
+ * meanwhile can still save.
+ */
+export function markReviewed(db, id) {
+  questionRow(db, id);
+  db.prepare("UPDATE question SET unreviewed = 0 WHERE id = ?").run(id);
+  return getQuestion(db, id);
 }
 
 /** Retires a question: not offered for new tests, its tests and usage untouched. */
@@ -422,17 +445,24 @@ function categoryView(db, id) {
   return { id: row.id, parentId: row.parent_id, nameDe: row.name_de, nameEn: row.name_en, position: row.position };
 }
 
+/**
+ * Inserts a category under `parentId` (null for the top) after its siblings,
+ * inside the caller's transaction, and answers its id. Also the Markdown
+ * import's way to create the categories its file names.
+ */
+export function insertCategory(db, { parentId = null, nameDe, nameEn }) {
+  const names = categoryNames({ nameDe, nameEn });
+  return db
+    .prepare("INSERT INTO question_category (parent_id, name_de, name_en, position) VALUES (?, ?, ?, ?) RETURNING id")
+    .get(parentId, names.de, names.en, endOfSiblings(db, parentId)).id;
+}
+
 /** Creates a category at the top or under `parentId`, after its siblings. */
 export function createCategory(db, { parentId = null, nameDe, nameEn } = {}) {
   const names = categoryNames({ nameDe, nameEn });
   const parent = parentOf(db, parentId);
   return namedUniquely(names.de, () =>
-    inTransaction(db, () => {
-      const { id } = db
-        .prepare("INSERT INTO question_category (parent_id, name_de, name_en, position) VALUES (?, ?, ?, ?) RETURNING id")
-        .get(parent, names.de, names.en, endOfSiblings(db, parent));
-      return categoryView(db, id);
-    })
+    inTransaction(db, () => categoryView(db, insertCategory(db, { parentId: parent, nameDe: names.de, nameEn: names.en })))
   );
 }
 

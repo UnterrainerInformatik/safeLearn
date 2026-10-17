@@ -34,6 +34,7 @@ export function registerPoolRoutes(router, { db, handle, startPage }) {
       categoryId: req.query.category ? idParam(String(req.query.category)) : null,
       query: typeof req.query.q === "string" ? req.query.q : "",
       includeRetired: req.query.retired === "1",
+      onlyUnreviewed: req.query.unreviewed === "1",
     })
   );
   api("get", "/pool/questions/:id", (req) => getQuestion(db, idParam(req.params.id)));
@@ -69,6 +70,8 @@ export function registerPoolRoutes(router, { db, handle, startPage }) {
       const params = context.courseId === null ? {} : { course: String(context.courseId) };
       // The category the browser opens with, e.g. when the editor returns.
       if (typeof req.query.category === "string" && /^[1-9]\d{0,9}$/.test(req.query.category)) params.category = req.query.category;
+      // Only the questions not reviewed yet, e.g. right after an import.
+      if (req.query.unreviewed === "1") params.unreviewed = "1";
       res.send(await teacherShell({ db, startPage, req, title: "Question pool", context, kind: "pool", params, current: "pool" }));
     })
   );

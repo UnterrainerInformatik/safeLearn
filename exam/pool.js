@@ -62,6 +62,9 @@ export function categoryAndBelow(db, categoryId) {
   );
 }
 
+/** Where an imported question came from; all null for any other. */
+const importColumns = "i.imported_at AS importedAt, i.imported_by AS importedBy, i.file_name AS importFileName";
+
 /** Each category's path from the root, in both languages, by id. */
 function categoryPaths(db) {
   const rows = db.prepare("SELECT id, parent_id AS parentId, name_de AS nameDe, name_en AS nameEn FROM question_category").all();
@@ -82,11 +85,12 @@ function categoryPaths(db) {
 /**
  * The questions of a category and everything below it - all of them without
  * `categoryId` - whose name, text or answers contain `query` in either
- * language, ignoring case. Retired questions only with `includeRetired`. Each
- * comes with its category's path and how often and when it was last used, so
- * the list can be read while choosing questions for a test.
+ * language, ignoring case. Retired questions only with `includeRetired`, and
+ * only those not reviewed yet with `onlyUnreviewed`. Each comes with its
+ * category's path, how often and when it was last used, so the list can be
+ * read while choosing questions for a test, and where it was imported from.
  */
-export function listQuestions(db, { categoryId = null, query = "", includeRetired = false } = {}) {
+export function listQuestions(db, { categoryId = null, query = "", includeRetired = false, onlyUnreviewed = false } = {}) {
   const inCategory = categoryId === null ? null : categoryAndBelow(db, categoryId);
   if (inCategory !== null && inCategory.size === 0) throw new NotFoundError("There is no such category.");
   const paths = categoryPaths(db);
@@ -98,16 +102,18 @@ export function listQuestions(db, { categoryId = null, query = "", includeRetire
   return db
     .prepare(
       `SELECT q.id, q.category_id AS categoryId, q.type, q.name_de AS nameDe, q.name_en AS nameEn,
-         q.text_de AS textDe, q.text_en AS textEn, q.retired,
+         q.text_de AS textDe, q.text_en AS textEn, q.retired, q.unreviewed, ${importColumns},
          (SELECT COUNT(*) FROM answer a WHERE a.question_id = q.id) AS answers,
          (SELECT COUNT(*) FROM question_usage u WHERE u.question_id = q.id) AS uses,
          (SELECT MAX(used_on) FROM question_usage u WHERE u.question_id = q.id) AS lastUsedOn
        FROM question q
        JOIN question_category c ON c.id = q.category_id
+       LEFT JOIN question_import i ON i.id = q.import_id
        ORDER BY c.position, c.id, q.position, q.id`
     )
     .all()
     .filter((row) => includeRetired || row.retired === 0)
+    .filter((row) => !onlyUnreviewed || row.unreviewed === 1)
     .filter((row) => inCategory === null || inCategory.has(row.categoryId))
     .filter(
       (row) =>
@@ -116,9 +122,10 @@ export function listQuestions(db, { categoryId = null, query = "", includeRetire
           .toLowerCase()
           .includes(needle)
     )
-    .map(({ textDe, textEn, retired, ...row }) => ({
+    .map(({ textDe, textEn, retired, unreviewed, ...row }) => ({
       ...row,
       retired: retired === 1,
+      unreviewed: unreviewed === 1,
       category: paths.get(row.categoryId),
       excerptDe: plainText(textDe).slice(0, 160),
       excerptEn: plainText(textEn).slice(0, 160),
@@ -129,14 +136,15 @@ export function listQuestions(db, { categoryId = null, query = "", includeRetire
  * One question as the preview and the editor show it: both languages, every
  * answer in its original order with its correct flag, the category's path,
  * each test it was used in, with course and date, and the version a save has
- * to name (exam-question-editor design D7).
+ * to name (exam-question-editor design D7), and for an imported question
+ * when, by whom and from which file (exam-question-import design D7).
  */
 export function getQuestion(db, id) {
   const row = db
     .prepare(
-      `SELECT id, category_id AS categoryId, type, name_de AS nameDe, name_en AS nameEn,
-         text_de AS textDe, text_en AS textEn, retired, version
-       FROM question WHERE id = ?`
+      `SELECT q.id, q.category_id AS categoryId, q.type, q.name_de AS nameDe, q.name_en AS nameEn,
+         q.text_de AS textDe, q.text_en AS textEn, q.retired, q.version, q.unreviewed, ${importColumns}
+       FROM question q LEFT JOIN question_import i ON i.id = q.import_id WHERE q.id = ?`
     )
     .get(id);
   if (!row) throw new NotFoundError("There is no such question.");
@@ -159,6 +167,7 @@ export function getQuestion(db, id) {
   return {
     ...row,
     retired: row.retired === 1,
+    unreviewed: row.unreviewed === 1,
     category: categoryPaths(db).get(row.categoryId),
     answers,
     usage,

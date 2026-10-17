@@ -28,7 +28,7 @@ Out of scope:
 | --- | --- |
 | Where it runs | Inside the safeLearn process, as a separate router (e.g. `/exam/*`) plus elements embedded into pages, behind a feature switch (`EXAM_MODULE=on`). Tier 3 of section 3. On in secureLectures, off in the WYSIWYG container |
 | Storage | **SQLite**, one file under `/app/data` (the volume already mounted for the directory cache). Plain SQL, so a later move to Postgres is not a rewrite |
-| Source of truth for questions | **The database.** Moodle XML is imported once, by hand (by Claude), from `htl-claude/moodle-quiz-questions/`. After that the online editor is the only way questions change. No re-import, no export |
+| Source of truth for questions | **The database.** Moodle XML is imported once, by hand (by Claude), from `htl-claude/moodle-quiz-questions/`. After that questions change through the online editor and Markdown imports, which only add questions (`exam-question-import`). No re-import from Moodle, no export |
 | Pool ownership | One pool shared by all teachers |
 | Question types | `multichoiceset` (all-or-nothing), `multichoice` (single answer) and `truefalse`, all graded all-or-nothing. `essay` is dropped on import |
 | Points | **1 point per question**, regardless of Moodle's `defaultgrade` |
