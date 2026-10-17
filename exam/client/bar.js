@@ -8,9 +8,32 @@
 
 import { elementFor, h } from "./frame.js";
 
+/**
+ * Where a choice leads on the page of one of the bar's buttons (`pool`,
+ * `tests`): that page again, for what is now chosen. An emptied position
+ * leaves the one to its left chosen.
+ */
+function samePage(page, position, value, { year, class: klass }) {
+  const named = (key, id) => `/exam/${page}?${key}=${encodeURIComponent(id)}`;
+  switch (position) {
+    case "year":
+      return value ? named("year", value) : `/exam/${page}`;
+    case "class":
+      return value ? named("class", value) : named("year", year);
+    case "course":
+      return value ? named("course", value) : named("class", klass);
+    default:
+      return null;
+  }
+}
+
 /** Where a choice leads; an emptied position leads to the overview of the one to its left. */
-function destination(position, value, { year, class: klass, course }) {
+function destination(position, value, { year, class: klass, course, current }) {
   const id = encodeURIComponent(value);
+  if (current) {
+    const target = samePage(current, position, value, { year, class: klass });
+    if (target) return target;
+  }
   switch (position) {
     case "year":
       return value ? `/exam/?year=${id}` : "/exam/";

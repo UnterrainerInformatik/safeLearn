@@ -117,6 +117,7 @@ function scrollingTable(table) {
 /** What a result field shows for a stored result in `column`. */
 function cellText(column, result) {
   if (!result) return "";
+  if (column.readOnly) return `${result.points}/${column.maxPoints}`;
   if (column.kind === "plusminus") return result.value === 1 ? "+" : "−";
   if (column.maxPoints !== null) return numberText(result.points);
   return numberText(Math.round(result.value * 10000) / 100);
@@ -249,13 +250,28 @@ class GradebookView extends ExamElement {
       {},
       rows.map((row, rowIndex) => this.studentRow(overview, groups, ordered, row, rowIndex, editable))
     );
-    const table = h("table", { class: "sl-exam-table sl-exam-sheet sl-exam-gradebook" }, h("thead", {}, headRow, columnRow), body);
+    const table = h("table", { class: "sl-exam-table sl-exam-sheet sl-exam-gradebook", "data-columns": String(ordered.length) }, h("thead", {}, headRow, columnRow), body);
     if (editable) table.addEventListener("keydown", (event) => this.arrowKey(table, event));
     return scrollingTable(table);
   }
 
-  /** A column's header: its name, date and maximum, editable in place, and its delete button. */
+  /**
+   * A column's header: its name, date and maximum, editable in place, and its
+   * delete button. An online test's column is the test's: its name links to
+   * the test, and nothing in it is edited or deleted here.
+   */
   columnHead(course, column, editable) {
+    if (column.readOnly) {
+      return h(
+        "th",
+        { class: "sl-exam-column-head sl-exam-column-online", "data-column": String(column.id) },
+        h("a", { href: `/exam/tests/${column.testId}` }, h("strong", {}, column.name)),
+        h("br"),
+        displayDate(column.date),
+        h("br"),
+        `/ ${column.maxPoints}`
+      );
+    }
     if (!editable) {
       return h(
         "th",
@@ -367,6 +383,8 @@ class GradebookView extends ExamElement {
   /** A student's field in one column, saved as it changes; read-only text for someone who left. */
   resultCell(course, column, columnIndex, row, rowIndex, editable, show) {
     const result = row.results[column.id] ?? null;
+    // An online test's result is the attempt's; the sheet shows it as text.
+    if (column.readOnly) return h("td", { class: "sl-exam-online-result", "data-column": String(column.id), "data-student": row.username }, cellText(column, result));
     if (!editable) return h("td", {}, cellText(column, result));
     const mark = column.kind === "plusminus";
     let stored = result;
@@ -435,7 +453,14 @@ class GradebookView extends ExamElement {
     else return;
     // Nothing is stepped or moved inside the field; at the sheet's edge the focus stays.
     event.preventDefault();
-    const next = table.querySelector(`input.sl-exam-cell[data-row="${target[0]}"][data-col="${target[1]}"]`);
+    // An online test's column has no fields; left and right pass over it.
+    const step = target[1] - col;
+    const columns = Number(table.dataset.columns);
+    let next = table.querySelector(`input.sl-exam-cell[data-row="${target[0]}"][data-col="${target[1]}"]`);
+    while (!next && step !== 0 && target[1] >= 0 && target[1] < columns) {
+      target[1] += step;
+      next = table.querySelector(`input.sl-exam-cell[data-row="${target[0]}"][data-col="${target[1]}"]`);
+    }
     if (!next) return;
     next.focus();
     next.select();

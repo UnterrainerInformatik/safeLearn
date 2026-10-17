@@ -17,7 +17,9 @@ import { after, before, describe, test } from "node:test";
 import {
   applicationOutput,
   applicationUrl,
+  reauthenticate,
   render,
+  restartApplication,
   setPreferences,
   sharedSession,
   shutdown,
@@ -191,9 +193,11 @@ describe("the instance with the exam module", () => {
     assert.equal(seen.placeholders[2].params.slCourse, "embedding-fixture-course");
     assert.equal(seen.notices, 0);
     assert.deepEqual(seen.moduleScripts, ["/exam/assets/exam-client.js"]);
-    for (const placeholder of seen.placeholders.filter((p) => p.kind === "test")) {
-      assert.match(placeholder.status, /not available on this instance yet/, "the client ran and drew its frame");
-    }
+    await teacher.page.waitForFunction(() => ![...document.querySelectorAll("sl-exam-test .sl-embed-status")].some((s) => s.textContent === "Loading…"), {
+      timeout: 10000,
+    });
+    const tests = await teacher.page.evaluate(() => [...document.querySelectorAll("sl-exam-test")].map((el) => el.textContent.trim()));
+    assert.deepEqual(tests, ["This record does not exist.", "This record does not exist."], "a test block naming no test says so in its own area");
     await teacher.page.waitForFunction(() => !document.querySelector("sl-exam-gradebook .sl-embed-status:not(.sl-embed-error)"), {
       timeout: 10000,
     });
@@ -980,6 +984,70 @@ describe("the module bar", () => {
     assert.deepEqual([home.class.chosen, home.course.create], [null, false], "no course is offered without a class");
   });
 
+  test("the buttons to the pool and the online tests are on every teacher page and keep what the bar has chosen", async () => {
+    for (const reference of [
+      "/exam/",
+      `/exam/classes/${gbClass.id}`,
+      `/exam/courses/${course.id}`,
+      `/exam/courses/${course.id}/gradebook`,
+      "/exam/scale",
+      "/exam/pool",
+      "/exam/tests",
+    ]) {
+      const served = await html(teacher, reference);
+      assert.match(served, /class="sl-exam-bar-page" data-page="pool"/, `${reference} carries the pool's button`);
+      assert.match(served, /class="sl-exam-bar-page" data-page="tests"/, `${reference} carries the tests' button`);
+    }
+
+    const buttons = () =>
+      teacher.page.evaluate(() =>
+        Object.fromEntries(
+          [...document.querySelectorAll(".sl-exam-bar-page")].map((a) => [a.dataset.page, { href: a.getAttribute("href"), current: a.getAttribute("aria-current") }])
+        )
+      );
+    await open("/exam/");
+    assert.deepEqual(await buttons(), {
+      pool: { href: `/exam/pool?year=${year.id}`, current: null },
+      tests: { href: `/exam/tests?year=${year.id}`, current: null },
+    });
+
+    await open(`/exam/courses/${course.id}/gradebook?semester=ws`);
+    assert.deepEqual(await buttons(), {
+      pool: { href: `/exam/pool?course=${course.id}`, current: null },
+      tests: { href: `/exam/tests?course=${course.id}`, current: null },
+    });
+    const chosen = async () => {
+      const seen = await bar(teacher.page);
+      return [seen.year.chosen, seen.class.chosen, seen.course.chosen];
+    };
+    const expected = [`${year.name} (current)`, "9XGB", "GB"];
+
+    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), teacher.page.click('.sl-exam-bar-page[data-page="pool"]')]);
+    await teacher.page.waitForSelector(".sl-exam-bar");
+    assert.equal(new URL(teacher.page.url()).pathname, "/exam/pool");
+    assert.deepEqual(await chosen(), expected, "the pool's bar keeps year, class and course");
+    assert.equal((await buttons()).pool.current, "page", "the pool's button is marked");
+
+    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), teacher.page.click('.sl-exam-bar-page[data-page="tests"]')]);
+    await teacher.page.waitForSelector(".sl-exam-bar");
+    assert.equal(new URL(teacher.page.url()).pathname, "/exam/tests");
+    assert.deepEqual(await chosen(), expected, "the tests' bar keeps year, class and course");
+    assert.deepEqual(Object.values(await buttons()).map((b) => b.current), [null, "page"], "the tests' button is marked");
+    await teacher.page.waitForSelector(`.sl-exam-tests-course[data-course="${course.id}"]`, { timeout: 20000 });
+
+    // Choosing another class on the tests page stays there; with no course
+    // chosen the year's courses are listed, grouped by class and course.
+    await Promise.all([
+      teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+      teacher.page.select('.sl-exam-bar select[data-position="course"]', ""),
+    ]);
+    assert.equal(new URL(teacher.page.url()).pathname, "/exam/tests");
+    await teacher.page.waitForSelector(".sl-exam-tests-course h2", { timeout: 20000 });
+    const groups = await teacher.page.evaluate(() => [...document.querySelectorAll(".sl-exam-tests-course h2")].map((h2) => h2.textContent));
+    assert.ok(groups.includes("9XGB GB"), `the year's courses are listed: ${groups.join(", ")}`);
+    assert.deepEqual((await chosen()).slice(0, 2), expected.slice(0, 2), "the class stays chosen");
+  });
+
   test("choosing a class opens its page and clears the course", async () => {
     await open(`/exam/courses/${course.id}/gradebook?semester=ws`);
     await Promise.all([
@@ -1018,9 +1086,13 @@ describe("the module bar", () => {
     assert.doesNotMatch(await html(student, "/exam/results"), /sl-exam-bar/);
     assert.doesNotMatch(await html(teacher, "/exam/results"), /sl-exam-bar/, "a teacher's own results carry none either");
     assert.doesNotMatch(await html(student, `/exam/courses/${course.id}/gradebook`), /sl-exam-bar/);
+    for (const reference of ["/exam/pool", "/exam/tests", `/exam/tests?course=${course.id}`]) {
+      assert.doesNotMatch(await html(student, reference), /sl-exam-bar/, `${reference} for a student`);
+    }
+    assert.equal((await fetchAs(student, "/exam/api/tests")).status, 403, "the tests' list refuses a student");
     await setPreferences(teacher, { vt: 0 });
     try {
-      for (const reference of ["/exam/", `/exam/courses/${course.id}/gradebook`]) {
+      for (const reference of ["/exam/", `/exam/courses/${course.id}/gradebook`, "/exam/pool", `/exam/tests?course=${course.id}`]) {
         assert.doesNotMatch(await html(teacher, reference), /sl-exam-bar/, `${reference} in student view`);
       }
     } finally {
@@ -1166,5 +1238,544 @@ describe("the question pool", () => {
     } finally {
       await setPreferences(teacher, {});
     }
+  });
+});
+
+describe("online tests: assembly", () => {
+  let student;
+  let teacher;
+  let course;
+  let questions;
+
+  /** The 9XGB course of the gradebook's checks, and the pool the pool's checks imported. */
+  before(async () => {
+    student = await sharedSession("student");
+    teacher = await sharedSession("teacher");
+    await setPreferences(student, {});
+    await setPreferences(teacher, {});
+    const year = (await fetchAs(teacher, "/exam/api/years")).json.current;
+    const gbClass = (await fetchAs(teacher, `/exam/api/years/${year.id}/classes`)).json.find((c) => c.name === "9xgb");
+    course = (await fetchAs(teacher, `/exam/api/classes/${gbClass.id}`)).json.courses.find((c) => c.subject === "GB");
+    questions = (await fetchAs(teacher, "/exam/api/pool/questions")).json;
+    assert.equal(questions.length, 2, "the pool's checks imported two questions");
+  });
+
+  test("without a course in the bar the browser offers no way to create a test", async () => {
+    await teacher.page.goto(`${applicationUrl}/exam/pool`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(".sl-exam-pool-questions tbody tr", { timeout: 20000 });
+    const seen = await teacher.page.evaluate(() => ({
+      ticks: document.querySelectorAll(".sl-exam-pool-tick").length,
+      assembly: Boolean(document.querySelector(".sl-exam-pool-assembly")),
+    }));
+    assert.deepEqual(seen, { ticks: 0, assembly: false });
+  });
+
+  test("with a course in the bar, ticked questions become a test with their usage shown in the browser", async () => {
+    await teacher.page.goto(`${applicationUrl}/exam/pool?course=${course.id}`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(".sl-exam-pool-tick", { timeout: 20000 });
+    assert.match(await teacher.page.$eval(".sl-exam-pool-assembly h2", (el) => el.textContent), /9XGB GB/);
+    for (const question of questions) await teacher.page.click(`tr[data-question="${question.id}"] .sl-exam-pool-tick`);
+    await teacher.page.type(".sl-exam-pool-create input[name=name]", "HTTP basics");
+    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), teacher.page.click(".sl-exam-pool-create button[type=submit]")]);
+    const testId = Number(new URL(teacher.page.url()).pathname.split("/").pop());
+    assert.ok(testId > 0, `the test's page opened: ${teacher.page.url()}`);
+    await teacher.page.waitForSelector(".sl-exam-test-questions li", { timeout: 20000 });
+    const page = await teacher.page.evaluate(() => ({
+      heading: document.querySelector("#markdown-content h1")?.textContent,
+      current: document.querySelector(".sl-exam-bar-page[aria-current]")?.dataset.page,
+      course: document.querySelector('.sl-exam-bar select[data-position="course"]').selectedOptions[0].textContent,
+      questions: document.querySelectorAll(".sl-exam-test-questions > li").length,
+      correct: document.querySelectorAll(".sl-exam-test-questions .is-correct").length,
+    }));
+    assert.deepEqual(page, { heading: "HTTP basics", current: "tests", course: "GB", questions: 2, correct: 2 });
+
+    const shown = (await fetchAs(teacher, `/exam/api/pool/questions/${questions[0].id}`)).json;
+    assert.deepEqual(shown.usage.map((u) => [u.testId, u.subject, u.className]), [[testId, "GB", "9xgb"]]);
+    await teacher.page.goto(`${applicationUrl}/exam/pool?course=${course.id}`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(`tr[data-question="${questions[0].id}"]`, { timeout: 20000 });
+    assert.equal(await teacher.page.$eval(`tr[data-question="${questions[0].id}"] td:nth-child(5)`, (td) => td.textContent), "1×", "the browser shows the usage");
+
+    const listed = (await fetchAs(teacher, `/exam/api/tests?course=${course.id}`)).json.groups[0].tests;
+    assert.deepEqual(listed.map((t) => [t.id, t.name, t.questions]), [[testId, "HTTP basics", 2]]);
+    await fetchAs(teacher, `/exam/api/tests/${testId}`, { method: "DELETE" });
+  });
+
+  test("no student, and no teacher in student view, reaches a test", async () => {
+    const created = await fetchAs(teacher, `/exam/api/courses/${course.id}/tests`, { method: "POST", body: { name: "Probe", questionIds: [questions[0].id] } });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    const id = created.json.id;
+    const probe = async (session) => {
+      const nothing = await fetchAs(session, absent);
+      for (const [method, reference, body] of [
+        ["GET", "/exam/api/tests"],
+        ["GET", `/exam/api/tests?course=${course.id}`],
+        ["GET", `/exam/api/tests/${id}`],
+        ["PUT", `/exam/api/tests/${id}`, { name: "Stolen" }],
+        ["DELETE", `/exam/api/tests/${id}`],
+        ["POST", `/exam/api/courses/${course.id}/tests`, { name: "Mine", questionIds: [questions[0].id] }],
+      ]) {
+        assert.equal((await fetchAs(session, reference, { method, body })).status, 403, `${method} ${reference} is refused`);
+      }
+      for (const reference of ["/exam/tests", `/exam/tests/${id}`]) {
+        assert.deepEqual(await fetchAs(session, reference), nothing, `${reference} is not there`);
+      }
+    };
+    try {
+      await probe(student);
+      await setPreferences(teacher, { vt: 0 });
+      await probe(teacher);
+    } finally {
+      await setPreferences(teacher, {});
+    }
+    const after = (await fetchAs(teacher, `/exam/api/tests/${id}`)).json;
+    assert.equal(after.name, "Probe", "nothing was changed");
+    await fetchAs(teacher, `/exam/api/tests/${id}`, { method: "DELETE" });
+  });
+
+  test("a test somebody has started cannot be deleted, and its questions cannot change", async () => {
+    const created = (await fetchAs(teacher, `/exam/api/courses/${course.id}/tests`, { method: "POST", body: { name: "Started", questionIds: [questions[0].id] } })).json;
+    // An attempt as the writing will start one, written beside the instance.
+    const { db } = openDatabase(run.databasePath);
+    try {
+      const at = new Date().toISOString();
+      const sitting = db
+        .prepare("INSERT INTO sitting (test_id, opens_at, closes_at, duration_s, created_at) VALUES (?, ?, ?, 600, ?)")
+        .run(created.id, at, new Date(Date.now() + 3600000).toISOString(), at);
+      db.prepare("INSERT OR IGNORE INTO student (username) VALUES ('probe-student')").run();
+      db.prepare("INSERT INTO attempt (test_id, sitting_id, username, started_at, deadline, question_count) VALUES (?, ?, 'probe-student', ?, ?, 1)").run(
+        created.id,
+        Number(sitting.lastInsertRowid),
+        at,
+        at
+      );
+    } finally {
+      db.close();
+    }
+    const refused = await fetchAs(teacher, `/exam/api/tests/${created.id}`, { method: "DELETE" });
+    assert.equal(refused.status, 409);
+    assert.match(refused.json.error, /written/);
+    assert.equal((await fetchAs(teacher, `/exam/api/tests/${created.id}`, { method: "PUT", body: { questionIds: [questions[1].id] } })).status, 409);
+    const kept = (await fetchAs(teacher, `/exam/api/tests/${created.id}`)).json;
+    assert.deepEqual([kept.started, kept.questions.map((q) => q.questionId)], [true, [questions[0].id]]);
+    assert.equal((await fetchAs(teacher, `/exam/api/tests/${created.id}`, { method: "PUT", body: { name: "Renamed" } })).json.name, "Renamed", "renaming stays possible");
+  });
+});
+
+describe("online tests: writing", () => {
+  let student;
+  let teacher;
+  let course;
+  let questions;
+  let imageId;
+
+  /** A connection to the run's database beside the instance, for what only the server knows. */
+  function database(fn) {
+    const { db } = openDatabase(run.databasePath);
+    try {
+      return fn(db);
+    } finally {
+      db.close();
+    }
+  }
+
+  /** A test of both pool questions with a sitting open from a minute ago for 50 minutes. */
+  async function openTest(name) {
+    const created = await fetchAs(teacher, `/exam/api/courses/${course.id}/tests`, { method: "POST", body: { name, questionIds: questions.map((q) => q.id) } });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    const sitting = await fetchAs(teacher, `/exam/api/tests/${created.json.id}/sittings`, {
+      method: "POST",
+      body: { opensAt: new Date(Date.now() - 60000).toISOString(), closesAt: new Date(Date.now() + 50 * 60000).toISOString(), durationMinutes: 15 },
+    });
+    assert.equal(sitting.status, 200, JSON.stringify(sitting.json));
+    return { ...created.json, sitting: sitting.json };
+  }
+
+  /** The answer texts the teacher's page marks correct, per question name. */
+  async function correctTexts(testId) {
+    const test = (await fetchAs(teacher, `/exam/api/tests/${testId}`)).json;
+    return test.questions.map((q) => q.answers.filter((a) => a.correct).map((a) => a.textDe.replace(/<[^>]+>/g, "").trim()));
+  }
+
+  /** Clicks the answer whose text is `text` on the writing page, and waits for its save. */
+  async function choose(page, text) {
+    const clicked = await page.evaluate((wanted) => {
+      const label = [...document.querySelectorAll(".sl-exam-attempt-answers label")].find((l) => l.textContent.trim() === wanted);
+      if (!label) return false;
+      label.querySelector("input").click();
+      return label.closest("fieldset").dataset.n;
+    }, text);
+    assert.ok(clicked, `the answer "${text}" is on the page`);
+    await page.waitForFunction((n) => document.querySelector(`fieldset[data-n="${n}"] .sl-exam-attempt-state`).dataset.state === "saved", { timeout: 10000 }, clicked);
+  }
+
+  /** An image request from inside the page: its status only. */
+  const imageStatus = (session) =>
+    session.page.evaluate(async (address) => (await fetch(address, { credentials: "include" })).status, `${applicationUrl}/exam/api/images/${imageId}`);
+
+  before(async () => {
+    student = await sharedSession("student");
+    teacher = await sharedSession("teacher");
+    await setPreferences(student, {});
+    await setPreferences(teacher, {});
+    const year = (await fetchAs(teacher, "/exam/api/years")).json.current;
+    const gbClass = (await fetchAs(teacher, `/exam/api/years/${year.id}/classes`)).json.find((c) => c.name === "9xgb");
+    course = (await fetchAs(teacher, `/exam/api/classes/${gbClass.id}`)).json.courses.find((c) => c.subject === "GB");
+    questions = (await fetchAs(teacher, "/exam/api/pool/questions")).json;
+    imageId = database((db) => db.prepare("SELECT id FROM image").get().id);
+  });
+
+  test("a student writes a test: shuffled tokens only, saved at once, resumed on reload, focus counted, submitted with points and grade only", async () => {
+    const test = await openTest("Writing");
+    const correct = await correctTexts(test.id);
+    const page = student.page;
+    const bodies = [];
+    const collect = (response) => {
+      if (new URL(response.url()).pathname.startsWith("/exam/api/") && (response.headers()["content-type"] ?? "").includes("json")) {
+        bodies.push(response.text().catch(() => ""));
+      }
+    };
+    page.on("response", collect);
+    try {
+      await page.goto(`${applicationUrl}/exam/my/tests`, { waitUntil: "domcontentloaded" });
+      assert.equal(await page.$(".sl-exam-bar"), null, "no bar on the student's page");
+      await page.waitForSelector(`.sl-exam-attempt-open[data-test="${test.id}"] button`, { timeout: 20000 });
+      await page.click(`.sl-exam-attempt-open[data-test="${test.id}"] button`);
+      await page.waitForSelector(".sl-exam-attempt-question", { timeout: 20000 });
+      await page.waitForFunction(() => [...document.querySelectorAll(".sl-exam-writing img")].every((img) => img.complete && img.naturalWidth === 1), { timeout: 10000 });
+      assert.equal(await imageStatus(student), 200, "the image of an open attempt is served");
+
+      await choose(page, correct[0][0]);
+      const before = await page.$eval(".sl-exam-countdown", (el) => el.textContent);
+      assert.match(before, /^1[45]:\d\d$/, `the countdown runs from the server's 15 minutes: ${before}`);
+
+      // Leaving the page and coming back, twice.
+      for (let i = 0; i < 2; i += 1) {
+        await page.evaluate(() => window.dispatchEvent(new Event("blur")));
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.waitForSelector(".sl-exam-attempt-question", { timeout: 20000 });
+      const resumed = await page.evaluate(() => [...document.querySelectorAll(".sl-exam-attempt-answers input:checked")].map((input) => input.closest("label").textContent.trim()));
+      assert.deepEqual(resumed, [correct[0][0]], "the reload resumes with the saved answer");
+      assert.match(await page.$eval(".sl-exam-countdown", (el) => el.textContent), /^1[45]:\d\d$/, "and the time left");
+
+      await choose(page, correct[1][0]);
+      await page.click(".sl-exam-attempt-submit");
+      assert.match(await page.$eval(".sl-exam-attempt-submit", (el) => el.textContent), /Wirklich abgeben/, "submitting asks once more");
+      await page.click(".sl-exam-attempt-submit");
+      await page.waitForSelector(".sl-exam-attempt-result", { timeout: 10000 });
+      const result = await page.$eval(".sl-exam-attempt-result", (el) => el.textContent);
+      assert.match(result, /2 of 2 questions correct – grade 1/);
+      assert.equal(await page.$(".sl-exam-attempt-result input, .sl-exam-attempt-result .is-correct"), null, "nothing about the answers");
+    } finally {
+      page.off("response", collect);
+    }
+
+    const forbidden = new Set(["correct", "position", "questionId", "id", "testQuestionId", "testAnswerId"]);
+    const keys = (value, found = new Set()) => {
+      if (Array.isArray(value)) value.forEach((item) => keys(item, found));
+      else if (value && typeof value === "object") for (const [key, inner] of Object.entries(value)) found.add(key) && keys(inner, found);
+      return found;
+    };
+    const texts = await Promise.all(bodies);
+    assert.ok(texts.length >= 5, `the writing session's answers were seen: ${texts.length}`);
+    for (const text of texts) {
+      const leaked = [...keys(JSON.parse(text || "null"))].filter((key) => forbidden.has(key));
+      assert.deepEqual(leaked, [], `a response of the writing session carries ${leaked.join(", ")}: ${text.slice(0, 200)}`);
+    }
+
+    const attempt = database((db) => db.prepare("SELECT * FROM attempt WHERE test_id = ?").get(test.id));
+    assert.deepEqual([attempt.score, attempt.question_count], [2, 2], "the grade is the answers', whatever the focus log says");
+    assert.ok(attempt.focus_count >= 2, `the focus losses are counted: ${attempt.focus_count}`);
+
+    // After submission: nothing more to read.
+    assert.equal(await imageStatus(student), 403, "the image is refused after submission");
+    const again = await fetchAs(student, `/exam/api/attempts/${attempt.id}`);
+    assert.deepEqual(Object.keys(again.json).sort(), ["grade", "questionCount", "score", "submitted"]);
+    assert.equal((await fetchAs(student, `/exam/api/tests/${test.id}/attempt`, { method: "POST" })).status, 409, "no second attempt");
+    assert.deepEqual((await fetchAs(student, "/exam/api/my/tests")).json.tests.filter((t) => t.testId === test.id), [], "the test is hidden");
+  });
+
+  test("a submitted attempt is a read-only field of its test's column in the sheet, and counts in the proposal", async () => {
+    const tests = (await fetchAs(teacher, `/exam/api/tests?course=${course.id}`)).json.groups[0].tests;
+    const written = tests.find((t) => t.name === "Writing");
+    const username = student.username.toLowerCase();
+    const overview = (await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=ws`)).json;
+    const column = overview.columns.find((c) => c.id === `test-${written.id}`);
+    assert.deepEqual([column.category, column.readOnly, column.maxPoints, column.name], ["onlineTests", true, 2, "Writing"]);
+    const row = overview.students.find((r) => r.username === username);
+    assert.deepEqual(row.results[column.id], { value: 1, points: 2 });
+    assert.ok(row.categories.onlineTests, "the online tests count in the proposal");
+    assert.equal(overview.students.find((r) => r.username === "gb-other-student").results[column.id], undefined, "nobody else has a result");
+
+    const own = (await fetchAs(student, "/exam/api/my/results")).json.courses.find((c) => c.subject === "GB");
+    assert.ok(own.entries.some((e) => e.name === "Writing" && e.points === 2 && e.maxPoints === 2), "the student's own results show the test by name");
+
+    await teacher.page.goto(`${applicationUrl}/exam/courses/${course.id}/gradebook?semester=ws`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(".sl-exam-sheet", { timeout: 20000 });
+    const cell = await teacher.page.$eval(`td.sl-exam-online-result[data-column="${column.id}"][data-student="${username}"]`, (td) => ({
+      text: td.textContent,
+      fields: td.querySelectorAll("input, select, textarea").length,
+    }));
+    assert.deepEqual(cell, { text: "2/2", fields: 0 }, "shown, and nothing to type into");
+    const head = await teacher.page.$eval(`th[data-column="${column.id}"]`, (th) => ({ link: th.querySelector("a")?.getAttribute("href"), delete: Boolean(th.querySelector(".sl-exam-delete")) }));
+    assert.deepEqual(head, { link: `/exam/tests/${written.id}`, delete: false });
+
+    // The arrow keys pass over the online columns: they are the sheet's first,
+    // so left from the first manual field stays there, and right goes on.
+    const fields = await teacher.page.$$eval(`input.sl-exam-cell[data-student="${username}"]`, (inputs) => inputs.map((input) => Number(input.dataset.col)));
+    const online = await teacher.page.$$eval("th.sl-exam-column-online", (ths) => ths.length);
+    assert.ok(online >= 1 && fields.length >= 2, `online columns ${online}, fields ${fields.join(",")}`);
+    assert.equal(Math.min(...fields), online, "the first field is the first manual column");
+    const first = `input.sl-exam-cell[data-student="${username}"][data-col="${online}"]`;
+    await teacher.page.focus(first);
+    await teacher.page.evaluate((s) => document.querySelector(s).select(), first);
+    await teacher.page.keyboard.press("ArrowLeft");
+    assert.equal(await teacher.page.evaluate(() => Number(document.activeElement.dataset.col)), online, "left stays in the first field");
+    await teacher.page.keyboard.press("ArrowRight");
+    assert.equal(await teacher.page.evaluate(() => Number(document.activeElement.dataset.col)), Math.min(...fields.filter((col) => col > online)));
+    await teacher.page.keyboard.press("ArrowLeft");
+    await teacher.page.keyboard.press("ArrowLeft");
+    assert.equal(await teacher.page.evaluate(() => Number(document.activeElement.dataset.col)), online, "and back, never into an online column");
+  });
+
+  test("a second browser is refused and recorded until the teacher releases the attempt", async () => {
+    const test = await openTest("Device");
+    const started = await fetchAs(student, `/exam/api/tests/${test.id}/attempt`, { method: "POST" });
+    assert.equal(started.status, 200);
+    const attemptId = started.json.attempt;
+    const cookieName = `sl-attempt-${attemptId}`;
+    const cookie = (await student.context.cookies()).find((c) => c.name === cookieName);
+    assert.ok(cookie, "the browser holds the attempt's cookie");
+    assert.deepEqual([cookie.httpOnly, cookie.sameSite, cookie.path], [true, "Strict", "/exam/"]);
+
+    // Another browser of the same account: the session without the cookie.
+    await student.context.deleteCookie(cookie);
+    const refused = await fetchAs(student, `/exam/api/attempts/${attemptId}`);
+    assert.equal(refused.status, 409);
+    assert.match(refused.json.error, /another browser/);
+    assert.equal(database((db) => db.prepare("SELECT COUNT(*) AS n FROM refused_device WHERE attempt_id = ?").get(attemptId).n), 1, "the refusal is recorded");
+
+    assert.equal((await fetchAs(student, `/exam/api/attempts/${attemptId}/release`, { method: "POST" })).status, 403, "a student cannot release");
+    assert.equal((await fetchAs(teacher, `/exam/api/attempts/${attemptId}/release`, { method: "POST" })).status, 200);
+    const resumed = await fetchAs(student, `/exam/api/attempts/${attemptId}`);
+    assert.equal(resumed.status, 200, "the released attempt resumes on the new browser");
+    assert.ok(resumed.json.remainingMs > 0 && resumed.json.questions.length === 2);
+    assert.ok((await student.context.cookies()).some((c) => c.name === cookieName && c.value !== cookie.value), "bound to the new browser");
+    await fetchAs(student, `/exam/api/attempts/${attemptId}/submit`, { method: "POST" });
+  });
+
+  test("a write after the deadline is refused, and the attempt is submitted with what was saved", async () => {
+    const test = await openTest("Late");
+    const writing = (await fetchAs(student, `/exam/api/tests/${test.id}/attempt`, { method: "POST" })).json;
+    const first = writing.questions[0];
+    assert.equal((await fetchAs(student, `/exam/api/attempts/${writing.attempt}/questions/${first.n}`, { method: "PUT", body: { tokens: [first.answers[0].token] } })).status, 200);
+    database((db) => db.prepare("UPDATE attempt SET deadline = ? WHERE id = ?").run(new Date(Date.now() - 1000).toISOString(), writing.attempt));
+    const late = await fetchAs(student, `/exam/api/attempts/${writing.attempt}/questions/${first.n}`, { method: "PUT", body: { tokens: [first.answers[1].token] } });
+    assert.equal(late.status, 409, "the late write is refused");
+    const row = database((db) => db.prepare("SELECT * FROM attempt WHERE id = ?").get(writing.attempt));
+    assert.ok(row.submitted_at, "submitted");
+    const chosen = database((db) => db.prepare("SELECT COUNT(*) AS n FROM response WHERE attempt_id = ?").get(writing.attempt).n);
+    assert.equal(chosen, 1, "with the answer saved before the deadline, unchanged");
+  });
+
+  test("at the deadline an attempt whose page is closed is submitted by the server", async () => {
+    const test = await openTest("Closed");
+    const writing = (await fetchAs(student, `/exam/api/tests/${test.id}/attempt`, { method: "POST" })).json;
+    const first = writing.questions[0];
+    await fetchAs(student, `/exam/api/attempts/${writing.attempt}/questions/${first.n}`, { method: "PUT", body: { tokens: [first.answers[0].token] } });
+    await student.page.goto(`${applicationUrl}${plainPage}`, { waitUntil: "domcontentloaded" });
+    database((db) => db.prepare("UPDATE attempt SET deadline = ? WHERE id = ?").run(new Date(Date.now() - 1000).toISOString(), writing.attempt));
+    const until = Date.now() + 45000;
+    let row;
+    do {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      row = database((db) => db.prepare("SELECT * FROM attempt WHERE id = ?").get(writing.attempt));
+    } while (!row.submitted_at && Date.now() < until);
+    assert.ok(row.submitted_at, "the sweep submitted it within 45 s");
+    assert.equal(row.submitted_at, row.deadline, "at its deadline");
+    assert.equal(database((db) => db.prepare("SELECT COUNT(*) AS n FROM response WHERE attempt_id = ?").get(writing.attempt).n), 1);
+  });
+
+  test("no student reaches another student's attempt, and a teacher cannot write a test", async () => {
+    const test = await openTest("Others");
+    const foreign = database((db) => {
+      const sitting = db.prepare("SELECT id FROM sitting WHERE test_id = ?").get(test.id).id;
+      const at = new Date().toISOString();
+      return Number(
+        db
+          .prepare("INSERT INTO attempt (test_id, sitting_id, username, started_at, deadline, question_count, device_hash) VALUES (?, ?, 'gb-other-student', ?, ?, 2, 'x')")
+          .run(test.id, sitting, at, new Date(Date.now() + 600000).toISOString()).lastInsertRowid
+      );
+    });
+    for (const [method, reference, body] of [
+      ["GET", `/exam/api/attempts/${foreign}`],
+      ["PUT", `/exam/api/attempts/${foreign}/questions/1`, { tokens: [] }],
+      ["POST", `/exam/api/attempts/${foreign}/submit`],
+      ["POST", `/exam/api/attempts/${foreign}/focus`, { state: "away" }],
+    ]) {
+      assert.equal((await fetchAs(student, reference, { method, body })).status, 404, `${method} ${reference}: somebody else's attempt does not exist`);
+    }
+    assert.equal((await fetchAs(teacher, `/exam/api/tests/${test.id}/attempt`, { method: "POST" })).status, 403, "a teacher is refused");
+    assert.deepEqual((await fetchAs(teacher, "/exam/api/my/tests")).json.tests, [], "and has no open test");
+    await setPreferences(teacher, { vt: 0 });
+    try {
+      assert.equal((await fetchAs(teacher, `/exam/api/tests/${test.id}/attempt`, { method: "POST" })).status, 404, "in student view, on no roster");
+    } finally {
+      await setPreferences(teacher, {});
+    }
+  });
+});
+
+describe("online tests: the live view", () => {
+  let student;
+  let teacher;
+  let course;
+  let questions;
+  let written;
+  let sitting;
+
+  /** The live view's row of the shared student, as the page shows it. */
+  const studentRow = () =>
+    teacher.page.evaluate((username) => {
+      const row = document.querySelector(`sl-exam-live tr[data-username="${username}"]`);
+      return row ? { status: row.dataset.status, focus: row.querySelector(".sl-exam-live-focus").textContent } : null;
+    }, student.username.toLowerCase());
+
+  before(async () => {
+    student = await sharedSession("student");
+    teacher = await sharedSession("teacher");
+    await setPreferences(student, {});
+    await setPreferences(teacher, {});
+    const year = (await fetchAs(teacher, "/exam/api/years")).json.current;
+    const gbClass = (await fetchAs(teacher, `/exam/api/years/${year.id}/classes`)).json.find((c) => c.name === "9xgb");
+    course = (await fetchAs(teacher, `/exam/api/classes/${gbClass.id}`)).json.courses.find((c) => c.subject === "GB");
+    questions = (await fetchAs(teacher, "/exam/api/pool/questions")).json;
+  });
+
+  /** A test with a sitting open now, its live view open on the teacher's page. */
+  async function openLive(name) {
+    written = (await fetchAs(teacher, `/exam/api/courses/${course.id}/tests`, { method: "POST", body: { name, questionIds: questions.map((q) => q.id) } })).json;
+    sitting = (
+      await fetchAs(teacher, `/exam/api/tests/${written.id}/sittings`, {
+        method: "POST",
+        body: { opensAt: new Date(Date.now() - 60000).toISOString(), closesAt: new Date(Date.now() + 50 * 60000).toISOString(), durationMinutes: 15 },
+      })
+    ).json;
+    await teacher.page.goto(`${applicationUrl}/exam/sittings/${sitting.id}/live`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForFunction(() => document.querySelector("sl-exam-live")?.dataset.mode === "stream", { timeout: 20000 });
+    assert.deepEqual(await studentRow(), { status: "not started", focus: "–" });
+  }
+
+  test("the stream refuses a request without a session and a student's, and sends them nothing", async () => {
+    await openLive("Live refusals");
+    const anonymous = await fetch(`${applicationUrl}/exam/api/sittings/${sitting.id}/events`, { redirect: "manual", signal: AbortSignal.timeout(5000) });
+    assert.notEqual(anonymous.status, 200);
+    assert.doesNotMatch(anonymous.headers.get("content-type") ?? "", /event-stream/);
+    const asStudent = await student.page.evaluate(async (address) => {
+      const response = await fetch(address, { credentials: "include" });
+      return { status: response.status, type: response.headers.get("content-type") };
+    }, `${applicationUrl}/exam/api/sittings/${sitting.id}/events`);
+    assert.equal(asStudent.status, 403);
+    assert.doesNotMatch(asStudent.type ?? "", /event-stream/);
+    for (const reference of [`/exam/api/sittings/${sitting.id}/live`]) assert.equal((await fetchAs(student, reference)).status, 403);
+    assert.deepEqual(await fetchAs(student, `/exam/sittings/${sitting.id}/live`), await fetchAs(student, absent), "the page is not there");
+  });
+
+  test("a start, a focus loss and a submission reach the teacher at once, and the hot-reload channel carries none of it", async () => {
+    await openLive("Live changes");
+    // Listening on the unauthenticated hot-reload channel, as anybody can.
+    const controller = new AbortController();
+    const heard = [];
+    const listening = fetch(`${applicationUrl}/hot-reload`, { signal: controller.signal })
+      .then(async (response) => {
+        const reader = response.body.getReader();
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          heard.push(Buffer.from(value).toString("utf8"));
+        }
+      })
+      .catch(() => {});
+    try {
+      const writing = (await fetchAs(student, `/exam/api/tests/${written.id}/attempt`, { method: "POST" })).json;
+      await teacher.page.waitForFunction((u) => document.querySelector(`sl-exam-live tr[data-username="${u}"]`)?.dataset.status === "writing", { timeout: 5000 }, student.username.toLowerCase());
+      await fetchAs(student, `/exam/api/attempts/${writing.attempt}/focus`, { method: "POST", body: { state: "away" } });
+      await fetchAs(student, `/exam/api/attempts/${writing.attempt}/focus`, { method: "POST", body: { state: "back" } });
+      await teacher.page.waitForFunction((u) => /left 1×/.test(document.querySelector(`sl-exam-live tr[data-username="${u}"] .sl-exam-live-focus`)?.textContent), { timeout: 5000 }, student.username.toLowerCase());
+      await fetchAs(student, `/exam/api/attempts/${writing.attempt}/submit`, { method: "POST" });
+      await teacher.page.waitForFunction((u) => document.querySelector(`sl-exam-live tr[data-username="${u}"]`)?.dataset.status === "submitted", { timeout: 5000 }, student.username.toLowerCase());
+      assert.equal(await teacher.page.evaluate(() => document.querySelector("sl-exam-live").dataset.mode), "stream", "pushed, not polled");
+    } finally {
+      controller.abort();
+      await listening;
+    }
+    const channel = heard.join("");
+    for (const trace of [student.username.toLowerCase(), "Live changes", "submitted", "writing", "attempt", "sitting"]) {
+      assert.ok(!channel.includes(trace), `the hot-reload channel carried "${trace}": ${channel.slice(0, 200)}`);
+    }
+  });
+
+  test("when the stream fails the view keeps updating from snapshots", async () => {
+    await openLive("Live fallback");
+    await teacher.page.evaluate(() => document.querySelector("sl-exam-live").fallBack());
+    assert.equal(await teacher.page.evaluate(() => document.querySelector("sl-exam-live").dataset.mode), "polling");
+    await fetchAs(student, `/exam/api/tests/${written.id}/attempt`, { method: "POST" });
+    await teacher.page.waitForFunction((u) => document.querySelector(`sl-exam-live tr[data-username="${u}"]`)?.dataset.status === "writing", { timeout: 12000 }, student.username.toLowerCase());
+    assert.equal(await teacher.page.evaluate(() => document.querySelector("sl-exam-live").dataset.mode), "polling", "updated by a snapshot");
+  });
+
+  test("a teacher who switches to the student view gets refused, and the view says why", async () => {
+    await openLive("Live student view");
+    // Switched in another tab, so the live view's page stays open.
+    const other = await teacher.context.newPage();
+    await other.goto(`${applicationUrl}${plainPage}`, { waitUntil: "domcontentloaded" });
+    const elsewhere = { ...teacher, page: other };
+    await setPreferences(elsewhere, { vt: 0 });
+    try {
+      // The next change of the sitting is checked against the session first.
+      await fetchAs(student, `/exam/api/tests/${written.id}/attempt`, { method: "POST" });
+      await teacher.page.waitForFunction(() => document.querySelector("sl-exam-live")?.dataset.mode === "refused", { timeout: 10000 });
+      assert.match(await teacher.page.$eval("sl-exam-live .sl-exam-live-state", (el) => el.textContent), /student view is active/);
+      assert.equal(await teacher.page.$$eval("sl-exam-live tbody tr", (rows) => rows.length), 0, "nothing of the sitting is left on the page");
+    } finally {
+      await setPreferences(elsewhere, {});
+      await other.close();
+    }
+  });
+});
+
+// Last in the file: it restarts the instance, and every session has to come
+// back through the identity provider afterwards.
+describe("online tests: a restart", () => {
+  test("a restarted server keeps the attempt, its answers and its browser", async () => {
+    const student = await sharedSession("student");
+    const teacher = await sharedSession("teacher");
+    const year = (await fetchAs(teacher, "/exam/api/years")).json.current;
+    const gbClass = (await fetchAs(teacher, `/exam/api/years/${year.id}/classes`)).json.find((c) => c.name === "9xgb");
+    const course = (await fetchAs(teacher, `/exam/api/classes/${gbClass.id}`)).json.courses.find((c) => c.subject === "GB");
+    const questions = (await fetchAs(teacher, "/exam/api/pool/questions")).json;
+    const test = (await fetchAs(teacher, `/exam/api/courses/${course.id}/tests`, { method: "POST", body: { name: "Restart", questionIds: questions.map((q) => q.id) } })).json;
+    await fetchAs(teacher, `/exam/api/tests/${test.id}/sittings`, {
+      method: "POST",
+      body: { opensAt: new Date(Date.now() - 60000).toISOString(), closesAt: new Date(Date.now() + 50 * 60000).toISOString(), durationMinutes: 15 },
+    });
+    const writing = (await fetchAs(student, `/exam/api/tests/${test.id}/attempt`, { method: "POST" })).json;
+    const first = writing.questions[0];
+    await fetchAs(student, `/exam/api/attempts/${writing.attempt}/questions/${first.n}`, { method: "PUT", body: { tokens: [first.answers[1].token] } });
+
+    await restartApplication();
+    assert.match(applicationOutput(), /Exam module: active/);
+    await reauthenticate(student);
+    await reauthenticate(teacher);
+
+    const resumed = await fetchAs(student, `/exam/api/attempts/${writing.attempt}`);
+    assert.equal(resumed.status, 200, JSON.stringify(resumed.json));
+    assert.deepEqual(resumed.json.questions.find((q) => q.n === first.n).chosen, [first.answers[1].token], "the saved answer is there");
+    assert.ok(resumed.json.remainingMs > 0 && resumed.json.remainingMs <= writing.remainingMs, "and the time left runs on");
+    await fetchAs(student, `/exam/api/attempts/${writing.attempt}/submit`, { method: "POST" });
   });
 });

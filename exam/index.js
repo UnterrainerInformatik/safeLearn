@@ -27,6 +27,10 @@ import { ConflictError, InvalidInputError, listYears, NotFoundError } from "./cl
 import { registerClassRoutes } from "./routes-classes.js";
 import { registerGradebookRoutes } from "./routes-gradebook.js";
 import { registerPoolRoutes } from "./routes-pool.js";
+import { registerTestRoutes } from "./routes-tests.js";
+import { registerAttemptRoutes } from "./routes-attempts.js";
+import { registerLiveRoutes } from "./routes-live.js";
+import { scheduleSweep } from "./attempts.js";
 
 const clientDir = path.join(import.meta.dirname, "client");
 const clientScript = "/exam/assets/exam-client.js";
@@ -92,6 +96,9 @@ function buildRouter(db, startPage) {
   registerClassRoutes(router, { db, handle, startPage });
   registerGradebookRoutes(router, { db, handle, startPage });
   registerPoolRoutes(router, { db, handle, startPage });
+  registerTestRoutes(router, { db, handle, startPage });
+  registerAttemptRoutes(router, { db, handle, startPage });
+  registerLiveRoutes(router, { db, handle, startPage });
 
   // The module's home page, for teachers: the classes of one school year -
   // the current one unless `?year=` names another - which the bar chooses.
@@ -163,6 +170,9 @@ export async function init({ startPage }) {
     console.log(`[exam] Migrated ${dbPath} from schema version ${migrated.from} to ${migrated.to}.`);
   }
   scheduleDailyBackups(db, dbPath);
+  // Attempts whose deadline passed while nobody asked - the page closed, the
+  // server down - are submitted now, and from then on every 30 s.
+  scheduleSweep(db);
   return {
     active: true,
     router: buildRouter(db, startPage),

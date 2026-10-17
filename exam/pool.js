@@ -167,15 +167,21 @@ export function getQuestion(db, id) {
 
 /** A stored image with the question it belongs to, or null. */
 export function readImage(db, id) {
-  return db.prepare("SELECT question_id AS questionId, mime, data FROM image WHERE id = ?").get(id) ?? null;
+  return db.prepare("SELECT id, question_id AS questionId, mime, data FROM image WHERE id = ?").get(id) ?? null;
 }
 
 /**
- * Whether the student `username` may see `image` because it belongs to a
- * question of an attempt they have open. Attempts arrive with the online
- * tests (P3, tasks 5.4 and 5.5); until then no student is inside one, and the
- * answer is no.
+ * Whether the student `username` may see the image `imageId` because the test
+ * of an attempt they have open right now shows it. Once the attempt is
+ * submitted or past its deadline, the answer is no.
  */
-export function studentMaySeeImage(db, username, image) {
-  return false;
+export function studentMaySeeImage(db, username, imageId, at = new Date().toISOString()) {
+  return (
+    db
+      .prepare(
+        `SELECT 1 FROM attempt a JOIN test_image ti ON ti.test_id = a.test_id
+         WHERE a.username = ? AND ti.image_id = ? AND a.submitted_at IS NULL AND ? < a.deadline LIMIT 1`
+      )
+      .get(username, imageId, at) !== undefined
+  );
 }

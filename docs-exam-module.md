@@ -3,7 +3,7 @@ Here you can find how the exam module is switched on, where it keeps its data, h
 
 [Back](README.md) to the main page.
 
-The module is being built in phases (`AI/exam-module-plan.md`). What exists today is its foundation (the switch, the database, backups, the teacher/student gate, the embedding syntax), classes and courses at `/exam/`, the gradebook, and the question pool. Online tests follow.
+The module is being built in phases (`AI/exam-module-plan.md`). What exists today is its foundation (the switch, the database, backups, the teacher/student gate, the embedding syntax), classes and courses at `/exam/`, the gradebook, the question pool, and online tests. The board solution, the question editor and the change of school year follow.
 
 ## The Switch
 The module exists only when the instance's environment says `EXAM_MODULE=on`. Any other value, or none, and the instance is exactly the one it was before the module: its code is not loaded, no database file is opened or created, nothing answers under `/exam/`, and no page links to it.
@@ -59,6 +59,8 @@ Every teacher page of the module carries a bar directly under the instance's top
 
 New records are created from the bar too, left to right, with the `+` beside a position: a new school year at any time, a new class once a year is chosen, a new course once a class is chosen. The same rules as before apply (a class or course that exists already is refused), and the new record is chosen in the bar afterwards.
 
+At its right end the bar has two buttons, **Question pool** and **Online tests**. Both keep what is chosen in the bar: the pool opened from the gradebook of `WMC 4BHIF` still has that course chosen, which is the course a test assembled there is for. Online tests opens the chosen course's tests, or - with no course chosen - the tests of every course of the chosen school year, grouped by class and course. The button of the page being shown is marked, and on these two pages a choice in the bar stays on the page, for what is now chosen.
+
 The bar comes with the page itself, so it costs no request of its own. The page of a student's own results (`/exam/results`) and elements placed in a content page have no bar. A student, or a teacher in student view, never gets one, because no teacher page is shown to them.
 
 ## Classes And Courses
@@ -74,7 +76,7 @@ Teachers manage these at `/exam/`. Everything here belongs to teachers. A studen
 Each course has a gradebook, reached from the course's and the class's page (`/exam/courses/<id>/gradebook`). Like classes and courses it belongs to teachers, with one exception: every student sees their own results.
 
 - **The gradebook is a sheet**: one row per student, one column per assessment. Each column belongs to a category - manual tests, participation or homework - and has a name, a date and, for a test or a homework, optionally a maximum. The column's date decides the semester of every result in it. The categories stand as headings over their columns, in the config sheet's order, and within a category the newest column is furthest right.
-- **Adding a column** is the `+` in its category's heading, which asks for the name, the date and, where the category has one, the maximum. A column without a name is named by its date. Online tests have no `+`: their columns are the tests themselves, once those exist. A column's name, date and maximum are edited in its header. A new maximum recomputes every result in the column from its points, and is refused while a result has more points than the new maximum. A column holding results keeps counting in points or in percent. Deleting a column (×) deletes its results, after asking when it has any.
+- **Adding a column** is the `+` in its category's heading, which asks for the name, the date and, where the category has one, the maximum. A column without a name is named by its date. Online tests have no `+`: their columns are the tests themselves (see Online Tests below), shown as text - points out of the number of questions - and never typed into or deleted here; the arrow keys pass over them. A column's name, date and maximum are edited in its header. A new maximum recomputes every result in the column from its points, and is refused while a result has more points than the new maximum. A column holding results keeps counting in points or in percent. Deleting a column (×) deletes its results, after asking when it has any.
 - **Every result is a fraction** from 0 to 1, and a student has at most one per column. In a column with a maximum you type the points (`17` of `24`, kept and shown as `17/24`), in one without a percentage; a participation mark is `+` (1) or `−` (0), typed as `+` or `-`. **A field is saved as soon as it changes**, when you leave it or press Enter; emptying it removes the result. A value the module refuses (more points than the maximum, a mark other than `+` or `−`) stays in the field, outlined in red with the reason, and the stored result stays as it was. The row's proposal and grade follow each saved field at once. A field still saving when you leave the page makes the browser ask first.
 - **The arrow keys** move between results as in a spreadsheet. Down and up go to the same column of the next or previous student, so a test or a round of `+`/`−` is entered down the list. Right and left go to the next or previous column of the same student - across category headings too - while the cursor stands at the end or the start of the value, so inside a value they still move the cursor. A field you arrive at has its value selected, and typing replaces it. Moving saves the field you leave; the arrows never change a value. Tab and Shift+Tab move along the row.
 - **The sheet keeps the student and the grade in view**: the name, the proposal, the override and the grade stay on the left while the columns scroll sideways inside the sheet. The override is a field of the row like any other, saved as it changes.
@@ -91,7 +93,8 @@ All teachers share one pool of multiple-choice questions, browsed at `/exam/pool
 
 - **A question** has a type - several correct answers, exactly one correct answer, or true/false - its text and each answer in German and in English, a correct flag per answer, a category, and the images it embeds. Every question is worth one point and is graded all-or-nothing, so the hint in the text saying how many answers are correct ("(2 richtige Antworten)") matters and is kept.
 - **The browser** shows the category tree with the number of questions in each, a search over names, texts and answers in both languages, and the matching questions with how often and when each was last used. Choosing one shows a preview in German or English with the correct answers marked, and every test it was used in, with the course and the date. Retired questions are left out.
-- **Images** are stored in the database, not as files, so the daily backup covers them, and are served only by the module (`/exam/api/images/<id>`): to teachers, and - once online tests exist - to a student inside an open attempt containing the question. They are never cached.
+- **Images** are stored in the database, not as files, so the daily backup covers them, and are served only by the module (`/exam/api/images/<id>`): to teachers, and to a student while they have an open attempt at a test showing the image. They are never cached. An image a test shows cannot be deleted from the pool.
+- **With a course chosen in the bar**, every question in the list has a tick box, and the questions ticked become a test of that course: give it a name and use **Create test**, or add them to one of the course's tests nobody has written yet. Without a course chosen, the browser offers neither.
 - **The database is the pool's only source.** It was filled once from the Moodle export, and from then on only the module changes it (the question editor follows). There is no re-import and no export.
 
 ### The One-Time Import
@@ -108,19 +111,34 @@ docker exec <container> node exam/import-moodle-pool.mjs /tmp/de.xml /tmp/en.xml
 
 `--dry-run` verifies and prints the report without touching the database; `--db <path>` names another database than the module's own. The report holds counts only. On the export as of 2026-10-16 it reads 94 questions in 22 categories (77 with several correct answers, 14 with one, 3 true/false), 9 essays dropped, and 7 images.
 
+## Online Tests
+Short multiple-choice tests are assembled from the pool, written in safeLearn, and graded on the server. The list of a course's tests is behind the bar's **Online tests** button (`/exam/tests`); each test has a page of its own (`/exam/tests/<id>`). Everything about a test belongs to teachers, except writing it.
+
+- **A test** is assembled in the question browser with a course chosen in the bar (see above). It copies every chosen question - both languages, the answers, the correct flags, the links to its images - so editing or retiring a pool question later changes no test and no grade. Its page shows the questions in the course's language with the correct answers marked. Until somebody has started writing it, a test can be renamed, have questions removed or added, and be deleted with its sittings; afterwards only its name can change.
+- **A sitting** is when a test is written: a window (opens, closes) and the minutes an attempt takes, which have to be fewer than the window. The first sitting is written by the whole class, or by the students ticked. Every later one is a make-up for the students ticked, with the first sitting's duration. A sitting can be changed or deleted until it opens. The test's column in the gradebook is dated by the first sitting's start, which decides its semester - a make-up in the summer semester still counts in the winter semester if that is where the first sitting was.
+- **Writing.** A student sees a test only while a sitting they take part in is open and they have not submitted it: on `/exam/my/tests` (linked from their results) and wherever a page places a `safelearn-test` block. Starting it starts their one attempt at the test; it lasts the sitting's duration, but never beyond the window's end. Questions and answers come in an order shuffled for each student, in the course's language. Every change of an answer is saved at once, a countdown shows the time left by the server's clock, and a reload - or the browser closed and opened again - resumes the attempt with its answers and the time left. **Submit** asks once more. At the deadline the server submits whatever was saved, whether the page is open or not, and refuses anything later.
+- **Grading** is all-or-nothing per question: a question counts only if exactly the correct answers are chosen. After submitting, the student sees their points and grade - and neither which answers were right nor the questions again. A participant who never started has no result, not a zero.
+- **Nothing to steal.** No answer the writing page receives says which answer is correct, or where it stood in the pool: the answers reach the browser as random tokens valid for one attempt only.
+- **One browser per attempt.** An attempt is bound to the browser that started it, by a cookie that survives a restart of the server. The same account opening it in another browser is refused, and the teacher sees the refusal. If a laptop fails, the teacher releases the attempt in the live view, and the next browser to open it continues with the saved answers and the time left.
+- **Leaving the page** - another tab, another window - is counted and timed and shown to the teacher ("left 3×, 47 s"). It never changes the grade; what to make of it is the teacher's decision.
+- **The live view** (`/exam/sittings/<id>/live`, linked from the test while a sitting is open) shows every participant: not started, writing with the time left, or submitted; how often and how long they left the page; refused browsers; and the button that releases an attempt. It updates as things happen, over a stream of its own that only a teacher's session can open and that ends when the session switches to the student view. If the stream cannot be kept open, the view fetches the state every 5 seconds instead.
+- **In the gradebook** every test with a sitting is a column of the online-test category, named by the test and dated by its first sitting. A course without online tests computes exactly as before. A result is changed only by the test itself; a teacher who disagrees overrides the semester grade.
+
 ## Placing An Element In A Page
 A page places an element with a fenced block whose info string is `safelearn-<kind>`, with the element's parameters as `key: value` lines:
 
 ````
 ```safelearn-test
-test: http-caching-1
+test: 12
 ```
 ````
 
-The kinds are `test`, `results`, `gradebook` and `live`. `test` and `live` arrive with the online tests; until then a placed one says that it is not available on this instance yet.
+The kinds are `test`, `results`, `gradebook` and `live`.
 
 | Kind | Parameters | Shows |
 | --- | --- | --- |
+| `test` | `test` (its id, as in the address of the test's page), or none | For a student, that test while it is open for them - or, without a parameter, every test open for them right now, across their courses, so one page serves every class. Starting, writing, submitting and the result happen in place. A teacher sees a note |
+| `live` | `sitting` (its id, as in the address of its live view) | The live view of that sitting. Teacher-only |
 | `results` | `subject` (optional) | The reader's own results, in the current school year, for that subject or for all their courses |
 | `gradebook` | `class` and `subject`, optionally `year` (like `2026/27`, the current year otherwise); or `course` (its id) | A course's sheet for teachers, with its own semester choice since a content page has no module bar. Teacher-only |
 

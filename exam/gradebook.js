@@ -23,6 +23,7 @@ import {
   weightCategories,
 } from "./classes.js";
 import { bandMidpoint, entryCategory, gradeFor, proposal, semesterOf, semesters, yearProposal } from "./grading.js";
+import { viennaDate } from "./tests.js";
 
 export const entryKinds = Object.freeze(Object.keys(entryCategory));
 
@@ -160,10 +161,11 @@ export function courseColumns(db, courseId, semester = null) {
       .map((row) => [row.id, row.n])
   );
   const order = (column) => weightCategories.indexOf(column.category);
-  return db
+  const manual = db
     .prepare("SELECT * FROM assessment WHERE course_id = ? ORDER BY held_on, created_at, id")
     .all(courseId)
-    .map((row) => columnFromRow(row, counts.get(row.id) ?? 0))
+    .map((row) => columnFromRow(row, counts.get(row.id) ?? 0));
+  return [...onlineColumns(db, courseId), ...manual]
     .filter((column) => semester === null || semesterOf(column.date, course.year) === semester)
     .sort((a, b) => order(a) - order(b));
 }
@@ -307,10 +309,71 @@ function entryFromRow(row, scale) {
 }
 
 /**
+ * The online tests of a course that have a sitting, as columns of the
+ * category `onlineTests` (exam-online-tests design D3): named by the test,
+ * dated by its first sitting's start in Vienna - which decides the semester,
+ * also for a later make-up - and out of its number of questions. Their
+ * results are the attempts', so the sheet shows them and never edits them.
+ */
+function onlineColumns(db, courseId) {
+  return db
+    .prepare(
+      `SELECT t.id, t.name, t.created_at, MIN(s.opens_at) AS first_opens_at,
+         (SELECT COUNT(*) FROM test_question q WHERE q.test_id = t.id) AS questions,
+         (SELECT COUNT(*) FROM attempt a WHERE a.test_id = t.id AND a.submitted_at IS NOT NULL) AS results
+       FROM test t JOIN sitting s ON s.test_id = t.id
+       WHERE t.course_id = ?
+       GROUP BY t.id
+       ORDER BY MIN(s.opens_at), t.created_at, t.id`
+    )
+    .all(courseId)
+    .map((row) => ({
+      id: `test-${row.id}`,
+      testId: row.id,
+      courseId,
+      kind: "online",
+      category: "onlineTests",
+      name: row.name,
+      date: viennaDate(row.first_opens_at),
+      maxPoints: row.questions,
+      results: row.results,
+      readOnly: true,
+    }));
+}
+
+/** The submitted attempts of a course's online tests as entries - one student's, or everyone's. */
+function onlineEntries(db, courseId, scale, username = null) {
+  const columns = new Map(onlineColumns(db, courseId).map((column) => [column.testId, column]));
+  const select = `SELECT a.id, a.test_id, a.username, a.score, a.question_count FROM attempt a JOIN test t ON t.id = a.test_id
+    WHERE t.course_id = ? AND a.submitted_at IS NOT NULL`;
+  const rows =
+    username === null
+      ? db.prepare(`${select} ORDER BY a.id`).all(courseId)
+      : db.prepare(`${select} AND a.username = ? ORDER BY a.id`).all(courseId, username);
+  return rows.map((row) => {
+    const column = columns.get(row.test_id);
+    const value = row.question_count === 0 ? 0 : row.score / row.question_count;
+    return {
+      id: `attempt-${row.id}`,
+      columnId: column.id,
+      username: row.username,
+      kind: "online",
+      category: "onlineTests",
+      value,
+      points: row.score,
+      maxPoints: row.question_count,
+      grade: gradeFor(value, scale),
+      date: column.date,
+      name: column.name,
+    };
+  });
+}
+
+/**
  * Every result of a course that counts towards its proposals, for one student
  * or for all, oldest first, each with its column's kind, name, date and
- * maximum. Today these are the manual columns; online tests add theirs in P3
- * under the category `onlineTests`.
+ * maximum: the manual columns' results and the submitted attempts of the
+ * course's online tests, under the category `onlineTests`.
  */
 function courseEntries(db, courseId, scale, username = null) {
   const select = `SELECT e.id, e.assessment_id, e.username, e.value, e.points, a.kind, a.name, a.held_on, a.max_points
@@ -319,7 +382,11 @@ function courseEntries(db, courseId, scale, username = null) {
     username === null
       ? db.prepare(`${select} ORDER BY a.held_on, a.created_at, a.id`).all(courseId)
       : db.prepare(`${select} AND e.username = ? ORDER BY a.held_on, a.created_at, a.id`).all(courseId, username);
-  return rows.map((row) => entryFromRow(row, scale));
+  const manual = rows.map((row) => entryFromRow(row, scale));
+  const online = onlineEntries(db, courseId, scale, username);
+  if (online.length === 0) return manual;
+  // A stable sort: entries of one date keep the order they had.
+  return [...online, ...manual].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
 // ----------------------------------------------------- overrides and comments

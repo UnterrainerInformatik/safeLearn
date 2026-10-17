@@ -17,6 +17,9 @@ import { connectBar } from "./bar.js";
 import "./classes.js";
 import "./gradebook.js";
 import "./pool.js";
+import "./tests.js";
+import "./attempt.js";
+import "./live.js";
 
 export { ExamElement, defineExamElement, examApi } from "./frame.js";
 

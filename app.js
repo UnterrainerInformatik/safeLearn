@@ -109,6 +109,7 @@ app.set("trust proxy", true);
 import { registerEmbedHandler, registerEmbedClientScript, highlightExtension, scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions, wrapAsDocument, resolveFileVisibility, registerVisibilityChangeCallback, searchCorpus, minimumQueryLength, recordAttachmentGrants, hasAttachmentGrant, dropAttachmentGrants, mayServeAttachment, normalizeCorpusPath } from "./obsidian.js";
 
 import chokidar from "chokidar";
+import { openEventStream } from "./event-stream.js";
 
 async function sanitizeAndParseMarkdown(data, req, options = {}) {
   try {
@@ -191,15 +192,9 @@ function getStartPage() {
 const clients = new Map();
 
 app.get('/hot-reload', (req, res) => {
-  res.set({
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive',
-  });
-  res.flushHeaders();
-  res.write('\n');
-
   const id = Date.now() + Math.random();
+  openEventStream(req, res, { onClose: () => clients.delete(id) });
+
   // This is the one endpoint that answers before any authentication has
   // happened, so everything a client sends it is treated as hostile. A context
   // that does not parse is the same thing as no context at all.
@@ -212,8 +207,6 @@ app.get('/hot-reload', (req, res) => {
     }
   }
   clients.set(id, { res, context });
-
-  req.on('close', () => clients.delete(id));
 });
 
 function broadcastReloadSSE(filesChanged = null) {

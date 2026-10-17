@@ -9,7 +9,7 @@
 import { categoryTree, getQuestion, listQuestions, readImage, studentMaySeeImage } from "./pool.js";
 import { NotFoundError } from "./classes.js";
 import { actsAsTeacher, identityOf, requireTeacher, teacherPage } from "./gate.js";
-import { teacherShell } from "./bar.js";
+import { contextFromQuery, teacherShell } from "./bar.js";
 
 /** A record id from the path or query; anything but a positive integer names nothing. */
 function idParam(value) {
@@ -49,7 +49,7 @@ export function registerPoolRoutes(router, { db, handle, startPage }) {
       const id = /^[1-9]\d{0,9}$/.test(req.params.id) ? Number(req.params.id) : null;
       const image = id === null ? null : readImage(db, id);
       const teacher = username !== null && (await actsAsTeacher(req));
-      if (!teacher && !(image && username !== null && studentMaySeeImage(db, username, image))) {
+      if (!teacher && !(image && username !== null && studentMaySeeImage(db, username, image.id))) {
         res.status(403).json({ error: "Forbidden" });
         return;
       }
@@ -63,7 +63,11 @@ export function registerPoolRoutes(router, { db, handle, startPage }) {
     "/pool",
     teacherPage,
     handle(async (req, res) => {
-      res.send(await teacherShell({ db, startPage, req, title: "Question pool", context: {}, kind: "pool", params: {} }));
+      // The bar's choice comes along in the query; with a course chosen, the
+      // browser assembles tests for it.
+      const context = contextFromQuery(req.query);
+      const params = context.courseId === null ? {} : { course: String(context.courseId) };
+      res.send(await teacherShell({ db, startPage, req, title: "Question pool", context, kind: "pool", params, current: "pool" }));
     })
   );
 }

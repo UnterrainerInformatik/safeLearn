@@ -3,7 +3,10 @@
  *
  * - `pool`: the category tree, a text search, the matching questions with how
  *   often and when each was used, and a preview of one question in German or
- *   English with its correct answers marked and its usage history
+ *   English with its correct answers marked and its usage history. With a
+ *   course chosen in the module bar (`data-sl-course`), the questions can be
+ *   ticked and assembled into a new test for that course, or added to one of
+ *   its tests that has not been written yet (`online-test`).
  *
  * The API refuses every session not acting as a teacher; this element only
  * draws what it answers.
@@ -14,7 +17,7 @@
  * the module's image route only.
  */
 
-import { defineExamElement, ExamElement, examApi, h, markRows } from "./frame.js";
+import { defineExamElement, ExamApiError, ExamElement, examApi, h, markRows } from "./frame.js";
 import { displayClass } from "./classes.js";
 
 const typeLabels = {
@@ -38,10 +41,19 @@ function storedMarkup(html, className) {
 
 class PoolView extends ExamElement {
   async load() {
-    return examApi("/pool/categories");
+    const courseId = this.params.course;
+    const [tree, course, tests] = await Promise.all([
+      examApi("/pool/categories"),
+      courseId ? examApi(`/courses/${courseId}`) : null,
+      courseId ? examApi(`/tests?course=${courseId}`) : null,
+    ]);
+    return { tree, course, tests: tests ? tests.groups[0].tests.filter((test) => test.started === 0) : [] };
   }
 
-  render(tree) {
+  render({ tree, course, tests }) {
+    this.course = course;
+    this.chosen = new Set();
+    this.assembly = course ? this.assemblyPanel(course, tests) : null;
     this.categoryId = null;
     this.query = "";
     this.language = "de";
@@ -108,8 +120,88 @@ class PoolView extends ExamElement {
       "div",
       { class: "sl-exam sl-exam-pool" },
       this.tree,
-      h("div", { class: "sl-exam-pool-main" }, search, this.list, this.preview)
+      h("div", { class: "sl-exam-pool-main" }, this.assembly, search, this.list, this.preview)
     );
+  }
+
+  /**
+   * Where ticked questions become a test of the bar's course: a name and
+   * "Create test", or one of the course's unwritten tests to add them to.
+   */
+  assemblyPanel(course, tests) {
+    this.count = h("span", { class: "sl-exam-pool-count" }, "No question ticked.");
+    this.message = h("p", { class: "sl-exam-message", role: "status" });
+    const name = h("input", { type: "text", name: "name", maxlength: "80", placeholder: "Name of the test", "aria-label": "Name of the test", required: true });
+    const create = h(
+      "form",
+      {
+        class: "sl-exam-pool-create",
+        onSubmit: (event) => {
+          event.preventDefault();
+          this.assemble(() => examApi(`/courses/${course.id}/tests`, { method: "POST", body: { name: name.value, questionIds: [...this.chosen] } }));
+        },
+      },
+      name,
+      h("button", { type: "submit" }, "Create test")
+    );
+    let add = null;
+    if (tests.length > 0) {
+      const target = h(
+        "select",
+        { name: "test", "aria-label": "Test to add the questions to" },
+        tests.map((test) => h("option", { value: String(test.id) }, test.name))
+      );
+      add = h(
+        "form",
+        {
+          class: "sl-exam-pool-add",
+          onSubmit: (event) => {
+            event.preventDefault();
+            this.assemble(async () => {
+              const test = await examApi(`/tests/${target.value}`);
+              const questionIds = test.questions.map((question) => question.questionId);
+              for (const id of this.chosen) if (!questionIds.includes(id)) questionIds.push(id);
+              return examApi(`/tests/${test.id}`, { method: "PUT", body: { questionIds } });
+            });
+          },
+        },
+        "or add them to ",
+        target,
+        h("button", { type: "submit" }, "Add")
+      );
+    }
+    return h(
+      "section",
+      { class: "sl-exam-pool-assembly", "aria-label": "Assemble a test" },
+      h("h2", {}, `A test for ${displayClass(course.className)} ${course.subject}`),
+      h("p", {}, this.count),
+      create,
+      add,
+      this.message
+    );
+  }
+
+  /** Sends the assembly `request` and opens the test it answers. */
+  async assemble(request) {
+    if (this.chosen.size === 0) {
+      this.message.textContent = "Tick at least one question.";
+      return;
+    }
+    this.message.textContent = "";
+    try {
+      const test = await request();
+      window.location.assign(`/exam/tests/${test.id}`);
+    } catch (error) {
+      this.message.textContent =
+        error instanceof ExamApiError && error.status < 500 ? error.message : "The test could not be saved. Please try again.";
+    }
+  }
+
+  tick(id, ticked) {
+    if (ticked) this.chosen.add(id);
+    else this.chosen.delete(id);
+    const n = this.chosen.size;
+    this.count.textContent = n === 0 ? "No question ticked." : n === 1 ? "1 question ticked." : `${n} questions ticked.`;
   }
 
   chooseCategory(categoryId, button) {
@@ -145,7 +237,16 @@ class PoolView extends ExamElement {
       h(
         "thead",
         {},
-        h("tr", {}, h("th", {}, "Question"), h("th", {}, "Category"), h("th", {}, "Type"), h("th", {}, "Used"), h("th", {}, "Last used"))
+        h(
+          "tr",
+          {},
+          this.course ? h("th", { "aria-label": "In the test" }) : null,
+          h("th", {}, "Question"),
+          h("th", {}, "Category"),
+          h("th", {}, "Type"),
+          h("th", {}, "Used"),
+          h("th", {}, "Last used")
+        )
       ),
       h(
         "tbody",
@@ -154,6 +255,19 @@ class PoolView extends ExamElement {
           h(
             "tr",
             { "data-question": String(question.id) },
+            this.course
+              ? h(
+                  "td",
+                  {},
+                  h("input", {
+                    type: "checkbox",
+                    class: "sl-exam-pool-tick",
+                    "aria-label": `Put "${question.nameDe}" in the test`,
+                    checked: this.chosen.has(question.id),
+                    onChange: (event) => this.tick(question.id, event.currentTarget.checked),
+                  })
+                )
+              : null,
             h(
               "td",
               {},

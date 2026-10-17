@@ -147,6 +147,7 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
       const title = "My results";
       const body = `
         <h1>${title}</h1>
+        <p><a href="/exam/my/tests">My online tests</a></p>
         ${embedPlaceholder("results", { page: "1" })}`;
       res.send(await wrapInPage(body, startPage(), req, { title, wide: true }));
     })

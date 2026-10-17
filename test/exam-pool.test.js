@@ -21,6 +21,7 @@ import { openDatabase } from "../exam/db.js";
 import { importPool, imagePath, planImport, PoolImportError, poolImported } from "../exam/pool-import.js";
 import { categoryTree, getQuestion, listQuestions, readImage, studentMaySeeImage } from "../exam/pool.js";
 import { createClass, createCourse, createYear } from "../exam/classes.js";
+import { createTest } from "../exam/tests.js";
 
 const temporaryDirs = [];
 const openDatabases = [];
@@ -355,13 +356,13 @@ describe("the question browser's reads", () => {
     const year = createYear(db, { name: "2026/27", startsOn: "2026-09-07", summerStartsOn: "2027-02-15", endsOn: "2027-07-02" });
     const courseOf = (name) => createCourse(db, createClass(db, year.id, { name }).id, { subject: "WMC" }).id;
     const [first, second] = [courseOf("4ahif"), courseOf("4bhif")];
-    // The tests arrive with P3; a stand-in for the table until then.
-    db.exec("CREATE TABLE IF NOT EXISTS test (id INTEGER PRIMARY KEY)");
-    db.exec("INSERT INTO test (id) VALUES (1), (2)");
     const [get] = listQuestions(db, { query: "GET wird" });
-    const use = db.prepare("INSERT INTO question_usage (question_id, test_id, course_id, used_on) VALUES (?, ?, ?, ?)");
-    use.run(get.id, 2, second, "2026-11-12");
-    use.run(get.id, 1, first, "2026-11-10");
+    const use = (courseId, usedOn) => {
+      const test = createTest(db, courseId, { name: "HTTP", questionIds: [get.id] });
+      db.prepare("UPDATE question_usage SET used_on = ? WHERE test_id = ?").run(usedOn, test.id);
+    };
+    use(second, "2026-11-12");
+    use(first, "2026-11-10");
 
     const shown = getQuestion(db, get.id);
     assert.equal(shown.uses, 2);
@@ -389,6 +390,6 @@ describe("the question browser's reads", () => {
 
   test("no student sees an image while there are no attempts", () => {
     const db = freshDatabase();
-    assert.equal(studentMaySeeImage(db, "student", { questionId: 1 }), false);
+    assert.equal(studentMaySeeImage(db, "student", 1), false);
   });
 });

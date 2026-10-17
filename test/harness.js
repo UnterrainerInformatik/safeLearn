@@ -295,8 +295,34 @@ export async function applicationStillRunning() {
   return answers(3000);
 }
 
+/**
+ * Restarts the instance this run started, keeping its exam database: the
+ * process ends and a new one starts against the same directory. Every
+ * session held in the old process's memory is gone; `reauthenticate` brings a
+ * session back through the identity provider's single sign-on, without a new
+ * login.
+ */
+export async function restartApplication() {
+  if (!server || server.adopted) throw new Error("Only an instance this run started can be restarted.");
+  await stopServer({ keepExamDir: true });
+  await ensureServer();
+}
+
+/**
+ * Takes `session` through the application's login flow again after a
+ * restart. The identity provider still knows the browser, so no form is
+ * filled in and no login is counted.
+ */
+export async function reauthenticate(session) {
+  await session.page.goto(`${applicationUrl}${contentPath}`, { waitUntil: "domcontentloaded" });
+  const identity = await readIdentity(session.page);
+  if (identity?.username !== accounts[session.role].username) {
+    throw new Error(`The ${session.role} session did not come back after the restart (it is ${identity?.username ?? "nobody"}).`);
+  }
+}
+
 /** Stops the application, but only if this run is the one that started it. */
-async function stopServer() {
+async function stopServer({ keepExamDir = false } = {}) {
   const running = server;
   server = null;
   if (running && !running.adopted) {
@@ -309,7 +335,7 @@ async function stopServer() {
       clearTimeout(hard);
     }
   }
-  removeExamDir();
+  if (!keepExamDir) removeExamDir();
 }
 
 // ################### The exam-module instance ###################
