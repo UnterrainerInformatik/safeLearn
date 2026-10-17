@@ -109,6 +109,11 @@ function nextYearSuggestion(years) {
 
 // ------------------------------------------------------------------ the home
 
+/** The module's pages that belong to no school year, so the home always offers them. */
+function moduleLinks() {
+  return h("p", { class: "sl-exam-quiet" }, h("a", { href: "/exam/scale" }, "Grading scale"), " · ", h("a", { href: "/exam/pool" }, "Question pool"));
+}
+
 class ClassesHome extends ExamElement {
   async load() {
     const { years, current } = await examApi("/years");
@@ -119,7 +124,12 @@ class ClassesHome extends ExamElement {
 
   render({ selected, classes }) {
     if (!selected) {
-      return h("div", { class: "sl-exam" }, h("p", {}, "There is no school year yet. Create the first one with the + beside School year above."));
+      return h(
+        "div",
+        { class: "sl-exam" },
+        h("p", {}, "There is no school year yet. Create the first one with the + beside School year above."),
+        moduleLinks()
+      );
     }
     const line = messageLine();
     const makeCurrent = selected.current
@@ -165,7 +175,7 @@ class ClassesHome extends ExamElement {
       ),
       line,
       table,
-      h("p", { class: "sl-exam-quiet" }, h("a", { href: "/exam/scale" }, "Grading scale"))
+      moduleLinks()
     );
   }
 }

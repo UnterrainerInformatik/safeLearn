@@ -23,6 +23,8 @@ import {
   shutdown,
   useExamModule,
 } from "./harness.js";
+import { openDatabase } from "../exam/db.js";
+import { importPool } from "../exam/pool-import.js";
 
 const run = useExamModule();
 
@@ -1021,6 +1023,146 @@ describe("the module bar", () => {
       for (const reference of ["/exam/", `/exam/courses/${course.id}/gradebook`]) {
         assert.doesNotMatch(await html(teacher, reference), /sl-exam-bar/, `${reference} in student view`);
       }
+    } finally {
+      await setPreferences(teacher, {});
+    }
+  });
+});
+
+describe("the question pool", () => {
+  let student;
+  let teacher;
+  let questionId;
+  let imageId;
+
+  // A 1×1 PNG.
+  const pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+  /** A trimmed Moodle export: one category, a question with an image, and one without. */
+  const pool = (lang) => `<?xml version="1.0" encoding="UTF-8"?>
+<quiz>
+  <question type="category"><category><text>$course$/top/HTTP/${lang === "de" ? "Grundlagen" : "Basics"}</text></category></question>
+  <question type="multichoice"><name><text>Bild ${lang}</text></name>
+    <questiontext format="html"><text><![CDATA[<p style="color: red"><img src="@@PLUGINFILE@@/image.png" alt="">${lang} picture (1 richtige Antwort)</p>]]></text>
+      <file name="image.png" path="/" encoding="base64">${pixel}</file></questiontext>
+    <answer fraction="100" format="html"><text><![CDATA[<p>yes ${lang}</p>]]></text></answer>
+    <answer fraction="0" format="html"><text><![CDATA[<p>no ${lang}</p>]]></text></answer>
+  </question>
+  <question type="truefalse"><name><text>Wahr ${lang}</text></name>
+    <questiontext format="html"><text><![CDATA[<p>${lang} statement</p>]]></text></questiontext>
+    <answer fraction="100" format="moodle_auto_format"><text>true</text></answer>
+    <answer fraction="0" format="moodle_auto_format"><text>false</text></answer>
+  </question>
+</quiz>`;
+
+  /** An image request from inside the page: what it answered, without the bytes. */
+  async function imageAs(session, reference) {
+    return session.page.evaluate(async (address) => {
+      const response = await fetch(address, { credentials: "include" });
+      return {
+        status: response.status,
+        type: response.headers.get("content-type"),
+        cache: response.headers.get("cache-control"),
+        bytes: (await response.arrayBuffer()).byteLength,
+      };
+    }, `${applicationUrl}${reference}`);
+  }
+
+  before(async () => {
+    student = await sharedSession("student");
+    teacher = await sharedSession("teacher");
+    await setPreferences(student, {});
+    await setPreferences(teacher, {});
+    // The import runs beside the instance, as it does on babylon5: a second
+    // connection to the run's database.
+    const { db } = openDatabase(run.databasePath);
+    try {
+      importPool(db, pool("de"), pool("en"));
+      const row = db.prepare("SELECT q.id AS questionId, i.id AS imageId FROM question q JOIN image i ON i.question_id = q.id").get();
+      questionId = row.questionId;
+      imageId = row.imageId;
+    } finally {
+      db.close();
+    }
+  });
+
+  test("a teacher browses the categories and finds a question by its text", async () => {
+    const tree = await fetchAs(teacher, "/exam/api/pool/categories");
+    assert.equal(tree.status, 200);
+    assert.deepEqual(
+      tree.json.map((node) => [node.nameDe, node.nameEn, node.total, node.children.map((child) => [child.nameDe, child.nameEn])]),
+      [["HTTP", "HTTP", 2, [["Grundlagen", "Basics"]]]]
+    );
+    const found = await fetchAs(teacher, "/exam/api/pool/questions?q=EN%20PICTURE");
+    assert.deepEqual(found.json.map((q) => q.id), [questionId], "found by its English text, ignoring case");
+    assert.equal((await fetchAs(teacher, "/exam/api/pool/questions?q=nothing-like-this")).json.length, 0);
+  });
+
+  test("the preview has both languages, the correct answers and the image from the module", async () => {
+    const shown = (await fetchAs(teacher, `/exam/api/pool/questions/${questionId}`)).json;
+    assert.match(shown.textDe, /de picture \(1 richtige Antwort\)/);
+    assert.match(shown.textEn, /en picture/);
+    assert.doesNotMatch(shown.textDe, /style=|base64|@@PLUGINFILE@@/);
+    assert.ok(shown.textDe.includes(`src="/exam/api/images/${imageId}"`));
+    assert.deepEqual(shown.answers.map((a) => [a.textDe, a.correct]), [["<p>yes de</p>", true], ["<p>no de</p>", false]]);
+    assert.deepEqual(shown.usage, []);
+
+    const image = await imageAs(teacher, `/exam/api/images/${imageId}`);
+    assert.deepEqual(image, { status: 200, type: "image/png", cache: "private, no-store", bytes: Buffer.from(pixel, "base64").length });
+    assert.equal((await imageAs(teacher, "/exam/api/images/999999")).status, 404);
+  });
+
+  test("the browser page draws the tree, the list and a preview with the answers marked", async () => {
+    await teacher.page.goto(`${applicationUrl}/exam/pool`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(".sl-exam-pool-questions tbody tr", { timeout: 20000 });
+    await teacher.page.click(`.sl-exam-pool-questions tr[data-question="${questionId}"] button`);
+    await teacher.page.waitForSelector(".sl-exam-pool-question", { timeout: 10000 });
+    await teacher.page.waitForFunction(() => [...document.querySelectorAll(".sl-exam-pool-text img")].every((img) => img.complete), {
+      timeout: 10000,
+    });
+    const seen = await teacher.page.evaluate(() => ({
+      heading: document.querySelector("#markdown-content h1")?.textContent,
+      bar: Boolean(document.querySelector(".sl-exam-bar")),
+      categories: [...document.querySelectorAll(".sl-exam-pool-category")].map((b) => b.textContent),
+      rows: document.querySelectorAll(".sl-exam-pool-questions tbody tr").length,
+      correct: [...document.querySelectorAll(".sl-exam-pool-answers li.is-correct")].map((li) => li.textContent.trim()),
+      imageLoaded: [...document.querySelectorAll(".sl-exam-pool-text img")].every((img) => img.complete && img.naturalWidth === 1),
+    }));
+    assert.deepEqual(seen, {
+      heading: "Question pool",
+      bar: true,
+      categories: ["All categories", "HTTP (2)", "Grundlagen (2)"],
+      rows: 2,
+      correct: ["✓yes de"],
+      imageLoaded: true,
+    });
+    await teacher.page.click(".sl-exam-pool-languages button:last-child");
+    assert.match(await teacher.page.$eval(".sl-exam-pool-text", (el) => el.textContent), /en picture/);
+  });
+
+  test("the home page leads a teacher to the pool", async () => {
+    await teacher.page.goto(`${applicationUrl}/exam/`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector('a[href="/exam/pool"]', { timeout: 20000 });
+  });
+
+  test("no student, and no teacher in student view, reaches the pool, its preview or its images", async () => {
+    const probe = async (session) => {
+      const nothing = await fetchAs(session, absent);
+      for (const reference of ["/exam/api/pool/categories", "/exam/api/pool/questions", `/exam/api/pool/questions/${questionId}`]) {
+        assert.equal((await fetchAs(session, reference)).status, 403, `${reference} is refused`);
+      }
+      assert.equal((await imageAs(session, `/exam/api/images/${imageId}`)).status, 403, "an image outside a test is refused");
+      assert.deepEqual(
+        await imageAs(session, "/exam/api/images/999999"),
+        await imageAs(session, `/exam/api/images/${imageId}`),
+        "and refused the same way as one that does not exist"
+      );
+      assert.deepEqual(await fetchAs(session, "/exam/pool"), nothing, "the page is not there");
+    };
+    await probe(student);
+    await setPreferences(teacher, { vt: 0 });
+    try {
+      await probe(teacher);
     } finally {
       await setPreferences(teacher, {});
     }

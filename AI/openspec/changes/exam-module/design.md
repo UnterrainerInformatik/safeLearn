@@ -117,8 +117,8 @@ The constraints that shape the approach:
 
 ### D10 — One-time import as a tool script using jsdom's XML parser
 
-- `tools/import-moodle-pool.mjs` takes the two XML paths and the database path. It parses with `new JSDOM(xml, { contentType: "text/xml" })`, because `jsdom` is already a dependency, so the import adds none.
-- It pairs the two files by position and verifies type, answer count and correct pattern, refusing all on any mismatch (spec `question-pool`). It sanitizes with the same `DOMPurify` instance and moves base64 `@@PLUGINFILE@@` images into an `image` table (BLOB).
+- `exam/import-moodle-pool.mjs` takes the two XML paths and, optionally, the database path (`--db`), and `--dry-run` reports without writing. It sits in the module's directory rather than `tools/`, because `tools/` is not part of the image and the import runs in the container; the logic is `exam/pool-import.js`. It parses with `new JSDOM(xml, { contentType: "text/xml" })`, because `jsdom` is already a dependency, so the import adds none.
+- It pairs the two files by position and verifies type, answer count and correct pattern, refusing all on any mismatch (spec `question-pool`). It sanitizes with the same `DOMPurify` instance (`sanitize.js`, which `app.js` uses too) and moves base64 `@@PLUGINFILE@@` images into an `image` table (BLOB).
 - It runs once, by hand, in the container on babylon5 (`docker exec`), after the module is switched on there.
 - Images are stored in the database rather than as files, so the one-file backup covers them.
 

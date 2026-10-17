@@ -44,12 +44,12 @@ Phases in the plan's order. Each phase ends deployable with `EXAM_MODULE` unset 
 
 ## 4. P2 — Question pool
 
-- [ ] 4.1 Migration: category tree, question (type, text DE/EN, retired flag), answer (text DE/EN, correct, position), image (BLOB, mime), usage (question, test)
-- [ ] 4.2 `tools/import-moodle-pool.mjs`: parse both XML files with jsdom's XML mode, pair by position, verify type/answer count/correct pattern, refuse all on mismatch with every bad position reported, drop `essay` with a count
-- [ ] 4.3 Import: sanitize HTML with the renderer's DOMPurify setup, strip Moodle styles, keep the answer-count hint, move `@@PLUGINFILE@@` images into the image table and rewrite references; refuse a second import
-- [ ] 4.4 Unit tests for the importer against trimmed fixtures (match, mismatch, essay, image), plus a dry-run against the real files reporting 94/22/9
-- [ ] 4.5 Image route `/exam/api/images/:id` with the access check (teacher, or student inside an open attempt containing it)
-- [ ] 4.6 Question browser for teachers: category tree, text search, preview in DE/EN with correct answers, usage history per question; students refused
+- [x] 4.1 Migration: category tree, question (type, text DE/EN, retired flag), answer (text DE/EN, correct, position), image (BLOB, mime), usage (question, test). Done as `005-question-pool.sql`; usage also records course and date, so the browser needs no `test` table before P3, and `pool_import` records the import and its report
+- [x] 4.2 `tools/import-moodle-pool.mjs`: parse both XML files with jsdom's XML mode, pair by position, verify type/answer count/correct pattern, refuse all on mismatch with every bad position reported, drop `essay` with a count. Lives at `exam/import-moodle-pool.mjs` (logic in `exam/pool-import.js`) instead: `tools/` is not in the image, and the import runs in the container (D10)
+- [x] 4.3 Import: sanitize HTML with the renderer's DOMPurify setup, strip Moodle styles, keep the answer-count hint, move `@@PLUGINFILE@@` images into the image table and rewrite references; refuse a second import. Also moves inline `data:` images (the real export has one, question 32) and keeps every category, including the one that held only essays, so the count is 22
+- [x] 4.4 Unit tests for the importer against trimmed fixtures (match, mismatch, essay, image), plus a dry-run against the real files reporting 94/22/9. `test/exam-pool.test.js`; the dry run is skipped where the export is not on the machine. Harness checks for the browser, the image route and the refusals in `test/exam.test.js`
+- [x] 4.5 Image route `/exam/api/images/:id` with the access check (teacher, or student inside an open attempt containing it). The student branch is `studentMaySeeImage` in `exam/pool.js`, which answers no until attempts exist; task 5.5 fills it in
+- [x] 4.6 Question browser for teachers: category tree, text search, preview in DE/EN with correct answers, usage history per question; students refused
 - [ ] 4.7 Run the import on babylon5 inside the container and record the report (aggregates only)
 
 ## 5. P3 — Online tests
@@ -58,7 +58,7 @@ Phases in the plan's order. Each phase ends deployable with `EXAM_MODULE` unset 
 - [ ] 5.2 Test assembly UI from the question browser: pick questions, create the snapshot, record usage
 - [ ] 5.3 Sitting and make-up UI: window, duration < window, participants (roster or selection), same duration for make-ups
 - [ ] 5.4 Attempt start: one per student and test across sittings, server-side permutation of questions and answers, random per-answer tokens, deadline = min(start + duration, window end)
-- [ ] 5.5 Writing page (`safelearn-test` embed and module page) in the course language: no correctness in any payload, autosave per change, server-time countdown, resume on reload
+- [ ] 5.5 Writing page (`safelearn-test` embed and module page) in the course language, with `studentMaySeeImage` answering yes for the images of an open attempt's questions: no correctness in any payload, autosave per change, server-time countdown, resume on reload
 - [ ] 5.6 Save API refusing writes after the deadline or after submission; explicit submit
 - [ ] 5.7 Finalization: lazy on access plus a 30 s sweep; all-or-nothing grading; fraction written as the student's result in that test's column of the online-test category (`gradebook-sheet`); test hidden afterwards
 - [ ] 5.8 Device binding via `httpOnly` `SameSite=Strict` attempt cookie with hashed secret; refused-device record; teacher release; survives a server restart

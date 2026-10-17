@@ -26,6 +26,7 @@ import { teacherShell } from "./bar.js";
 import { ConflictError, InvalidInputError, listYears, NotFoundError } from "./classes.js";
 import { registerClassRoutes } from "./routes-classes.js";
 import { registerGradebookRoutes } from "./routes-gradebook.js";
+import { registerPoolRoutes } from "./routes-pool.js";
 
 const clientDir = path.join(import.meta.dirname, "client");
 const clientScript = "/exam/assets/exam-client.js";
@@ -90,6 +91,7 @@ function buildRouter(db, startPage) {
 
   registerClassRoutes(router, { db, handle, startPage });
   registerGradebookRoutes(router, { db, handle, startPage });
+  registerPoolRoutes(router, { db, handle, startPage });
 
   // The module's home page, for teachers: the classes of one school year -
   // the current one unless `?year=` names another - which the bar chooses.

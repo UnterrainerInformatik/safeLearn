@@ -3,7 +3,7 @@ Here you can find how the exam module is switched on, where it keeps its data, h
 
 [Back](README.md) to the main page.
 
-The module is being built in phases (`AI/exam-module-plan.md`). What exists today is its foundation (the switch, the database, backups, the teacher/student gate, the embedding syntax), classes and courses at `/exam/`, and the gradebook. Online tests and the question pool follow.
+The module is being built in phases (`AI/exam-module-plan.md`). What exists today is its foundation (the switch, the database, backups, the teacher/student gate, the embedding syntax), classes and courses at `/exam/`, the gradebook, and the question pool. Online tests follow.
 
 ## The Switch
 The module exists only when the instance's environment says `EXAM_MODULE=on`. Any other value, or none, and the instance is exactly the one it was before the module: its code is not loaded, no database file is opened or created, nothing answers under `/exam/`, and no page links to it.
@@ -85,6 +85,28 @@ Each course has a gradebook, reached from the course's and the class's page (`/e
 - **An override** replaces the proposal for one student's semester, with an optional comment. Teachers keep seeing the proposal beside it; removing the override makes the proposal the grade again. The comment reaches the student only when "The student sees the comment" is ticked.
 - **Students who left the roster** stand below the sheet, read-only, with what was recorded for them. A student's own page in a course (`/exam/courses/<id>/students/<username>`, from their name in the sheet) shows each semester's categories, proposal and grade, the override and the comment - saved as they change - and their results by column, read-only, with a link to the sheet.
 - **A student's own results** are at `/exam/results`, or wherever a page places a `safelearn-results` block: per course their results with each column's name and date, the category fractions and the grade. While no override exists that is the proposal; once one does, the student sees the override and no longer the proposal. The year grade appears once the summer semester has begun. No request can name another student: the route answers about the session's own identity only.
+
+## The Question Pool
+All teachers share one pool of multiple-choice questions, browsed at `/exam/pool` (linked from the module's home page). Like everything else here it belongs to teachers: a student, or a teacher in student view, finds no page there, and the API and the images refuse them.
+
+- **A question** has a type - several correct answers, exactly one correct answer, or true/false - its text and each answer in German and in English, a correct flag per answer, a category, and the images it embeds. Every question is worth one point and is graded all-or-nothing, so the hint in the text saying how many answers are correct ("(2 richtige Antworten)") matters and is kept.
+- **The browser** shows the category tree with the number of questions in each, a search over names, texts and answers in both languages, and the matching questions with how often and when each was last used. Choosing one shows a preview in German or English with the correct answers marked, and every test it was used in, with the course and the date. Retired questions are left out.
+- **Images** are stored in the database, not as files, so the daily backup covers them, and are served only by the module (`/exam/api/images/<id>`): to teachers, and - once online tests exist - to a student inside an open attempt containing the question. They are never cached.
+- **The database is the pool's only source.** It was filled once from the Moodle export, and from then on only the module changes it (the question editor follows). There is no re-import and no export.
+
+### The One-Time Import
+The import reads the German original and the English translation of the Moodle export (`WMC - Fragenpool - thematisch.xml`, `WMC - Question Pool - by topic (EN).xml`). Moodle gives the questions no shared id, so the two files are paired by position, and every pair has to agree in type, number of answers, correct-answer pattern and category. If any pair disagrees, nothing is imported and every disagreeing position is listed. `essay` questions are dropped and counted. Text is sanitized with the renderer's own sanitizer, without Moodle's inline styles; images embedded as `@@PLUGINFILE@@` files or inline data are moved into the database. A second import is refused and changes nothing.
+
+It runs by hand, inside the container, after the module is switched on:
+
+```bash
+docker cp "WMC - Fragenpool - thematisch.xml" <container>:/tmp/de.xml
+docker cp "WMC - Question Pool - by topic (EN).xml" <container>:/tmp/en.xml
+docker exec <container> node exam/import-moodle-pool.mjs /tmp/de.xml /tmp/en.xml --dry-run
+docker exec <container> node exam/import-moodle-pool.mjs /tmp/de.xml /tmp/en.xml
+```
+
+`--dry-run` verifies and prints the report without touching the database; `--db <path>` names another database than the module's own. The report holds counts only. On the export as of 2026-10-16 it reads 94 questions in 22 categories (77 with several correct answers, 14 with one, 3 true/false), 9 essays dropped, and 7 images.
 
 ## Placing An Element In A Page
 A page places an element with a fenced block whose info string is `safelearn-<kind>`, with the element's parameters as `key: value` lines:

@@ -20,8 +20,7 @@ import express from "express";
 import { Marked } from "marked";
 import markedShiki from "marked-shiki";
 import { bundledLanguages, getHighlighter } from "shiki";
-import createDOMPurify from "dompurify";
-import { JSDOM } from "jsdom";
+import { sanitizeHtml } from "./sanitize.js";
 import {
   transformerNotationDiff,
   transformerNotationHighlight,
@@ -104,9 +103,6 @@ const __dirname = import.meta.dirname;
 
 config();
 
-const window = new JSDOM("").window;
-const DOMPurify = createDOMPurify(window);
-
 const app = express();
 app.set("trust proxy", true);
 
@@ -147,7 +143,7 @@ async function sanitizeAndParseMarkdown(data, req, options = {}) {
     const marked = dm == 1 ? markedDark : markedLight;
     let html = await marked.parse(d);
     html = manipulateHtml(html, req);
-    return DOMPurify.sanitize(html);
+    return sanitizeHtml(html);
   } catch (error) {
     // Not something to show on the page: the session it would be shown to has
     // just ended, and the request is answered as one without a session.

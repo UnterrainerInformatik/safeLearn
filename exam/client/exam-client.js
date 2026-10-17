@@ -16,6 +16,7 @@ import { elementFor } from "./frame.js";
 import { connectBar } from "./bar.js";
 import "./classes.js";
 import "./gradebook.js";
+import "./pool.js";
 
 export { ExamElement, defineExamElement, examApi } from "./frame.js";
 
