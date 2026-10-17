@@ -129,7 +129,7 @@ Switching the module on in production exposes nothing to students by itself. Stu
 
 ## Risks / Trade-offs
 
-- [The database holds grades of minors on one host] → Daily `VACUUM INTO` copies on the same volume do not survive a lost disk. Add the backup directory to babylon5's existing off-host backup, or copy it off-host as a task in P0. Only aggregates are ever logged ([[pii-handling-real-data]]).
+- [The database holds grades of minors on one host] → Daily `VACUUM INTO` copies on the same volume do not survive a lost disk. Getting them off the host is the operator's responsibility, not the application's: the copies stay beside the database so a restore finds them there, and the operator backs up `exam-backups/` (never the live file) with the host's own backup. safeLearn is the open-source staging instance and keeps nothing worth backing up; secureLectures' data directory is covered by babylon5's backup (settled with Gerald on 2026-10-17). Only aggregates are ever logged ([[pii-handling-real-data]]).
 - [Synchronous SQLite in the request path] → Writes are single-row and indexed. A sitting of 30 students autosaving is well under 100 writes per second. Measured as part of P3's harness checks with a simulated class.
 - [An embed block's placeholder is stripped by `DOMPurify`] → A rendering check asserts that the placeholder and its `data-*` attributes survive. The kind and parameters are escaped before they are placed in attributes.
 - [`EXAM_DB_PATH` trips `test/deployment-config.test.js`] → Declared there as a variable that deliberately does not reach a deployed instance.

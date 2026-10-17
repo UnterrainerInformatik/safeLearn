@@ -16,7 +16,7 @@ Phases in the plan's order. Each phase ends deployable with `EXAM_MODULE` unset 
 - [x] 1.12 Deployment: pass `EXAM_MODULE` through `deploy/docker-compose.yml`'s `environment:`; declare `EXAM_DB_PATH` as test-only in `test/deployment-config.test.js`; assert the WYSIWYG templates (`wysiwyg-container-linux`/`-windows`) set no `EXAM_MODULE`; assert no static mount reaches `data/`
 - [x] 1.13 Harness: a second instance configuration with `EXAM_MODULE=on` and `EXAM_DB_PATH` in a temp directory created and removed per run (also on interruption); the module-off run asserts `/exam/*` answers as nothing-behind-it and that pages are unchanged
 - [x] 1.14 Content checks for embedding: a fixture page in `md/` with a `safelearn-test` block outside and one inside `@@@ teacher`; student vs. teacher vs. module on/off vs. `?reveal=1`; update `test/coverage-map.json` for the guarded code
-- [ ] 1.15 Off-host backup: add `data/exam-backups/` to babylon5's backup, or document the copy job (with Gerald)
+- [x] 1.15 Off-host backup: settled with Gerald on 2026-10-17 — the operator backs up, not the application. The copies stay in `data/exam-backups/` beside the database; `docs-exam-module.md` tells operators to back up that directory rather than the live file. safeLearn (staging) keeps no backup; secureLectures' `/app/data` is in babylon5's UrBackup
 - [x] 1.16 Docs: `docs-exam-module.md` (switch, data, backups, embed syntax), a pointer from `README.md` and `docs-wysiwyg.md` (module off there), `AI/architecture.md` component map and route table
 
 ## 2. P1 — Classes & courses

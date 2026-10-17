@@ -44,7 +44,9 @@ The module writes consistent copies with `VACUUM INTO` into `exam-backups/` besi
 | `exam-pre-v<N>-<time>.sqlite` | Before the first pending migration away from version `N` | 90 days |
 | `exam-daily-<time>.sqlite` | At start-up if the newest is a day old or missing, then once a day | The newest 14 |
 
-These copies sit on the same disk as the database, so they protect against a bad migration or a mistake, not against losing the disk. **Copy `exam-backups/` off the host** as well, together with whatever else of `${DATA_DIR}` is backed up there.
+They sit beside the database on purpose: a restore finds them right where it needs them. `VACUUM INTO` only reads the database, so taking a copy cannot damage it.
+
+Getting the copies off the host is the operator's job, with whatever that host already backs up with. **Back up `exam-backups/`, not the live `exam.sqlite`:** a file-level backup can catch the database in the middle of a write, with part of it still in the `exam.sqlite-wal` file beside it, while every copy in `exam-backups/` is complete. A backup of the copies holds grades of minors, so wherever it goes, it has to be a place that may hold them.
 
 **Restoring** means stopping the container, replacing `exam.sqlite` with a copy (and deleting `exam.sqlite-wal` and `exam.sqlite-shm` beside it), and starting again. A copy from an older schema version is migrated forward on start, as any older database is.
 
