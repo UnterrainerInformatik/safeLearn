@@ -430,6 +430,10 @@ function runVisibilityChecks() {
       filesToReload.add(entry.file);
     }
   }
+  if (filesToReload.size > 0) {
+    // A window opened or closed: every render-time grant may now be wrong.
+    grantEpoch += 1;
+  }
   if (filesToReload.size > 0 && typeof visibilityChangeCallback === "function") {
     console.log(
       `[TimedPermissions] Visibility changed for: ${Array.from(filesToReload).join(", ")}`
@@ -465,6 +469,7 @@ async function readCorpusFile(filePath) {
     permissions: parseFirstLineForPermissions(firstLine),
     text,
     blocks: extractInlinePermissionBlocks(text),
+    references: extractAttachmentReferences(text),
   };
 }
 
@@ -856,8 +861,8 @@ export async function scanFiles(prefix, dir, resetFonts = false, root = dir) {
       const carried = carriedEntries.get(relFullPath);
       const derived =
         carried && carried.mtime === mtime ? carried : await readCorpusFile(absPath);
-      const { permissions, text, blocks } = derived;
-      currentEntries.set(relFullPath, { mtime, permissions, text, blocks });
+      const { permissions, text, blocks, references } = derived;
+      currentEntries.set(relFullPath, { mtime, permissions, text, blocks, references });
       return {
         [file]: {
           path: file,
@@ -908,6 +913,11 @@ export async function scanFiles(prefix, dir, resetFonts = false, root = dir) {
   mdFilesDirStructure = mdFiles;
 
   await rebuildTimedPermissionSchedule(currentEntries);
+
+  // Against the `filesMap` this scan rebuilt, so an attachment added since the
+  // last one is found without opening the page that embeds it.
+  rebuildAttachmentIndex(currentEntries);
+  grantEpoch += 1;
 
   return { added, removed, modified };
 }
@@ -1855,7 +1865,24 @@ function parseWidthHeight(input) {
   return null;
 }
 
+/**
+ * Replaces the embeds of `html`, except inside `<pre>` and `<code>`: an embed
+ * written in code is an example of the syntax, as Obsidian shows it, and
+ * `extractAttachmentReferences` does not count it as a reference either.
+ */
 function replaceObsidianImageLinks(html, req) {
+  const code = /<pre\b[\s\S]*?<\/pre>|<code\b[\s\S]*?<\/code>/gi;
+  let result = "";
+  let carried = 0;
+  let match;
+  while ((match = code.exec(html)) !== null) {
+    result += replaceEmbedsIn(html.slice(carried, match.index), req) + match[0];
+    carried = match.index + match[0].length;
+  }
+  return result + replaceEmbedsIn(html.slice(carried), req);
+}
+
+function replaceEmbedsIn(html, req) {
   const regex = /!\[\[(.*?)\]\]/g;
 
   return html.replace(regex, (match) => {
@@ -1864,28 +1891,429 @@ function replaceObsidianImageLinks(html, req) {
     if (r) {
       fileName = r.name;
     }
-    if (fileName.startsWith("/md/")) {
-      fileName = fileName.slice(4);
-    }
-    if (fileName.startsWith("md/")) {
-      fileName = fileName.slice(3);
-    }
-    const lastPartOfFileName = fileName.split("/").pop();
-    const filePath = filesMap[lastPartOfFileName];
-    if (filePath) {
-      let f = filePath[0];
-      if (filePath.length > 1) {
-        f = filePath.find((path) => path === fileName);
-        if (!f) {
-          return match;
-        }
-      }
-      const serverUrl = `${req.protocol}://${req.get("host")}`;
-      return getHtmlFor(getFileExtension(f), fileName, serverUrl, dirPrefix, f, r);
-    } else {
+    const f = resolveAttachment(fileName);
+    if (f === null) {
       return match;
     }
+    const serverUrl = `${req.protocol}://${req.get("host")}`;
+    return getHtmlFor(getFileExtension(f), stripCorpusPrefix(fileName), serverUrl, dirPrefix, f, r);
   });
+}
+
+// ################### Attachments ###################
+
+/** An embed's name as the renderer reads it: without a leading `/md/` or `md/`. */
+function stripCorpusPrefix(name) {
+  let fileName = name;
+  if (fileName.startsWith("/md/")) {
+    fileName = fileName.slice(4);
+  }
+  if (fileName.startsWith("md/")) {
+    fileName = fileName.slice(3);
+  }
+  return fileName;
+}
+
+/**
+ * The attachment an embed names, as a path relative to `md/`, or null.
+ *
+ * The one implementation of how `![[name]]` finds its file. The renderer calls it
+ * to decide what to emit, and the attachment index calls it to decide what a page
+ * makes servable, so "an attachment is served the way the page renders it" holds
+ * because there is nothing else to agree with. The basename is looked up in
+ * `filesMap`. Where it exists in several folders, only the full path picks one,
+ * and a name that does not give it resolves to nothing - as it renders to
+ * nothing.
+ */
+export function resolveAttachment(name) {
+  if (typeof name !== "string") {
+    return null;
+  }
+  const fileName = stripCorpusPrefix(name);
+  const candidates = filesMap[fileName.split("/").pop()];
+  if (!candidates) {
+    return null;
+  }
+  if (candidates.length === 1) {
+    return candidates[0];
+  }
+  return candidates.find((candidate) => candidate === fileName) ?? null;
+}
+
+/** Whether `corpusPath`, relative to `md/`, is an attachment the last scan saw. */
+function isAttachment(corpusPath) {
+  const candidates = filesMap[corpusPath.split("/").pop()];
+  return Boolean(candidates && candidates.includes(corpusPath));
+}
+
+/**
+ * A path relative to `md/` in the one form grants, the index and requests are
+ * compared in: `/`-separated, normalized, without a leading slash. Null when it
+ * leaves `md/` or names the directory itself.
+ */
+export function normalizeCorpusPath(candidate) {
+  if (typeof candidate !== "string" || candidate.includes("\0") || candidate.includes("\\")) {
+    return null;
+  }
+  const normalized = path.posix.normalize(candidate).replace(/^\/+/, "");
+  if (normalized === "" || normalized === "." || normalized === ".." || normalized.startsWith("../")) {
+    return null;
+  }
+  return normalized;
+}
+
+/**
+ * The text with every fenced code block and every inline code span replaced by
+ * spaces of the same length, so that a reference written as an example of the
+ * syntax is no reference, and every offset found in the result is an offset in
+ * the original.
+ */
+function maskCode(markdown) {
+  const chars = markdown.split("");
+  const blank = (from, to) => {
+    for (let i = from; i < to; i++) {
+      if (chars[i] !== "\n") chars[i] = " ";
+    }
+  };
+
+  // Fenced blocks, line by line: a fence closes on a line of the same character,
+  // at least as long, and nothing else. An unclosed fence runs to the end.
+  const fence = /^[ \t]{0,3}(`{3,}|~{3,})/;
+  let offset = 0;
+  let open = null;
+  for (const line of markdown.split("\n")) {
+    const end = offset + line.length;
+    if (open === null) {
+      const match = fence.exec(line);
+      if (match) {
+        open = { start: offset, marker: match[1] };
+      }
+    } else {
+      const trimmed = line.trim().replace(/\r$/, "");
+      if (
+        trimmed.length >= open.marker.length &&
+        trimmed === open.marker[0].repeat(trimmed.length)
+      ) {
+        blank(open.start, end);
+        open = null;
+      }
+    }
+    offset = end + 1;
+  }
+  if (open !== null) {
+    blank(open.start, markdown.length);
+  }
+
+  // Inline spans, on what the fences left: a run of backticks closed by a run of
+  // the same length, never across a blank line.
+  const fenced = chars.join("");
+  const span = /(?<!`)(`+)(?!`)((?:(?!\n[ \t]*\n)[\s\S])*?[^`])\1(?!`)/g;
+  let match;
+  while ((match = span.exec(fenced)) !== null) {
+    blank(match.index, match.index + match[0].length);
+  }
+  return chars.join("");
+}
+
+const htmlEntities = { "&amp;": "&", "&quot;": '"', "&#39;": "'", "&lt;": "<", "&gt;": ">" };
+
+function decodeHtmlEntities(value) {
+  return value.replace(/&(?:amp|quot|#39|lt|gt);/g, (entity) => htmlEntities[entity]);
+}
+
+/**
+ * A link or image target as a reference, or null when it addresses no
+ * attachment: an external URL, a fragment, or Markdown.
+ */
+function targetReference(target, kind, offset) {
+  const raw = target.trim().replace(/^<(.*)>$/, "$1");
+  if (raw === "" || raw.startsWith("#") || raw.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+    return null;
+  }
+  const withoutQuery = raw.split(/[?#]/, 1)[0];
+  if (withoutQuery === "" || withoutQuery.toLowerCase().endsWith(".md")) {
+    return null;
+  }
+  if (withoutQuery.startsWith("/") && !withoutQuery.startsWith("/md/")) {
+    return null;
+  }
+  return { raw: withoutQuery, kind, offset };
+}
+
+/**
+ * Every place `markdown` addresses an attachment, in document order, as written:
+ * `{ raw, kind, offset }`.
+ *
+ * - `embed`: `![[name]]` and `![[name|size]]`, `raw` the name without its size.
+ * - `image` and `link`: Markdown images, links and link definitions whose target
+ *   is relative or under `/md/`.
+ * - `html`: `src`, `href` and `poster` of raw `img`, `video`, `audio`, `source`
+ *   and `a` tags, under the same condition.
+ *
+ * External URLs and `.md` targets are not attachments and are left out. So is
+ * anything inside fenced or inline code. Nothing here is resolved:
+ * `resolveAttachmentReference` does that against the corpus as it stands, so a
+ * reference recorded before its file exists finds it after the next scan.
+ */
+export function extractAttachmentReferences(markdown) {
+  if (typeof markdown !== "string" || markdown.length === 0) {
+    return [];
+  }
+  const text = maskCode(markdown);
+  const references = [];
+  let match;
+
+  const embed = /!\[\[(.*?)\]\]/g;
+  while ((match = embed.exec(text)) !== null) {
+    const name = match[1];
+    const sized = parseWidthHeight(name);
+    references.push({ raw: sized ? sized.name : name, kind: "embed", offset: match.index });
+  }
+
+  const inline =
+    /(!?)\[(?:[^\[\]\n]|\[[^\[\]\n]*\])*\]\(\s*(<[^>\n]*>|[^\s()]*(?:\([^\s()]*\)[^\s()]*)*)(?:\s+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\)))?\s*\)/g;
+  while ((match = inline.exec(text)) !== null) {
+    const reference = targetReference(match[2], match[1] ? "image" : "link", match.index);
+    if (reference) references.push(reference);
+  }
+
+  const definition = /^[ \t]{0,3}\[(?!\^)[^\]\n]+\]:[ \t]*(<[^>\n]*>|\S+)/gm;
+  while ((match = definition.exec(text)) !== null) {
+    const reference = targetReference(match[1], "link", match.index);
+    if (reference) references.push(reference);
+  }
+
+  const tag = /<(img|video|audio|source|a)\b([^>]*)>/gi;
+  while ((match = tag.exec(text)) !== null) {
+    const attributes = /\b(?:src|href|poster)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi;
+    const attributesStart = match.index + match[0].indexOf(match[2]);
+    let attribute;
+    while ((attribute = attributes.exec(match[2])) !== null) {
+      const value = decodeHtmlEntities(attribute[1] ?? attribute[2] ?? attribute[3]);
+      const reference = targetReference(value, "html", attributesStart + attribute.index);
+      if (reference) references.push(reference);
+    }
+  }
+
+  return references.sort((a, b) => a.offset - b.offset);
+}
+
+/**
+ * The attachment a reference addresses, relative to `md/`, or null.
+ *
+ * `folder` is the referencing file's folder relative to `md/`. A relative target
+ * is resolved against it, which is what the browser does against the page's URL
+ * `/md/<folder>/<page>.md`. A target that leaves `md/` addresses nothing.
+ */
+export function resolveAttachmentReference(reference, folder = "") {
+  if (reference.kind === "embed") {
+    return resolveAttachment(reference.raw);
+  }
+  let target;
+  try {
+    target = decodeURIComponent(reference.raw);
+  } catch {
+    return null;
+  }
+  const candidate = target.startsWith("/md/")
+    ? target.slice(4)
+    : path.posix.join(folder, target);
+  const normalized = normalizeCorpusPath(candidate);
+  return normalized !== null && isAttachment(normalized) ? normalized : null;
+}
+
+/** The folder of a corpus file `md/<folder>/<page>.md`, relative to `md/`. */
+function corpusFolderOf(fullPath) {
+  const relative = fullPath.startsWith(dirPrefix) ? fullPath.slice(dirPrefix.length) : fullPath;
+  const folder = path.posix.dirname(relative);
+  return folder === "." ? "" : folder;
+}
+
+/**
+ * Attachment path -> the corpus files that reference it. Paths only: who may see
+ * any of those places is decided per request, by reading the file.
+ */
+let attachmentReferrers = new Map();
+
+/** The last scan's unreferenced attachments, replaced as a whole. */
+let unreferencedReport = Object.freeze({ scannedAt: null, paths: Object.freeze([]) });
+
+/**
+ * Bumped whenever what a session may see can have changed for everyone: at the
+ * end of a scan and when a time window opens or closes. A grant recorded under an
+ * older epoch is no grant.
+ */
+let grantEpoch = 0;
+
+/** How long a render-time grant lives at most. */
+export const attachmentGrantLifetimeMs = 10 * 60 * 1000;
+
+/**
+ * Rebuilds the reverse map and the unreferenced report from the index, against
+ * the `filesMap` the same scan just rebuilt. One pass for both, so the list the
+ * log names and the set the gate refuses as unreferenced are one computation.
+ */
+function rebuildAttachmentIndex(indexEntries) {
+  const referrers = new Map();
+  for (const [fullPath, entry] of indexEntries) {
+    const folder = corpusFolderOf(fullPath);
+    for (const reference of entry.references) {
+      const attachment = resolveAttachmentReference(reference, folder);
+      if (attachment === null) continue;
+      if (!referrers.has(attachment)) referrers.set(attachment, new Set());
+      referrers.get(attachment).add(fullPath);
+    }
+  }
+  attachmentReferrers = referrers;
+
+  const paths = Object.values(filesMap)
+    .flat()
+    .filter((attachment) => !referrers.has(attachment))
+    .sort();
+  unreferencedReport = Object.freeze({ scannedAt: new Date(), paths: Object.freeze(paths) });
+
+  // Line by line, each ending in a newline: `docker logs` holds back output
+  // without one. Corpus paths only - they are in the repository anyway.
+  for (const attachment of paths) {
+    console.log(`[Attachments] unreferenced: ${attachment}`);
+  }
+  console.log(`[Attachments] ${paths.length} unreferenced attachment(s)`);
+}
+
+/**
+ * The attachments no page referenced at the last scan, sorted, relative to `md/`,
+ * with the time of that scan. For a later teacher admin page; nothing serves it
+ * yet.
+ */
+export function unreferencedAttachments() {
+  return unreferencedReport;
+}
+
+/** Resolves true at the first promise that resolves true, false when none does. */
+function firstTrue(promises) {
+  if (promises.length === 0) {
+    return Promise.resolve(false);
+  }
+  return new Promise((resolve, reject) => {
+    let pending = promises.length;
+    for (const promise of promises) {
+      promise.then((yes) => {
+        if (yes) resolve(true);
+        else if (--pending === 0) resolve(false);
+      }, reject);
+    }
+  });
+}
+
+/** Whether `fullPath` references `attachment` in a place this session may see. */
+async function referencesVisibly(req, fullPath, attachment) {
+  const file = mdFilesDirStructure[fullPath.slice(dirPrefix.length)];
+  if (!file) {
+    return false;
+  }
+  let raw;
+  try {
+    raw = await fs.promises.readFile(file.absolutePath, "utf8");
+  } catch {
+    return false;
+  }
+  // The same steps the page handler takes, in the same order, as `answerFromFile`
+  // does for search: the leading marks, the whole-file directive, the blocks.
+  let content = raw.replace(/^[​‌‍‎‏﻿]/, "");
+  const permissions = parseFirstLineForPermissions(content.split("\n")[0]);
+  if (permissions !== null) {
+    const { visible } = await resolveFileVisibility(req, permissions);
+    if (!visible) {
+      return false;
+    }
+    content = content.split("\n").slice(1).join("\n");
+  }
+  const folder = corpusFolderOf(fullPath);
+  const segments = await filterForbiddenSegments(content, req);
+  return segments.some((segment) =>
+    extractAttachmentReferences(segment.text).some(
+      (reference) => resolveAttachmentReference(reference, folder) === attachment
+    )
+  );
+}
+
+/**
+ * Whether this session may be served `attachment` (relative to `md/`), decided
+ * from the files themselves.
+ *
+ * The index proposes the files that reference it; each is read and filtered for
+ * this session exactly as its page would be, and only a reference that survives
+ * counts. Concurrent, so every candidate joins the request's one permission
+ * context, and answered at the first yes. An attachment the index knows no
+ * referrer for is refused without reading anything.
+ */
+export async function mayServeAttachment(req, attachment) {
+  const candidates = attachmentReferrers.get(attachment);
+  if (!candidates || candidates.size === 0) {
+    return false;
+  }
+  return firstTrue(
+    Array.from(candidates, (fullPath) => referencesVisibly(req, fullPath, attachment))
+  );
+}
+
+/**
+ * Records a grant for every attachment the sanitized body `html` addresses on
+ * this origin. Called by the page handler for corpus files only: what a session
+ * was just shown is exactly what it may load, and Markdown from anywhere else
+ * must not name what it is shown.
+ */
+export function recordAttachmentGrants(req, html) {
+  if (!req.session || typeof html !== "string") {
+    return;
+  }
+  let base;
+  try {
+    base = new URL(req.originalUrl, `${req.protocol}://${req.get("host")}`);
+  } catch {
+    return;
+  }
+  const now = Date.now();
+  const grants = {};
+  for (const [granted, grant] of Object.entries(req.session.attachmentGrants ?? {})) {
+    if (grant.expiresAt > now) grants[granted] = grant;
+  }
+  const attribute = /\b(?:src|href|poster)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
+  let match;
+  while ((match = attribute.exec(html)) !== null) {
+    let url;
+    try {
+      url = new URL(decodeHtmlEntities(match[1] ?? match[2]), base);
+    } catch {
+      continue;
+    }
+    if (url.origin !== base.origin || !url.pathname.startsWith("/md/")) continue;
+    let decoded;
+    try {
+      decoded = decodeURIComponent(url.pathname.slice(4));
+    } catch {
+      continue;
+    }
+    const attachment = normalizeCorpusPath(decoded);
+    if (attachment === null || attachment.toLowerCase().endsWith(".md") || !isAttachment(attachment)) {
+      continue;
+    }
+    grants[attachment] = { expiresAt: now + attachmentGrantLifetimeMs, epoch: grantEpoch };
+  }
+  req.session.attachmentGrants = grants;
+}
+
+/** Whether this session holds a live grant for `attachment`. */
+export function hasAttachmentGrant(req, attachment) {
+  const grant = req.session?.attachmentGrants?.[attachment];
+  return Boolean(grant && grant.expiresAt > Date.now() && grant.epoch === grantEpoch);
+}
+
+/** Drops every grant of this session, after it changed what it sees. */
+export function dropAttachmentGrants(req) {
+  if (req.session) {
+    delete req.session.attachmentGrants;
+  }
 }
 
 function getFileExtension(filePath) {

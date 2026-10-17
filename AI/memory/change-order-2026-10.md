@@ -10,8 +10,8 @@ metadata:
 
 Agreed with Gerald on 2026-10-17. The four open changes are applied in this order:
 
-1. `remove-convert-route`: removes `/convert` (SSRF, forwards the session cookie). **Next one to start.**
-2. `attachment-access-control`: attachments under `/md` only if at least one referencing location is visible. 399 unreferenced attachments are blocked and logged.
+1. `remove-convert-route`: removes `/convert` (SSRF, forwards the session cookie). Archived 2026-10-17 (b819e55).
+2. `attachment-access-control`: **Next one to start.** Attachments under `/md` only if at least one referencing location is visible. 399 unreferenced attachments are blocked and logged.
 3. `exam-module`: one big change for the whole `AI/exam-module-plan.md`. Task groups P0 → P1 → P4 first. Task 3.10 switches the module on in secureLectures, which must happen before the grade-entry deadline **05.02.2027**. P2, P3, P6, P7 and P5 follow later.
 4. `publishing-without-keycloak` (operating tier 1): only after P4 of the exam module.
 

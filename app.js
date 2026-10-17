@@ -110,7 +110,7 @@ const DOMPurify = createDOMPurify(window);
 const app = express();
 app.set("trust proxy", true);
 
-import { highlightExtension, scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions, wrapAsDocument, resolveFileVisibility, registerVisibilityChangeCallback, searchCorpus, minimumQueryLength } from "./obsidian.js";
+import { highlightExtension, scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions, wrapAsDocument, resolveFileVisibility, registerVisibilityChangeCallback, searchCorpus, minimumQueryLength, recordAttachmentGrants, hasAttachmentGrant, dropAttachmentGrants, mayServeAttachment, normalizeCorpusPath } from "./obsidian.js";
 
 import chokidar from "chokidar";
 
@@ -389,9 +389,21 @@ initKeycloak(app).then(() => {
   });
   app.use(fileNameExtractor);
 
+  const corpusRoot = path.join(__dirname, "md") + path.sep;
+
   app.use(checkAuthenticated, (req, res, next) => {
     let filePath = path.join(__dirname, decodeURIComponent(req.path));
     if (path.extname(filePath) === ".md") {
+      // The body of a corpus file is what this session was just allowed to see,
+      // so the attachments it addresses are granted to it. Nothing else the
+      // renderer is handed may grant anything (`attachment-access`).
+      const render = filePath.startsWith(corpusRoot)
+        ? (data) =>
+            sanitizeAndParseMarkdown(data, req).then((html) => {
+              recordAttachmentGrants(req, html);
+              return html;
+            })
+        : (data) => sanitizeAndParseMarkdown(data, req);
       fs.readFile(filePath, "utf8", (err, data) => {
         if (err) {
           console.error(`Error reading file ${filePath}`, err);
@@ -400,7 +412,7 @@ initKeycloak(app).then(() => {
         }
         const reveal = req.query.reveal;
         if (reveal) {
-          sanitizeAndParseMarkdown(data, req)
+          render(data)
             .then((html) => wrapInReveal(splitForReveal(html), req))
             .then((r) => {
               res.send(r);
@@ -409,7 +421,7 @@ initKeycloak(app).then(() => {
         } else {
           const doc = req.query.document;
           if  (doc) {
-            sanitizeAndParseMarkdown(data, req)
+            render(data)
               .then((html) => wrapAsDocument(html, req))
               .then((r) => {
                 rememberLastVisited(req);
@@ -417,7 +429,7 @@ initKeycloak(app).then(() => {
               })
               .catch(next);
           } else {
-            sanitizeAndParseMarkdown(data, req)
+            render(data)
               .then((html) => wrapInPage(html, getStartPage(), req))
               .then((r) => {
                 rememberLastVisited(req);
@@ -450,8 +462,40 @@ initKeycloak(app).then(() => {
   // Markdown never arrives here: the handler above answers everything with a
   // .md extension, so whole-file permissions cannot be bypassed through this
   // mount. What is left of the corpus are the images and other attachments a
-  // page embeds.
-  app.use("/md", checkAuthenticated, express.static(path.join(__dirname, "md")));
+  // page embeds, and those are not served to anyone who asks: an attachment
+  // reaches a session only when the session may see at least one place in the
+  // corpus that references it (`attachment-access`). The gate decides before
+  // `express.static` looks at the disk. A refusal leaves the router, so it lands
+  // in the catch-all exactly where a path with no file behind it lands, and
+  // the two cannot be told apart.
+  const attachments = express.Router();
+  attachments.use((req, res, next) => {
+    let attachment;
+    try {
+      attachment = normalizeCorpusPath(decodeURIComponent(req.path));
+    } catch {
+      attachment = null;
+    }
+    if (attachment === null) {
+      next("router");
+      return;
+    }
+    const serve = () => {
+      // The browser may keep its copy and revalidate it; a shared cache must
+      // not hand one session's attachment to another.
+      res.setHeader("Cache-Control", "private, no-cache");
+      next();
+    };
+    if (hasAttachmentGrant(req, attachment)) {
+      serve();
+      return;
+    }
+    mayServeAttachment(req, attachment)
+      .then((yes) => (yes ? serve() : next("router")))
+      .catch(next);
+  });
+  attachments.use(express.static(path.join(__dirname, "md"), { cacheControl: false }));
+  app.use("/md", checkAuthenticated, attachments);
   // Single files need their own handler — `express.static` serves directories.
   // A file the deployment does not ship falls through to the catch-all instead
   // of raising, so an unserved path answers the same way wherever it comes from.
@@ -577,6 +621,10 @@ initKeycloak(app).then(() => {
       setUserAttribute(req, 'config', JSON.stringify(req.body))
         .then((result) => {
           if (result) {
+            // The preferences decide what this session sees - teacher or
+            // student view, exam variant or practice - so what it was granted
+            // under the old ones is no longer what it has been shown.
+            dropAttachmentGrants(req);
             res.json({ success: true });
           } else {
             res.json({ success: false });

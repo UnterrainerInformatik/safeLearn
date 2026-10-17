@@ -47,6 +47,8 @@ The attachment resolution inside `replaceObsidianImageLinks` (strip `md/` and `/
 
 *Over-approximation, accepted:* the extractor works on Markdown text, so a `![[x.png]]` inside a code block counts as a reference. That can only make an attachment servable to a session that may already see the place that mentions it, so the rule is not loosened in a way the spec cares about. Making the extractor code-block-aware is cheap, though, and the task list includes it.
 
+*Settled during implementation:* the extractor skips fenced and inline code, and the renderer now does the same. `replaceObsidianImageLinks` used to turn an embed inside `<code>` or `<pre>` into an image, which Obsidian never does, and which would have rendered an image the extractor refuses. Both now treat an embed in code as text, as Obsidian shows it.
+
 ### 3. What the index holds
 
 `readCorpusFile` adds `references: extractAttachmentReferences(text)` to the entry. It is carried forward with the rest when the mtime is unchanged. After every scan, `scanFiles` builds a reverse map `attachmentPath → Set<mdFullPath>` by running `resolveAttachment` over every entry's references. This uses the fresh `filesMap`, so an attachment added between scans is picked up without reopening pages (`corpus-index` scenario). The map holds paths only, no conclusion. The same pass counts the attachments in `filesMap` with no entry in the reverse map and logs that number once (`attachment-access`, "The scan reports…"). Files under `md/` that `scanFilesInternal` records as fonts are attachments like any other, but they are served from `/assets`, so they are out of scope.

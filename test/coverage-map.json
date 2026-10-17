@@ -26,7 +26,8 @@
         "test/checks/presentation.js",
         "test/checks/directory-search.js",
         "test/checks/session-lifecycle.js",
-        "test/checks/deployment-surface.js"
+        "test/checks/deployment-surface.js",
+        "test/checks/attachments.js"
       ],
       "corpus": []
     },
@@ -147,8 +148,29 @@
         "md/test-md-file.md"
       ]
     },
+    "test/checks/attachments.js": {
+      "what": "Which session is served which attachment under /md, against a running instance: an attachment on an unrestricted page is served to everyone, one only in a teacher block to teachers only, one in several places as widely as the most visible of them, one only inside a closed window or only in the exam variant to nobody who cannot see that place, an ambiguous embed and an unreferenced file to nobody. That a teacher who switches to the student view loses what only the teacher view showed, grant included, that a refusal is answered exactly like a missing file (status, headers apart from the date, body), and that a served attachment is marked private. That every attachment any corpus page addresses for the test student and the test teacher is served by the full decision with the render-time grants dropped, which keeps the extractor and the renderer in step.",
+      "guards": [
+        "app.js",
+        "obsidian.js",
+        "permission-context.js",
+        "utils.js"
+      ],
+      "corpus": [
+        "md/test-attachments.md",
+        "md/test-attachments-teachers.md",
+        "md/assets/test-attachment-public.png",
+        "md/assets/test-attachment-shared.png",
+        "md/assets/test-attachment-teacher.png",
+        "md/assets/test-attachment-window.png",
+        "md/assets/test-attachment-exam.png",
+        "md/assets/test-attachment-unreferenced.png",
+        "md/assets/attachments-a/test-attachment-ambiguous.png",
+        "md/assets/attachments-b/test-attachment-ambiguous.png"
+      ]
+    },
     "test/checks/deployment-surface.js": {
-      "what": "What a running instance publishes over HTTP: that keycloak.json, the application sources, the dependency manifests and what sits beside a mounted package directory are not served and a refusal looks like a path with no file behind it, that the assets a page addresses still are — including the ones only a stylesheet names — that every same-origin reference of a rendered page resolves in all three views, and that the one endpoint answering before authentication survives a parameter it cannot interpret. That a page which cannot reach the reload stream keeps trying with a growing delay rather than on a fixed timer. That a self-authenticating route — the directory search endpoint and the status endpoint beside it — returns no directory data to a request carrying neither a bearer token nor, distinctly, to one carrying only a valid browser session. That no route fetches a URL a request names: the former /convert route, asked by GET and POST to fetch a local listener or render a posted body, makes no outbound request and is answered exactly like a path that never existed.",
+      "what": "What a running instance publishes over HTTP: that keycloak.json, the application sources, the dependency manifests and what sits beside a mounted package directory are not served and a refusal looks like a path with no file behind it, that the assets a page addresses still are — including the ones only a stylesheet names — that every same-origin reference of a rendered page resolves in all three views, the assets from their mounts and the attachments under /md for the session the page was rendered for, and that the one endpoint answering before authentication survives a parameter it cannot interpret. That a page which cannot reach the reload stream keeps trying with a growing delay rather than on a fixed timer. That a self-authenticating route — the directory search endpoint and the status endpoint beside it — returns no directory data to a request carrying neither a bearer token nor, distinctly, to one carrying only a valid browser session. That no route fetches a URL a request names: the former /convert route, asked by GET and POST to fetch a local listener or render a posted body, makes no outbound request and is answered exactly like a path that never existed.",
       "guards": [
         "app.js",
         "obsidian.js",
@@ -258,6 +280,16 @@
         "utils.js",
         "middlewares/keycloak-middleware.js",
         "obsidian.js"
+      ],
+      "corpus": []
+    },
+    "test/attachments.test.js": {
+      "what": "What a page addresses and which file that is: embeds with and without a size, Markdown images, links and definitions, raw img/video/audio/source/a attributes, external URLs and Markdown targets left out, references inside fenced or inline code ignored, an ambiguous basename resolving to nothing, relative paths against the page's folder, /md/ paths with percent-encoding, and paths that leave md/ rejected. Who is served an attachment by the full decision, case by case, including a removed reference and a file added after the page that embeds it. The unreferenced report: sorted paths, one log line each plus the count, replaced as a whole on rescan, and every listed path refused. The grant store: only same-origin attachments the body addresses, expiry and pruning, invalidation by a scan and by a preference write, and that app.js records grants in exactly one place, behind the corpus check. Scans a temporary fixture corpus and stubs fetch; needs no server, no browser, no login.",
+      "guards": [
+        "obsidian.js",
+        "app.js",
+        "permission-context.js",
+        "utils.js"
       ],
       "corpus": []
     },

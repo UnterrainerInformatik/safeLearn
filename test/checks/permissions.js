@@ -196,6 +196,12 @@ const restrictedFiles = [
     directive: ["teacher"],
     content: "STALEGESCHLOSSEN",
   },
+  // One of the places `test/checks/attachments.js` embeds its shared image.
+  {
+    path: "/md/test-attachments-teachers.md",
+    directive: ["teacher"],
+    content: "The second place",
+  },
 ];
 
 /**

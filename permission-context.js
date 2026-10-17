@@ -256,8 +256,10 @@ async function buildPermissionContext(req) {
  * stays empty until the build finishes would leave every block of a document
  * starting a build of its own.
  *
- * Lazy, so a request that asks no permission question - a stylesheet, an image,
- * the hot-reload stream - pays for no lookup at all.
+ * Lazy, so a request that asks no permission question - a stylesheet, the
+ * hot-reload stream, an attachment the session holds a render-time grant for -
+ * pays for no lookup at all. An attachment requested without a grant does ask,
+ * once, because `mayServeAttachment` reads the files that reference it.
  */
 export function getPermissionContext(req) {
   if (!req.permissionContext) {

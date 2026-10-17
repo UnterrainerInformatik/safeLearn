@@ -497,21 +497,44 @@ describe("deployment surface", () => {
         `${corpusPath} as a ${view} addresses nothing of this application, which cannot be right`
       );
 
+      // Two scenarios of `deployment-surface` meet here. A stylesheet, a font or
+      // the client script is served from its mount to anyone. An attachment under
+      // `/md` is served to this session because a page rendered for it
+      // references it (`attachment-access`), so it is asserted as its own half:
+      // a page that embeds one the server then refuses the same session is the
+      // failure that rule must never produce. Markdown under `/md` is a page,
+      // not an attachment.
+      const isAttachment = (entry) => {
+        const { pathname } = new URL(entry.address);
+        return pathname.startsWith("/md/") && !pathname.toLowerCase().endsWith(".md");
+      };
+      assert.ok(
+        references.some(isAttachment),
+        `${corpusPath} as a ${view} addresses no attachment, so this walk proves nothing about them`
+      );
+
       // A path without a mount is not a 404: the catch-all in `app.js` redirects
       // to the start page, so it answers 200 with a page nobody asked for.
-      const unresolved = references
-        .filter((entry) => entry.status === null || entry.status >= 400 || entry.redirected)
-        .map((entry) => {
-          if (entry.status === null) return `${entry.reference} (the request failed: ${entry.error ?? "no answer"})`;
-          if (entry.redirected) return `${entry.reference} (falls through to ${entry.servedFrom})`;
-          return `${entry.reference} (answers ${entry.status})`;
-        });
+      const unresolved = (entries) =>
+        entries
+          .filter((entry) => entry.status === null || entry.status >= 400 || entry.redirected)
+          .map((entry) => {
+            if (entry.status === null) return `${entry.reference} (the request failed: ${entry.error ?? "no answer"})`;
+            if (entry.redirected) return `${entry.reference} (falls through to ${entry.servedFrom})`;
+            return `${entry.reference} (answers ${entry.status})`;
+          });
 
       assert.deepEqual(
-        unresolved,
+        unresolved(references.filter((entry) => !isAttachment(entry))),
         [],
-        `${corpusPath} as a ${view} addresses references of this application that do not resolve. ` +
+        `${corpusPath} as a ${view} addresses assets of this application that do not resolve. ` +
           `A reference that falls through to the start page needs its own mount in app.js.`
+      );
+      assert.deepEqual(
+        unresolved(references.filter(isAttachment)),
+        [],
+        `${corpusPath} as a ${view} addresses attachments the server refuses the very session it ` +
+          `rendered them for.`
       );
     }
   });
