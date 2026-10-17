@@ -1,6 +1,6 @@
 ---
 name: directory-service-credentials-invalid
-description: "The tracked .env holds only CHANGE… placeholders for DIRECTORY_SERVICE_CLIENT_ID/_SECRET, so the realm answers invalid_client and directory search never holds data (202 forever); since 2026-10-17 .env is gitignored and .env.template is the tracked template"
+description: "Until 2026-10-17 the local .env held only CHANGE… placeholders, so directory search answered invalid_client / 202 forever; since then .env is gitignored, holds staging values, and .env.template is the tracked template"
 metadata: 
   node_type: memory
   type: project
@@ -17,3 +17,5 @@ Since `show-directory-fetch-progress` (2026-09-12) the **symptom changed**: the 
 **How to apply:** A never-resolving `202` (or, before 2026-09-12, a `502`) from directory search in this environment is almost certainly this stale/invalid credential, not a code defect — confirm against this before debugging the search logic itself. Either the Keycloak-side `DIRECTORY_SERVICE_CLIENT_ID` client was deleted/rotated, or the local `.env`'s secret is a stale copy. Whoever administers the realm needs to reissue the secret (or recreate the service-account client, `view-users` role) and update `.env`. See [[plugin-login-state-missing]] for a second, unrelated pre-existing gap found the same session.
 
 **Corrected 2026-10-17:** the cause is not a stale or rotated secret. `.env` is tracked in the public safeLearn repo (not gitignored) and carries `CHANGE…` placeholders for `SESSION_SECRET` and both directory-service values; it is a template. Settled the same day: `.env` is now gitignored (`/.env`), the template is `.env.template`, and the real test-realm values go into the local `.env`. In secureLectures `.env` stays tracked on purpose (private repo, production values), so the upstream untracking shows up there as a modify/delete conflict once, resolved by keeping downstream's file.
+
+**Update 2026-10-17:** Gerald has filled the local `.env` with staging values (no `CHANGE…` left). The `invalid_client` / never-resolving `202` should be gone locally. If it shows up again, check the staging values first, not the placeholders.
