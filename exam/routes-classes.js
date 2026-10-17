@@ -34,7 +34,7 @@ import {
   searchPeople,
 } from "./roster-source.js";
 import { requireTeacher, teacherPage } from "./gate.js";
-import { embedPlaceholder, wrapInPage } from "../obsidian.js";
+import { teacherShell } from "./bar.js";
 import { directoryServiceConfigured, heldDirectoryPeople } from "../middlewares/directory-service.js";
 
 /** A record id from the path; anything but a positive integer names nothing. */
@@ -145,26 +145,25 @@ export function registerClassRoutes(router, { db, handle, startPage }) {
 
   // ------------------------------------------------------------------- pages
 
-  // Server-rendered shells in the instance's frame; the element in each loads
-  // its own data from the API above.
+  // Server-rendered shells in the instance's frame, each with the module's bar;
+  // the element in each loads its own data from the API above. A new class is
+  // created from the bar's dialog, not from a page of its own.
   const page = (path, title, element) =>
     router.get(
       path,
       teacherPage,
       handle(async (req, res) => {
-        const { kind, params } = element(req);
-        const body = `
-          <p class="sl-exam-crumbs"><a href="/exam/">Classes and courses</a></p>
-          <h1>${title}</h1>
-          ${embedPlaceholder(kind, params)}`;
-        res.send(await wrapInPage(body, startPage(), req, { title, wide: true }));
+        const { kind, params, context } = element(req);
+        res.send(await teacherShell({ db, startPage, req, title, context, kind, params }));
       })
     );
 
-  page("/classes/new", "New class", (req) => ({
-    kind: "class-new",
-    params: { year: String(idParam(String(req.query.year ?? ""))) },
-  }));
-  page("/classes/:id", "Class", (req) => ({ kind: "class", params: { class: String(idParam(req.params.id)) } }));
-  page("/courses/:id", "Course", (req) => ({ kind: "course", params: { course: String(idParam(req.params.id)) } }));
+  page("/classes/:id", "Class", (req) => {
+    const classId = idParam(req.params.id);
+    return { kind: "class", params: { class: String(classId) }, context: { classId } };
+  });
+  page("/courses/:id", "Course", (req) => {
+    const courseId = idParam(req.params.id);
+    return { kind: "course", params: { course: String(courseId) }, context: { courseId } };
+  });
 }

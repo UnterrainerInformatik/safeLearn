@@ -13,6 +13,7 @@
  */
 
 import { elementFor } from "./frame.js";
+import { connectBar } from "./bar.js";
 import "./classes.js";
 import "./gradebook.js";
 
@@ -47,5 +48,6 @@ function mountAll() {
 }
 
 // A module script runs after the document has been parsed, so every
-// placeholder is already there.
+// placeholder - and a teacher page's module bar - is already there.
 mountAll();
+for (const bar of document.querySelectorAll(".sl-exam-bar")) connectBar(bar);

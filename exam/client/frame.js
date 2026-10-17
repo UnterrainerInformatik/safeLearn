@@ -63,7 +63,7 @@ export function h(tag, props = {}, ...children) {
       element.setAttribute(key, value === true ? "" : String(value));
     }
   }
-  for (const child of children.flat()) {
+  for (const child of children.flat(Infinity)) {
     if (child === undefined || child === null || child === false) continue;
     element.append(child instanceof Node ? child : document.createTextNode(String(child)));
   }
@@ -146,4 +146,163 @@ export function defineExamElement(kind, constructor) {
 /** The element name that draws `kind`, or undefined while none is built. */
 export function elementFor(kind) {
   return elements.get(kind);
+}
+
+// ------------------------------------------------------- table conventions
+//
+// What every module table shares (`gradebook-sheet`): a marked row as a
+// reading aid, leading columns that stay in place while the table scrolls
+// sideways, and fields saved as they change.
+
+/**
+ * Marks the row a click or a focus lands in, one row per table: marking
+ * another unmarks the first. Client state only - nothing is stored or sent
+ * (design.md, D6). Returns the table.
+ */
+export function markRows(table) {
+  const mark = (event) => {
+    const row = event.target.closest("tbody tr");
+    if (!row || row.closest("table") !== table) return;
+    for (const marked of table.querySelectorAll("tr.is-marked")) {
+      if (marked !== row) marked.classList.remove("is-marked");
+    }
+    row.classList.add("is-marked");
+  };
+  table.addEventListener("click", mark);
+  table.addEventListener("focusin", mark);
+  return table;
+}
+
+/**
+ * Keeps the cells marked `data-sticky="<n>"` in place when `table` scrolls
+ * sideways in its wrapper: each gets `position: sticky` (by its class) and a
+ * `left` offset measured from the rendered widths of the sticky columns before
+ * it. Fixed widths would cut long names, so the offsets are measured - once
+ * the table is drawn, and again whenever its size changes, which is what a new
+ * font size or typeface does without a redraw (design.md, D5).
+ */
+export function stickyColumns(table) {
+  const measure = () => {
+    const cells = [...table.querySelectorAll("[data-sticky]")];
+    if (cells.length === 0 || !table.isConnected) return;
+    const first = new Map();
+    for (const cell of cells) {
+      const index = Number(cell.dataset.sticky);
+      if (!first.has(index)) first.set(index, cell);
+    }
+    const indices = [...first.keys()].sort((a, b) => a - b);
+    const origin = first.get(indices[0]).getBoundingClientRect().left;
+    const offsets = new Map(indices.map((index) => [index, first.get(index).getBoundingClientRect().left - origin]));
+    for (const cell of cells) {
+      cell.classList.add("sl-exam-sticky");
+      cell.style.left = `${offsets.get(Number(cell.dataset.sticky))}px`;
+    }
+  };
+  if (typeof ResizeObserver === "function") {
+    new ResizeObserver(() => {
+      // Measured from the cells' natural places, so the old offsets go first.
+      for (const cell of table.querySelectorAll("[data-sticky]")) cell.style.left = "";
+      measure();
+    }).observe(table);
+  }
+  requestAnimationFrame(measure);
+  return table;
+}
+
+/** Fields with a write in flight, for the leave-page prompt. */
+const saving = new Set();
+
+window.addEventListener("beforeunload", (event) => {
+  if (saving.size === 0) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
+
+/** Why a save was refused, in a sentence for the teacher. */
+function refusal(error) {
+  return error instanceof ExamApiError && error.status < 500 ? error.message : "That could not be saved. Please try again.";
+}
+
+/**
+ * Saves `field` whenever its value changes - on the `change` event, so a value
+ * goes out once it is complete (design.md, D4). `save(value)` sends it and
+ * resolves to the server's answer, handed to `onSaved(answer, value)`.
+ * `check(value)` may refuse a value at the field before any request, by
+ * returning the reason.
+ *
+ * One request per field is in flight at a time; a value typed meanwhile waits
+ * behind it, and only the latest does, so a slow answer never overwrites a
+ * newer value. The field shows `is-saving`, briefly `is-saved`, or `is-refused`
+ * with the reason as its title - keeping the typed value, while the stored one
+ * stays as it was. `field.saveNow()` saves the current value at once.
+ */
+export function saveOnChange(field, { save, onSaved = () => {}, check = () => null, value = () => field.value }) {
+  let inFlight = false;
+  let queued;
+  let hasQueued = false;
+  let savedTimer;
+  // The value last sent: the same value again is not sent twice.
+  let sent = value();
+
+  const state = (name, reason = null) => {
+    field.classList.toggle("is-saving", name === "saving");
+    field.classList.toggle("is-saved", name === "saved");
+    field.classList.toggle("is-refused", name === "refused");
+    if (reason) {
+      field.title = reason;
+      field.setAttribute("aria-invalid", "true");
+    } else {
+      field.removeAttribute("title");
+      field.removeAttribute("aria-invalid");
+    }
+  };
+
+  const send = async (current) => {
+    inFlight = true;
+    saving.add(field);
+    clearTimeout(savedTimer);
+    state("saving");
+    try {
+      const answer = await save(current);
+      if (!hasQueued) {
+        state("saved");
+        savedTimer = setTimeout(() => field.classList.remove("is-saved"), 1500);
+      }
+      onSaved(answer, current);
+    } catch (error) {
+      if (!hasQueued) state("refused", refusal(error));
+    } finally {
+      inFlight = false;
+      saving.delete(field);
+      if (hasQueued) {
+        hasQueued = false;
+        send(queued);
+      }
+    }
+  };
+
+  const changed = () => {
+    const current = value();
+    const reason = check(current);
+    if (reason) {
+      hasQueued = false;
+      state("refused", reason);
+      return;
+    }
+    if (current === sent && !field.classList.contains("is-refused")) {
+      hasQueued = false;
+      return;
+    }
+    sent = current;
+    if (inFlight) {
+      queued = current;
+      hasQueued = true;
+      return;
+    }
+    send(current);
+  };
+
+  field.addEventListener("change", changed);
+  field.saveNow = changed;
+  return field;
 }

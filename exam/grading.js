@@ -8,6 +8,10 @@
  * the course's config sheet, and the grading scale turns a fraction into a
  * grade. A category without entries is left out and the remaining weights are
  * scaled up (design.md, D7).
+ *
+ * The year grade is not a semester's proposal over the whole year: it combines
+ * the winter semester's result and the summer semester's own by the course's
+ * winter share (`yearProposal`, `year-grade`).
  */
 
 /** The semesters of a school year. `ss`'s proposal is the grade for the whole year. */
@@ -48,13 +52,12 @@ export function semesterOf(date, year) {
 }
 
 /**
- * The entries a semester's proposal is made of: those dated in the winter
- * semester for `ws`, and every entry of the school year for `ss`, whose grade
- * is the year grade.
+ * The entries a semester's own proposal is made of: those dated in it. The
+ * summer semester counts summer entries only; the winter semester reaches the
+ * year grade through `yearProposal`, not by being counted again.
  */
 export function entriesOfSemester(entries, semester, year) {
-  if (semester === "ss") return entries;
-  return entries.filter((entry) => semesterOf(entry.date, year) === "ws");
+  return entries.filter((entry) => semesterOf(entry.date, year) === semester);
 }
 
 /**
@@ -103,4 +106,32 @@ export function proposal(entries, { semester, year, weights, scale }) {
   );
   const fraction = weightedMean(fractions, weights);
   return { categories, fraction, grade: fraction === null ? null : gradeFor(fraction, scale) };
+}
+
+/**
+ * The fraction that stands for `grade` on `scale`: the middle of its range,
+ * from its own threshold up to the next better grade's, or up to 100 % for a 1.
+ * Computed from the scale as it is now, so it follows a change of the scale.
+ */
+export function bandMidpoint(grade, scale) {
+  const own = scale.find((step) => step.grade === grade);
+  const better = scale.find((step) => step.grade === grade - 1);
+  if (!own) throw new Error(`The scale has no grade ${grade}.`);
+  return (own.minPercent + (better ? better.minPercent : 100)) / 200;
+}
+
+/**
+ * The year proposal: the winter semester's fraction times `share` (whole
+ * percent) plus the summer semester's own fraction times the rest. The winter
+ * fraction is its proposal's, or the band midpoint of its override - the
+ * caller decides which. A side without a fraction leaves the other; with
+ * neither there is no year proposal (null).
+ */
+export function yearProposal(winterFraction, summerFraction, share, scale) {
+  let fraction;
+  if (winterFraction === null && summerFraction === null) return null;
+  if (winterFraction === null) fraction = summerFraction;
+  else if (summerFraction === null) fraction = winterFraction;
+  else fraction = (winterFraction * share + summerFraction * (100 - share)) / 100;
+  return { fraction, grade: gradeFor(fraction, scale) };
 }

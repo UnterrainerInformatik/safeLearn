@@ -368,6 +368,17 @@ export function normalizeWeights(weights) {
   return normalized;
 }
 
+/**
+ * The winter semester's share in the year grade: a whole percentage from 0 to
+ * 100 (`year-grade`). The summer semester has the rest.
+ */
+export function normalizeWinterShare(share) {
+  if (!Number.isInteger(share) || share < 0 || share > 100) {
+    throw new InvalidInputError("The winter semester's share has to be a whole percentage from 0 to 100.");
+  }
+  return share;
+}
+
 function normalizeLanguage(language) {
   if (!languages.includes(language)) {
     throw new InvalidInputError(`A course's language is one of ${languages.join(", ")}.`);
@@ -390,6 +401,7 @@ function courseFromRow(row) {
     subject: row.subject,
     language: row.language,
     weights: { ...defaultWeights, ...JSON.parse(row.weights) },
+    winterShare: row.winter_share,
   };
 }
 
@@ -417,17 +429,18 @@ export function getCourse(db, id) {
  * each subject once, however it is capitalized; a second attempt is refused.
  * The course has no owner - every teacher sees and edits it.
  */
-export function createCourse(db, classId, { subject, language = "de", weights = defaultWeights } = {}) {
+export function createCourse(db, classId, { subject, language = "de", weights = defaultWeights, winterShare = 50 } = {}) {
   getClass(db, classId);
   const values = {
     subject: normalizeSubject(subject),
     language: normalizeLanguage(language),
     weights: normalizeWeights(weights),
+    winterShare: normalizeWinterShare(winterShare),
   };
   try {
     const { lastInsertRowid } = db
-      .prepare("INSERT INTO course (class_id, subject, language, weights) VALUES (?, ?, ?, ?)")
-      .run(classId, values.subject, values.language, JSON.stringify(values.weights));
+      .prepare("INSERT INTO course (class_id, subject, language, weights, winter_share) VALUES (?, ?, ?, ?, ?)")
+      .run(classId, values.subject, values.language, JSON.stringify(values.weights), values.winterShare);
     return getCourse(db, Number(lastInsertRowid));
   } catch (error) {
     if (isUniqueViolation(error)) {
@@ -438,19 +451,22 @@ export function createCourse(db, classId, { subject, language = "de", weights = 
 }
 
 /**
- * Changes a course's language or its config sheet. New weights apply to every
- * student and every semester of the course; proposals are computed on read, so
- * they follow at once, and overrides are not touched.
+ * Changes a course's language or its config sheet - the weights and the winter
+ * semester's share in the year grade. New values apply to every student and
+ * every semester of the course; proposals are computed on read, so they follow
+ * at once, and overrides are not touched.
  */
-export function updateCourse(db, id, { language, weights } = {}) {
+export function updateCourse(db, id, { language, weights, winterShare } = {}) {
   const course = getCourse(db, id);
   const next = {
     language: language === undefined ? course.language : normalizeLanguage(language),
     weights: weights === undefined ? course.weights : normalizeWeights(weights),
+    winterShare: winterShare === undefined ? course.winterShare : normalizeWinterShare(winterShare),
   };
-  db.prepare("UPDATE course SET language = ?, weights = ? WHERE id = ?").run(
+  db.prepare("UPDATE course SET language = ?, weights = ?, winter_share = ? WHERE id = ?").run(
     next.language,
     JSON.stringify(next.weights),
+    next.winterShare,
     id
   );
   return getCourse(db, id);

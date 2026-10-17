@@ -118,11 +118,6 @@
   white-space: nowrap;
 }
 
-.sl-exam-entry summary {
-  cursor: pointer;
-  margin: 0.8em 0 0.4em;
-}
-
 .sl-exam-comment {
   font-style: italic;
 }
@@ -161,4 +156,190 @@ a.sl-exam-button {
   justify-content: center;
   color: inherit;
   text-decoration: none;
+}
+
+/* The table conventions every module table shares (`gradebook-sheet`). */
+
+/* A table that is wider than the content scrolls inside this wrapper, so the
+   scrollbar belongs to the table and not to the page. */
+.sl-exam-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+/* A table, not the block that content tables are made scrollable as, so the
+   wrapper is what scrolls. Separate borders: with collapsed ones, a sticky
+   cell's border stays behind when the cell moves. Each cell draws its right
+   and bottom edge; the first row and column the outer top and left. */
+#markdown-content .sl-exam-scroll > .sl-exam-table {
+  display: table;
+  overflow: visible;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+#markdown-content .sl-exam-scroll > .sl-exam-table th,
+#markdown-content .sl-exam-scroll > .sl-exam-table td {
+  border-width: 0 1px 1px 0;
+}
+
+#markdown-content .sl-exam-scroll > .sl-exam-table tr > :first-child {
+  border-left-width: 1px;
+}
+
+#markdown-content .sl-exam-scroll > .sl-exam-table thead tr:first-child > *,
+#markdown-content .sl-exam-scroll > .sl-exam-table > tbody:first-child tr:first-child > * {
+  border-top-width: 1px;
+}
+
+/* Leading columns that stay in place. Their `left` is measured by the client
+   (`stickyColumns`); the background keeps scrolled cells from showing through,
+   in both themes. */
+.sl-exam-sticky {
+  position: sticky;
+  z-index: 1;
+  background-color: #ffffff;
+}
+
+#markdown-content.dark-mode .sl-exam-sticky {
+  background-color: #1e1e1e;
+}
+
+#markdown-content th.sl-exam-sticky {
+  background-color: #d0d0d0;
+}
+
+#markdown-content.dark-mode th.sl-exam-sticky {
+  background-color: #505050;
+}
+
+/* The marked row: a reading aid, opaque so the sticky cells carry it too. */
+.sl-exam-table tbody tr.is-marked > td {
+  background-color: #dfeffc;
+}
+
+#markdown-content.dark-mode .sl-exam-table tbody tr.is-marked > td {
+  background-color: #1f3a52;
+}
+
+/* A field saved as it changes: saving, saved, refused. */
+.sl-exam .is-saving {
+  outline: 2px dashed rgba(127, 127, 127, 0.7);
+}
+
+.sl-exam .is-saved {
+  outline: 2px solid #2e8b57;
+}
+
+.sl-exam .is-refused {
+  outline: 2px solid #c0392b;
+  background-color: rgba(192, 57, 43, 0.12);
+}
+
+#markdown-content.dark-mode .sl-exam .is-refused {
+  outline-color: #ff7b72;
+}
+
+/* The sheet. */
+
+.sl-exam-sheet td,
+.sl-exam-sheet th {
+  white-space: nowrap;
+}
+
+#markdown-content .sl-exam-sheet td,
+#markdown-content .sl-exam-sheet th {
+  padding: 3px 6px;
+}
+
+.sl-exam-sheet .sl-exam-cell {
+  width: 3.5em;
+  font: inherit;
+  text-align: right;
+}
+
+.sl-exam-sheet .sl-exam-cell.sl-exam-mark {
+  width: 2em;
+  text-align: center;
+}
+
+.sl-exam-sheet .sl-exam-column-head {
+  text-transform: none;
+  font-weight: normal;
+  vertical-align: top;
+}
+
+.sl-exam-sheet .sl-exam-column-head input {
+  display: block;
+  font: inherit;
+  font-size: 0.85em;
+  margin: 1px 0;
+}
+
+.sl-exam-sheet .sl-exam-column-head input[type="text"] {
+  width: 8em;
+  font-weight: bold;
+}
+
+.sl-exam-sheet .sl-exam-column-head .sl-exam-number {
+  width: 5em;
+}
+
+.sl-exam-sheet .sl-exam-category {
+  text-transform: none;
+}
+
+.sl-exam-add {
+  margin-left: 0.5em;
+  font-weight: bold;
+}
+
+.sl-exam-dialog form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* The module bar (`exam-navigation`): directly under the instance's top bar,
+   which is fixed and 50px high, and staying there while the page scrolls. */
+.sl-exam-bar {
+  position: sticky;
+  top: 50px;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  align-items: center;
+  margin: 0 0 0.6em;
+  padding: 6px 0;
+  background-color: #ffffff;
+  border-bottom: 1px solid rgba(27, 31, 35, 0.15);
+  font-size: 0.9em;
+}
+
+#markdown-content.dark-mode .sl-exam-bar {
+  background-color: #1e1e1e;
+  border-bottom-color: rgba(255, 255, 255, 0.2);
+}
+
+.sl-exam-bar-position {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.sl-exam-bar select,
+.sl-exam-bar button {
+  font: inherit;
+}
+
+@media screen and (max-width: 700px) {
+  .sl-exam-bar {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  .sl-exam-bar-position {
+    flex: 1 1 40%;
+  }
 }

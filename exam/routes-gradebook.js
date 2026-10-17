@@ -1,6 +1,7 @@
 /**
- * The routes of the gradebook (`gradebook`). Everything about a course - its
- * overview, a student's record in it, entries, overrides, the scale - is a
+ * The routes of the gradebook (`gradebook`, `gradebook-sheet`). Everything
+ * about a course - its sheet, a student's record in it, columns and their
+ * results, overrides, the scale - is a
  * teacher's: the API refuses any other session with 403, and the pages are not
  * there for it (`gate.js`). A student has exactly one route of their own,
  * `GET /api/my/results`, which answers about the session's own identity and
@@ -8,22 +9,25 @@
  */
 
 import {
-  addEntries,
   courseOverview,
-  deleteEntry,
+  createColumn,
+  deleteColumn,
+  deleteResult,
   findCourse,
   readScale,
   resultsOf,
   semesterToday,
+  setResult,
   setSemesterGrade,
   studentRecord,
-  updateEntry,
+  updateColumn,
   updateScale,
 } from "./gradebook.js";
 import { getCourse, InvalidInputError, NotFoundError } from "./classes.js";
 import { semesters } from "./grading.js";
 import { identityOf, requireTeacher, teacherPage } from "./gate.js";
 import { embedPlaceholder, wrapInPage } from "../obsidian.js";
+import { teacherShell } from "./bar.js";
 
 /** A record id from the path or query; anything but a positive integer names nothing. */
 function idParam(value) {
@@ -76,12 +80,24 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
     return courseOverview(db, id, semesterParam(req.query.semester, getCourse(db, id)));
   });
   api("get", "/courses/:id/students/:username", (req) => studentRecord(db, idParam(req.params.id), req.params.username));
-  api("post", "/courses/:id/entries", (req) => addEntries(db, idParam(req.params.id), req.body?.entries));
   api("put", "/courses/:id/grades/:username/:semester", (req) =>
     setSemesterGrade(db, idParam(req.params.id), req.params.username, req.params.semester, req.body ?? {})
   );
-  api("put", "/entries/:id", (req) => updateEntry(db, idParam(req.params.id), req.body ?? {}));
-  api("delete", "/entries/:id", (req) => deleteEntry(db, idParam(req.params.id)));
+
+  // ------------------------------------------------- columns and their cells
+
+  // One request per field: a cell is written on its own and answers the
+  // student's recomputed row, so writes of a teacher tabbing quickly through a
+  // row cannot undo each other (design.md, D3).
+  api("post", "/courses/:id/assessments", (req) => createColumn(db, idParam(req.params.id), req.body ?? {}));
+  api("put", "/assessments/:id", (req) => updateColumn(db, idParam(req.params.id), req.body ?? {}));
+  api("delete", "/assessments/:id", (req) => deleteColumn(db, idParam(req.params.id)));
+  api("put", "/assessments/:id/results/:username", (req) =>
+    setResult(db, idParam(req.params.id), req.params.username, req.body ?? {})
+  );
+  api("delete", "/assessments/:id/results/:username", (req) =>
+    deleteResult(db, idParam(req.params.id), req.params.username)
+  );
 
   // ---------------------------------------------------- a student's own view
 
@@ -94,37 +110,45 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
 
   // ------------------------------------------------------------------ pages
 
-  const page = (path, gate, crumbs, title, element) =>
+  // A teacher's pages carry the module's bar (`teacherShell`); a student's own
+  // results, which every session can open, do not.
+  const page = (path, title, element) =>
     router.get(
       path,
-      gate,
+      teacherPage,
       handle(async (req, res) => {
-        const { kind, params } = element(req);
-        const body = `
-          ${crumbs ? `<p class="sl-exam-crumbs"><a href="/exam/">Classes and courses</a></p>` : ""}
-          <h1>${title}</h1>
-          ${embedPlaceholder(kind, params)}`;
-        res.send(await wrapInPage(body, startPage(), req, { title, wide: true }));
+        const { kind, params, context } = element(req);
+        res.send(await teacherShell({ db, startPage, req, title, context, kind, params }));
       })
     );
 
-  page("/courses/:id/gradebook", teacherPage, true, "Gradebook", (req) => {
-    const params = { course: String(idParam(req.params.id)) };
-    if (semesters.includes(req.query.semester)) params.semester = req.query.semester;
-    return { kind: "gradebook", params: { ...params, page: "1" } };
+  page("/courses/:id/gradebook", "Gradebook", (req) => {
+    const courseId = idParam(req.params.id);
+    // A page asking for no semester, or for one there is not, shows the one running now.
+    const semester = semesters.includes(req.query.semester) ? req.query.semester : semesterToday(getCourse(db, courseId).year);
+    return { kind: "gradebook", params: { course: String(courseId), semester, page: "1" }, context: { courseId, semester } };
   });
-  page("/courses/:id/students/:username", teacherPage, true, "Student", (req) => ({
-    kind: "gradebook-student",
-    params: { course: String(idParam(req.params.id)), student: String(req.params.username).toLowerCase() },
-  }));
-  page("/scale", teacherPage, true, "Grading scale", () => ({ kind: "scale", params: {} }));
+  page("/courses/:id/students/:username", "Student", (req) => {
+    const courseId = idParam(req.params.id);
+    return {
+      kind: "gradebook-student",
+      params: { course: String(courseId), student: String(req.params.username).toLowerCase() },
+      context: { courseId },
+    };
+  });
+  page("/scale", "Grading scale", () => ({ kind: "scale", params: {}, context: {} }));
+
   // Everyone's own results, a teacher's included - a teacher is on no roster
   // and finds none.
-  page(
+  router.get(
     "/results",
     (req, res, next) => (identityOf(req) ? next() : next("router")),
-    false,
-    "My results",
-    () => ({ kind: "results", params: { page: "1" } })
+    handle(async (req, res) => {
+      const title = "My results";
+      const body = `
+        <h1>${title}</h1>
+        ${embedPlaceholder("results", { page: "1" })}`;
+      res.send(await wrapInPage(body, startPage(), req, { title, wide: true }));
+    })
   );
 }

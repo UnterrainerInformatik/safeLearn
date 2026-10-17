@@ -1,16 +1,19 @@
 /**
  * The elements of classes and courses (`class-roster`), all for teachers:
  *
- * - `classes-home`: the school years, the classes of one of them, a new year
+ * - `classes-home`: the classes of one school year, the one the bar chose
+ * - `year-new`: a new school year (in the bar's dialog)
  * - `class-new`: a new class, its roster ticked from the directory's checklist
+ *   (in the bar's dialog)
  * - `class`: one class's roster during the year, and its courses
+ * - `course-new`: a new course of a class (in the bar's dialog)
  * - `course`: one course's language and config sheet
  *
  * Every change goes through the API, which decides again on the server; these
  * elements only draw what it answers.
  */
 
-import { defineExamElement, ExamApiError, ExamElement, examApi, h } from "./frame.js";
+import { defineExamElement, ExamApiError, ExamElement, examApi, h, markRows, saveOnChange, stickyColumns } from "./frame.js";
 
 export const categoryLabels = {
   onlineTests: "Online tests",
@@ -69,6 +72,17 @@ export async function act(button, line, action) {
   }
 }
 
+/**
+ * A table in its own sideways-scrolling wrapper, its rows marked on click and
+ * its first column - the one naming the row - kept in place.
+ */
+function conventionalTable(table) {
+  for (const row of table.querySelectorAll("tr")) row.firstElementChild?.setAttribute("data-sticky", "0");
+  markRows(table);
+  stickyColumns(table);
+  return h("div", { class: "sl-exam-scroll" }, table);
+}
+
 /** What the directory's state means for the teacher, or null when it is ready. */
 function directoryNotice(state) {
   if (state === "unavailable") {
@@ -98,35 +112,16 @@ function nextYearSuggestion(years) {
 class ClassesHome extends ExamElement {
   async load() {
     const { years, current } = await examApi("/years");
-    const selected = years.find((year) => String(year.id) === this.selectedYear) ?? current ?? years.at(-1) ?? null;
+    const selected = years.find((year) => String(year.id) === this.params.year) ?? current ?? years.at(-1) ?? null;
     const classes = selected ? await examApi(`/years/${selected.id}/classes`) : [];
-    return { years, selected, classes };
+    return { selected, classes };
   }
 
-  render({ years, selected, classes }) {
-    return h(
-      "div",
-      { class: "sl-exam" },
-      selected ? this.yearSection(years, selected, classes) : h("p", {}, "There is no school year yet. Create the first one below."),
-      this.newYearForm(years)
-    );
-  }
-
-  yearSection(years, selected, classes) {
+  render({ selected, classes }) {
+    if (!selected) {
+      return h("div", { class: "sl-exam" }, h("p", {}, "There is no school year yet. Create the first one with the + beside School year above."));
+    }
     const line = messageLine();
-    const picker = h(
-      "select",
-      {
-        "aria-label": "School year",
-        onchange: (event) => {
-          this.selectedYear = event.target.value;
-          this.reload();
-        },
-      },
-      years.map((year) =>
-        h("option", { value: String(year.id), selected: year.id === selected.id }, year.current ? `${year.name} (current)` : year.name)
-      )
-    );
     const makeCurrent = selected.current
       ? null
       : h("button", {
@@ -134,33 +129,35 @@ class ClassesHome extends ExamElement {
           onclick: (event) =>
             act(event.target, line, async () => {
               await examApi(`/years/${selected.id}/current`, { method: "POST" });
-              this.reload();
+              window.location.reload();
             }),
         }, "Make current");
     const table = classes.length
-      ? h(
-          "table",
-          { class: "sl-exam-table" },
-          h("thead", {}, h("tr", {}, h("th", {}, "Class"), h("th", {}, "Students"), h("th", {}, "Courses"))),
+      ? conventionalTable(
           h(
-            "tbody",
-            {},
-            classes.map((klass) =>
-              h(
-                "tr",
-                {},
-                h("td", {}, h("a", { href: `/exam/classes/${klass.id}` }, displayClass(klass.name))),
-                h("td", {}, String(klass.students)),
-                h("td", {}, String(klass.courses))
+            "table",
+            { class: "sl-exam-table sl-exam-classes" },
+            h("thead", {}, h("tr", {}, h("th", {}, "Class"), h("th", {}, "Students"), h("th", {}, "Courses"))),
+            h(
+              "tbody",
+              {},
+              classes.map((klass) =>
+                h(
+                  "tr",
+                  {},
+                  h("td", {}, h("a", { href: `/exam/classes/${klass.id}` }, displayClass(klass.name))),
+                  h("td", {}, String(klass.students)),
+                  h("td", {}, String(klass.courses))
+                )
               )
             )
           )
         )
-      : h("p", {}, "This school year has no classes yet.");
+      : h("p", {}, "This school year has no classes yet. Create one with the + beside Class above.");
     return h(
-      "section",
-      {},
-      h("h2", {}, "School year ", picker, " ", makeCurrent),
+      "div",
+      { class: "sl-exam" },
+      h("h2", {}, `School year ${selected.name}`, selected.current ? " (current)" : "", " ", makeCurrent),
       h(
         "p",
         { class: "sl-exam-quiet" },
@@ -168,11 +165,19 @@ class ClassesHome extends ExamElement {
       ),
       line,
       table,
-      h("p", {}, h("a", { href: `/exam/classes/new?year=${selected.id}` }, "New class…"))
+      h("p", { class: "sl-exam-quiet" }, h("a", { href: "/exam/scale" }, "Grading scale"))
     );
   }
+}
 
-  newYearForm(years) {
+// ------------------------------------------------------- a new school year
+
+class YearNew extends ExamElement {
+  async load() {
+    return (await examApi("/years")).years;
+  }
+
+  render(years) {
     const suggestion = nextYearSuggestion(years);
     const line = messageLine();
     const field = (label, name, type, value) =>
@@ -186,8 +191,7 @@ class ClassesHome extends ExamElement {
           const data = Object.fromEntries(new FormData(form));
           act(form.querySelector("button"), line, async () => {
             const year = await examApi("/years", { method: "POST", body: data });
-            this.selectedYear = String(year.id);
-            this.reload();
+            window.location.assign(`/exam/?year=${year.id}`);
           });
         },
       },
@@ -195,9 +199,9 @@ class ClassesHome extends ExamElement {
       field("Starts", "startsOn", "date", suggestion.startsOn),
       field("Summer semester from", "summerStartsOn", "date", suggestion.summerStartsOn),
       field("Ends", "endsOn", "date", suggestion.endsOn),
-      h("button", { type: "submit" }, "Create school year")
+      h("button", { type: "submit", class: "sl-exam-primary" }, "Create school year")
     );
-    return h("section", {}, h("h2", {}, "New school year"), form, line);
+    return h("div", { class: "sl-exam" }, form, line);
   }
 }
 
@@ -346,10 +350,10 @@ class ClassView extends ExamElement {
       {},
       h("h2", {}, `Roster (${attending.length})`),
       attending.length
-        ? h("table", { class: "sl-exam-table sl-exam-roster" }, h("tbody", {}, rows(attending, true)))
+        ? conventionalTable(h("table", { class: "sl-exam-table sl-exam-roster" }, h("tbody", {}, rows(attending, true))))
         : h("p", {}, "Nobody is on this roster."),
       left.length ? h("h3", {}, `Left the roster (${left.length})`) : null,
-      left.length ? h("table", { class: "sl-exam-table sl-exam-roster" }, h("tbody", {}, rows(left, false))) : null,
+      left.length ? conventionalTable(h("table", { class: "sl-exam-table sl-exam-roster" }, h("tbody", {}, rows(left, false)))) : null,
       h("p", {}, h("button", { type: "button", onclick: refresh }, "Refresh names from the directory")),
       line
     );
@@ -403,27 +407,49 @@ class ClassView extends ExamElement {
   }
 
   courseSection(klass) {
-    const line = messageLine();
-    const subject = h("input", { name: "subject", required: true, placeholder: "WMC", "aria-label": "Subject" });
-    const language = h("select", { name: "language", "aria-label": "Language" }, Object.entries(languageLabels).map(([value, label]) => h("option", { value }, label)));
-    const create = (event) =>
-      act(event.target, line, async () => {
-        const course = await examApi(`/classes/${klass.id}/courses`, {
-          method: "POST",
-          body: { subject: subject.value, language: language.value },
-        });
-        window.location.assign(`/exam/courses/${course.id}`);
-      });
     return h(
       "section",
       {},
       h("h2", {}, "Courses"),
       klass.courses.length
         ? h("ul", {}, klass.courses.map((course) => h("li", {}, h("a", { href: `/exam/courses/${course.id}` }, course.subject), ` (${languageLabels[course.language]}) · `, h("a", { href: `/exam/courses/${course.id}/gradebook` }, "Gradebook"))))
-        : h("p", {}, "This class has no courses yet."),
-      h("p", {}, subject, " ", language, " ", h("button", { type: "button", onclick: create }, "Create course")),
-      line
+        : h("p", {}, "This class has no courses yet. Create one with the + beside Course above.")
     );
+  }
+}
+
+// ------------------------------------------------------------- a new course
+
+class CourseNew extends ExamElement {
+  async load() {
+    return examApi(`/classes/${encodeURIComponent(this.params.class)}`);
+  }
+
+  render(klass) {
+    const line = messageLine();
+    const subject = h("input", { name: "subject", required: true, placeholder: "WMC", "aria-label": "Subject" });
+    const language = h("select", { name: "language", "aria-label": "Language" }, Object.entries(languageLabels).map(([value, label]) => h("option", { value }, label)));
+    const form = h(
+      "form",
+      {
+        class: "sl-exam-form",
+        onsubmit: (event) => {
+          event.preventDefault();
+          act(form.querySelector("button"), line, async () => {
+            const course = await examApi(`/classes/${klass.id}/courses`, {
+              method: "POST",
+              body: { subject: subject.value, language: language.value },
+            });
+            window.location.assign(`/exam/courses/${course.id}`);
+          });
+        },
+      },
+      h("p", {}, `Class ${displayClass(klass.name)} – ${klass.year.name}`),
+      h("label", {}, "Subject ", subject),
+      h("label", {}, "Language ", language),
+      h("button", { type: "submit", class: "sl-exam-primary" }, "Create course")
+    );
+    return h("div", { class: "sl-exam" }, form, line);
   }
 }
 
@@ -434,11 +460,18 @@ class CourseView extends ExamElement {
     return examApi(`/courses/${encodeURIComponent(this.params.course)}`);
   }
 
+  /**
+   * The course's language and config sheet, each saved as it changes. The
+   * weights are saved together, and only while they add up to 100 %; until
+   * then the sum says what is missing.
+   */
   render(course) {
     const heading = document.querySelector("#markdown-content h1");
     if (heading) heading.textContent = `${course.subject} – ${displayClass(course.className)} – ${course.year.name}`;
-    const line = messageLine();
+    const put = (body) => examApi(`/courses/${course.id}`, { method: "PUT", body });
     const language = h("select", { "aria-label": "Language" }, Object.entries(languageLabels).map(([value, label]) => h("option", { value, selected: value === course.language }, label)));
+    saveOnChange(language, { save: (value) => put({ language: value }) });
+
     const sum = h("span", {});
     const inputs = Object.fromEntries(
       course.categories.map((category) => [
@@ -447,38 +480,56 @@ class CourseView extends ExamElement {
       ])
     );
     const weights = () => Object.fromEntries(Object.entries(inputs).map(([category, input]) => [category, Number(input.value)]));
+    const total = () => Object.values(weights()).reduce((a, b) => a + b, 0);
     const updateSum = () => {
-      const total = Object.values(weights()).reduce((a, b) => a + b, 0);
-      sum.textContent = `Together ${total} %`;
-      sum.classList.toggle("sl-embed-error", total !== 100);
+      sum.textContent = total() === 100 ? "Together 100 %" : `Together ${total()} % – saved once they add up to 100 %`;
+      sum.classList.toggle("sl-embed-error", total() !== 100);
     };
     Object.values(inputs).forEach((input) => input.addEventListener("input", updateSum));
     updateSum();
-    const save = (event) =>
-      act(event.target, line, async () => {
-        await examApi(`/courses/${course.id}`, { method: "PUT", body: { language: language.value, weights: weights() } });
-        line.report("Saved.");
-      });
+    const sheet = h(
+      "table",
+      { class: "sl-exam-table sl-exam-config" },
+      h("tbody", {}, course.categories.map((category) => h("tr", {}, h("td", {}, categoryLabels[category]), h("td", {}, inputs[category], " %"))))
+    );
+    // One save for the four fields: their `change` events reach the table.
+    saveOnChange(sheet, {
+      value: () => JSON.stringify(weights()),
+      check: () => (total() === 100 ? null : `The weights add up to ${total()} %, not 100 %.`),
+      save: () => put({ weights: weights() }),
+    });
+
+    const share = h("input", { type: "number", min: "0", max: "100", step: "1", class: "sl-exam-number", value: String(course.winterShare), "aria-label": "Winter semester's share of the year grade" });
+    saveOnChange(share, {
+      check: (value) => (/^\d+$/.test(value) && Number(value) <= 100 ? null : "A whole percentage from 0 to 100."),
+      save: (value) => put({ winterShare: Number(value) }),
+    });
+
     return h(
       "div",
       { class: "sl-exam" },
-      h("p", {}, h("a", { href: `/exam/classes/${course.classId}` }, `Class ${displayClass(course.className)}`), " · ", h("a", { href: `/exam/courses/${course.id}/gradebook` }, "Gradebook")),
+      h("p", { class: "sl-exam-quiet" }, "Every field is saved as it changes."),
       h("p", {}, h("label", {}, "Tests are presented in ", language)),
       h("h2", {}, "Config sheet"),
       h("p", { class: "sl-exam-quiet" }, "How much each category counts towards the semester grade. A category without entries is left out and the others are scaled up."),
-      h(
-        "table",
-        { class: "sl-exam-table" },
-        h("tbody", {}, course.categories.map((category) => h("tr", {}, h("td", {}, categoryLabels[category]), h("td", {}, inputs[category], " %"))))
-      ),
+      conventionalTable(sheet),
       h("p", {}, sum),
-      h("p", {}, h("button", { type: "button", class: "sl-exam-primary", onclick: save }, "Save")),
-      line
+      h("h2", {}, "Year grade"),
+      h(
+        "p",
+        {},
+        h("label", {}, "The winter semester counts ", share, " % towards the year grade"),
+        h("br"),
+        h("span", { class: "sl-exam-quiet" }, "The summer semester's own results count the rest. An overridden winter semester counts as the middle of its grade's range.")
+      ),
+      h("p", {}, h("a", { href: `/exam/courses/${course.id}/gradebook` }, "Open the gradebook"))
     );
   }
 }
 
 defineExamElement("classes-home", ClassesHome);
+defineExamElement("year-new", YearNew);
 defineExamElement("class-new", ClassNew);
 defineExamElement("class", ClassView);
+defineExamElement("course-new", CourseNew);
 defineExamElement("course", CourseView);

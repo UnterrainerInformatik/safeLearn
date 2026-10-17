@@ -1,10 +1,11 @@
 /**
- * The elements of the gradebook (`gradebook`):
+ * The elements of the gradebook (`gradebook`, `gradebook-sheet`, `year-grade`):
  *
- * - `gradebook`: a course's overview for one semester, with a form to record
- *   an entry for the whole class at once (teachers; a page and an embed)
- * - `gradebook-student`: one student's record in a course - entries to edit
- *   or delete, and the override and comment per semester (teachers)
+ * - `gradebook`: a course's sheet for one semester - one column per
+ *   assessment, one row per student, every field saved as it changes
+ *   (teachers; a page and an embed)
+ * - `gradebook-student`: one student's record in a course - the override and
+ *   comment per semester, and their results by column, read-only (teachers)
  * - `scale`: the grading scale (teachers)
  * - `results`: a student's own results (everyone; a page and an embed)
  *
@@ -13,20 +14,35 @@
  */
 
 import { act, categoryLabels, displayClass, displayDate, displayPerson, messageLine } from "./classes.js";
-import { defineExamElement, ExamElement, examApi, h } from "./frame.js";
+import { defineExamElement, ExamElement, examApi, h, markRows, saveOnChange, stickyColumns } from "./frame.js";
 
 const categories = ["onlineTests", "manualTests", "participation", "homework"];
 
-const kindLabels = { test: "Test", plusminus: "Participation", homework: "Homework" };
+/** The kind a category's `+` adds a column of. Online tests have no `+`: their columns are the tests. */
+const addableKinds = { manualTests: "test", participation: "plusminus", homework: "homework" };
 
 const semesterLabels = { ws: "Winter semester", ss: "Whole year (summer semester)" };
+
+/** The reader's decimal separator, for showing and reading typed numbers. */
+const decimalSeparator = (1.5).toLocaleString().charAt(1);
 
 /** A fraction as a percentage for reading: 0.815 → "81.5 %". */
 function percent(fraction) {
   return `${(Math.round(fraction * 1000) / 10).toLocaleString()} %`;
 }
 
-/** An entry's result as it was entered: "17/24", "75 %", "+" or "−". */
+/** A number as a field shows it: `17.5` → "17,5" where that is how numbers are written. */
+function numberText(value) {
+  return String(value).replace(".", decimalSeparator);
+}
+
+/** A typed number, with either separator: "17,5" → 17.5; NaN for anything else. */
+function parseNumber(text) {
+  const trimmed = text.trim().replace(",", ".");
+  return /^\d+(\.\d+)?$|^\.\d+$/.test(trimmed) ? Number(trimmed) : Number.NaN;
+}
+
+/** A result as it was entered: "17/24", "75 %", "+" or "−". */
 function entryResult(entry) {
   if (entry.kind === "plusminus") return entry.value === 1 ? "+" : "−";
   if (entry.maxPoints !== null) return `${entry.points.toLocaleString()}/${entry.maxPoints.toLocaleString()}`;
@@ -39,17 +55,49 @@ function categoryCell(category) {
   return h("td", { title: `${category.count} entr${category.count === 1 ? "y" : "ies"}` }, `${percent(category.fraction)} · ${category.grade}`);
 }
 
+/** A proposal for reading: "2 (81.5 %)", or a dash without one. */
+function proposalText(proposal) {
+  return proposal ? `${proposal.grade} (${percent(proposal.fraction)})` : "–";
+}
+
+/** The winter grade the year builds on: "1 (override)", "2", or a dash. */
+function winterText(winter) {
+  if (!winter || winter.grade === null) return "–";
+  return winter.overridden ? `${winter.grade} (override)` : String(winter.grade);
+}
+
+/** What the categories of a row are, for the proposal's tooltip. */
+function categoriesTitle(rowCategories) {
+  return categories
+    .filter((category) => rowCategories[category])
+    .map((category) => `${categoryLabels[category]}: ${percent(rowCategories[category].fraction)}`)
+    .join("\n");
+}
+
 /** Today as an ISO date in the reader's time zone. */
 function today() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
-/** A date inside `year` for a new entry: today, or the year's nearer end. */
-function defaultDate(year) {
+/** The day before an ISO date. */
+function dayBefore(iso) {
+  const date = new Date(`${iso}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
+/** The first and last day of `semester` in `year`. */
+function semesterRange(year, semester) {
+  return semester === "ws" ? [year.startsOn, dayBefore(year.summerStartsOn)] : [year.summerStartsOn, year.endsOn];
+}
+
+/** A date for a new column: today, or the semester's nearer end. */
+function defaultDate(year, semester) {
+  const [from, to] = semesterRange(year, semester);
   const date = today();
-  if (date < year.startsOn) return year.startsOn;
-  if (date > year.endsOn) return year.endsOn;
+  if (date < from) return from;
+  if (date > to) return to;
   return date;
 }
 
@@ -57,84 +105,39 @@ function courseTitle(course) {
   return `${course.subject} – ${displayClass(course.className)} – ${course.year.name}`;
 }
 
+/** A table in its own sideways-scrolling wrapper, with marked rows and its sticky cells kept in place. */
+function scrollingTable(table) {
+  markRows(table);
+  stickyColumns(table);
+  return h("div", { class: "sl-exam-scroll" }, table);
+}
+
+// ---------------------------------------------------------- the sheet
+
+/** What a result field shows for a stored result in `column`. */
+function cellText(column, result) {
+  if (!result) return "";
+  if (column.kind === "plusminus") return result.value === 1 ? "+" : "−";
+  if (column.maxPoints !== null) return numberText(result.points);
+  return numberText(Math.round(result.value * 10000) / 100);
+}
+
 /**
- * The result fields of an entry of `kind`: a +/− choice for participation,
- * otherwise a result and an optional maximum. Without a maximum the result is
- * a percentage. `read()` answers the API's fields, or null while empty.
+ * What a typed value means for `column`: `{ body }` to store, `{ empty }` to
+ * remove the result, or `{ reason }` when the field refuses it before any
+ * request.
  */
-function resultFields(kind, initial = null, { withMax = true } = {}) {
-  if (kind === "plusminus") {
-    const mark = h(
-      "select",
-      { "aria-label": "Mark" },
-      h("option", { value: "" }, ""),
-      h("option", { value: "+", selected: initial?.kind === "plusminus" && initial.value === 1 }, "+"),
-      h("option", { value: "-", selected: initial?.kind === "plusminus" && initial.value === 0 }, "−")
-    );
-    return { nodes: [mark], read: () => (mark.value ? { mark: mark.value } : null), focus: () => mark.focus() };
+function readCell(column, text) {
+  const trimmed = text.trim();
+  if (trimmed === "") return { empty: true };
+  if (column.kind === "plusminus") {
+    const mark = trimmed.replace("−", "-");
+    return mark === "+" || mark === "-" ? { body: { mark } } : { reason: "A participation mark is + or −." };
   }
-  const fromEntry = initial && initial.kind !== "plusminus";
-  const result = h("input", {
-    type: "number",
-    min: "0",
-    step: "any",
-    class: "sl-exam-number",
-    "aria-label": "Result",
-    value: fromEntry ? String(initial.maxPoints !== null ? initial.points : Math.round(initial.value * 10000) / 100) : "",
-  });
-  const max = withMax
-    ? h("input", {
-        type: "number",
-        min: "0",
-        step: "any",
-        class: "sl-exam-number",
-        "aria-label": "Maximum points",
-        placeholder: "%",
-        value: fromEntry && initial.maxPoints !== null ? String(initial.maxPoints) : "",
-      })
-    : null;
-  return {
-    nodes: max ? [result, " of ", max] : [result],
-    max,
-    read: (sharedMax = max?.value) => {
-      if (result.value === "") return null;
-      const value = Number(result.value);
-      return sharedMax ? { points: value, maxPoints: Number(sharedMax) } : { fraction: value / 100 };
-    },
-    focus: () => result.focus(),
-  };
+  const value = parseNumber(trimmed);
+  if (Number.isNaN(value)) return { reason: "Enter a number." };
+  return { body: column.maxPoints !== null ? { points: value } : { percent: value } };
 }
-
-/**
- * A row of fields for one entry: kind, date, result and note. `read()`
- * answers the entry as the API takes it, or null while the result is empty.
- */
-function entryFields(year, initial = null) {
-  const kind = h(
-    "select",
-    { "aria-label": "Kind" },
-    Object.entries(kindLabels).map(([value, label]) => h("option", { value, selected: initial?.kind === value }, label))
-  );
-  const date = h("input", { type: "date", "aria-label": "Date", min: year.startsOn, max: year.endsOn, value: initial?.date ?? defaultDate(year) });
-  const note = h("input", { "aria-label": "Note (the student sees it)", placeholder: "note, the student sees it", value: initial?.note ?? "" });
-  const slot = h("span", {});
-  let result;
-  const draw = () => {
-    result = resultFields(kind.value, initial);
-    slot.replaceChildren(...result.nodes);
-  };
-  kind.addEventListener("change", draw);
-  draw();
-  return {
-    nodes: [kind, " ", date, " ", slot, " ", note],
-    read: () => {
-      const value = result.read();
-      return value === null ? null : { kind: kind.value, date: date.value, note: note.value, ...value };
-    },
-  };
-}
-
-// --------------------------------------------------------- course overview
 
 class GradebookView extends ExamElement {
   /** The course's id: given directly, or looked up by class and subject. */
@@ -157,19 +160,26 @@ class GradebookView extends ExamElement {
     const onPage = this.params.page === "1";
     if (onPage) {
       const heading = document.querySelector("#markdown-content h1");
-      if (heading) heading.textContent = `Gradebook – ${courseTitle(course)}`;
+      if (heading) heading.textContent = `Gradebook – ${courseTitle(course)} – ${semesterLabels[semester]}`;
     }
-    const picker = h(
-      "select",
-      {
-        "aria-label": "Semester",
-        onchange: (event) => {
-          this.semester = event.target.value;
-          this.reload();
-        },
-      },
-      Object.entries(semesterLabels).map(([value, label]) => h("option", { value, selected: value === semester }, label))
-    );
+    // On a page the module bar chooses the semester; an embed has no bar.
+    const picker = onPage
+      ? null
+      : h(
+          "select",
+          {
+            "aria-label": "Semester",
+            onchange: (event) => {
+              this.semester = event.target.value;
+              this.reload();
+            },
+          },
+          Object.entries(semesterLabels).map(([value, label]) => h("option", { value, selected: value === semester }, label))
+        );
+    this.line = messageLine();
+    const groups = categories
+      .map((category) => ({ category, columns: overview.columns.filter((column) => column.category === category) }))
+      .filter((group) => group.columns.length > 0 || addableKinds[group.category]);
     return h(
       "div",
       { class: "sl-exam" },
@@ -178,104 +188,298 @@ class GradebookView extends ExamElement {
         "p",
         {},
         picker,
-        " ",
+        picker ? " " : null,
         h("a", { href: `/exam/courses/${course.id}` }, "Config sheet"),
         " · ",
         h("a", { href: "/exam/scale" }, "Grading scale"),
         onPage ? null : [" · ", h("a", { href: `/exam/courses/${course.id}/gradebook?semester=${semester}` }, "Open as a page")]
       ),
-      this.table(course, overview.students),
-      overview.left.length ? [h("h4", {}, `Left the roster (${overview.left.length})`), this.table(course, overview.left)] : null,
-      overview.students.length ? this.classEntryForm(course, overview.students) : null
+      h(
+        "p",
+        { class: "sl-exam-quiet" },
+        "Every field is saved as it changes. A column without a maximum takes its results in percent. ",
+        "The arrow keys move between results: up and down along a column, left and right at the start or end of a value."
+      ),
+      overview.students.length
+        ? this.sheet(overview, groups, overview.students, true)
+        : h("p", {}, "Nobody is on this course's roster."),
+      overview.left.length ? [h("h4", {}, `Left the roster (${overview.left.length})`), this.sheet(overview, groups, overview.left, false)] : null,
+      this.line
     );
   }
 
-  table(course, rows) {
-    if (rows.length === 0) return h("p", {}, "Nobody is on this course's roster.");
-    return h(
-      "table",
-      { class: "sl-exam-table sl-exam-gradebook" },
-      h(
-        "thead",
-        {},
-        h(
-          "tr",
-          {},
-          h("th", {}, "Student"),
-          categories.map((category) => h("th", {}, `${categoryLabels[category]} (${course.weights[category]} %)`)),
-          h("th", {}, "Proposal"),
-          h("th", {}, "Override"),
-          h("th", {}, "Grade")
-        )
-      ),
-      h(
-        "tbody",
-        {},
-        rows.map((row) =>
-          h(
-            "tr",
-            { class: row.leftAt ? "sl-exam-left" : null },
-            h("td", {}, h("a", { href: `/exam/courses/${course.id}/students/${encodeURIComponent(row.username)}` }, displayPerson(row))),
-            categories.map((category) => categoryCell(row.categories[category])),
-            h("td", {}, row.proposal ? `${row.proposal.grade} (${percent(row.proposal.fraction)})` : "–"),
-            h("td", { title: row.comment ?? "" }, row.override === null ? "" : String(row.override), row.comment ? " ✎" : ""),
-            h("td", { class: "sl-exam-grade" }, row.effective === null ? "–" : String(row.effective))
-          )
-        )
-      )
-    );
+  /** The leading columns, left to right: the year view adds the winter grade it builds on. */
+  leading(semester) {
+    return semester === "ss" ? ["Student", "Winter", "Year proposal", "Override", "Grade"] : ["Student", "Proposal", "Override", "Grade"];
   }
 
   /**
-   * One entry for every attending student at once, such as a paper test: one
-   * kind, date, maximum and note, and a result per student. Students left
-   * empty get no entry.
+   * The sheet: the leading columns, then the categories as headings spanning
+   * their columns, each column's name, date and maximum below, and a field
+   * per student and column. `editable` is false for those who left the roster.
    */
-  classEntryForm(course, students) {
-    const line = messageLine();
-    const kind = h("select", { "aria-label": "Kind" }, Object.entries(kindLabels).map(([value, label]) => h("option", { value }, label)));
-    const date = h("input", { type: "date", "aria-label": "Date", min: course.year.startsOn, max: course.year.endsOn, value: defaultDate(course.year) });
-    const max = h("input", { type: "number", min: "0", step: "any", class: "sl-exam-number", "aria-label": "Maximum points", placeholder: "%" });
-    const maxLabel = h("label", {}, "Out of ", max, " points (empty: results in %)");
-    const note = h("input", { "aria-label": "Note (the students see it)", placeholder: "e.g. 1st test" });
-    const cells = students.map(() => h("td", {}));
-    let fields = [];
-    const draw = () => {
-      fields = students.map((_, index) => {
-        const field = resultFields(kind.value, null, { withMax: false });
-        cells[index].replaceChildren(...field.nodes);
-        return field;
-      });
-      maxLabel.hidden = kind.value === "plusminus";
-    };
-    kind.addEventListener("change", draw);
-    draw();
+  sheet(overview, groups, rows, editable) {
+    const { course, semester } = overview;
+    const leading = this.leading(semester);
+    const headRow = h(
+      "tr",
+      {},
+      leading.map((label, index) => h("th", { rowspan: "2", "data-sticky": String(index) }, label)),
+      groups.map((group) =>
+        h(
+          "th",
+          { colspan: String(Math.max(1, group.columns.length)), class: "sl-exam-category" },
+          `${categoryLabels[group.category]} (${course.weights[group.category]} %)`,
+          editable && addableKinds[group.category]
+            ? h("button", { type: "button", class: "sl-exam-add", title: `Add a column to ${categoryLabels[group.category]}`, "aria-label": `Add a column to ${categoryLabels[group.category]}`, onclick: () => this.addColumn(course, semester, group.category) }, "+")
+            : null
+        )
+      )
+    );
+    const columnRow = h(
+      "tr",
+      {},
+      groups.map((group) =>
+        group.columns.length ? group.columns.map((column) => this.columnHead(course, column, editable)) : h("th", { class: "sl-exam-column-head sl-exam-quiet" }, "no columns yet")
+      )
+    );
+    const ordered = groups.flatMap((group) => group.columns);
+    const body = h(
+      "tbody",
+      {},
+      rows.map((row, rowIndex) => this.studentRow(overview, groups, ordered, row, rowIndex, editable))
+    );
+    const table = h("table", { class: "sl-exam-table sl-exam-sheet sl-exam-gradebook" }, h("thead", {}, headRow, columnRow), body);
+    if (editable) table.addEventListener("keydown", (event) => this.arrowKey(table, event));
+    return scrollingTable(table);
+  }
 
-    const save = (event) =>
-      act(event.target, line, async () => {
-        const shared = kind.value === "plusminus" ? undefined : max.value;
-        const entries = [];
-        students.forEach((student, index) => {
-          const value = fields[index].read(shared);
-          if (value) entries.push({ username: student.username, kind: kind.value, date: date.value, note: note.value, ...value });
-        });
-        if (entries.length === 0) {
-          line.report("Enter a result for at least one student.", true);
-          return;
-        }
-        await examApi(`/courses/${course.id}/entries`, { method: "POST", body: { entries } });
+  /** A column's header: its name, date and maximum, editable in place, and its delete button. */
+  columnHead(course, column, editable) {
+    if (!editable) {
+      return h(
+        "th",
+        { class: "sl-exam-column-head" },
+        h("strong", {}, column.name),
+        h("br"),
+        displayDate(column.date),
+        column.maxPoints !== null ? [h("br"), `/ ${column.maxPoints.toLocaleString()}`] : null
+      );
+    }
+    const put = (body) => examApi(`/assessments/${column.id}`, { method: "PUT", body });
+    const name = saveOnChange(h("input", { type: "text", value: column.name, "aria-label": "Column name" }), {
+      save: (value) => put({ name: value }),
+    });
+    const date = saveOnChange(h("input", { type: "date", value: column.date, min: course.year.startsOn, max: course.year.endsOn, "aria-label": "Column date" }), {
+      check: (value) => (value ? null : "A column needs a date."),
+      save: (value) => put({ date: value }),
+      // A new date may move the column, or out of this semester.
+      onSaved: () => this.reload(),
+    });
+    const max =
+      column.kind === "plusminus"
+        ? null
+        : saveOnChange(
+            h("input", {
+              type: "text",
+              inputmode: "decimal",
+              class: "sl-exam-number",
+              value: column.maxPoints === null ? "" : numberText(column.maxPoints),
+              placeholder: "max. (%)",
+              "aria-label": "Maximum points",
+            }),
+            {
+              check: (value) => (value.trim() === "" || !Number.isNaN(parseNumber(value)) ? null : "Enter a number of points, or nothing for percent."),
+              save: (value) => put({ maxPoints: value.trim() === "" ? null : parseNumber(value) }),
+              // Every result of the column is recomputed.
+              onSaved: () => this.reload(),
+            }
+          );
+    const remove = (event) => {
+      if (column.results > 0 && !window.confirm(`Delete the column ${column.name} and its ${column.results} result(s)?`)) return;
+      act(event.target, this.line, async () => {
+        await examApi(`/assessments/${column.id}`, { method: "DELETE" });
         await this.reload();
       });
-
+    };
     return h(
-      "details",
-      { class: "sl-exam-entry" },
-      h("summary", {}, "Record an entry for the class"),
-      h("p", {}, h("label", {}, "Kind ", kind), " ", h("label", {}, "Date ", date), " ", maxLabel, " ", h("label", {}, "Note ", note)),
-      h("table", { class: "sl-exam-table" }, h("tbody", {}, students.map((student, index) => h("tr", {}, h("td", {}, displayPerson(student)), cells[index])))),
-      h("p", {}, h("button", { type: "button", class: "sl-exam-primary", onclick: save }, "Record")),
+      "th",
+      { class: "sl-exam-column-head", "data-column": String(column.id) },
+      name,
+      date,
+      max,
+      h("button", { type: "button", class: "sl-exam-delete", title: "Delete this column", "aria-label": `Delete the column ${column.name}`, onclick: remove }, "×")
+    );
+  }
+
+  /** One student's row: the leading cells, then one field per column. */
+  studentRow(overview, groups, ordered, row, rowIndex, editable) {
+    const { course, semester } = overview;
+    const proposalCell = h("td", { class: "sl-exam-proposal" });
+    const winterCell = semester === "ss" ? h("td", { class: "sl-exam-winter" }) : null;
+    const gradeCell = h("td", { class: "sl-exam-grade" });
+    const show = (values) => {
+      proposalCell.textContent = proposalText(values.proposal);
+      proposalCell.title = categoriesTitle(values.categories ?? {});
+      if (winterCell) winterCell.textContent = winterText(values.winter);
+      gradeCell.textContent = values.effective === null ? "–" : String(values.effective);
+    };
+    show(row);
+
+    let overrideCell;
+    if (editable) {
+      const override = h(
+        "select",
+        { "aria-label": `Override for ${displayPerson(row)}`, class: "sl-exam-override" },
+        h("option", { value: "" }, "–"),
+        [1, 2, 3, 4, 5].map((grade) => h("option", { value: String(grade), selected: row.override === grade }, String(grade)))
+      );
+      saveOnChange(override, {
+        save: (value) =>
+          examApi(`/courses/${course.id}/grades/${encodeURIComponent(row.username)}/${semester}`, {
+            method: "PUT",
+            body: { override: value ? Number(value) : null },
+          }),
+        onSaved: (record) => show(record.semesters[semester]),
+      });
+      overrideCell = h("td", { title: row.comment ?? "" }, override, row.comment ? " ✎" : "");
+    } else {
+      overrideCell = h("td", { title: row.comment ?? "" }, row.override === null ? "" : String(row.override), row.comment ? " ✎" : "");
+    }
+
+    const leadingCells = [
+      h("td", {}, h("a", { href: `/exam/courses/${course.id}/students/${encodeURIComponent(row.username)}` }, displayPerson(row))),
+      winterCell,
+      proposalCell,
+      overrideCell,
+      gradeCell,
+    ].filter(Boolean);
+    leadingCells.forEach((cell, index) => cell.setAttribute("data-sticky", String(index)));
+
+    const fieldCells = groups.map((group) =>
+      group.columns.length
+        ? group.columns.map((column) => this.resultCell(course, column, ordered.indexOf(column), row, rowIndex, editable, show))
+        : h("td", {})
+    );
+    return h("tr", { class: row.leftAt ? "sl-exam-left" : null, "data-student": row.username }, leadingCells, fieldCells);
+  }
+
+  /** A student's field in one column, saved as it changes; read-only text for someone who left. */
+  resultCell(course, column, columnIndex, row, rowIndex, editable, show) {
+    const result = row.results[column.id] ?? null;
+    if (!editable) return h("td", {}, cellText(column, result));
+    const mark = column.kind === "plusminus";
+    let stored = result;
+    const field = h("input", {
+      type: "text",
+      class: mark ? "sl-exam-cell sl-exam-mark" : "sl-exam-cell",
+      inputmode: mark ? "text" : "decimal",
+      maxlength: mark ? "1" : null,
+      autocomplete: "off",
+      value: cellText(column, result),
+      "data-row": String(rowIndex),
+      "data-col": String(columnIndex),
+      "data-assessment": String(column.id),
+      "data-student": row.username,
+      "aria-label": `${displayPerson(row)} – ${column.name}`,
+    });
+    const path = `/assessments/${column.id}/results/${encodeURIComponent(row.username)}`;
+    saveOnChange(field, {
+      check: (text) => readCell(column, text).reason ?? null,
+      save: async (text) => {
+        const typed = readCell(column, text);
+        if (typed.empty) return stored === null ? null : examApi(path, { method: "DELETE" });
+        return examApi(path, { method: "PUT", body: typed.body });
+      },
+      onSaved: (answer) => {
+        if (!answer) return;
+        stored = answer.results[column.id] ?? null;
+        show(answer);
+      },
+    });
+    if (mark) {
+      // A + or − is set by typing it, replacing what is there: one keystroke
+      // is a complete value, so it is saved at once. The minus is shown as −.
+      field.addEventListener("keydown", (event) => {
+        if (!["+", "-", "−"].includes(event.key)) return;
+        event.preventDefault();
+        field.value = event.key === "+" ? "+" : "−";
+        field.saveNow();
+      });
+    }
+    return h("td", {}, field);
+  }
+
+  /**
+   * The arrow keys between result fields (design.md, D9): up and down along a
+   * column, left and right along a row - but only with the cursor at the
+   * value's end or start, so they still move the cursor inside a value. The
+   * focus leaving a field fires its `change`, which saves it.
+   */
+  arrowKey(table, event) {
+    const field = event.target;
+    if (!(field instanceof HTMLInputElement) || !field.classList.contains("sl-exam-cell")) return;
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const row = Number(field.dataset.row);
+    const col = Number(field.dataset.col);
+    const { selectionStart: start, selectionEnd: end, value } = field;
+    // A field whose whole text is selected - as it is right after arriving -
+    // and a + or − field, which is never edited character by character, stand
+    // at both edges.
+    const whole = field.classList.contains("sl-exam-mark") || (start === 0 && end === value.length);
+    let target;
+    if (event.key === "ArrowDown") target = [row + 1, col];
+    else if (event.key === "ArrowUp") target = [row - 1, col];
+    else if (event.key === "ArrowRight" && (whole || (start === end && end === value.length))) target = [row, col + 1];
+    else if (event.key === "ArrowLeft" && (whole || (start === end && start === 0))) target = [row, col - 1];
+    else return;
+    // Nothing is stepped or moved inside the field; at the sheet's edge the focus stays.
+    event.preventDefault();
+    const next = table.querySelector(`input.sl-exam-cell[data-row="${target[0]}"][data-col="${target[1]}"]`);
+    if (!next) return;
+    next.focus();
+    next.select();
+  }
+
+  /** The `+` of a category: a column's name, date and, where the category has one, maximum. */
+  addColumn(course, semester, category) {
+    const kind = addableKinds[category];
+    const [from, to] = semesterRange(course.year, semester);
+    const line = messageLine();
+    const name = h("input", { type: "text", name: "name", placeholder: "e.g. 1st test – empty: the date", "aria-label": "Name" });
+    const date = h("input", { type: "date", name: "date", required: true, min: course.year.startsOn, max: course.year.endsOn, value: defaultDate(course.year, semester), "aria-label": "Date" });
+    const max = kind === "plusminus" ? null : h("input", { type: "text", name: "maxPoints", inputmode: "decimal", class: "sl-exam-number", placeholder: "empty: percent", "aria-label": "Maximum points" });
+    const dialog = h("dialog", { class: "sl-exam-dialog sl-exam" });
+    const form = h(
+      "form",
+      {
+        onsubmit: (event) => {
+          event.preventDefault();
+          const maxPoints = max && max.value.trim() !== "" ? parseNumber(max.value) : null;
+          if (Number.isNaN(maxPoints)) {
+            line.report("The maximum is a number of points, or nothing for percent.", true);
+            return;
+          }
+          act(form.querySelector("button[type=submit]"), line, async () => {
+            await examApi(`/courses/${course.id}/assessments`, { method: "POST", body: { kind, name: name.value, date: date.value, maxPoints } });
+            dialog.close();
+            await this.reload();
+          });
+        },
+      },
+      h("h3", {}, `New column: ${categoryLabels[category]}`),
+      h("label", {}, "Name ", name),
+      h("label", {}, "Date ", date),
+      date.value < from || date.value > to ? null : h("span", { class: "sl-exam-quiet" }, `${semesterLabels[semester]}: ${displayDate(from)} – ${displayDate(to)}`),
+      max ? h("label", {}, "Out of ", max, " points") : null,
+      h("p", {}, h("button", { type: "submit", class: "sl-exam-primary" }, "Add column"), " ", h("button", { type: "button", onclick: () => dialog.close() }, "Cancel")),
       line
     );
+    dialog.append(form);
+    dialog.addEventListener("close", () => dialog.remove());
+    this.append(dialog);
+    dialog.showModal();
+    name.focus();
   }
 }
 
@@ -293,124 +497,91 @@ class GradebookStudent extends ExamElement {
     return h(
       "div",
       { class: "sl-exam" },
-      h("p", {}, h("a", { href: `/exam/courses/${course.id}/gradebook` }, "Back to the gradebook")),
       student.leftAt ? h("p", { class: "sl-exam-quiet" }, `Left the roster on ${displayDate(student.leftAt)}.`) : null,
-      ["ws", "ss"].map((semester) => this.semesterSection(record, semester)),
-      this.entriesSection(record)
+      ["ws", "ss"].map((semester) => this.semesterSection(record, semester))
     );
   }
 
-  semesterSection({ course, student, semesters }, semester) {
+  semesterSection({ course, student, semesters, entries }, semester) {
     const values = semesters[semester];
-    const line = messageLine();
+    const put = (body) =>
+      examApi(`/courses/${course.id}/grades/${encodeURIComponent(student.username)}/${semester}`, { method: "PUT", body });
+    const proposalCell = h("td", {}, values.proposal ? proposalText(values.proposal) : "– (no entries)");
+    const gradeCell = h("td", { class: "sl-exam-grade" });
+    const showGrade = (current) => {
+      gradeCell.textContent = `${current.effective === null ? "–" : current.effective}${current.override !== null ? " (override)" : ""}`;
+    };
+    showGrade(values);
+
     const override = h(
       "select",
       { "aria-label": "Override" },
       h("option", { value: "" }, "none – the proposal counts"),
       [1, 2, 3, 4, 5].map((grade) => h("option", { value: String(grade), selected: values.override === grade }, String(grade)))
     );
+    saveOnChange(override, {
+      save: (value) => put({ override: value ? Number(value) : null }),
+      onSaved: (answer) => showGrade(answer.semesters[semester]),
+    });
     const comment = h("textarea", { rows: 2, cols: 50, "aria-label": "Comment" });
     comment.value = values.comment ?? "";
-    const visible = h("input", { type: "checkbox", checked: values.commentVisible });
-    const save = (event) =>
-      act(event.target, line, async () => {
-        await examApi(`/courses/${course.id}/grades/${encodeURIComponent(student.username)}/${semester}`, {
-          method: "PUT",
-          body: { override: override.value ? Number(override.value) : null, comment: comment.value, commentVisible: visible.checked },
-        });
-        await this.reload();
-      });
+    saveOnChange(comment, { save: (value) => put({ comment: value }) });
+    const visible = h("input", { type: "checkbox", checked: values.commentVisible, "aria-label": "The student sees the comment" });
+    saveOnChange(visible, { value: () => visible.checked, save: (checked) => put({ commentVisible: checked }) });
+
+    const own = entries.filter((entry) => entry.semester === semester);
     return h(
       "section",
       {},
       h("h2", {}, semesterLabels[semester]),
-      h(
-        "table",
-        { class: "sl-exam-table" },
+      scrollingTable(
         h(
-          "tbody",
-          {},
-          categories.map((category) => h("tr", {}, h("td", {}, `${categoryLabels[category]} (${course.weights[category]} %)`), categoryCell(values.categories[category]))),
-          h("tr", {}, h("td", {}, "Proposal"), h("td", {}, values.proposal ? `${values.proposal.grade} (${percent(values.proposal.fraction)})` : "– (no entries)")),
-          h("tr", {}, h("td", {}, "Grade"), h("td", { class: "sl-exam-grade" }, values.effective === null ? "–" : String(values.effective), values.override !== null ? " (override)" : ""))
+          "table",
+          { class: "sl-exam-table" },
+          h(
+            "tbody",
+            {},
+            categories.map((category) => h("tr", {}, h("td", { "data-sticky": "0" }, `${categoryLabels[category]} (${course.weights[category]} %)`), categoryCell(values.categories[category]))),
+            semester === "ss" ? h("tr", {}, h("td", { "data-sticky": "0" }, `Winter semester (${course.winterShare} % of the year)`), h("td", {}, winterText(values.winter))) : null,
+            h("tr", {}, h("td", { "data-sticky": "0" }, semester === "ss" ? "Year proposal" : "Proposal"), proposalCell),
+            h("tr", {}, h("td", { "data-sticky": "0" }, "Grade"), gradeCell)
+          )
         )
       ),
       h("p", {}, h("label", {}, "Override ", override)),
       h("p", {}, h("label", {}, "Comment", h("br"), comment)),
       h("p", {}, h("label", {}, visible, " The student sees the comment")),
-      h("p", {}, h("button", { type: "button", onclick: save }, "Save")),
-      line
+      h("h3", {}, `Results (${own.length})`),
+      own.length ? resultsTable(own) : h("p", { class: "sl-exam-quiet" }, "No results in this semester."),
+      h("p", {}, h("a", { href: `/exam/courses/${course.id}/gradebook?semester=${semester}` }, "Enter results in the gradebook"))
     );
   }
+}
 
-  entriesSection({ course, student, entries }) {
-    const line = messageLine();
-    const remove = (entry) => (event) => {
-      if (!window.confirm("Delete this entry?")) return;
-      act(event.target, line, async () => {
-        await examApi(`/entries/${entry.id}`, { method: "DELETE" });
-        await this.reload();
-      });
-    };
-    const edit = (entry, row) => () => {
-      const fields = entryFields(course.year, entry);
-      const save = (event) =>
-        act(event.target, line, async () => {
-          const value = fields.read();
-          if (!value) {
-            line.report("Enter a result.", true);
-            return;
-          }
-          await examApi(`/entries/${entry.id}`, { method: "PUT", body: value });
-          await this.reload();
-        });
-      row.replaceChildren(
-        h("td", { colspan: "5" }, ...fields.nodes),
-        h("td", {}, h("button", { type: "button", onclick: save }, "Save"), " ", h("button", { type: "button", onclick: () => this.reload() }, "Cancel"))
-      );
-    };
-    const rows = entries.map((entry) => {
-      const row = h("tr", {});
-      row.append(
-        h("td", {}, displayDate(entry.date)),
-        h("td", {}, kindLabels[entry.kind]),
-        h("td", {}, entryResult(entry)),
-        h("td", {}, entry.grade === null ? "" : String(entry.grade)),
-        h("td", {}, entry.note ?? ""),
-        h("td", {}, h("button", { type: "button", onclick: edit(entry, row) }, "Edit"), " ", h("button", { type: "button", onclick: remove(entry) }, "Delete"))
-      );
-      return row;
-    });
-
-    const fields = entryFields(course.year);
-    const add = (event) =>
-      act(event.target, line, async () => {
-        const value = fields.read();
-        if (!value) {
-          line.report("Enter a result.", true);
-          return;
-        }
-        await examApi(`/courses/${course.id}/entries`, { method: "POST", body: { entries: [{ username: student.username, ...value }] } });
-        await this.reload();
-      });
-
-    return h(
-      "section",
-      {},
-      h("h2", {}, `Entries (${entries.length})`),
-      entries.length
-        ? h(
-            "table",
-            { class: "sl-exam-table sl-exam-entries" },
-            h("thead", {}, h("tr", {}, h("th", {}, "Date"), h("th", {}, "Kind"), h("th", {}, "Result"), h("th", {}, "Grade"), h("th", {}, "Note"), h("th", {}, ""))),
-            h("tbody", {}, rows)
+/** Results by column, read-only: the column's name and date, the category, the result and its grade. */
+function resultsTable(entries) {
+  return scrollingTable(
+    h(
+      "table",
+      { class: "sl-exam-table sl-exam-entries" },
+      h("thead", {}, h("tr", {}, h("th", { "data-sticky": "0" }, "Column"), h("th", {}, "Date"), h("th", {}, "Category"), h("th", {}, "Result"), h("th", {}, "Grade"))),
+      h(
+        "tbody",
+        {},
+        entries.map((entry) =>
+          h(
+            "tr",
+            {},
+            h("td", { "data-sticky": "0" }, entry.name),
+            h("td", {}, displayDate(entry.date)),
+            h("td", {}, categoryLabels[entry.category] ?? entry.category),
+            h("td", {}, entryResult(entry)),
+            h("td", {}, entry.grade === null ? "" : String(entry.grade))
           )
-        : h("p", {}, "No entries yet."),
-      h("p", {}, ...fields.nodes, " ", h("button", { type: "button", onclick: add }, "Add entry")),
-      h("p", { class: "sl-exam-quiet" }, "A result without a maximum is a percentage."),
-      line
-    );
-  }
+        )
+      )
+    )
+  );
 }
 
 // ---------------------------------------------------------- grading scale
@@ -510,6 +681,7 @@ class ResultsView extends ExamElement {
           h(
             "ul",
             { class: "sl-exam-quiet" },
+            values.winter ? h("li", {}, `Winter semester: ${winterText(values.winter)}`) : null,
             categories
               .filter((category) => values.categories[category])
               .map((category) => h("li", {}, `${categoryLabels[category]}: ${percent(values.categories[category].fraction)}`))
@@ -517,28 +689,7 @@ class ResultsView extends ExamElement {
           values.comment ? h("p", { class: "sl-exam-comment" }, values.comment) : null
         )
       ),
-      course.entries.length
-        ? h(
-            "table",
-            { class: "sl-exam-table" },
-            h("thead", {}, h("tr", {}, h("th", {}, "Date"), h("th", {}, "Kind"), h("th", {}, "Result"), h("th", {}, "Grade"), h("th", {}, "Note"))),
-            h(
-              "tbody",
-              {},
-              course.entries.map((entry) =>
-                h(
-                  "tr",
-                  {},
-                  h("td", {}, displayDate(entry.date)),
-                  h("td", {}, kindLabels[entry.kind] ?? entry.kind),
-                  h("td", {}, entryResult(entry)),
-                  h("td", {}, entry.grade === null ? "" : String(entry.grade)),
-                  h("td", {}, entry.note ?? "")
-                )
-              )
-            )
-          )
-        : h("p", { class: "sl-exam-quiet" }, "No entries yet.")
+      course.entries.length ? resultsTable(course.entries) : h("p", { class: "sl-exam-quiet" }, "No results yet.")
     );
   }
 }

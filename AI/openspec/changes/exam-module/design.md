@@ -90,7 +90,7 @@ The constraints that shape the approach:
 ### D7 — Grades derived on read, overrides stored
 
 - Entries and attempt fractions are stored. Category fractions and proposals are **computed on read**, which is trivially cheap for ≤ 35 students × a few dozen entries. A stored proposal could go stale against new weights or a new scale. Overrides and comments are stored per student × course × semester.
-- **Semester assignment.** An entry belongs to the semester its date falls in. The WS proposal uses WS entries. The SS proposal is the year grade and uses all entries of the school year. This is the Austrian rule that the year grade covers the whole school year. (Assumption, stated in spec `gradebook`. Teachers can always override.)
+- **Semester assignment.** An entry belongs to the semester its date falls in - for a manual result, its column's date. The WS proposal uses WS entries. The SS proposal is the year grade: the winter semester's result and the summer semester's own entries, combined by the course's winter share, as `year-grade` (change `exam-navigation-and-grid`, its D10) defines. Teachers can always override.
 - Fractions are stored as `REAL`. Thresholds are compared with `>=` on the percentage, after rounding the fraction to 4 decimal places, so that 0.75 computed as 0.7499999 is not demoted.
 
 ### D8 — Attempts: server deadline, lazy plus swept finalization, device cookie

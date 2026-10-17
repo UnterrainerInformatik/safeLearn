@@ -60,7 +60,7 @@ Phases in the plan's order. Each phase ends deployable with `EXAM_MODULE` unset 
 - [ ] 5.4 Attempt start: one per student and test across sittings, server-side permutation of questions and answers, random per-answer tokens, deadline = min(start + duration, window end)
 - [ ] 5.5 Writing page (`safelearn-test` embed and module page) in the course language: no correctness in any payload, autosave per change, server-time countdown, resume on reload
 - [ ] 5.6 Save API refusing writes after the deadline or after submission; explicit submit
-- [ ] 5.7 Finalization: lazy on access plus a 30 s sweep; all-or-nothing grading; fraction written as an online-test result; test hidden afterwards
+- [ ] 5.7 Finalization: lazy on access plus a 30 s sweep; all-or-nothing grading; fraction written as the student's result in that test's column of the online-test category (`gradebook-sheet`); test hidden afterwards
 - [ ] 5.8 Device binding via `httpOnly` `SameSite=Strict` attempt cookie with hashed secret; refused-device record; teacher release; survives a server restart
 - [ ] 5.9 Focus log: `visibilitychange`/`blur`/`focus` reports and `sendBeacon` on `pagehide`; aggregated per attempt; never affects the grade
 - [ ] 5.10 Teacher live view (`safelearn-live` embed and module page) over SSE: `GET /exam/api/sittings/:id/events` behind `checkAuthenticated` and the teacher gate, snapshot on connect, an event per change from an in-process emitter per sitting, 25 s heartbeat, session re-check before each event with a closing `refused` event; snapshot endpoint `GET /exam/api/sittings/:id/live`; client fallback to 5 s snapshot polling after three failed reconnects; shows status, remaining time, focus losses, refused devices, release button

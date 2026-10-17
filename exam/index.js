@@ -17,12 +17,13 @@
 import express from "express";
 import path from "node:path";
 
-import { embedPlaceholder, wrapInPage } from "../obsidian.js";
+import { embedPlaceholder } from "../obsidian.js";
 import { scheduleDailyBackups } from "./backup.js";
 import { databasePath, openDatabase } from "./db.js";
 import { SessionEndedError } from "../middlewares/keycloak-middleware.js";
 import { actsAsTeacher, identityOf, teacherPage } from "./gate.js";
-import { ConflictError, InvalidInputError, NotFoundError } from "./classes.js";
+import { teacherShell } from "./bar.js";
+import { ConflictError, InvalidInputError, listYears, NotFoundError } from "./classes.js";
 import { registerClassRoutes } from "./routes-classes.js";
 import { registerGradebookRoutes } from "./routes-gradebook.js";
 
@@ -90,17 +91,26 @@ function buildRouter(db, startPage) {
   registerClassRoutes(router, { db, handle, startPage });
   registerGradebookRoutes(router, { db, handle, startPage });
 
-  // The module's home page, for teachers: the school years, their classes and
-  // the classes' courses.
+  // The module's home page, for teachers: the classes of one school year -
+  // the current one unless `?year=` names another - which the bar chooses.
   router.get(
     "/",
     teacherPage,
     handle(async (req, res) => {
-      const body = `
-        <h1>Classes and courses</h1>
-        ${embedPlaceholder("classes-home", {})}
-        <p class="sl-exam-quiet"><a href="/exam/scale">Grading scale</a></p>`;
-      res.send(await wrapInPage(body, startPage(), req, { title: "Classes and courses", wide: true }));
+      const yearId = typeof req.query.year === "string" && /^[1-9]\d{0,9}$/.test(req.query.year) ? Number(req.query.year) : null;
+      const year = yearId === null ? null : (listYears(db).find((candidate) => candidate.id === yearId) ?? null);
+      const params = year ? { year: String(year.id) } : {};
+      res.send(
+        await teacherShell({
+          db,
+          startPage,
+          req,
+          title: "Classes and courses",
+          context: { yearId: year?.id ?? null },
+          kind: "classes-home",
+          params,
+        })
+      );
     })
   );
 

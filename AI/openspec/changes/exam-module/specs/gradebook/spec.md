@@ -29,21 +29,21 @@ Every result the gradebook holds — an online test, a manually entered test, a 
 
 ### Requirement: Teachers enter manual results per student
 
-A teacher SHALL be able to record, for a student of a course, a manual entry of the kind `test`, `plusminus` or `homework`, with a value, a date and an optional note. A `test` or `homework` entry SHALL take its value as a fraction, or as points out of a maximum that is converted to one. A `plusminus` entry SHALL be either `+` (1) or `−` (0). Entries SHALL be editable and deletable by any teacher.
+A teacher SHALL be able to record, for a student of a course, a manual result of the kind `test`, `plusminus` or `homework`. A manual result SHALL be a result in one of the course's columns (`gradebook-sheet`, change `exam-navigation-and-grid`): the column carries the kind, the name, the date and, for a test or homework, an optional maximum, and a student has at most one result per column. A `test` or `homework` result SHALL take its value as points out of the column's maximum, converted to a fraction, or as a percentage where the column has no maximum. A `plusminus` result SHALL be either `+` (1) or `−` (0). Results and columns SHALL be editable and deletable by any teacher.
 
 #### Scenario: A participation mark
 
-- **WHEN** a teacher records `+` for a student on 2026-11-03
-- **THEN** the student's participation category contains an entry worth 1 on that date
+- **WHEN** a teacher records `+` for a student in a participation column dated 2026-11-03
+- **THEN** the student's participation category contains a result worth 1 on that date
 
 #### Scenario: A paper test in points
 
-- **WHEN** a teacher records 17 of 24 points for a paper test
-- **THEN** the entry is stored as 17/24 and shown as 17/24 with its grade from the scale
+- **WHEN** a teacher records 17 points for a student in a test column out of 24
+- **THEN** the result is stored as 17/24 and shown as 17/24 with its grade from the scale
 
 ### Requirement: The semester proposal is the scale applied to the weighted mean of category fractions
 
-For each student of a course and each semester, the gradebook SHALL compute one fraction per category (online tests, manual tests, participation, homework) as the mean of that category's entries, then the mean of those category fractions weighted by the course's config sheet, and SHALL map the result through the grading scale. A category without entries SHALL be left out and the remaining weights SHALL be renormalized. A student without any entry SHALL have no proposal. The winter-semester proposal SHALL use the entries dated in the winter semester. The summer-semester proposal is the grade for the whole year and SHALL use every entry of the school year.
+For each student of a course and each semester, the gradebook SHALL compute one fraction per category (online tests, manual tests, participation, homework) as the mean of that category's entries, then the mean of those category fractions weighted by the course's config sheet, and SHALL map the result through the grading scale. A category without entries SHALL be left out and the remaining weights SHALL be renormalized. A student without any entry SHALL have no proposal. The winter-semester proposal SHALL use the entries dated in the winter semester. The summer-semester proposal is the grade for the whole year; how it combines the winter semester's result with the summer semester's own entries is defined by `year-grade` (change `exam-navigation-and-grid`).
 
 #### Scenario: All categories present
 
