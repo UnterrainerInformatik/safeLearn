@@ -3,7 +3,7 @@ Here you can find how the exam module is switched on, where it keeps its data, h
 
 [Back](README.md) to the main page.
 
-The module is being built in phases (`AI/exam-module-plan.md`). What exists today is its foundation: the switch, the database, backups, the teacher/student gate, the embedding syntax and a module home page at `/exam/`. Tests, the gradebook and the question pool follow.
+The module is being built in phases (`AI/exam-module-plan.md`). What exists today is its foundation (the switch, the database, backups, the teacher/student gate, the embedding syntax) and classes and courses, at `/exam/`. Tests, the gradebook and the question pool follow.
 
 ## The Switch
 The module exists only when the instance's environment says `EXAM_MODULE=on`. Any other value, or none, and the instance is exactly the one it was before the module: its code is not loaded, no database file is opened or created, nothing answers under `/exam/`, and no page links to it.
@@ -51,6 +51,14 @@ Getting the copies off the host is the operator's job, with whatever that host a
 **Restoring** means stopping the container, replacing `exam.sqlite` with a copy (and deleting `exam.sqlite-wal` and `exam.sqlite-shm` beside it), and starting again. A copy from an older schema version is migrated forward on start, as any older database is.
 
 **Rolling back** the module itself means unsetting `EXAM_MODULE` and redeploying. The data stays in `exam.sqlite`, untouched, and switching the module back on resumes where it was.
+
+## Classes And Courses
+Teachers manage these at `/exam/`. Everything here belongs to teachers. A student, or a teacher in student view, finds no page there, and every request is refused.
+
+- **School years** are named like `2026/27`. Each has a start date, the first day of the summer semester and an end date. The first year created becomes the current one. A later year can be created in advance and made current when it starts, and exactly one year is current at a time.
+- **A class** belongs to one school year and is named like `5AHIF`. When you create it, the module lists every member of the class's directory unit as a checklist, and nobody is ticked. On an LDAP realm that unit is the class's OU; on a realm that grants classes as client roles, it is that role. Only the people you tick form the roster. This is what keeps former students out of a 5th-year class whose OU still holds them. Teachers are never offered and can never be added.
+- **The roster** changes only when a teacher changes it. A student who joins the directory unit later is listed under "Add students" but is not added on their own. You can also add someone from the whole directory, or by username when the directory is not available on the instance or is still loading. Removing a student keeps their entry, marked as left, so what is recorded for them stays theirs. "Refresh names" updates names from the directory and never changes who is on the roster.
+- **A course** is a class, a subject and the class's school year, and exists once per class however the subject is capitalized. It has no owner, so every teacher sees and edits every course. Its language (German or English) decides how its tests are presented. Its config sheet weighs the gradebook's four categories (online tests, manual tests, participation, homework) in whole percentages that add up to 100. A new course starts at 25 % each.
 
 ## Placing An Element In A Page
 A page places an element with a fenced block whose info string is `safelearn-<kind>`, with the element's parameters as `key: value` lines:

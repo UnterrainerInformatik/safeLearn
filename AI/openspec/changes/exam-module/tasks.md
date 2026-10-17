@@ -21,12 +21,12 @@ Phases in the plan's order. Each phase ends deployable with `EXAM_MODULE` unset 
 
 ## 2. P1 — Classes & courses
 
-- [ ] 2.1 Migration: school year (start, SS start, end, current flag), class, roster entry (username, names snapshot, left-at), course (class, subject, year, language, weights), unique (class, subject, year)
-- [ ] 2.2 School-year API and teacher page: create, set current, list; exactly one current year
-- [ ] 2.3 Roster source: members of a class from `heldDirectoryUsers()` by merged role value; "directory not available" state; add by username fallback
-- [ ] 2.4 Roster editor page: checklist with nothing pre-ticked, create roster from ticked; add/remove during the year with left-at marking; name refresh that never changes membership
-- [ ] 2.5 Course API and editor: create course (refuse duplicates), language, config sheet with category weights summing to 100 %
-- [ ] 2.6 Harness checks: a roster from the demo realm's client-role class; a student cannot reach any P1 route; duplicate course refused; removed student keeps records
+- [x] 2.1 Migration: school year (start, SS start, end, current flag), class, roster entry (username, names snapshot, left-at), course (class, subject, year, language, weights), unique (class, subject, year)
+- [x] 2.2 School-year API and teacher page: create, set current, list; exactly one current year
+- [x] 2.3 Roster source: members of a class from `heldDirectoryUsers()` by merged role value; "directory not available" state; add by username fallback
+- [x] 2.4 Roster editor page: checklist with nothing pre-ticked, create roster from ticked; add/remove during the year with left-at marking; name refresh that never changes membership
+- [x] 2.5 Course API and editor: create course (refuse duplicates), language, config sheet with category weights summing to 100 %
+- [x] 2.6 Harness checks: a roster from the demo realm's client-role class; a student cannot reach any P1 route; duplicate course refused; removed student keeps records
 
 ## 3. P4 — Gradebook
 

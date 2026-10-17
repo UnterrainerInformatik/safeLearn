@@ -30,10 +30,20 @@ const fixture = "/md/test-exam-embedding.md";
 const plainPage = "/md/test-md-file.md";
 const absent = "/no-deployment-has-a-file-at-this-path-exam-7d1e.json";
 
-/** A request from inside the page, carrying the session's cookies. */
-async function fetchAs(session, reference) {
-  return session.page.evaluate(async (address) => {
-    const response = await fetch(address, { credentials: "include", headers: { Accept: "application/json" } });
+/**
+ * A request from inside the page, carrying the session's cookies. `body`, if
+ * given, is sent as JSON.
+ */
+async function fetchAs(session, reference, { method = "GET", body } = {}) {
+  return session.page.evaluate(async (address, method, body) => {
+    const headers = { Accept: "application/json" };
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    const response = await fetch(address, {
+      method,
+      credentials: "include",
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
     const text = await response.text();
     let json = null;
     try {
@@ -42,7 +52,7 @@ async function fetchAs(session, reference) {
       // Not JSON - a page.
     }
     return { status: response.status, servedFrom: new URL(response.url).pathname, redirected: response.redirected, json };
-  }, `${applicationUrl}${reference}`);
+  }, `${applicationUrl}${reference}`, method, body);
 }
 
 /** What the rendered page holds of the module, once its client had a turn. */
@@ -122,7 +132,12 @@ describe("the instance with the exam module", () => {
       sidebar: Boolean(document.querySelector("#sidebar")),
       heading: document.querySelector("#markdown-content h1")?.textContent,
     }));
-    assert.deepEqual(frame, { title: "Exam module", topbar: "Exam module", sidebar: true, heading: "Exam module" });
+    assert.deepEqual(frame, {
+      title: "Classes and courses",
+      topbar: "Classes and courses",
+      sidebar: true,
+      heading: "Classes and courses",
+    });
 
     const nothing = await fetchAs(student, absent);
     assert.deepEqual(await fetchAs(student, "/exam/"), nothing, "a student finds nothing there");
@@ -197,5 +212,182 @@ describe("the instance with the exam module", () => {
         `${reference} answered ${answer.status} from ${answer.servedFrom}; it must not serve a file`
       );
     }
+  });
+});
+
+describe("classes and courses", () => {
+  let student;
+  let teacher;
+  let year;
+  let klass;
+  let candidates;
+
+  /**
+   * The directory's class names once it holds them. The instance warms the
+   * directory at start-up; until that fetch is done the module says "loading".
+   */
+  async function directoryClasses() {
+    const deadline = Date.now() + 90000;
+    for (;;) {
+      const answer = await fetchAs(teacher, "/exam/api/directory/classes");
+      assert.equal(answer.status, 200);
+      assert.notEqual(
+        answer.json.state,
+        "unavailable",
+        "the instance has no directory-service credentials (DIRECTORY_SERVICE_CLIENT_ID/_SECRET in .env)"
+      );
+      if (answer.json.ready) return answer.json.classes;
+      assert.ok(Date.now() < deadline, "the directory should be loaded within 90 s");
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+  }
+
+  before(async () => {
+    student = await sharedSession("student");
+    teacher = await sharedSession("teacher");
+    await setPreferences(student, {});
+    await setPreferences(teacher, {});
+  });
+
+  test("a teacher creates the school year, and it is the current one", async () => {
+    const created = await fetchAs(teacher, "/exam/api/years", {
+      method: "POST",
+      body: { name: "2026/27", startsOn: "2026-09-07", summerStartsOn: "2027-02-15", endsOn: "2027-07-02" },
+    });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    year = created.json;
+    assert.equal(year.current, true);
+    const again = await fetchAs(teacher, "/exam/api/years", { method: "POST", body: { ...year } });
+    assert.equal(again.status, 409, "the same year twice is refused");
+  });
+
+  test("a roster is ticked from the demo realm's client-role class", async () => {
+    const classes = await directoryClasses();
+    assert.ok(classes.length > 0, "the demo realm grants at least one class as a client role");
+    let name = null;
+    for (const candidate of classes) {
+      const answer = await fetchAs(teacher, `/exam/api/directory/classes/${candidate}`);
+      if (answer.json.candidates.length > 0) {
+        name = candidate;
+        candidates = answer.json.candidates;
+        break;
+      }
+    }
+    assert.ok(name, `one of ${classes.join(", ")} should have a member who is not a teacher`);
+
+    const created = await fetchAs(teacher, `/exam/api/years/${year.id}/classes`, {
+      method: "POST",
+      body: { name: name.toUpperCase(), students: candidates.map((c) => c.username) },
+    });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    klass = created.json;
+    assert.equal(klass.name, name);
+    assert.deepEqual(
+      klass.roster.map((entry) => entry.username).sort(),
+      candidates.map((c) => c.username).sort(),
+      "exactly the ticked members"
+    );
+    const named = klass.roster.filter((entry) => entry.givenName || entry.familyName);
+    assert.equal(named.length, candidates.filter((c) => c.givenName || c.familyName).length, "names come from the directory");
+  });
+
+  test("a teacher is never put on a roster", async () => {
+    const answer = await fetchAs(teacher, `/exam/api/classes/${klass.id}/roster`, {
+      method: "POST",
+      body: { username: teacher.username },
+    });
+    assert.equal(answer.status, 400);
+  });
+
+  test("a student removed from the roster keeps their entry, marked as left", async () => {
+    const username = student.username.toLowerCase();
+    const added = await fetchAs(teacher, `/exam/api/classes/${klass.id}/roster`, { method: "POST", body: { username } });
+    assert.equal(added.status, 200, JSON.stringify(added.json));
+    const removed = await fetchAs(teacher, `/exam/api/classes/${klass.id}/roster/${username}`, { method: "DELETE" });
+    assert.equal(removed.status, 200);
+    const entry = removed.json.find((e) => e.username === username);
+    assert.ok(entry, "the entry is still there");
+    assert.ok(entry.leftAt, "and marked as left");
+  });
+
+  test("a course is created once per class and subject, however it is capitalized", async () => {
+    const created = await fetchAs(teacher, `/exam/api/classes/${klass.id}/courses`, {
+      method: "POST",
+      body: { subject: "WMC", language: "en" },
+    });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    const duplicate = await fetchAs(teacher, `/exam/api/classes/${klass.id}/courses`, {
+      method: "POST",
+      body: { subject: "wmc", language: "de" },
+    });
+    assert.equal(duplicate.status, 409);
+
+    const weights = { onlineTests: 50, manualTests: 30, participation: 10, homework: 10 };
+    const saved = await fetchAs(teacher, `/exam/api/courses/${created.json.id}`, { method: "PUT", body: { weights } });
+    assert.deepEqual(saved.json.weights, weights);
+    const wrong = await fetchAs(teacher, `/exam/api/courses/${created.json.id}`, {
+      method: "PUT",
+      body: { weights: { ...weights, homework: 20 } },
+    });
+    assert.equal(wrong.status, 400, "weights that do not make 100 % are refused");
+  });
+
+  test("the class page draws the class for a teacher", async () => {
+    await teacher.page.goto(`${applicationUrl}/exam/classes/${klass.id}`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForFunction(() => document.querySelector("#markdown-content h1")?.textContent.startsWith("Class "), {
+      timeout: 20000,
+    });
+    const seen = await teacher.page.evaluate(() => ({
+      heading: document.querySelector("#markdown-content h1").textContent,
+      rows: document.querySelectorAll(".sl-exam-roster tr").length,
+      courses: [...document.querySelectorAll('a[href^="/exam/courses/"]')].map((a) => a.textContent),
+    }));
+    assert.equal(seen.heading, `Class ${klass.name.toUpperCase()} – 2026/27`);
+    assert.equal(seen.rows, candidates.length + 1, "the attending members and the one who left");
+    assert.deepEqual(seen.courses, ["WMC"]);
+  });
+
+  test("no route of classes and courses answers a student, or a teacher in student view", async () => {
+    const api = [
+      ["GET", "/exam/api/years"],
+      ["POST", "/exam/api/years", {}],
+      ["POST", `/exam/api/years/${year.id}/current`],
+      ["GET", `/exam/api/years/${year.id}/classes`],
+      ["POST", `/exam/api/years/${year.id}/classes`, { name: "1xhif" }],
+      ["GET", `/exam/api/classes/${klass.id}`],
+      ["POST", `/exam/api/classes/${klass.id}/roster`, { username: "someone" }],
+      ["DELETE", `/exam/api/classes/${klass.id}/roster/${candidates[0].username}`],
+      ["POST", `/exam/api/classes/${klass.id}/names`],
+      ["POST", `/exam/api/classes/${klass.id}/courses`, { subject: "X" }],
+      ["GET", "/exam/api/courses/1"],
+      ["PUT", "/exam/api/courses/1", { language: "de" }],
+      ["GET", "/exam/api/directory/classes"],
+      ["GET", `/exam/api/directory/classes/${klass.name}`],
+      ["GET", "/exam/api/directory/people?q=st"],
+    ];
+    const pages = ["/exam/", `/exam/classes/new?year=${year.id}`, `/exam/classes/${klass.id}`, "/exam/courses/1"];
+
+    const probe = async (session) => {
+      const nothing = await fetchAs(session, absent);
+      for (const [method, reference, body] of api) {
+        const answer = await fetchAs(session, reference, { method, body });
+        assert.equal(answer.status, 403, `${method} ${reference} answered ${answer.status}`);
+      }
+      for (const reference of pages) {
+        assert.deepEqual(await fetchAs(session, reference), nothing, `${reference} is not there`);
+      }
+    };
+
+    await probe(student);
+    await setPreferences(teacher, { vt: 0 });
+    try {
+      await probe(teacher);
+    } finally {
+      await setPreferences(teacher, {});
+    }
+
+    const afterwards = await fetchAs(teacher, `/exam/api/classes/${klass.id}`);
+    assert.equal(afterwards.json.roster.filter((e) => !e.leftAt).length, candidates.length, "nothing a refused request asked for happened");
+    assert.equal(afterwards.json.courses.length, 1);
   });
 });

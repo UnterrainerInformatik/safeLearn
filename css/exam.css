@@ -41,3 +41,64 @@
 #markdown-content.dark-mode .sl-embed-status.sl-embed-error {
   color: #ff7b72;
 }
+
+/* The module's own pages: classes and courses. */
+
+.sl-exam h2 select {
+  font: inherit;
+  font-size: 0.8em;
+}
+
+.sl-exam-table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+}
+
+.sl-exam-table th,
+.sl-exam-table td {
+  padding: 4px 12px 4px 0;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.sl-exam-left {
+  opacity: 0.6;
+}
+
+.sl-exam-checklist {
+  list-style: none;
+  padding-left: 0;
+}
+
+.sl-exam-checklist li {
+  margin: 2px 0;
+}
+
+.sl-exam-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: end;
+}
+
+.sl-exam-quiet,
+.sl-exam-crumbs {
+  font-size: 0.9em;
+  opacity: 0.7;
+}
+
+.sl-exam-message:empty {
+  display: none;
+}
+
+.sl-exam-primary {
+  font-weight: bold;
+}
+
+.sl-exam .sl-embed-error {
+  color: #c0392b;
+}
+
+#markdown-content.dark-mode .sl-exam .sl-embed-error {
+  color: #ff7b72;
+}

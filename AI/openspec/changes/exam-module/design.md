@@ -83,6 +83,9 @@ The constraints that shape the approach:
 - The checklist for a class lists every directory user whose merged role set contains the class name (lowercased, e.g. `5ahif`). This is the same membership the directory search uses, so it works on LDAP and on client-role realms alike.
 - If the directory service is not configured or not yet warm, the roster editor says so, and the teacher can still add students by username.
 - Rosters store a snapshot of username and names. A nightly or on-demand refresh updates names only, never membership.
+- Teachers and admins are never offered on a checklist and are refused when added, so D5's "a teacher is never on a roster" holds by construction. A username the directory does not know is accepted as it is, because that is the fallback for a directory that is unavailable.
+- A class's name is the lowercased role value. The suggestions offered are the directory's role values of the form digit + letters (`5ahif`), the same approximation the plugin's "List classes" makes.
+- A new course's config sheet starts at 25 % per category. Weights are whole percentages and are refused unless they add up to exactly 100.
 
 ### D7 — Grades derived on read, overrides stored
 

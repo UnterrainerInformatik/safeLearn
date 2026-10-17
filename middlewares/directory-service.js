@@ -951,6 +951,38 @@ export function heldDirectoryUsers() {
   return directoryUsersCache;
 }
 
+/** Whether this instance has the credentials a directory fetch needs at all. */
+export function directoryServiceConfigured() {
+  return Boolean(process.env.DIRECTORY_SERVICE_CLIENT_ID && process.env.DIRECTORY_SERVICE_CLIENT_SECRET);
+}
+
+/**
+ * The directory's people for a caller inside this process - the exam module's
+ * roster checklist - as `{ username, firstName, lastName, roles }`, the username
+ * lowercased and the roles merged exactly as `searchDirectory` merges them.
+ * Null while the directory holds nothing yet; like a search, that starts a
+ * fetch behind the answer when one can run, and stale data starts a refresh
+ * while still being answered from.
+ */
+export function heldDirectoryPeople() {
+  const users = heldDirectoryUsers();
+  if (!users) {
+    if (directoryServiceConfigured()) startDirectoryRefresh();
+    return null;
+  }
+  if (Date.now() - directoryUsersCachedAt >= directoryCacheTtlMs) {
+    startDirectoryRefresh();
+  }
+  return users
+    .filter((user) => typeof user.username === "string" && user.username.trim().length > 0)
+    .map((user) => ({
+      username: user.username.trim().toLowerCase(),
+      firstName: namePart(user.firstName),
+      lastName: namePart(user.lastName),
+      roles: directoryUserRoles(user),
+    }));
+}
+
 /**
  * Starts a refresh unless one is already running, and hands back the promise
  * either way — so a caller that wants to wait can, and one that only wants the

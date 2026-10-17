@@ -22,6 +22,8 @@ import { scheduleDailyBackups } from "./backup.js";
 import { databasePath, openDatabase } from "./db.js";
 import { SessionEndedError } from "../middlewares/keycloak-middleware.js";
 import { actsAsTeacher, identityOf, teacherPage } from "./gate.js";
+import { ConflictError, InvalidInputError, NotFoundError } from "./classes.js";
+import { registerClassRoutes } from "./routes-classes.js";
 
 const clientDir = path.join(import.meta.dirname, "client");
 const clientScript = "/exam/assets/exam-client.js";
@@ -55,7 +57,15 @@ function buildEmbedHandlers() {
   };
 }
 
-function buildRouter(startPage) {
+/** The status a refusal of the module's own is answered with, or null for a failure. */
+function refusalStatus(error) {
+  if (error instanceof InvalidInputError) return 400;
+  if (error instanceof NotFoundError) return 404;
+  if (error instanceof ConflictError) return 409;
+  return null;
+}
+
+function buildRouter(db, startPage) {
   const router = express.Router();
 
   // The module's client: its directory and nothing beside it. Mounted here, so
@@ -76,15 +86,18 @@ function buildRouter(startPage) {
     })
   );
 
-  // The module's home page, for teachers. Later phases list courses here.
+  registerClassRoutes(router, { db, handle, startPage });
+
+  // The module's home page, for teachers: the school years, their classes and
+  // the classes' courses.
   router.get(
     "/",
     teacherPage,
     handle(async (req, res) => {
       const body = `
-        <h1>Exam module</h1>
-        <p>The exam module is active on this instance.</p>`;
-      res.send(await wrapInPage(body, startPage(), req, { title: "Exam module" }));
+        <h1>Classes and courses</h1>
+        ${embedPlaceholder("classes-home", {})}`;
+      res.send(await wrapInPage(body, startPage(), req, { title: "Classes and courses" }));
     })
   );
 
@@ -95,6 +108,17 @@ function buildRouter(startPage) {
     // checkAuthenticated answers a request without one.
     if (error instanceof SessionEndedError) {
       next(error);
+      return;
+    }
+    // A refusal the module names is an answer, not a failure. A page about a
+    // record there is none of lands where a path with nothing behind it lands.
+    const status = refusalStatus(error);
+    if (status === 404 && !req.path.startsWith("/api/")) {
+      next();
+      return;
+    }
+    if (status !== null) {
+      res.status(status).json({ error: error.message });
       return;
     }
     console.error(`[exam] ${req.method} ${req.originalUrl} failed:`, error);
@@ -126,7 +150,7 @@ export async function init({ startPage }) {
   scheduleDailyBackups(db, dbPath);
   return {
     active: true,
-    router: buildRouter(startPage),
+    router: buildRouter(db, startPage),
     embedHandlers: buildEmbedHandlers(),
     clientScript,
     dbPath,

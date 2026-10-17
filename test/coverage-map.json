@@ -323,7 +323,7 @@
       ]
     },
     "test/exam.test.js": {
-      "what": "The instance with the exam module on, in a process of its own against a database created for the run and removed afterwards: the start-up log names that database and a fresh migration, /exam/api/me reports the identity and the student-view downgrade, an unauthenticated request is refused, the module page is shown to teachers in the instance's frame and to nobody else, elements mount as placeholders the client draws its frame into (teacher-only ones only for teachers), the presentation and document views and pages without elements load no module script, and the database is not retrievable over HTTP.",
+      "what": "The instance with the exam module on, in a process of its own against a database created for the run and removed afterwards: the start-up log names that database and a fresh migration, /exam/api/me reports the identity and the student-view downgrade, an unauthenticated request is refused, the module page is shown to teachers in the instance's frame and to nobody else, elements mount as placeholders the client draws its frame into (teacher-only ones only for teachers), the presentation and document views and pages without elements load no module script, and the database is not retrievable over HTTP. Classes and courses against the demo realm: a teacher creates the current school year (twice is refused), ticks a roster from the directory's client-role class (exactly the ticked members, names from the directory), cannot put a teacher on a roster, removes a student who stays listed as left, creates a course once per class and subject however it is capitalized and saves weights only when they make 100 %, sees the class page drawn by the client, and every route of classes and courses refuses a student and a teacher in student view (403 for the API, nothing for the pages) without changing anything.",
       "guards": [
         "exam/index.js",
         "exam/gate.js",
@@ -332,7 +332,14 @@
         "exam/client/exam-client.js",
         "obsidian.js",
         "app.js",
-        "test/harness.js"
+        "test/harness.js",
+        "exam/classes.js",
+        "exam/roster-source.js",
+        "exam/routes-classes.js",
+        "exam/client/frame.js",
+        "exam/client/classes.js",
+        "css/exam.css",
+        "middlewares/directory-service.js"
       ],
       "corpus": [
         "md/test-exam-embedding.md",
@@ -350,6 +357,17 @@
         "obsidian.js",
         "utils.js",
         "permission-context.js"
+      ],
+      "corpus": []
+    },
+    "test/exam-classes.test.js": {
+      "what": "Classes and courses unit by unit, without browser or server: the first school year becomes current and exactly one is, a year's name and date order, a year and a class per year existing once; a 5th-year class whose checklist offers all 70 members of its unit (no teacher or admin) and whose roster holds the 25 ticked, nobody on a class unless ticked, a class name of letters and digits; the directory changing later leaving the roster alone and a name refresh changing names only; a student changing class mid-year kept and marked as left in one and on the other from then on, coming back clearing the mark, twice on a roster refused, an unknown username added as it is; the checklist sorted by name in German collation without roles, class names among the role values, the whole-directory search; a course once per class and subject however it is capitalized, its language, and config-sheet weights that are whole percentages making 100; and the indexes the classes migration adds.",
+      "guards": [
+        "exam/classes.js",
+        "exam/roster-source.js",
+        "exam/db.js",
+        "exam/migrations/001-skeleton.sql",
+        "exam/migrations/002-classes-and-courses.sql"
       ],
       "corpus": []
     }
