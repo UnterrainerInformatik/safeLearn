@@ -17,6 +17,8 @@ import { defineExamElement, ExamApiError, ExamElement, examApi, h } from "./fram
 import { displayClass, displayPerson } from "./classes.js";
 import { displayWindow } from "./tests.js";
 
+const stateLabels = { scheduled: "not open yet", open: "open", over: "over" };
+
 const statusLabels = { "not started": "not started", writing: "writing", submitted: "submitted" };
 
 /** "12:05" for a number of milliseconds. */
@@ -60,7 +62,7 @@ class LiveView extends ExamElement {
         "p",
         { class: "sl-exam-quiet" },
         h("a", { href: `/exam/tests/${test.id}` }, test.name),
-        ` · ${displayClass(course.className)} ${course.subject} · ${sitting.makeup ? "make-up, " : ""}${displayWindow(sitting)} · ${Math.round(sitting.durationS / 60)} min`
+        ` · ${displayClass(course.className)} ${course.subject} · ${sitting.makeup ? "make-up, " : ""}${displayWindow(sitting)} · ${Math.round(sitting.durationS / 60)} min · ${stateLabels[sitting.state]}`
       ),
       this.summary,
       h(

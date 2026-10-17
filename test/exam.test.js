@@ -1728,6 +1728,32 @@ describe("online tests: the live view", () => {
     assert.equal(await teacher.page.evaluate(() => document.querySelector("sl-exam-live").dataset.mode), "polling", "updated by a snapshot");
   });
 
+  test("the live view of a sitting can be opened before it opens, and shows the first start as it happens", async () => {
+    written = (await fetchAs(teacher, `/exam/api/courses/${course.id}/tests`, { method: "POST", body: { name: "Live early", questionIds: questions.map((q) => q.id) } })).json;
+    sitting = (
+      await fetchAs(teacher, `/exam/api/tests/${written.id}/sittings`, {
+        method: "POST",
+        body: { opensAt: new Date(Date.now() + 10 * 60000).toISOString(), closesAt: new Date(Date.now() + 60 * 60000).toISOString(), durationMinutes: 15 },
+      })
+    ).json;
+    await teacher.page.goto(`${applicationUrl}/exam/tests/${written.id}`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(`li[data-sitting="${sitting.id}"][data-state="scheduled"] a[href="/exam/sittings/${sitting.id}/live"]`, { timeout: 20000 });
+    await teacher.page.goto(`${applicationUrl}/exam/sittings/${sitting.id}/live`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForFunction(() => document.querySelector("sl-exam-live")?.dataset.mode === "stream", { timeout: 20000 });
+    assert.match(await teacher.page.$eval("sl-exam-live .sl-exam-quiet", (el) => el.textContent), /not open yet/);
+    assert.deepEqual(await studentRow(), { status: "not started", focus: "–" });
+    assert.equal((await fetchAs(student, `/exam/api/tests/${written.id}/attempt`, { method: "POST" })).status, 404, "nobody writes before it opens");
+    // The sitting opens.
+    const { db } = openDatabase(run.databasePath);
+    try {
+      db.prepare("UPDATE sitting SET opens_at = ? WHERE id = ?").run(new Date(Date.now() - 1000).toISOString(), sitting.id);
+    } finally {
+      db.close();
+    }
+    await fetchAs(student, `/exam/api/tests/${written.id}/attempt`, { method: "POST" });
+    await teacher.page.waitForFunction((u) => document.querySelector(`sl-exam-live tr[data-username="${u}"]`)?.dataset.status === "writing", { timeout: 5000 }, student.username.toLowerCase());
+  });
+
   test("a teacher who switches to the student view gets refused, and the view says why", async () => {
     await openLive("Live student view");
     // Switched in another tab, so the live view's page stays open.

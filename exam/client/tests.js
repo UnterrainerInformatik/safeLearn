@@ -89,7 +89,7 @@ class TestList extends ExamElement {
                                 "li",
                                 { "data-state": sitting.state },
                                 `${sitting.makeup ? "Make-up " : ""}${displayWindow(sitting)} · ${stateLabels[sitting.state]}`,
-                                sitting.state === "open" ? [" · ", h("a", { href: `/exam/sittings/${sitting.id}/live` }, "live view")] : null
+                                sitting.state !== "over" ? [" · ", h("a", { href: `/exam/sittings/${sitting.id}/live` }, "live view")] : null
                               )
                             )
                           )
@@ -212,7 +212,7 @@ class TestDetail extends ExamElement {
                 sitting.makeup || sitting.participants.length < this.roster.length
                   ? sitting.participants.map((username) => names.get(username) ?? username).join(", ")
                   : "the whole class",
-                sitting.state === "open" ? [" · ", h("a", { href: `/exam/sittings/${sitting.id}/live` }, "live view")] : null,
+                sitting.state !== "over" ? [" · ", h("a", { href: `/exam/sittings/${sitting.id}/live` }, "live view")] : null,
                 sitting.state === "scheduled"
                   ? [
                       " ",
@@ -302,11 +302,19 @@ class TestDetail extends ExamElement {
           }
         },
       },
-      h("h3", {}, sitting ? "Change the sitting" : makeup ? "Schedule a make-up" : "Schedule the sitting"),
+      h("h3", {}, sitting ? "Change the sitting" : makeup ? "Schedule a make-up sitting" : "Schedule the sitting"),
       h("label", {}, "Opens ", opensAt),
       h("label", {}, "Closes ", closesAt),
       h("label", {}, "Minutes per attempt ", duration),
-      makeup ? h("p", { class: "sl-exam-quiet" }, "A make-up keeps the first sitting's duration and is written by the students ticked below.") : h("label", {}, whole, " The whole class"),
+      makeup
+        ? h(
+            "p",
+            { class: "sl-exam-quiet" },
+            "A make-up sitting is a later chance to write this test, for students who missed the first sitting. ",
+            "Only the students you tick below can write it, and they get the same minutes per attempt as the first sitting. ",
+            "Anyone who has already submitted the test cannot write it again."
+          )
+        : h("label", {}, whole, " The whole class"),
       people,
       h("p", {}, h("button", { type: "submit", class: "sl-exam-primary" }, sitting ? "Save" : "Schedule"), sitting ? [" ", h("button", { type: "button", onClick: () => this.drawSittingForm(test, null) }, "Cancel")] : null),
       message

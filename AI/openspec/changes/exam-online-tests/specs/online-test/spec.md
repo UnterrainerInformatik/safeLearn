@@ -39,7 +39,7 @@ Until the first attempt of a test has started, a teacher SHALL be able to rename
 
 ### Requirement: A course lists its tests
 
-Each course SHALL have a list of its tests, reachable from the module bar, showing per test its name, number of questions, its sittings with their windows and their state (scheduled, open, over), and how many participants have submitted. From the list a teacher SHALL open a test's sittings, its live view while a sitting is open, and the questions of its snapshot. A student SHALL NOT reach the list.
+Each course SHALL have a list of its tests, reachable from the module bar, showing per test its name, number of questions, its sittings with their windows and their state (scheduled, open, over), and how many participants have submitted. From the list a teacher SHALL open a test's sittings, the live view of any sitting from the moment it is scheduled until it is over, and the questions of its snapshot. A student SHALL NOT reach the list.
 
 #### Scenario: The course's tests
 
@@ -161,7 +161,12 @@ While an attempt is open, the page SHALL report to the server each time it loses
 
 ### Requirement: Teachers follow a sitting live
 
-During a sitting a teacher SHALL see, per participant: not started, writing (with remaining time), submitted; focus losses; and refused devices. The view SHALL be pushed to the teacher's browser as changes happen, over a stream that requires the teacher's authenticated session and is separate from the unauthenticated hot-reload channel. Exam data SHALL NOT be sent over the hot-reload channel. The stream SHALL be re-checked against the session while it is open and SHALL end when the session no longer acts as a teacher. When the stream cannot be kept open, the view SHALL keep updating by fetching snapshots, without reloading the page.
+A teacher SHALL be able to open a sitting's live view before it opens, and during the sitting SHALL see, per participant: not started, writing (with remaining time), submitted; focus losses; and refused devices. The view SHALL be pushed to the teacher's browser as changes happen, over a stream that requires the teacher's authenticated session and is separate from the unauthenticated hot-reload channel. Exam data SHALL NOT be sent over the hot-reload channel. The stream SHALL be re-checked against the session while it is open and SHALL end when the session no longer acts as a teacher. When the stream cannot be kept open, the view SHALL keep updating by fetching snapshots, without reloading the page.
+
+#### Scenario: Opened before the sitting
+
+- **WHEN** a teacher opens the live view of a sitting that opens in ten minutes
+- **THEN** every participant is shown as not started, and the first student who starts appears as writing without the page being reloaded
 
 #### Scenario: A student submits
 
