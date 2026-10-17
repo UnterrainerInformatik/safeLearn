@@ -62,3 +62,6 @@ AI/plugin
 # Claude Code's lock for its scheduled tasks: a running session's id and pid,
 # rewritten per run and meaningless on any other machine.
 AI/claude/scheduled_tasks.lock
+
+# Local configuration, with real secrets. Copy .env.template to .env and fill it in.
+/.env

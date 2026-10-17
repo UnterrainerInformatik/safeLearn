@@ -9,7 +9,9 @@ Just do the following:
 * open it in VSCode
 * open a terminal window
 * `npm install`
-* make sure your `.env` in the repository root carries a `SESSION_SECRET`. The server signs its session cookies with it and refuses to start without one, so `npm run start` exits immediately with a message naming the variable. The `.env` this repository ships holds a placeholder — replace it with any long random string of your own; locally it is only ever compared against itself. Changing it later logs your own browser out once.
+* copy `.env.template` to `.env` in the repository root. `.env` is ignored by git, so the real values you put into it stay on your machine; never put them into the template.
+* make sure your `.env` carries a `SESSION_SECRET`. The server signs its session cookies with it and refuses to start without one, so `npm run start` exits immediately with a message naming the variable. The template holds a placeholder — replace it with any long random string of your own; locally it is only ever compared against itself. Changing it later logs your own browser out once.
+* for the directory search (and its checks in `npm test`), fill in `DIRECTORY_SERVICE_CLIENT_ID` and `DIRECTORY_SERVICE_CLIENT_SECRET` as well, see "Directory search client" in `docs-keycloak.md`.
 * `npm run start` (the contents of the start-script are located in the `package.json` file)
 * Just press `F5` to start debugging, while the webserver is running in the background
 You can use the built-in debugger now.
@@ -20,7 +22,7 @@ The following files are changed or omitted in the build-process:
 
 | FILE                              | DESCRIPTION                                                                                                                                                                                                                                                        |
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| .env                              | -> `pipeline`<br>Will be re-generated from scratch during the pipeline-run using Github secrets.<br>Code is located in this repository in the `yml` file of the action.                                                                                            |
+| .env                              | -> `pipeline`<br>Not in the repository: copy `.env.template` for local work. The pipeline generates the image's `.env` from scratch using Github secrets.<br>Code is located in this repository in the `yml` file of the action.                                    |
 | keycloak.json                     | -> `pipeline`<br>Will be generated from scratch during the pipeline-run using Github secrets.<br>So you're free to place a debugging-file of your own in here. The one that is present connects you to a test-server and will most likely not work with your fork. |
 | package.json<br>package-lock.json | -> 'Dockerfile'<br>These files will be copied during the pipeline-run's Docker-Image generation and used to setup the web-server in the Docker container by running `npm install` afterwards.                                                                      |
 | app.js<br>*.js<br>*.css           | -> 'Dockerfile'<br>`app.js` is the start-file for the NodeJS server. It is copied together with every other `.js` and `.css` file at the repository root during the pipeline-run's Docker-Image generation.                                                          |

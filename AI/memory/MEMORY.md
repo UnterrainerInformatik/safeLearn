@@ -21,7 +21,7 @@ Echter Ablageort: `/mnt/data/source/HTL/safeLearn/AI/memory/`
 - [secureLectures ist Downstream](securelectures-downstream-role.md) — dort nur Tests entfernen, `md/`-Inhalt und deployment-Config; jede App-Entscheidung (Code!) gehört upstream nach safeLearn
 - [Sync-Reihenfolge safeLearn → secureLectures](securelectures-sync-order.md) — erst safeLearn pushen, dann public/master in secureLectures mergen+pushen; nicht auf den Build warten
 - [Kontext vor Entscheidungsfragen](decision-questions-need-context.md) — erst den Mechanismus belegen, dann erst Optionen anbieten
-- [Directory-Service-Credentials ungültig](directory-service-credentials-invalid.md) — lokales `.env` gibt `invalid_client` gegen die echte Keycloak-Realm; `/api/admin/directory/search` antwortet immer mit 502
+- [Directory-Service-Credentials sind Platzhalter](directory-service-credentials-invalid.md) — eingechecktes `.env` hat nur `CHANGE…`-Platzhalter → `invalid_client`, Search hängt auf 202; seit 2026-10-17 ist `.env` gitignored, Vorlage `.env.template`
 - [git mv durch den openspec-Symlink](git-mv-through-openspec-symlink.md) — Ziel muss `AI/openspec/...` heißen, nicht `openspec/...`, sonst korrumpiert `git mv` den Index
 - [Realm-Cleanup-Investigation abgeschlossen](realm-directory-cleanup-investigation.md) — archiviert 2026-09-12: keine Duplikate, 84% synthetische TestUsers, Remedy liegt im LDAP-Split
 - [Kein macOS erreichbar](no-macos-available.md) — gibt es nicht und wird es nie geben; keine Sichtprüfung auf einem Mac einplanen
