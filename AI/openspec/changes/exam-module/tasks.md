@@ -50,7 +50,7 @@ Phases in the plan's order. Each phase ends deployable with `EXAM_MODULE` unset 
 - [x] 4.4 Unit tests for the importer against trimmed fixtures (match, mismatch, essay, image), plus a dry-run against the real files reporting 94/22/9. `test/exam-pool.test.js`; the dry run is skipped where the export is not on the machine. Harness checks for the browser, the image route and the refusals in `test/exam.test.js`
 - [x] 4.5 Image route `/exam/api/images/:id` with the access check (teacher, or student inside an open attempt containing it). The student branch is `studentMaySeeImage` in `exam/pool.js`, which answers no until attempts exist; task 5.5 fills it in
 - [x] 4.6 Question browser for teachers: category tree, text search, preview in DE/EN with correct answers, usage history per question; students refused
-- [ ] 4.7 Run the import on babylon5 inside the container and record the report (aggregates only)
+- [x] 4.7 Run the import on babylon5 inside the container and record the report (aggregates only). Done 2026-10-17 15:28 UTC in `secureLectures` after the deploy migrated its database from schema 4 to 5 (pre-migration copy in `data/exam-backups/`): dry run, then import, both reporting 94 questions (77 multichoiceset, 14 multichoice, 3 truefalse) in 22 categories, 9 essays dropped, 7 images, 4 unreferenced files dropped; a second run was refused. Source files checked against the local copies by SHA-256 and removed from the container afterwards
 
 ## 5. P3 — Online tests
 
