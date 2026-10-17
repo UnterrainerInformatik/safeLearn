@@ -96,7 +96,6 @@ markedDark.use(
   })
 );
 
-import axios from "axios";
 
 import { config } from "dotenv";
 import path from "node:path";
@@ -158,21 +157,6 @@ async function sanitizeAndParseMarkdown(data, req) {
     console.error(`Error parsing markdown: ${error}`);
     return `Error parsing markdown: ${error}`;
   }
-}
-
-async function mdGetToHtml(url, req) {
-  let headers = {};
-  if (req.headers.cookie) {
-    headers = {
-      cookie: req.headers.cookie,
-    };
-  }
-
-  const response = await axios.get(url, {
-    responseType: "document",
-    headers: headers,
-  });
-  return sanitizeAndParseMarkdown(response.data, req);
 }
 
 /**
@@ -572,76 +556,6 @@ initKeycloak(app).then(() => {
         console.error(`Search failed: ${error}`);
         res.status(500).json({ error: "The search could not be answered." });
       });
-  });
-
-  // Convert markdown to HTML using marked.
-  app.get("/convert", checkAuthenticated, (req, res, next) => {
-    const fileUrl = req.query.url;
-    if (!fileUrl) {
-      res.send(
-        "You have to provide a file-url to the markdown file by specifying `?url=<your-url-encoded-url>` in order to convert the markdown to HTML."
-      );
-      return;
-    }
-
-    mdGetToHtml(fileUrl, req)
-      .then((html) => wrapInPage(html, getStartPage(), req))
-      .then((r) => {
-        res.send(r);
-      })
-      .catch((error) => {
-        if (error instanceof SessionEndedError) {
-          next(error);
-          return;
-        }
-        res.send(`Error: ${error}`);
-      });
-  });
-
-  // Post the request as a JSON file following this format:
-  // {
-  //   "url": "https://raw.githubusercontent.com/..."
-  // }
-  // The URL should point to a markdown file.
-  // Or you may also send the markdown content directly using this format:
-  // {
-  //   "content": "## Hello World"
-  // }
-  // The server will then convert the markdown to HTML and send it back as a JSON response using this format:
-  // {
-  //   "html": "<html>...</html>"
-  // }
-  // The HTML will be sanitized using DOMPurify and will not contain any html, head or body tags.
-  app.post("/convert", checkAuthenticated, (req, res, next) => {
-    if (typeof req.body == "undefined" || req.body == null) {
-      res.json({
-        error:
-          "No data found in body. You have to specify 'url' or 'content' in your body in order to convert the markdown to HTML.",
-      });
-    } else {
-      if (req.body.url !== undefined && req.body.url !== null) {
-        mdGetToHtml(req.body.url, req)
-          .then((html) => {
-            res.json({ html: html });
-          })
-          .catch((error) => {
-            if (error instanceof SessionEndedError) {
-              next(error);
-              return;
-            }
-            res.json({ error: error });
-          });
-      } else {
-        const c = req.body.content;
-        if (c !== undefined && c !== null) {
-          sanitizeAndParseMarkdown(c, req)
-            .then((html) => {
-              res.json({ html: html });
-            })
-            .catch(next);
-        }
-      }
-    }
   });
 
   app.get("/userattributes", checkAuthenticated, (req, res, next) => {

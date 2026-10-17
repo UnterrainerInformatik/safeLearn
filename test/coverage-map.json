@@ -31,7 +31,7 @@
       "corpus": []
     },
     "test/checks/permissions.js": {
-      "what": "Block-level and whole-file directives in both directions, including the admin directive and both plural aliases (teachers and students), their effect on the navigation tree, time-bounded windows, and the teacher-to-student downgrade. That the navigation tree and the page a link leads to agree for every file carrying a whole-file directive - the tree read from the rendered sidebar, the page from a direct request, compared against each other rather than against a derived expectation - and that the two refusals stay told apart by their cause. That the same rule reaches Markdown posted to /convert, which has no corpus file behind it. That a rendered page costs the identity provider at most one account lookup however many directives it evaluates, and that a request evaluating no directive costs none - counted on the session by fetchAccount, because those lookups happen between the application and Keycloak where the browser cannot see them.",
+      "what": "Block-level and whole-file directives in both directions, including the admin directive and both plural aliases (teachers and students), their effect on the navigation tree, time-bounded windows, and the teacher-to-student downgrade. That the navigation tree and the page a link leads to agree for every file carrying a whole-file directive - the tree read from the rendered sidebar, the page from a direct request, compared against each other rather than against a derived expectation - and that the two refusals stay told apart by their cause. That a file a session may see reaches it without its directive line. That a rendered page costs the identity provider at most one account lookup however many directives it evaluates, and that a request evaluating no directive costs none - counted on the session by fetchAccount, because those lookups happen between the application and Keycloak where the browser cannot see them.",
       "guards": [
         "utils.js",
         "obsidian.js",
@@ -47,6 +47,7 @@
         "md/test-fileperms-teachers.md",
         "md/test-fileperms-4bhif-5bhif-2ahif.md",
         "md/test-fileperms-window-closed.md",
+        "md/test-fileperms-nobody.md",
         "md/test-md-file.md",
         "md/test-search-teacher-file.md",
         "md/test-search-staleness-restricted.md"
@@ -147,7 +148,7 @@
       ]
     },
     "test/checks/deployment-surface.js": {
-      "what": "What a running instance publishes over HTTP: that keycloak.json, the application sources, the dependency manifests and what sits beside a mounted package directory are not served and a refusal looks like a path with no file behind it, that the assets a page addresses still are — including the ones only a stylesheet names — that every same-origin reference of a rendered page resolves in all three views, and that the one endpoint answering before authentication survives a parameter it cannot interpret. That a page which cannot reach the reload stream keeps trying with a growing delay rather than on a fixed timer. That a self-authenticating route — the directory search endpoint and the status endpoint beside it — returns no directory data to a request carrying neither a bearer token nor, distinctly, to one carrying only a valid browser session.",
+      "what": "What a running instance publishes over HTTP: that keycloak.json, the application sources, the dependency manifests and what sits beside a mounted package directory are not served and a refusal looks like a path with no file behind it, that the assets a page addresses still are — including the ones only a stylesheet names — that every same-origin reference of a rendered page resolves in all three views, and that the one endpoint answering before authentication survives a parameter it cannot interpret. That a page which cannot reach the reload stream keeps trying with a growing delay rather than on a fixed timer. That a self-authenticating route — the directory search endpoint and the status endpoint beside it — returns no directory data to a request carrying neither a bearer token nor, distinctly, to one carrying only a valid browser session. That no route fetches a URL a request names: the former /convert route, asked by GET and POST to fetch a local listener or render a posted body, makes no outbound request and is answered exactly like a path that never existed.",
       "guards": [
         "app.js",
         "obsidian.js",

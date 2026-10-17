@@ -297,9 +297,10 @@ export function getActivePermissionRoles(permissions, referenceDate = new Date()
  * one it was allowed to read.
  *
  * It takes an already parsed directive rather than a path, because the page
- * handler, /convert and mdGetToHtml hold content that has no corpus file
- * behind it. A null or undefined directive means the file names no roles and
- * every authenticated session may see it.
+ * handler re-parses the directive from the file it has just read: the index is
+ * a snapshot of the last scan, and a page follows the directive as it stands on
+ * disk. A null or undefined directive means the file names no roles and every
+ * authenticated session may see it.
  *
  * Returns { visible: true } or { visible: false, reason } where reason is
  * "outside-window" when the directive's time windows leave no role active at
@@ -2395,13 +2396,11 @@ async function getTopBar(startPage, req) {
       "Menu"
     )}</button>
     <div class="topbar-title nav-font">${
-      req.path !== "/convert/"
-        ? decodeURIComponent(
-            req.path.startsWith(`/${dirPrefix}`)
-              ? req.path.slice(dirPrefix.length + 1)
-              : req.path
-          )
-        : decodeURIComponent(req.query.url)
+      decodeURIComponent(
+        req.path.startsWith(`/${dirPrefix}`)
+          ? req.path.slice(dirPrefix.length + 1)
+          : req.path
+      )
     }</div>
     <div class="topbar-menu">
       ${

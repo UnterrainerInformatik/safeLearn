@@ -22,6 +22,7 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createServer } from "node:http";
 import path from "node:path";
 import { before, describe, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
@@ -194,6 +195,27 @@ async function request(session, reference, { textLimit = 262144 } = {}) {
     `${applicationUrl}${reference}`,
     textLimit
   );
+}
+
+/**
+ * Sends `method` to `reference` from the test process with the session's
+ * cookies, and does not follow a redirect, so the target a catch-all names is
+ * visible. A request from inside the page could not show it: `fetch` hides the
+ * `Location` of a redirect it is told not to follow.
+ */
+async function requestUnfollowed(session, method, reference, body) {
+  const cookies = await session.page.cookies(applicationUrl);
+  const response = await fetch(`${applicationUrl}${reference}`, {
+    method,
+    redirect: "manual",
+    headers: {
+      cookie: cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; "),
+      ...(body === undefined ? {} : { "content-type": "application/json" }),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  await response.arrayBuffer();
+  return { status: response.status, location: response.headers.get("location") };
 }
 
 /**
@@ -491,6 +513,42 @@ describe("deployment surface", () => {
         `${corpusPath} as a ${view} addresses references of this application that do not resolve. ` +
           `A reference that falls through to the start page needs its own mount in app.js.`
       );
+    }
+  });
+
+  // ---- No route fetches what a request names ----
+
+  // `/convert` once fetched any URL a session named and forwarded the session's
+  // cookie to it. It is gone; this keeps it from coming back by a merge. The
+  // listener stands in for a host the server can reach and the caller cannot.
+  test("no route fetches a URL a request names, and /convert answers like a path that never existed", async () => {
+    const hits = [];
+    const listener = createServer((incoming, answer) => {
+      hits.push(`${incoming.method} ${incoming.url}`);
+      answer.end("# fetched");
+    });
+    await new Promise((resolve) => listener.listen(0, "127.0.0.1", resolve));
+    const target = `http://127.0.0.1:${listener.address().port}/named-by-the-request.md`;
+    try {
+      const asked = [
+        { method: "GET", reference: `/convert?url=${encodeURIComponent(target)}` },
+        { method: "POST", reference: "/convert", body: { url: target } },
+        { method: "POST", reference: "/convert", body: { content: "# x" } },
+      ];
+      for (const { method, reference, body } of asked) {
+        const answer = await requestUnfollowed(session, method, reference, body);
+        const nothing = await requestUnfollowed(session, method, absent, body);
+        assert.deepEqual(
+          answer,
+          nothing,
+          `${method} ${reference} should be answered exactly like ${method} ${absent}, a path that never existed`
+        );
+      }
+      // Whatever the server might have started, give it the moment it would need.
+      await delay(500);
+      assert.deepEqual(hits, [], `the server fetched a URL the request named: ${hits.join(", ")}`);
+    } finally {
+      await new Promise((resolve) => listener.close(resolve));
     }
   });
 });

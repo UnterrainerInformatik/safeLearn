@@ -4,7 +4,7 @@
  * Reads `md/test-perms.md`, `md/test-perms-teacher-alias.md`,
  * `md/test-perms-student-alias.md`, `md/test-fileperms-teachers.md`,
  * `md/test-fileperms-4bhif-5bhif-2ahif.md`,
- * `md/test-fileperms-window-closed.md`, the two `md/test-search-*.md` files that
+ * `md/test-fileperms-window-closed.md`, `md/test-fileperms-nobody.md`, the two `md/test-search-*.md` files that
  * carry a whole-file directive, and the admin and time-bound blocks of
  * `md/test-md-file.md`.
  *
@@ -44,11 +44,14 @@ function corpusPaths(directory = corpusRoot, collected = []) {
   return collected;
 }
 
+/** The first line of a corpus file, as it stands on disk. */
+const directiveLine = (servedPath) =>
+  readFileSync(path.join(corpusRoot, servedPath.slice("/md/".length)), "utf8")
+    .split("\n")[0]
+    .trim();
+
 /** Whether a corpus file's first line is a whole-file `@@@` directive. */
-const carriesWholeFileDirective = (servedPath) =>
-  /^\s*@@@\s*\S/.test(
-    readFileSync(path.join(corpusRoot, servedPath.slice("/md/".length)), "utf8").split("\n")[0]
-  );
+const carriesWholeFileDirective = (servedPath) => /^@@@\s*\S/.test(directiveLine(servedPath));
 
 const permissionsPage = "/md/test-perms.md";
 const timedPage = "/md/test-md-file.md";
@@ -172,6 +175,13 @@ const restrictedFiles = [
     directive: ["teacher"],
     windowClosed: true,
     content: "Only visible while the window is open.",
+  },
+  // A role no account can hold, so the refusal is exercised for both sessions
+  // no matter what the identity provider hands out.
+  {
+    path: "/md/test-fileperms-nobody.md",
+    directive: ["nobody-holds-this-role"],
+    content: "NIEMANDSDATEI",
   },
   // The two the search checks are about. They carry whole-file directives, so
   // the agreement between the tree and the page has to hold for them too -
@@ -328,6 +338,12 @@ describe("permissions", () => {
           `the ${role} session should ${allowed ? "not " : ""}be refused ${file.path}` +
             (allowed ? "" : ` with "${refusalFor(file)}"`)
         );
+        if (allowed) {
+          assert.ok(
+            !text.includes(directiveLine(file.path)),
+            `${file.path} should reach the ${role} session without its directive line`
+          );
+        }
       }
     });
   }
@@ -565,90 +581,6 @@ describe("permissions", () => {
       (await treeEntries(teacher)).includes(teacherFile.path),
       `with the teacher view back on, ${teacherFile.path} should be in the navigation tree again`
     );
-  });
-
-  // ---- 3.5a The same rule over content that has no corpus file ----
-
-  /**
-   * Posts a Markdown body to `/convert` from inside the session's own page, so
-   * the request carries the session cookie the browser already holds. `/convert`
-   * renders a body that has no file behind it, which is why the shared decision
-   * takes a parsed directive rather than a path: there is no path to take.
-   */
-  const convert = async (session, content) => {
-    const answer = await session.page.evaluate(async (body) => {
-      const response = await fetch("/convert", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({ content: body }),
-      });
-      return { status: response.status, body: await response.text() };
-    }, content);
-    assert.equal(
-      answer.status,
-      200,
-      `/convert answered ${answer.status} for the ${session.role} session; the harness is not ` +
-        `posting as an authenticated user, so what follows would not be testing the directive`
-    );
-    return answer.body;
-  };
-
-  test("a posted body whose first line is a directive the session fails is refused", async () => {
-    for (const role of ["student", "teacher"]) {
-      const session = shown.get(role).session;
-      await render(session, timedPage);
-
-      // A role no demo account can hold, so this direction is exercised for
-      // both sessions no matter what the identity provider hands out.
-      const unheld = "@@@ nobody-holds-this-role\nThe body behind the directive.";
-      const denied = await convert(session, unheld);
-      assert.ok(
-        denied.includes(refusal),
-        `/convert should refuse the ${role} session a body addressed to a role it does not hold`
-      );
-      assert.ok(
-        !denied.includes("The body behind the directive."),
-        `/convert refused the ${role} session but handed back the body anyway`
-      );
-
-      // The other cause: a window that closed in the past leaves no role active,
-      // so the directive hides the body from everyone - including a teacher.
-      // No corpus file carries a whole-file directive with a window, so this is
-      // the one route on which that message can be reached today.
-      const closed = "@@@ teacher[2025-01-01T00:00:00 to 2025-01-02T00:00:00]\nThe body behind the window.";
-      const expired = await convert(session, closed);
-      assert.ok(
-        expired.includes(closedWindowRefusal),
-        `/convert should tell the ${role} session that a body whose directive window has closed ` +
-          `is not visible right now, whatever roles the session holds`
-      );
-      assert.ok(
-        !expired.includes("The body behind the window."),
-        `/convert refused the ${role} session over a closed window but handed back the body anyway`
-      );
-
-      // And the directive still has to let content through when it is met, or
-      // the two assertions above would pass against a route that refuses
-      // everything. The directive is built from the roles this session actually
-      // carries rather than from role names this repository does not own, so it
-      // is met whatever the demo accounts turn out to hold.
-      const held = [...carried.get(role)].filter((r) => !r.includes(","));
-      assert.ok(
-        held.length > 0,
-        `the ${role} session carries no role at all, so there is no directive it could meet`
-      );
-      const open = `@@@ ${held.join(", ")}\nThe body every session may read.`;
-      const allowed = await convert(session, open);
-      assert.ok(
-        allowed.includes("The body every session may read."),
-        `/convert should hand the ${role} session a body whose directive names a role it holds`
-      );
-      assert.ok(
-        !allowed.includes("@@@"),
-        `/convert should strip the directive line from a body it hands back to the ${role} session`
-      );
-    }
   });
 
   // ---- 3.6 What the answers cost ----

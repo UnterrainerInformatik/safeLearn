@@ -46,14 +46,9 @@ Whether a session may see a file addressed by a whole-file permission directive 
 - **WHEN** a file carries no whole-file directive
 - **THEN** every authenticated session may see it, and it is listed for every session
 
-### Requirement: Content with no index entry is governed by the directive it carries
+### Requirement: A page follows the directive on disk, not the index
 
-The application SHALL apply the whole-file rule to Markdown it renders from a request body or from a fetched URL, neither of which corresponds to a file in the corpus. The shared implementation SHALL therefore operate on a directive that the caller has already parsed, not on a path it resolves for itself.
-
-#### Scenario: Markdown is posted for conversion
-
-- **WHEN** a session posts Markdown whose first line is a directive naming roles the session does not hold
-- **THEN** the conversion is refused, exactly as the rendered page would be
+When a corpus file is requested, the application SHALL decide its whole-file visibility from the directive in the file as it is read for that request, not from the directive the last scan recorded. The shared implementation that decides whether a session may see a file SHALL therefore operate on a directive the caller has already parsed, so that the page and the navigation tree reach the same rule from their two sources.
 
 #### Scenario: The index is not consulted for a page
 

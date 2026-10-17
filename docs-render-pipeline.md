@@ -12,18 +12,10 @@ start
 
 :checkAuthenticated;
 note right
-  Every one of the three entries below
-  sits behind this gate.
+  The page handler sits behind this gate.
 end note
 
-switch (where does the Markdown come from?)
-case (a .md path)
-  :fs.readFile from disk;
-case (/convert with a url)
-  :mdGetToHtml fetches it over HTTP;
-case (POST /convert with content)
-  :taken straight from the request body;
-endswitch
+:fs.readFile the .md path from disk;
 
 partition #MistyRose "May this caller see it? (app.js)" {
   :refreshAccessToken(req);
@@ -99,9 +91,6 @@ partition #Honeydew "Wrapping for the destination (app.js)" {
     :wrapAsDocument;
   case (plain page)
     :wrapInPage;
-  case (POST /convert)
-    :no wrapping at all - the HTML
-    is answered as the "html" field;
   endswitch
 }
 
@@ -110,7 +99,7 @@ partition #Honeydew "Wrapping for the destination (app.js)" {
 stop
 ```
 ## The Steps In Order
-1. The Markdown is obtained (`app.js`). A path ending in `.md` is read from disk, `/convert` with a `url` fetches it over HTTP (`mdGetToHtml`), and `POST /convert` with `content` takes it from the request body. All three sit behind `checkAuthenticated`.
+1. The Markdown is obtained (`app.js`). A path ending in `.md` is read from disk, behind `checkAuthenticated`. That is the only source: the application renders its own corpus files and nothing a request supplies or names.
 2. Accesstoken is refreshed, so it and all contained roles and attributes are actually current
 3. The first line is examined for a file-permission directive. If it carries one, `resolveFileVisibility` decides whether this caller may see the file at all - by the same rule, and through the same implementation, that the navigation tree applies - and the directive line is then dropped from the content.
 4. `preParse` is called preparing the content for HTML-conversion
@@ -131,4 +120,4 @@ stop
 	4. `postprocessFragments` turns the marks left by step 4.7 into the numbered fragments RevealJS reveals one at a time
 	5. `makeContentMap` generates the map of the files' content later on displayed on the left navbar
 7. `DOMPurify.sanitize` is called before sending the response to the client
-8. The sanitized HTML is wrapped for wherever it is going. Each wrapper emits the `@font-face` block for the fonts this deployment ships, which is where the names a stylesheet has to use come from — see "Naming a font in a stylesheet" in [development](docs-development.md). The wrappers are: `splitForReveal` and then `wrapInReveal` for `?reveal`, `wrapAsDocument` for `?document`, and `wrapInPage` for everything else. `POST /convert` is the one caller that receives the HTML unwrapped, as the `html` field of its JSON answer.
+8. The sanitized HTML is wrapped for wherever it is going. Each wrapper emits the `@font-face` block for the fonts this deployment ships, which is where the names a stylesheet has to use come from — see "Naming a font in a stylesheet" in [development](docs-development.md). The wrappers are: `splitForReveal` and then `wrapInReveal` for `?reveal`, `wrapAsDocument` for `?document`, and `wrapInPage` for everything else.
