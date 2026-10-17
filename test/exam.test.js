@@ -1816,6 +1816,46 @@ describe("online tests: the live view", () => {
     assert.deepEqual(focus, { level: "good", share: "100 %" }, "never left: a full green bar");
   });
 
+  test("the view for the class shows state, window, time left and clock, without navigation and without a name", async () => {
+    await openLive("Live screen");
+    const fromList = async (reference) => {
+      await teacher.page.goto(`${applicationUrl}${reference}`, { waitUntil: "domcontentloaded" });
+      await teacher.page.waitForSelector(`a.sl-exam-screen-link[href="/exam/sittings/${sitting.id}/screen"]`, { timeout: 20000 });
+      return teacher.page.$eval(`a.sl-exam-screen-link[href="/exam/sittings/${sitting.id}/screen"]`, (a) => a.getAttribute("target"));
+    };
+    assert.equal(await fromList(`/exam/tests?course=${course.id}`), "_blank", "the online tests' list links the class screen in a new window");
+    assert.equal(await fromList(`/exam/tests/${written.id}`), "_blank", "and so does the test's page");
+    await teacher.page.goto(`${applicationUrl}/exam/sittings/${sitting.id}/live`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(".sl-exam-live-screen-link", { timeout: 20000 });
+    assert.equal(
+      await teacher.page.$eval(".sl-exam-live-screen-link", (a) => [a.getAttribute("href"), a.getAttribute("target")].join(" ")),
+      `/exam/sittings/${sitting.id}/screen _blank`
+    );
+    await fetchAs(student, `/exam/api/tests/${written.id}/attempt`, { method: "POST" });
+    await teacher.page.goto(`${applicationUrl}/exam/sittings/${sitting.id}/screen`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForFunction(() => document.querySelector("sl-exam-live")?.dataset.mode === "stream", { timeout: 20000 });
+    const seen = await teacher.page.evaluate(() => ({
+      navigation: Boolean(document.querySelector("#topbar, #sidebar, .sl-exam-bar")),
+      list: Boolean(document.querySelector("sl-exam-live table, sl-exam-live button")),
+      badge: document.querySelector(".sl-exam-live-badge").textContent,
+      label: document.querySelector(".sl-exam-screen-label").textContent,
+      remaining: document.querySelector(".sl-exam-screen-remaining").textContent,
+      clock: document.querySelector(".sl-exam-screen-clock").textContent,
+      summary: document.querySelector(".sl-exam-live-summary").textContent,
+      text: document.body.innerText,
+      size: parseFloat(getComputedStyle(document.querySelector(".sl-exam-screen-remaining")).fontSize),
+    }));
+    assert.equal(seen.navigation, false, "no top bar, sidebar or module bar");
+    assert.equal(seen.list, false, "no list and nothing to click");
+    assert.deepEqual([seen.badge, seen.label], ["Live", "Closes in"]);
+    assert.match(seen.remaining, /^\d+:\d\d$/);
+    assert.match(seen.clock, /\d{1,2}:\d\d:\d\d/);
+    assert.match(seen.summary, /1 writing/);
+    assert.ok(!seen.text.toLowerCase().includes(student.username.toLowerCase()), "no name on the screen");
+    assert.ok(seen.size >= 64, `the time left is large: ${seen.size}px`);
+    assert.deepEqual(await fetchAs(student, `/exam/sittings/${sitting.id}/screen`), await fetchAs(student, absent), "a student finds no page");
+  });
+
   test("a teacher who switches to the student view gets refused, and the view says why", async () => {
     await openLive("Live student view");
     // Switched in another tab, so the live view's page stays open.

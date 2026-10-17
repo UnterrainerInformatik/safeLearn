@@ -18,6 +18,11 @@ import { NotFoundError } from "./classes.js";
 import { actsAsTeacher, identityOf, requireTeacher, teacherPage } from "./gate.js";
 import { teacherShell } from "./bar.js";
 import { openEventStream } from "../event-stream.js";
+import { embedPlaceholder } from "../obsidian.js";
+
+function escapeHtml(text) {
+  return String(text).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+}
 
 /** A record id from the path; anything but a positive integer names nothing. */
 function idParam(value) {
@@ -147,6 +152,35 @@ export function registerLiveRoutes(router, { db, handle, startPage }) {
           current: "tests",
         })
       );
+    })
+  );
+
+  // The view for the class, to put on a projector from the teacher's own
+  // session: a page of its own with no top bar, no navigation and no bar,
+  // showing the sitting's state, window, time left and clock large, and how
+  // many are writing - never a name.
+  router.get(
+    "/sittings/:id/screen",
+    teacherPage,
+    handle(async (req, res) => {
+      const sitting = getSitting(db, idParam(req.params.id));
+      const title = escapeHtml(sitting.testName);
+      res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/css/main.css">
+  <link rel="shortcut icon" href="/assets/favicon.ico" type="image/x-icon" />
+  <title>${title}</title>
+</head>
+<body class="sl-exam-screen-page">
+  <div id="markdown-content" class="sl-exam-screen-content">
+    ${embedPlaceholder("live", { sitting: String(sitting.id), screen: "1" })}
+  </div>
+  <script type="module" src="/exam/assets/exam-client.js"></script>
+</body>
+</html>`);
     })
   );
 }

@@ -896,3 +896,77 @@ a.sl-exam-button {
 .sl-exam-pool-questions td:nth-child(n + 2) {
   white-space: nowrap;
 }
+
+/* The view for the class (`/exam/sittings/<id>/screen`), for a projector:
+   nothing but the sitting's state and time, readable from the back row. */
+
+body.sl-exam-screen-page {
+  margin: 0;
+  background-color: #ffffff;
+}
+
+#markdown-content.sl-exam-screen-content {
+  max-width: none;
+  margin: 0;
+  padding: 3vh 4vw;
+}
+
+.sl-exam-screen-content .sl-embed {
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.sl-exam-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  min-height: 90vh;
+  justify-content: center;
+}
+
+.sl-exam-screen p {
+  margin: 0.3em 0;
+}
+
+.sl-exam-screen-test {
+  font-size: clamp(1.5rem, 4vw, 3.5rem);
+  font-weight: 700;
+}
+
+.sl-exam-screen-state .sl-exam-live-badge {
+  font-size: clamp(1.5rem, 4vw, 3rem);
+  padding: 0.1em 0.8em;
+  border-radius: 1em;
+}
+
+.sl-exam-screen-label,
+.sl-exam-screen-clock-label {
+  margin-top: 2vh;
+  font-size: clamp(1.2rem, 2.5vw, 2.2rem);
+  opacity: 0.7;
+}
+
+.sl-exam-screen-remaining {
+  font-size: clamp(5rem, 20vw, 18rem);
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.sl-exam-screen-clock {
+  font-size: clamp(3rem, 9vw, 8rem);
+  font-weight: 700;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+
+.sl-exam-screen-window,
+.sl-exam-screen-summary {
+  font-size: clamp(1.2rem, 2.5vw, 2.2rem);
+}
+
+.sl-exam-screen-connection {
+  margin-top: 2vh;
+}

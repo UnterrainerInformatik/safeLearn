@@ -8,6 +8,12 @@
  *   bar, with how often and how long they left it; requests refused from
  *   another browser; and the button that releases an attempt to a new browser
  *
+ * With `screen: 1` it is the view for the class, on its own page
+ * (`/exam/sittings/<id>/screen`) for a projector: whether the sitting is
+ * live, its window, the time until it opens or closes and the server's time,
+ * large enough to read from the back of the room, and how many are writing
+ * and have submitted - no name, no list, nothing to click.
+ *
  * Changes arrive over the sitting's own event stream as they happen. When the
  * stream fails three times in a row the view fetches snapshots every 5 s and
  * tries the stream again every minute, so it keeps updating without a reload.
@@ -84,7 +90,14 @@ class LiveView extends ExamElement {
       { class: "sl-exam-live-head" },
       h("p", {}, this.badge, " ", this.state),
       h("p", {}, this.windowLine),
-      h("p", { class: "sl-exam-quiet" }, "Server time ", this.serverClock),
+      h(
+        "p",
+        { class: "sl-exam-quiet" },
+        "Server time ",
+        this.serverClock,
+        " · ",
+        h("a", { href: `/exam/sittings/${sitting.id}/screen`, target: "_blank", rel: "noopener", class: "sl-exam-live-screen-link" }, "Class screen (new window)")
+      ),
       h(
         "p",
         { class: "sl-exam-quiet" },
@@ -92,6 +105,7 @@ class LiveView extends ExamElement {
         ` · ${displayClass(course.className)} ${course.subject} · ${sitting.makeup ? "make-up sitting · " : ""}${Math.round(sitting.durationS / 60)} min per attempt`
       )
     );
+    if (this.params.screen === "1") return this.screenView(snapshot);
     const view = h(
       "div",
       { class: "sl-exam sl-exam-live" },
@@ -104,6 +118,28 @@ class LiveView extends ExamElement {
         this.body
       ),
       this.message
+    );
+    this.tick();
+    return view;
+  }
+
+  /** The projector's view: the same state, clock and counts, large, and no names. */
+  screenView(snapshot) {
+    const { test, course } = snapshot;
+    this.bigRemaining = h("div", { class: "sl-exam-screen-remaining" });
+    this.bigLabel = h("div", { class: "sl-exam-screen-label" });
+    const view = h(
+      "div",
+      { class: "sl-exam sl-exam-screen" },
+      h("p", { class: "sl-exam-screen-test" }, test.name, h("span", { class: "sl-exam-quiet" }, ` · ${displayClass(course.className)} ${course.subject}`)),
+      h("p", { class: "sl-exam-screen-state" }, this.badge),
+      this.bigLabel,
+      this.bigRemaining,
+      h("p", { class: "sl-exam-screen-window" }, this.windowLine),
+      h("div", { class: "sl-exam-screen-clock-label" }, "Time"),
+      h("div", { class: "sl-exam-screen-clock" }, this.serverClock),
+      h("div", { class: "sl-exam-screen-summary" }, this.summary),
+      h("p", { class: "sl-exam-quiet sl-exam-screen-connection" }, this.state)
     );
     this.tick();
     return view;
@@ -130,8 +166,14 @@ class LiveView extends ExamElement {
     this.badge.textContent = stateLabels[state];
     this.badge.dataset.state = state;
     const remaining = state === "scheduled" ? `opens in ${span(opens - now)}` : state === "open" ? `closes in ${span(closes - now)}` : `closed ${span(now - closes)} ago`;
-    this.windowLine.textContent = `Window ${displayWindow(this.sitting)} · ${remaining}`;
     this.serverClock.textContent = localClock.format(new Date(now));
+    if (this.bigRemaining) {
+      this.windowLine.textContent = `Window ${displayWindow(this.sitting)}`;
+      this.bigLabel.textContent = state === "scheduled" ? "Opens in" : state === "open" ? "Closes in" : "Closed";
+      this.bigRemaining.textContent = state === "over" ? "–" : span(state === "scheduled" ? opens - now : closes - now);
+      return;
+    }
+    this.windowLine.textContent = `Window ${displayWindow(this.sitting)} · ${remaining}`;
   }
 
   /** Draws a whole snapshot. */
@@ -241,7 +283,27 @@ class LiveView extends ExamElement {
 
   // ------------------------------------------------------------ the stream
 
+  /**
+   * A page left for another is kept by the browser's back/forward cache with
+   * its connections open; enough of them use up the six a browser allows per
+   * host over HTTP/1.1, and the next page does not load. So the stream closes
+   * when the page is hidden that way and opens again when it is shown.
+   */
+  watchPage() {
+    if (this.watchingPage) return;
+    this.watchingPage = true;
+    window.addEventListener("pagehide", () => {
+      this.resume = this.streaming || Boolean(this.poller);
+      this.closeStream();
+      this.stopPolling();
+    });
+    window.addEventListener("pageshow", (event) => {
+      if (event.persisted && this.resume) this.connect();
+    });
+  }
+
   connect() {
+    this.watchPage();
     this.closeStream();
     const source = new EventSource(`/exam/api/sittings/${this.params.sitting}/events`);
     this.source = source;

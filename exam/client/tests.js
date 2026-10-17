@@ -34,6 +34,19 @@ export function displayWindow({ opensAt, closesAt }) {
   return `${displayTime(opensAt)} – ${sameDay ? viennaClock.format(new Date(closesAt)) : displayTime(closesAt)}`;
 }
 
+/**
+ * The links of a sitting that has not ended: its live view, and the view for
+ * the class, which opens in a window of its own for the projector.
+ */
+function sittingLinks(sitting) {
+  return [
+    " · ",
+    h("a", { href: `/exam/sittings/${sitting.id}/live` }, "live view"),
+    " · ",
+    h("a", { href: `/exam/sittings/${sitting.id}/screen`, target: "_blank", rel: "noopener", class: "sl-exam-screen-link" }, "class screen"),
+  ];
+}
+
 /** A list of tests, one group per course. */
 class TestList extends ExamElement {
   async load() {
@@ -89,7 +102,7 @@ class TestList extends ExamElement {
                                 "li",
                                 { "data-state": sitting.state },
                                 `${sitting.makeup ? "Make-up " : ""}${displayWindow(sitting)} · ${stateLabels[sitting.state]}`,
-                                sitting.state !== "over" ? [" · ", h("a", { href: `/exam/sittings/${sitting.id}/live` }, "live view")] : null
+                                sitting.state !== "over" ? sittingLinks(sitting) : null
                               )
                             )
                           )
@@ -218,7 +231,7 @@ class TestDetail extends ExamElement {
                 sitting.makeup || sitting.participants.length < this.roster.length
                   ? sitting.participants.map((username) => names.get(username) ?? username).join(", ")
                   : "the whole class",
-                sitting.state !== "over" ? [" · ", h("a", { href: `/exam/sittings/${sitting.id}/live` }, "live view")] : null,
+                sitting.state !== "over" ? sittingLinks(sitting) : null,
                 sitting.state === "scheduled"
                   ? [
                       " ",
