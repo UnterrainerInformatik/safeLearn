@@ -39,7 +39,8 @@ Phases in the plan's order. Each phase ends deployable with `EXAM_MODULE` unset 
 - [x] 3.7 `safelearn-gradebook` embed for teacher pages (course overview inline)
 - [x] 3.8 Grading-scale admin for teachers
 - [x] 3.9 Harness checks: entries → proposal end to end, override visibility to the student, cross-student access refused, embed off/on
-- [ ] 3.10 Milestone: switch on in secureLectures (`EXAM_MODULE=on` in `deploy/.env` and compose), redeploy, smoke-check with a real teacher account; record in `AI/open-proposals.md`/architecture
+- [x] 3.10 Milestone: switch on in secureLectures (`EXAM_MODULE=on` in `deploy/.env` and compose), redeploy, smoke-check with a real teacher account; record in `AI/open-proposals.md`/architecture. Done 2026-10-17: repository variable `EXAM_MODULE=on` in guFalcon/secureLectures (the workflow writes it into `deploy/.env`), smoke-check passed with Gerald's teacher account
+- [x] 3.11 From the smoke-check: the module's pages use the whole width beside the sidebar (`wrapInPage`'s `wide`), and the top bar shows a teacher acting as one a button to `/exam/` while the module is active; harness checks for both, and that the module-off instance offers no button
 
 ## 4. P2 — Question pool
 

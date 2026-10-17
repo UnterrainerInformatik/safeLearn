@@ -157,7 +157,7 @@ export function registerClassRoutes(router, { db, handle, startPage }) {
           <p class="sl-exam-crumbs"><a href="/exam/">Classes and courses</a></p>
           <h1>${title}</h1>
           ${embedPlaceholder(kind, params)}`;
-        res.send(await wrapInPage(body, startPage(), req, { title }));
+        res.send(await wrapInPage(body, startPage(), req, { title, wide: true }));
       })
     );
 

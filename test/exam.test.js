@@ -149,6 +149,37 @@ describe("the instance with the exam module", () => {
     }
   });
 
+  test("the top bar leads a teacher to the module, and nobody else; module pages use the whole width", async () => {
+    const button = async (session) => {
+      await render(session, plainPage);
+      return session.page.evaluate(() => document.querySelector("#topbar a.sl-exam-button")?.getAttribute("href") ?? null);
+    };
+    assert.equal(await button(teacher), "/exam/");
+    assert.equal(await button(student), null);
+    await setPreferences(teacher, { vt: 0 });
+    try {
+      assert.equal(await button(teacher), null, "no button in student view, where the page is not shown");
+    } finally {
+      await setPreferences(teacher, {});
+    }
+    assert.equal(
+      await teacher.page.evaluate(() => document.querySelector("#markdown-content").classList.contains("sl-wide")),
+      false,
+      "a content page keeps its reading column"
+    );
+
+    await teacher.page.goto(`${applicationUrl}/exam/`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForFunction(() => document.body.style.display !== "none", { timeout: 45000 });
+    const wide = await teacher.page.evaluate(() => {
+      const content = document.querySelector("#markdown-content");
+      return { marked: content.classList.contains("sl-wide"), width: content.getBoundingClientRect().width, viewport: window.innerWidth };
+    });
+    assert.ok(wide.marked, "the module's page is marked wide");
+    if (wide.viewport > 1200) {
+      assert.ok(wide.width > 900, `the content is ${wide.width}px wide in a ${wide.viewport}px window, wider than the reading column`);
+    }
+  });
+
   test("a teacher's page mounts every element, and the client reports what it cannot show", async () => {
     await render(teacher, fixture);
     const seen = await moduleTraces(teacher.page);

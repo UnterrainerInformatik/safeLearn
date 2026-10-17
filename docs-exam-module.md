@@ -10,7 +10,7 @@ The module exists only when the instance's environment says `EXAM_MODULE=on`. An
 
 | Deployment | Module |
 | --- | --- |
-| Production (`deploy/docker-compose.yml`) | Off until a deployment sets it. The compose file passes `EXAM_MODULE` through to the container, and the pipeline fills it from the repository variable `EXAM_MODULE` (Settings → Secrets and variables → Actions → Variables). |
+| Production (`deploy/docker-compose.yml`) | Off until a deployment sets it (secureLectures has it on since 2026-10-17). The compose file passes `EXAM_MODULE` through to the container, and the pipeline fills it from the repository variable `EXAM_MODULE` (Settings → Secrets and variables → Actions → Variables). |
 | WYSIWYG container | Always off. Its templates set no `EXAM_MODULE` and mount no data volume, and `test/deployment-config.test.js` keeps it that way. |
 | Local `npm start` | Off unless your `.env` says `EXAM_MODULE=on`. |
 
@@ -24,7 +24,7 @@ Exam module: disabled - the database data/exam.sqlite could not be opened: ...
 
 **A module that cannot start never stops the reader.** If the database cannot be opened, the data directory is read-only, a migration fails or the database was written by a newer image, the log says why and the instance runs without the module. A request under `/exam/` that fails is answered with a `500` on its own; every other page and session carries on.
 
-Everything under `/exam/` requires a login, exactly like the content. A teacher in student view is a student to the module as well: teacher pages and teacher-only elements disappear and teacher actions are refused, until the view is switched back.
+Everything under `/exam/` requires a login, exactly like the content. A teacher reaches it through the graduation-cap button in the top bar, which only a session acting as a teacher sees, and only on an instance with the module on. The module's pages use the whole width beside the sidebar rather than the reading column, so a gradebook fits on one screen. A teacher in student view is a student to the module as well: teacher pages and teacher-only elements disappear and teacher actions are refused, until the view is switched back.
 
 ## The Data
 All state lives in one SQLite file, `data/exam.sqlite` relative to the working directory — `/app/data` in the image, the volume `deploy/docker-compose.yml` already mounts from `${DATA_DIR}` for the directory cache. It is opened with `node:sqlite`, which the image's Node 24 ships, so the module adds no dependency.

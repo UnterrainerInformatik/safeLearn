@@ -81,6 +81,7 @@ describe("exam-module elements without the module", () => {
     assert.ok(!seen.text.includes("nosuchkind"), "an unknown kind renders nothing, not even its source");
     assert.ok(seen.text.includes("embedding-fixture-example"), "the example inside a longer fence stays text");
     assert.deepEqual(seen.moduleScripts, [], "no page names the module's script");
+    assert.ok(!seen.html.includes("sl-exam-button"), "nor offers a teacher a way to it");
     assert.deepEqual(
       seen.requested.filter((url) => new URL(url).pathname.startsWith("/exam/")),
       [],

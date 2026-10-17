@@ -100,7 +100,7 @@ function buildRouter(db, startPage) {
         <h1>Classes and courses</h1>
         ${embedPlaceholder("classes-home", {})}
         <p class="sl-exam-quiet"><a href="/exam/scale">Grading scale</a></p>`;
-      res.send(await wrapInPage(body, startPage(), req, { title: "Classes and courses" }));
+      res.send(await wrapInPage(body, startPage(), req, { title: "Classes and courses", wide: true }));
     })
   );
 

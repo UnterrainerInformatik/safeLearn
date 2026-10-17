@@ -2985,6 +2985,17 @@ async function getTopBar(startPage, req, title = null) {
       </div>`
           : ""
       }
+      ${
+        // The exam module's home, for a session acting as a teacher, on an
+        // instance where the module is active - the same rule its page applies,
+        // so a teacher in student view gets no button to a page they would not
+        // be shown.
+        embedClientScript !== null && (await hasSomeRoles(req, ["teacher"], true))
+          ? `<a class="sl-button sl-exam-button" href="/exam/" title="Classes, courses and gradebooks" aria-label="Exam module" style="height: 32px; margin: 6px;">${lucideIcon(
+              "GraduationCap"
+            )}</a>`
+          : ""
+      }
       <button class="sl-button" style="height: 32px; margin: 6px;" onclick="openAsPresentation(false)">${lucideIcon(
         "Presentation"
       )}</button>
@@ -3315,6 +3326,8 @@ function getAutoReloadScript() {
 /**
  * `options.title` names a page that is not a corpus file - a module page under
  * /exam/ - in the top bar and the tab, where a corpus page shows its path.
+ * `options.wide` lets the content use the whole width beside the sidebar
+ * instead of the reading column, for the module's tables.
  */
 export async function wrapInPage(html, startPage, req, options = {}) {
   const title = options.title ?? null;
@@ -3351,7 +3364,7 @@ export async function wrapInPage(html, startPage, req, options = {}) {
             startPage,
             req
           )}</div>
-          <div id="markdown-content">
+          <div id="markdown-content"${options.wide ? ' class="sl-wide"' : ""}>
     `;
   const post = `
           </div>
