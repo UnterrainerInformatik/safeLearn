@@ -41,4 +41,7 @@
 
 - [x] 6.1 `docs-permissions.md`: attachments are as visible as their most visible reference, unreferenced ones are not served, and visibility changes take up to 10 minutes without autoscan
 - [x] 6.2 `AI/architecture.md`: the route table entry for `/md`, the index entry's new field, the grant store in "Security-relevant observations", and the `getPermissionContext` comment about images, which is no longer true for a request without a grant
-- [ ] 6.3 After the production sync, compare the logged unreferenced count against the 399 from 2026-10-17 and note it in the change. Hand Gerald the logged list as the starting point for cleaning out the repository
+- [x] 6.3 After the production sync, compare the logged unreferenced count against the 399 from 2026-10-17 and note it in the change. Hand Gerald the logged list as the starting point for cleaning out the repository
+  - Result 2026-10-17, first scan of the container built from 7cf98dc: `[Attachments] 560 unreferenced attachment(s)`. The log counts paths, the proposal counted names: the 560 paths carry 402 distinct names, against the 399 from the proposal. The difference is the same file name in several exercise folders, plus `.obsidian/` config files, which the scan now treats as unreferenced too and therefore no longer serves.
+  - Breakdown by path: 426 under `exercises/POSE3OO/`, 16 under `presentations/Security & Keycloak/`, 14 under `.obsidian/`. By type: 312 `.java`, 98 `.png`, 41 `.gitignore`, the rest small (`.txt`, `.json`, `.xml`, `.csv`, `.sh`).
+  - The full list was handed to Gerald outside the repository, because this repository is public and the list names files from the private corpus.
