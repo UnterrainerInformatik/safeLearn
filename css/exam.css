@@ -158,6 +158,19 @@ a.sl-exam-button {
   text-decoration: none;
 }
 
+/* A student's buttons name their page beside the icon while there is room. */
+.sl-exam-button-label {
+  margin-left: 6px;
+  margin-right: 4px;
+  position: relative;
+  top: -1px;
+}
+@media screen and (max-width: 700px) {
+  .sl-exam-button-label {
+    display: none;
+  }
+}
+
 /* The table conventions every module table shares (`gradebook-sheet`). */
 
 /* A table that is wider than the content scrolls inside this wrapper, so the

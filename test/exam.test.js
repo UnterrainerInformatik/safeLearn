@@ -153,16 +153,16 @@ describe("the instance with the exam module", () => {
     }
   });
 
-  test("the top bar leads a teacher to the module, and nobody else; module pages use the whole width", async () => {
-    const button = async (session) => {
+  test("the top bar leads a teacher to the module and a student to their tests and results; module pages use the whole width", async () => {
+    const buttons = async (session) => {
       await render(session, plainPage);
-      return session.page.evaluate(() => document.querySelector("#topbar a.sl-exam-button")?.getAttribute("href") ?? null);
+      return session.page.evaluate(() => [...document.querySelectorAll("#topbar a.sl-exam-button")].map((a) => a.getAttribute("href")));
     };
-    assert.equal(await button(teacher), "/exam/");
-    assert.equal(await button(student), null);
+    assert.deepEqual(await buttons(teacher), ["/exam/"]);
+    assert.deepEqual(await buttons(student), ["/exam/my/tests", "/exam/results"], "a student reaches both own pages from every page");
     await setPreferences(teacher, { vt: 0 });
     try {
-      assert.equal(await button(teacher), null, "no button in student view, where the page is not shown");
+      assert.deepEqual(await buttons(teacher), ["/exam/my/tests", "/exam/results"], "in student view, what a student gets, and not the module's home");
     } finally {
       await setPreferences(teacher, {});
     }
@@ -1554,6 +1554,66 @@ describe("online tests: writing", () => {
     assert.equal(database((db) => db.prepare("SELECT COUNT(*) AS n FROM attempt WHERE test_id = ?").get(test.id).n), 0, "no attempt");
     assert.equal((await fetchAs(student, `/exam/api/tests/${test.id}/preview`)).status, 403, "a student is refused");
     assert.deepEqual(await fetchAs(student, `/exam/tests/${test.id}/preview`), await fetchAs(student, absent), "and finds no page");
+  });
+
+  test("a teacher shows a test's solution on the board: correct answers and the class's share, no names, no foreign host", async () => {
+    const tests = (await fetchAs(teacher, `/exam/api/tests?course=${course.id}`)).json.groups[0].tests;
+    const written = tests.find((t) => t.name === "Writing");
+    const unwritten = tests.find((t) => t.name === "Preview");
+    await teacher.page.goto(`${applicationUrl}/exam/tests/${written.id}`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(".sl-exam-test-solution", { timeout: 20000 });
+    assert.deepEqual(
+      await teacher.page.$eval(".sl-exam-test-solution", (a) => [a.getAttribute("href"), a.getAttribute("target")]),
+      [`/exam/tests/${written.id}/solution`, "_blank"],
+      "the test's page opens the solution in a new window"
+    );
+
+    const deck = async (testId) => {
+      const hosts = new Set();
+      const record = (request) => hosts.add(new URL(request.url()).host);
+      teacher.page.on("request", record);
+      try {
+        await teacher.page.goto(`${applicationUrl}/exam/tests/${testId}/solution`, { waitUntil: "networkidle0" });
+        await teacher.page.waitForFunction(() => document.body.style.display !== "none", { timeout: 10000 });
+        const seen = await teacher.page.evaluate(() => ({
+          html: document.documentElement.outerHTML,
+          revealed: Boolean(document.querySelector(".reveal.ready, .reveal .slides section.present")),
+          questions: [...document.querySelectorAll("section.sl-board-question")].map((s) => ({
+            correct: s.querySelectorAll(".sl-board-correct").length,
+            share: s.querySelector(".sl-board-share")?.textContent ?? null,
+          })),
+        }));
+        return { ...seen, hosts: [...hosts] };
+      } finally {
+        teacher.page.off("request", record);
+      }
+    };
+
+    const flags = (await fetchAs(teacher, `/exam/api/tests/${written.id}`)).json.questions.map((q) => q.answers.filter((a) => a.correct).length);
+    const solved = await deck(written.id);
+    assert.ok(solved.revealed, "the deck runs in the presentation view");
+    assert.deepEqual(
+      solved.questions,
+      flags.map((correct) => ({ correct, share: "Richtig beantwortet: 100 %" })),
+      "one slide per question, its correct answers marked and the share of the one submitted attempt"
+    );
+    assert.deepEqual(solved.hosts, [new URL(applicationUrl).host], `the deck contacts no other host: ${solved.hosts.join(", ")}`);
+    const names = database((db) => db.prepare("SELECT username, given_name, family_name FROM student").all())
+      .flatMap((s) => [s.username, s.given_name, s.family_name])
+      .filter((value) => typeof value === "string" && value.length > 2);
+    assert.ok(names.length > 0);
+    assert.deepEqual(names.filter((name) => solved.html.toLowerCase().includes(name.toLowerCase())), [], "no student is named in the deck");
+
+    const fresh = await deck(unwritten.id);
+    assert.ok(fresh.questions.length > 0 && fresh.questions.every((q) => q.correct > 0 && q.share === null), "a test nobody wrote shows the answers and no share");
+
+    assert.deepEqual(await fetchAs(student, `/exam/tests/${written.id}/solution`), await fetchAs(student, absent), "a student finds no deck");
+    await setPreferences(teacher, { vt: 0 });
+    try {
+      assert.deepEqual(await fetchAs(teacher, `/exam/tests/${written.id}/solution`), await fetchAs(teacher, absent), "nor does a teacher in student view");
+    } finally {
+      await setPreferences(teacher, {});
+    }
   });
 
   test("a submitted attempt is a read-only field of its test's column in the sheet, and counts in the proposal", async () => {

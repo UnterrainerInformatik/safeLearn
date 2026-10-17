@@ -25,6 +25,7 @@ import { importPool } from "../exam/pool-import.js";
 import { createSitting, createTest, deleteSitting, deleteTest, getTest, listTests, updateSitting, updateTest, viennaDate } from "../exam/tests.js";
 import {
   checkDevice,
+  correctShares,
   DeviceRefusedError,
   finalizeDue,
   openTestsOf,
@@ -416,6 +417,33 @@ describe("attempts", () => {
     const result = submitAttempt(db, attemptRow(db, attemptId));
     assert.deepEqual(result, { submitted: true, score: 2, questionCount: 3, grade: 3 });
     assert.throws(() => writingView(db, attemptRow(db, attemptId)), ConflictError, "the questions are gone after submission");
+  });
+
+  test("the board solution's share per question counts submitted attempts only, by the same rule as the grade", () => {
+    const { db, test } = running();
+    const questionIds = db.prepare("SELECT id, type FROM test_question WHERE test_id = ?").all(test.id);
+    assert.deepEqual(correctShares(db, test.id).submitted, 0, "nobody has written it yet");
+    assert.ok(questionIds.every((q) => correctShares(db, test.id).correct.get(q.id) === 0));
+
+    // Anna gets everything right; Ben misses one of the two correct answers
+    // of the multiple-answer question and leaves the rest open.
+    const anna = startAttempt(db, "anna", test.id).attemptId;
+    const correct = correctTokens(db, anna);
+    for (const question of writingView(db, attemptRow(db, anna)).questions) saveAnswer(db, attemptRow(db, anna), question.n, correct[question.n]);
+    submitAttempt(db, attemptRow(db, anna));
+    const ben = startAttempt(db, "ben", test.id).attemptId;
+    const multi = writingView(db, attemptRow(db, ben)).questions.find((q) => q.type === "multichoiceset");
+    saveAnswer(db, attemptRow(db, ben), multi.n, correctTokens(db, ben)[multi.n].slice(0, 1));
+    assert.equal(correctShares(db, test.id).submitted, 1, "an open attempt does not count yet");
+    submitAttempt(db, attemptRow(db, ben));
+
+    const shares = correctShares(db, test.id);
+    assert.equal(shares.submitted, 2);
+    assert.deepEqual(
+      questionIds.map((q) => shares.correct.get(q.id)),
+      questionIds.map(() => 1),
+      "each question was answered correctly by Anna only"
+    );
   });
 
   test("past the deadline an attempt is submitted with what was saved, on access or by the sweep", () => {

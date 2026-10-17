@@ -2996,6 +2996,19 @@ async function getTopBar(startPage, req, title = null) {
             )}</a>`
           : ""
       }
+      ${
+        // A student's two pages of the module, on every page, so a class finds
+        // its open tests and its results without a link in the content. Shown
+        // to every session not acting as a teacher - a teacher in student view
+        // included, who finds both empty, as a student off every roster would.
+        embedClientScript !== null && !(await hasSomeRoles(req, ["teacher"], true))
+          ? `<a class="sl-button sl-exam-button sl-exam-student-button" href="/exam/my/tests" title="My online tests" aria-label="My online tests" style="height: 32px; margin: 6px;">${lucideIcon(
+              "ClipboardList"
+            )}<span class="sl-exam-button-label">Tests</span></a><a class="sl-button sl-exam-button sl-exam-student-button" href="/exam/results" title="My results" aria-label="My results" style="height: 32px; margin: 6px;">${lucideIcon(
+              "Award"
+            )}<span class="sl-exam-button-label">Results</span></a>`
+          : ""
+      }
       <button class="sl-button" style="height: 32px; margin: 6px;" onclick="openAsPresentation(false)">${lucideIcon(
         "Presentation"
       )}</button>
@@ -3430,7 +3443,11 @@ export async function wrapAsDocument(html, req) {
   return pre + html + post;
 }
 
-export async function wrapInReveal(reveal, req) {
+/**
+ * `options.title` names a deck that is no corpus file - the exam module's board
+ * solution (`board-solution`) - in place of `req.file.name`.
+ */
+export async function wrapInReveal(reveal, req, options = {}) {
   const pre = `
   <!DOCTYPE html>
   <html>
@@ -3439,7 +3456,7 @@ export async function wrapInReveal(reveal, req) {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   
-    <title>${req.file.name}</title>
+    <title>${options.title !== undefined ? escapeHtmlAttribute(options.title) : req.file.name}</title>
   
     <!-- Reveal, from the version package.json declares and app.js serves out of
          node_modules. The theme is this project's derivation of the package's

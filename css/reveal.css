@@ -128,3 +128,48 @@ pre.mermaid svg {
 .reveal .obsidian-callout .obsidian-callout-content code {
   white-space: normal;
 }
+
+/* The exam module's board solution (`board-solution`): a question's answers
+   with the correct ones marked, and the share of the class that got it right. */
+.reveal .sl-board-text {
+  font-size: 0.8em;
+}
+.reveal ul.sl-board-answers {
+  list-style: none;
+  margin: 0.5em 0 0 0;
+  padding: 0;
+  font-size: 0.75em;
+  text-align: left;
+}
+.reveal ul.sl-board-answers li {
+  display: flex;
+  gap: 0.6em;
+  align-items: baseline;
+  margin: 0.25em 0;
+  padding: 0.15em 0.4em;
+  border-radius: 6px;
+}
+.reveal ul.sl-board-answers li > div > p {
+  margin: 0;
+}
+.reveal ul.sl-board-answers li.sl-board-correct {
+  background-color: rgba(80, 200, 120, 0.25);
+  color: #eee8d5;
+  font-weight: 600;
+}
+.reveal ul.sl-board-answers li.sl-board-wrong {
+  opacity: 0.7;
+}
+.reveal .sl-board-mark {
+  flex: 0 0 auto;
+  width: 1.2em;
+  text-align: center;
+}
+.reveal .sl-board-correct .sl-board-mark {
+  color: #50c878;
+}
+.reveal .sl-board-share {
+  margin-top: 0.8em;
+  font-size: 0.7em;
+  opacity: 0.85;
+}

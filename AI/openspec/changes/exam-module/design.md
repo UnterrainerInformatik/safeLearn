@@ -137,7 +137,7 @@ Switching the module on in production exposes nothing to students by itself. Stu
 
 ## Open Questions
 
-- **Retention (P5).** How long the grades, attempts and focus logs of a student who has left are kept, and what the year change deletes versus archives. Spec `school-year-change` requires a retention period and a confirmation step. Its value is a setting decided before P5.
+- **Retention (P5).** Settled with Gerald on 2026-10-17: **two years.** The legal duty to keep records runs until after the re-sit exams (Nachprüfungen) that follow a school year, so two years after a student's last roster entry always covers it. The period is a setting with two years as its default; what the year change deletes versus archives is still decided in P5.
 - **School-network restriction.** Whether safeLearn on babylon5 sees the real client IP (a reverse proxy setting `X-Forwarded-For`, given that `trust proxy` is set). That needs a spike. If it works, a sitting gets an optional "school network only" flag, which is off for make-ups at home. This would be an additive requirement on `online-test`.
 - **Make-up sittings swapping questions.** Whether a make-up may replace individual questions to counter pool wear. If yes, that is a per-sitting question override on top of the test's snapshot, and grades stay per attempt.
 - **Deleting used questions (P7).** Spec `question-editor` settles this as "retire, never delete" so the usage history keeps its target. Still open: who may retire a question (any teacher, or only the one who created it or last edited it), and whether a retired question can be revived.

@@ -58,8 +58,8 @@ Moved to the change `exam-online-tests` on 2026-10-17, together with the spec `o
 
 ## 6. P6 — Board solution
 
-- [ ] 6.1 Teacher-only route building one slide per question (original order, course language, correct answers marked, share correct from submitted attempts) through `wrapInReveal`
-- [ ] 6.2 Harness checks: student and teacher-in-student-view refused; no names in the deck; deck contacts no foreign host
+- [x] 6.1 Teacher-only route building one slide per question (original order, course language, correct answers marked, share correct from submitted attempts) through `wrapInReveal`. Done as `GET /exam/tests/:id/solution` (`routes-tests.js`), shares by `correctShares` in `attempts.js` (unit test in `test/exam-tests.test.js`), linked from the test's page as "Solution on the board"; `wrapInReveal` takes a `title` for a deck that is no corpus file
+- [x] 6.2 Harness checks: student and teacher-in-student-view refused; no names in the deck; deck contacts no foreign host
 
 ## 7. P7 — Question editor
 
@@ -73,7 +73,7 @@ Moved to the change `exam-online-tests` on 2026-10-17, together with the spec `o
 
 - [ ] 8.1 Close a school year after its end date: read-only for everyone, still readable by its teachers and students
 - [ ] 8.2 Start the next year: offer each class one level up with last year's roster pre-ticked beside the directory's current members; copy courses with language and weights, without entries
-- [ ] 8.3 Retention: setting for the retention period (value decided before this phase, design.md Open Questions); the year change reports counts to be removed and deletes only after confirmation
+- [ ] 8.3 Retention: setting for the retention period (default two years, decided 2026-10-17, design.md Open Questions); the year change reports counts to be removed and deletes only after confirmation
 - [ ] 8.4 Harness checks: closed year refuses writes; next-year roster proposal; retention deletion only after confirmation
 
 ## 9. Wrap-up

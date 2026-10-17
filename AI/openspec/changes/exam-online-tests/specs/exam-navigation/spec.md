@@ -18,3 +18,17 @@ At its right end, apart from the four positions, the bar SHALL carry two buttons
 
 - **WHEN** a teacher in student view opens any module page
 - **THEN** neither button is shown, as no bar is shown
+
+### Requirement: A student reaches their own tests and results from every page
+
+While the module is active, the instance's top bar SHALL carry, on every page, two buttons for a session not acting as a teacher: **Tests**, which opens the student's own page of open online tests, and **Results**, which opens the student's own results. A teacher in student view SHALL get both, as a student would, and SHALL not get the button to the module's home. A session acting as a teacher SHALL get neither. Without the module neither button exists.
+
+#### Scenario: A student on a lecture page
+
+- **WHEN** a student opens any content page of an instance with the module active
+- **THEN** the top bar leads to `/exam/my/tests` and to `/exam/results`
+
+#### Scenario: A teacher
+
+- **WHEN** a teacher in teacher view opens the same page
+- **THEN** the top bar carries the button to the module's home and neither of the student's buttons

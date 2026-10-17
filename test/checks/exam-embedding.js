@@ -98,6 +98,7 @@ describe("exam-module elements without the module", () => {
     assert.ok(!seen.text.includes("embedding-fixture-course"), "nor of the gradebook block");
     assert.ok(!seen.html.includes("embedding-fixture-course"), "not even in the markup");
     assert.ok(!seen.html.includes("embedding-fixture-teacher-test"), "nor of the test block in the teacher section");
+    assert.ok(!seen.html.includes("sl-exam-button"), "nor a button to the module's pages");
     assert.match(seen.text, /Text before the element\.[\s\S]*Text between the elements\.[\s\S]*Text after the elements\./);
   });
 

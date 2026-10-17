@@ -7,8 +7,8 @@
  */
 
 import { createSitting, createTest, deleteSitting, deleteTest, getTest, listTests, updateSitting, updateTest } from "./tests.js";
-import { previewView, releaseAttempt } from "./attempts.js";
-import { embedPlaceholder, wrapInPage } from "../obsidian.js";
+import { correctShares, previewView, releaseAttempt } from "./attempts.js";
+import { embedPlaceholder, wrapInPage, wrapInReveal } from "../obsidian.js";
 import { NotFoundError } from "./classes.js";
 import { requireTeacher, teacherPage } from "./gate.js";
 import { contextFromQuery, teacherShell } from "./bar.js";
@@ -18,6 +18,53 @@ function idParam(value) {
   const id = typeof value === "string" && /^[1-9]\d{0,9}$/.test(value) ? Number(value) : null;
   if (id === null) throw new NotFoundError("There is no such record.");
   return id;
+}
+
+function escapeText(value) {
+  return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+}
+
+/**
+ * The board solution's slides (`board-solution`, design D11): a title slide,
+ * then one per question in the test's own order and the course's language,
+ * the correct answers marked and the share of submitted attempts that got the
+ * question right - a number, never a name. Without a submitted attempt the
+ * share is left out. The texts are the snapshot's, sanitized when imported.
+ */
+function solutionSlides(test, shares) {
+  const en = test.course.language === "en";
+  const text = en ? "textEn" : "textDe";
+  const title = `
+    <section class="sl-board-title">
+      <h1>${escapeText(test.name)}</h1>
+      <p>${escapeText(test.course.className.toUpperCase())} ${escapeText(test.course.subject)} · ${escapeText(test.course.yearName)}</p>
+      <p>${en ? "Solution" : "Lösung"}${
+        shares.submitted > 0 ? ` · ${shares.submitted} ${en ? (shares.submitted === 1 ? "attempt" : "attempts") : shares.submitted === 1 ? "Abgabe" : "Abgaben"}` : ""
+      }</p>
+    </section>`;
+  const slides = test.questions.map((question, index) => {
+    const correct = shares.correct.get(question.id) ?? 0;
+    const share =
+      shares.submitted > 0
+        ? `<p class="sl-board-share">${en ? "Answered correctly" : "Richtig beantwortet"}: ${Math.round((100 * correct) / shares.submitted)} %</p>`
+        : "";
+    const answers = question.answers
+      .map(
+        (answer) =>
+          `<li class="${answer.correct ? "sl-board-correct" : "sl-board-wrong"}"><span class="sl-board-mark" aria-label="${
+            answer.correct ? (en ? "correct" : "richtig") : en ? "wrong" : "falsch"
+          }">${answer.correct ? "✓" : "✗"}</span><div>${answer[text]}</div></li>`
+      )
+      .join("");
+    return `
+    <section class="sl-board-question" data-question="${index + 1}">
+      <h3>${en ? "Question" : "Frage"} ${index + 1}</h3>
+      <div class="sl-board-text">${question[text]}</div>
+      <ul class="sl-board-answers">${answers}</ul>
+      ${share}
+    </section>`;
+  });
+  return title + slides.join("");
 }
 
 export function registerTestRoutes(router, { db, handle, startPage }) {
@@ -73,6 +120,18 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
           current: "tests",
         })
       );
+    })
+  );
+
+  // The solution on the board, as a deck in the presentation view. Teachers
+  // only; anyone else lands where a path with nothing behind it lands.
+  router.get(
+    "/tests/:id/solution",
+    teacherPage,
+    handle(async (req, res) => {
+      const test = getTest(db, idParam(req.params.id));
+      const slides = solutionSlides(test, correctShares(db, test.id));
+      res.send(await wrapInReveal(slides, req, { title: `${test.name} – Solution` }));
     })
   );
 

@@ -81,6 +81,42 @@ export function scoreAttempt(db, attemptId) {
 }
 
 /**
+ * For each question of a test's snapshot, how many submitted attempts
+ * answered it correctly - by the rule `scoreAttempt` applies - out of how many
+ * submitted attempts there are. Counts only, never who (`board-solution`).
+ */
+export function correctShares(db, testId) {
+  const submitted = db.prepare("SELECT COUNT(*) AS n FROM attempt WHERE test_id = ? AND submitted_at IS NOT NULL").get(testId).n;
+  const correct = new Map();
+  const chosenRows = db
+    .prepare(
+      `SELECT r.attempt_id AS attemptId, a.test_question_id AS questionId, a.id AS answerId
+       FROM response r JOIN attempt t ON t.id = r.attempt_id JOIN test_answer a ON a.id = r.test_answer_id
+       WHERE t.test_id = ? AND t.submitted_at IS NOT NULL`
+    )
+    .all(testId);
+  const chosen = new Map();
+  for (const row of chosenRows) {
+    const key = `${row.attemptId}:${row.questionId}`;
+    if (!chosen.has(key)) chosen.set(key, new Set());
+    chosen.get(key).add(row.answerId);
+  }
+  const questions = db.prepare("SELECT id FROM test_question WHERE test_id = ?").all(testId);
+  const correctOf = db.prepare("SELECT id FROM test_answer WHERE test_question_id = ? AND correct = 1");
+  const attempts = db.prepare("SELECT id FROM attempt WHERE test_id = ? AND submitted_at IS NOT NULL").all(testId);
+  for (const question of questions) {
+    const right = correctOf.all(question.id).map((row) => row.id);
+    let count = 0;
+    for (const attempt of attempts) {
+      const picked = chosen.get(`${attempt.id}:${question.id}`) ?? new Set();
+      if (picked.size === right.length && right.every((id) => picked.has(id))) count += 1;
+    }
+    correct.set(question.id, count);
+  }
+  return { submitted, correct };
+}
+
+/**
  * Submits an attempt at `at`, or at its deadline if that came first: scores
  * it and closes an absence still open. Does nothing to a submitted attempt.
  */

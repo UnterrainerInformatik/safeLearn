@@ -169,6 +169,12 @@ class TestDetail extends ExamElement {
         h("a", { href: `/exam/tests/${test.id}/preview`, target: "_blank", rel: "noopener", class: "sl-exam-test-preview" }, "Try this test as a student sees it"),
         h("span", { class: "sl-exam-quiet" }, " (new window; nothing is saved or submitted)")
       ),
+      h(
+        "p",
+        {},
+        h("a", { href: `/exam/tests/${test.id}/solution`, target: "_blank", rel: "noopener", class: "sl-exam-test-solution" }, "Solution on the board"),
+        h("span", { class: "sl-exam-quiet" }, " (presentation in a new window: correct answers and the share of the class that got each right, no names)")
+      ),
       this.renameForm(test),
       this.message,
       this.sittingsSection(test),
