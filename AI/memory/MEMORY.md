@@ -20,6 +20,7 @@ Echter Ablageort: `/mnt/data/source/HTL/safeLearn/AI/memory/`
 - [Vault-Link unter Windows](plugin-vault-link-windows.md) — der Link auf das Plugin darf nicht eingecheckt werden; auf Windows wird er zur 53-Byte-Datei und jede Store-Installation hängt ewig
 - [secureLectures ist Downstream](securelectures-downstream-role.md) — dort nur Tests entfernen, `md/`-Inhalt und deployment-Config; jede App-Entscheidung (Code!) gehört upstream nach safeLearn
 - [Sync-Reihenfolge safeLearn → secureLectures](securelectures-sync-order.md) — erst safeLearn pushen, dann public/master in secureLectures mergen+pushen; nicht auf den Build warten
+- [Deploy-Pfadfilter in secureLectures](securelectures-deploy-path-filter.md) — Deploy läuft nur für gelistete Pfade; nach dem Merge prüfen, ob ein Run für HEAD startet
 - [Kontext vor Entscheidungsfragen](decision-questions-need-context.md) — erst den Mechanismus belegen, dann erst Optionen anbieten
 - [Directory-Service-Credentials](directory-service-credentials-invalid.md) — bis 2026-10-17 nur `CHANGE…`-Platzhalter → `invalid_client`/202; jetzt gitignored mit Staging-Werten, Vorlage `.env.template`
 - [git mv durch den openspec-Symlink](git-mv-through-openspec-symlink.md) — Ziel muss `AI/openspec/...` heißen, nicht `openspec/...`, sonst korrumpiert `git mv` den Index
