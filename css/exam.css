@@ -988,3 +988,262 @@ body.sl-exam-screen-page {
 .sl-exam-screen-connection {
   margin-top: 2vh;
 }
+
+/* The question editor (`question-editor`): German and English side by side
+   per row, a narrow label column on the left. Below 800px the two languages
+   stack. */
+
+.sl-exam-pool-tools,
+.sl-exam-pool-question-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+  margin-bottom: 0.4em;
+}
+
+.sl-exam-pool-tools .sl-exam-pool-search {
+  flex: 1 1 14em;
+}
+
+.sl-exam-pool-questions tbody tr.is-retired > td {
+  opacity: 0.6;
+}
+
+.sl-exam-editor-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin-bottom: 0.8em;
+}
+
+.sl-exam-editor select,
+.sl-exam-editor input[type="text"],
+.sl-exam-editor button,
+.sl-exam-categories input,
+.sl-exam-categories select,
+.sl-exam-categories button {
+  font: inherit;
+}
+
+.sl-exam-editor-row {
+  display: grid;
+  grid-template-columns: 7em minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px 12px;
+  align-items: start;
+  margin: 6px 0;
+}
+
+.sl-exam-editor-head {
+  font-weight: bold;
+  margin-bottom: 0;
+}
+
+.sl-exam-editor-row input[type="text"] {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.sl-exam-editor-label {
+  padding-top: 4px;
+}
+
+.sl-exam-editor-tools {
+  display: flex;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.sl-exam-editor-tools button {
+  padding: 0 6px;
+}
+
+.sl-exam-editor-answers {
+  margin-top: 1em;
+}
+
+.sl-exam-editor-truefalse label {
+  margin-right: 1em;
+}
+
+.sl-exam-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  margin-top: 1em;
+}
+
+.sl-exam-editor-lifecycle {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.sl-exam-editor-problems:empty {
+  display: none;
+}
+
+.sl-exam-editor-retired {
+  padding: 4px 10px;
+  border-left: 3px solid #bf8700;
+}
+
+@media (max-width: 800px) {
+  .sl-exam-editor-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sl-exam-editor-head > :nth-child(n + 2) {
+    display: none;
+  }
+
+  .sl-exam-editor-de::before {
+    content: "Deutsch";
+  }
+
+  .sl-exam-editor-en::before {
+    content: "English";
+  }
+
+  .sl-exam-editor-de::before,
+  .sl-exam-editor-en::before {
+    display: block;
+    font-size: 0.85em;
+    opacity: 0.7;
+  }
+}
+
+/* The rich-text field: a toolbar over an editable area that looks like an
+   input. Stored text keeps no classes, so the area styles its children. */
+
+sl-rich-text {
+  display: block;
+  border: 1px solid rgba(27, 31, 35, 0.3);
+  border-radius: 4px;
+}
+
+#markdown-content.dark-mode sl-rich-text {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.sl-rich-text-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  border-bottom: 1px solid rgba(27, 31, 35, 0.15);
+}
+
+#markdown-content.dark-mode .sl-rich-text-toolbar {
+  border-bottom-color: rgba(255, 255, 255, 0.2);
+}
+
+.sl-rich-text-toolbar button {
+  font: inherit;
+  font-size: 0.85em;
+  min-width: 2em;
+  padding: 0 4px;
+  color: inherit;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.sl-rich-text-toolbar button:hover,
+.sl-rich-text-toolbar button:focus-visible {
+  border-color: rgba(27, 31, 35, 0.3);
+}
+
+#markdown-content.dark-mode .sl-rich-text-toolbar button:hover,
+#markdown-content.dark-mode .sl-rich-text-toolbar button:focus-visible {
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.sl-rich-text-area {
+  min-height: 2.4em;
+  padding: 4px 8px;
+  overflow-wrap: anywhere;
+}
+
+.sl-rich-text-area:focus {
+  outline: 2px solid rgba(9, 105, 218, 0.5);
+  outline-offset: -2px;
+}
+
+.sl-rich-text-area > :first-child {
+  margin-top: 0;
+}
+
+.sl-rich-text-area > :last-child {
+  margin-bottom: 0;
+}
+
+.sl-rich-text-area img {
+  max-width: 100%;
+  height: auto;
+}
+
+.sl-rich-text-area pre {
+  padding: 4px 8px;
+  overflow-x: auto;
+  background: rgba(27, 31, 35, 0.06);
+  border-radius: 4px;
+}
+
+#markdown-content.dark-mode .sl-rich-text-area pre {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.sl-rich-text-status:empty {
+  display: none;
+}
+
+.sl-rich-text-status {
+  display: block;
+  padding: 2px 8px;
+  font-size: 0.85em;
+}
+
+/* The category page. */
+
+.sl-exam-categories-tree,
+.sl-exam-categories-tree ul {
+  list-style: none;
+  padding-left: 0;
+}
+
+.sl-exam-categories-tree ul {
+  padding-left: 1.5em;
+}
+
+.sl-exam-categories-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+  padding: 3px 0;
+  border-bottom: 1px solid rgba(27, 31, 35, 0.08);
+}
+
+#markdown-content.dark-mode .sl-exam-categories-line {
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+.sl-exam-categories-name {
+  flex: 1 1 14em;
+}
+
+.sl-exam-categories-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.sl-exam-categories-names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0.4em 0;
+}

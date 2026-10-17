@@ -17,6 +17,8 @@ import { connectBar } from "./bar.js";
 import "./classes.js";
 import "./gradebook.js";
 import "./pool.js";
+import "./question-editor.js";
+import "./pool-categories.js";
 import "./tests.js";
 import "./attempt.js";
 import "./live.js";

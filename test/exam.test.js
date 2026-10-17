@@ -11,7 +11,9 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { after, before, describe, test } from "node:test";
 
 import {
@@ -27,6 +29,7 @@ import {
 } from "./harness.js";
 import { openDatabase } from "../exam/db.js";
 import { importPool } from "../exam/pool-import.js";
+import { purgeUploads } from "../exam/pool-edit.js";
 
 const run = useExamModule();
 
@@ -1941,6 +1944,481 @@ describe("online tests: the live view", () => {
       await setPreferences(elsewhere, {});
       await other.close();
     }
+  });
+});
+
+describe("the question editor", () => {
+  let student;
+  let teacher;
+  let course;
+  let categoryId;
+
+  // A 1×1 PNG, and a second, different one.
+  const pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+  const otherPixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
+
+  /** A connection to the run's database beside the instance, for what only the server knows. */
+  function database(fn) {
+    const { db } = openDatabase(run.databasePath);
+    try {
+      return fn(db);
+    } finally {
+      db.close();
+    }
+  }
+
+  /**
+   * An upload from inside the page, as the editor sends one: the bytes of
+   * `base64`, or `size` bytes starting like a PNG, in a file called `name`.
+   */
+  async function uploadAs(session, { base64 = null, size = 0, name = "image.png" }) {
+    return session.page.evaluate(
+      async (address, base64, size, name) => {
+        let bytes;
+        if (base64 !== null) {
+          bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+        } else {
+          bytes = new Uint8Array(size);
+          bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+        }
+        const response = await fetch(address, {
+          method: "POST",
+          credentials: "include",
+          headers: { Accept: "application/json", "Content-Type": "application/octet-stream" },
+          body: new File([bytes], name, { type: "image/png" }),
+        });
+        let json = null;
+        try {
+          json = await response.json();
+        } catch {
+          // Not JSON.
+        }
+        return { status: response.status, json };
+      },
+      `${applicationUrl}/exam/api/pool/uploads`,
+      base64,
+      size,
+      name
+    );
+  }
+
+  /** What an image address answers inside the page: its status and size. */
+  const imageAs = (session, reference) =>
+    session.page.evaluate(async (address) => {
+      const response = await fetch(address, { credentials: "include" });
+      return { status: response.status, bytes: (await response.arrayBuffer()).byteLength };
+    }, `${applicationUrl}${reference}`);
+
+  /** A complete new question in the checks' category; `overrides` change any field. */
+  async function newQuestion(overrides = {}) {
+    const created = await fetchAs(teacher, "/exam/api/pool/questions", {
+      method: "POST",
+      body: {
+        categoryId,
+        type: "multichoice",
+        nameDe: "Editor-Frage",
+        nameEn: "Editor question",
+        textDe: "<p>Was ist richtig?</p>",
+        textEn: "<p>What is right?</p>",
+        answers: [
+          { textDe: "<p>das</p>", textEn: "<p>this</p>", correct: true },
+          { textDe: "<p>jenes</p>", textEn: "<p>that</p>", correct: false },
+        ],
+        ...overrides,
+      },
+    });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    return created.json.question;
+  }
+
+  /** The question as the editor sends it back unchanged. */
+  async function editable(id) {
+    const q = (await fetchAs(teacher, `/exam/api/pool/questions/${id}`)).json;
+    return {
+      version: q.version,
+      categoryId: q.categoryId,
+      type: q.type,
+      nameDe: q.nameDe,
+      nameEn: q.nameEn,
+      textDe: q.textDe,
+      textEn: q.textEn,
+      answers: q.answers.map(({ textDe, textEn, correct }) => ({ textDe, textEn, correct })),
+    };
+  }
+
+  /** A test of `questionIds` for the GB course; with `written`, the student has started it. */
+  async function testOf(name, questionIds, { written = false } = {}) {
+    const created = await fetchAs(teacher, `/exam/api/courses/${course.id}/tests`, { method: "POST", body: { name, questionIds } });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    if (written) {
+      await fetchAs(teacher, `/exam/api/tests/${created.json.id}/sittings`, {
+        method: "POST",
+        body: { opensAt: new Date(Date.now() - 60000).toISOString(), closesAt: new Date(Date.now() + 50 * 60000).toISOString(), durationMinutes: 15 },
+      });
+      const writing = await fetchAs(student, `/exam/api/tests/${created.json.id}/attempt`, { method: "POST" });
+      assert.equal(writing.status, 200, JSON.stringify(writing.json));
+      await fetchAs(student, `/exam/api/attempts/${writing.json.attempt}/submit`, { method: "POST" });
+    }
+    return created.json;
+  }
+
+  before(async () => {
+    student = await sharedSession("student");
+    teacher = await sharedSession("teacher");
+    await setPreferences(student, {});
+    await setPreferences(teacher, {});
+    const year = (await fetchAs(teacher, "/exam/api/years")).json.current;
+    const gbClass = (await fetchAs(teacher, `/exam/api/years/${year.id}/classes`)).json.find((c) => c.name === "9xgb");
+    course = (await fetchAs(teacher, `/exam/api/classes/${gbClass.id}`)).json.courses.find((c) => c.subject === "GB");
+    const created = await fetchAs(teacher, "/exam/api/pool/categories", { method: "POST", body: { parentId: null, nameDe: "Editor-Checks", nameEn: "Editor checks" } });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    categoryId = created.json.id;
+  });
+
+  test("no student, and no teacher in student view, reaches the editor's pages or changes the pool", async () => {
+    const question = await newQuestion();
+    const { src } = (await uploadAs(teacher, { base64: pixel })).json;
+    const before = await editable(question.id);
+    const probe = async (session) => {
+      const nothing = await fetchAs(session, absent);
+      for (const page of [`/exam/pool/questions/${question.id}`, `/exam/pool/questions/new?category=${categoryId}`, "/exam/pool/categories"]) {
+        assert.deepEqual(await fetchAs(session, page), nothing, `${page} is not there`);
+      }
+      for (const [method, reference, body] of [
+        ["POST", "/exam/api/pool/questions", { ...before, nameDe: "x" }],
+        ["PUT", `/exam/api/pool/questions/${question.id}`, { ...before, nameDe: "x" }],
+        ["POST", `/exam/api/pool/questions/${question.id}/retire`],
+        ["DELETE", `/exam/api/pool/questions/${question.id}`],
+        ["POST", "/exam/api/pool/categories", { nameDe: "x", nameEn: "x" }],
+        ["PUT", `/exam/api/pool/categories/${categoryId}`, { nameDe: "x", nameEn: "x" }],
+        ["DELETE", `/exam/api/pool/categories/${categoryId}`],
+      ]) {
+        assert.equal((await fetchAs(session, reference, { method, body })).status, 403, `${method} ${reference} is refused`);
+      }
+      assert.equal((await uploadAs(session, { base64: pixel })).status, 403, "the upload is refused");
+      assert.equal((await imageAs(session, src.replace(applicationUrl, ""))).status, 403, "a staged upload is not served");
+    };
+    await probe(student);
+    await setPreferences(teacher, { vt: 0 });
+    try {
+      await probe(teacher);
+    } finally {
+      await setPreferences(teacher, {});
+    }
+    assert.deepEqual(await editable(question.id), before, "the question is unchanged");
+    assert.equal((await fetchAs(teacher, `/exam/api/pool/categories`)).json.find((c) => c.id === categoryId).nameDe, "Editor-Checks");
+  });
+
+  test("a mismatch is refused with the answer named, and nothing is stored", async () => {
+    const question = await newQuestion();
+    const input = await editable(question.id);
+    input.answers[1].textEn = "";
+    input.answers[1].correct = true;
+    const refused = await fetchAs(teacher, `/exam/api/pool/questions/${question.id}`, { method: "PUT", body: input });
+    assert.equal(refused.status, 422);
+    assert.deepEqual(
+      refused.json.problems.map((p) => [p.field, p.answer, p.message]),
+      [
+        ["textEn", 2, "Answer 2 has no English text."],
+        ["answers", null, "Exactly one answer may be correct in a single-choice question."],
+      ]
+    );
+    assert.equal((await editable(question.id)).answers[1].textEn, "<p>that</p>");
+  });
+
+  test("a styled save is stored without style and script", async () => {
+    const question = await newQuestion();
+    const input = await editable(question.id);
+    input.textDe = '<p style="color: red" onclick="alert(1)">Was ist <b>richtig</b>?</p><script>alert(1)</script><img src="x" onerror="alert(1)">';
+    const saved = await fetchAs(teacher, `/exam/api/pool/questions/${question.id}`, { method: "PUT", body: input });
+    assert.equal(saved.status, 422, "an image from outside the module is refused");
+    input.textDe = '<p style="color: red" onclick="alert(1)">Was ist <b>richtig</b>?</p><script>alert(1)</script>';
+    const stored = await fetchAs(teacher, `/exam/api/pool/questions/${question.id}`, { method: "PUT", body: input });
+    assert.equal(stored.status, 200, JSON.stringify(stored.json));
+    assert.equal(stored.json.question.textDe, "<p>Was ist <b>richtig</b>?</p>");
+  });
+
+  test("a written test's snapshot is unchanged after an edit; the second of two concurrent saves is refused", async () => {
+    const question = await newQuestion();
+    const written = await testOf("Editor: written", [question.id], { written: true });
+    const snapshot = (await fetchAs(teacher, `/exam/api/tests/${written.id}`)).json.questions;
+    const first = await editable(question.id);
+    const second = await editable(question.id);
+    first.textDe = "<p>Neu formuliert</p>";
+    first.answers[0].correct = false;
+    first.answers[1].correct = true;
+    assert.equal((await fetchAs(teacher, `/exam/api/pool/questions/${question.id}`, { method: "PUT", body: first })).status, 200);
+    assert.deepEqual((await fetchAs(teacher, `/exam/api/tests/${written.id}`)).json.questions, snapshot, "the written test keeps its snapshot");
+    second.nameDe = "Zweiter Stand";
+    const late = await fetchAs(teacher, `/exam/api/pool/questions/${question.id}`, { method: "PUT", body: second });
+    assert.equal(late.status, 409);
+    assert.match(late.json.error, /changed in the meantime/);
+    const kept = await editable(question.id);
+    assert.deepEqual([kept.nameDe, kept.textDe], ["Editor-Frage", "<p>Neu formuliert</p>"], "the first save is kept");
+  });
+
+  test("the editor opens from the preview, saves a fix, and returns to the browser with the category chosen", async () => {
+    const question = await newQuestion({ nameDe: "Tippfehler-Frage", nameEn: "Typo question" });
+    await teacher.page.goto(`${applicationUrl}/exam/pool?category=${categoryId}`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(`.sl-exam-pool-questions tr[data-question="${question.id}"]`, { timeout: 20000 });
+    assert.equal(await teacher.page.$eval(".sl-exam-pool-category.is-chosen", (el) => el.dataset.category), String(categoryId), "the category is chosen");
+    assert.equal(await teacher.page.$eval(".sl-exam-pool-new", (el) => el.hidden), false, "New question is offered");
+    await teacher.page.click(`.sl-exam-pool-questions tr[data-question="${question.id}"] button`);
+    await teacher.page.waitForSelector(".sl-exam-pool-edit", { timeout: 10000 });
+    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), teacher.page.click(".sl-exam-pool-edit")]);
+    await teacher.page.waitForSelector(".sl-exam-editor sl-rich-text .sl-rich-text-area", { timeout: 20000 });
+    const shown = await teacher.page.evaluate(() => ({
+      heading: document.querySelector("#markdown-content h1")?.textContent,
+      current: document.querySelector(".sl-exam-bar-page[aria-current]")?.dataset.page,
+      titles: [document.querySelector("input[name=nameDe]").value, document.querySelector("input[name=nameEn]").value],
+      texts: [...document.querySelectorAll(".sl-exam-editor-row:not(.sl-exam-editor-answer) sl-rich-text")].map((el) => el.value),
+      answers: [...document.querySelectorAll(".sl-exam-editor-answer")].map((row) => [
+        row.querySelector("input").checked,
+        ...[...row.querySelectorAll("sl-rich-text")].map((el) => el.value),
+      ]),
+      toolbar: [...document.querySelector("sl-rich-text .sl-rich-text-toolbar").querySelectorAll("button")].map((b) => b.dataset.action),
+    }));
+    assert.deepEqual(shown, {
+      heading: "Edit: Tippfehler-Frage",
+      current: "pool",
+      titles: ["Tippfehler-Frage", "Typo question"],
+      texts: ["<p>Was ist richtig?</p>", "<p>What is right?</p>"],
+      answers: [
+        [true, "<p>das</p>", "<p>this</p>"],
+        [false, "<p>jenes</p>", "<p>that</p>"],
+      ],
+      toolbar: ["bold", "italic", "code", "codeblock", "ul", "ol", "image"],
+    });
+
+    // The second answer becomes the correct one, and a third is added.
+    await teacher.page.click('.sl-exam-editor-answer[data-answer="2"] input[type=radio]');
+    await teacher.page.click(".sl-exam-editor-add");
+    await teacher.page.type('.sl-exam-editor-answer[data-answer="3"] .sl-exam-editor-de .sl-rich-text-area', "beides");
+    await teacher.page.click(".sl-exam-editor-actions button[type=submit]");
+    await teacher.page.waitForSelector(".sl-exam-editor-problems li", { timeout: 10000 });
+    const refused = await teacher.page.evaluate(() => ({
+      problems: [...document.querySelectorAll(".sl-exam-editor-problems li")].map((li) => li.textContent),
+      marked: [...document.querySelectorAll(".is-refused")].map((el) => el.closest("[data-answer]")?.dataset.answer + (el.closest(".sl-exam-editor-en") ? "/en" : "/de")),
+    }));
+    assert.deepEqual(refused, { problems: ["Answer 3 has no English text."], marked: ["3/en"] }, "the problem is shown at its field");
+    await teacher.page.type('.sl-exam-editor-answer[data-answer="3"] .sl-exam-editor-en .sl-rich-text-area', "both");
+    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), teacher.page.click(".sl-exam-editor-actions button[type=submit]")]);
+    assert.equal(new URL(teacher.page.url()).search, `?category=${categoryId}`, "back in the browser with the category chosen");
+    const saved = await editable(question.id);
+    assert.deepEqual(saved.answers.map((a) => [a.textDe, a.textEn, a.correct]), [
+      ["<p>das</p>", "<p>this</p>", false],
+      ["<p>jenes</p>", "<p>that</p>", true],
+      ["beides", "both", false],
+    ]);
+  });
+
+  test("a new question from the browser: the rich-text field formats, filters a paste and uploads images by paste and button", async () => {
+    await teacher.page.goto(`${applicationUrl}/exam/pool?category=${categoryId}`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(".sl-exam-pool-new:not([hidden])", { timeout: 20000 });
+    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), teacher.page.click(".sl-exam-pool-new")]);
+    assert.equal(new URL(teacher.page.url()).pathname, "/exam/pool/questions/new");
+    await teacher.page.waitForSelector(".sl-exam-editor sl-rich-text .sl-rich-text-area", { timeout: 20000 });
+    assert.equal(await teacher.page.$eval("select[name=categoryId]", (el) => el.value), String(categoryId), "the browser's category is chosen");
+
+    const de = '.sl-exam-editor-row:not(.sl-exam-editor-answer) .sl-exam-editor-de';
+    const en = '.sl-exam-editor-row:not(.sl-exam-editor-answer) .sl-exam-editor-en';
+    await teacher.page.type("input[name=nameDe]", "Formatiert");
+    await teacher.page.type("input[name=nameEn]", "Formatted");
+    // Bold and inline code on a selection; a code block on a line of its own.
+    await teacher.page.click(`${de} .sl-rich-text-area`);
+    await teacher.page.keyboard.type("fett");
+    await teacher.page.evaluate((selector) => {
+      const area = document.querySelector(`${selector} .sl-rich-text-area`);
+      const range = document.createRange();
+      range.selectNodeContents(area);
+      getSelection().removeAllRanges();
+      getSelection().addRange(range);
+    }, de);
+    await teacher.page.click(`${de} button[data-action=bold]`);
+    await teacher.page.keyboard.press("End");
+    await teacher.page.click(`${de} button[data-action=bold]`);
+    await teacher.page.keyboard.type(" und ");
+    await teacher.page.keyboard.type("x = 1");
+    await teacher.page.keyboard.down("Shift");
+    for (let i = 0; i < 5; i += 1) await teacher.page.keyboard.press("ArrowLeft");
+    await teacher.page.keyboard.up("Shift");
+    await teacher.page.click(`${de} button[data-action=code]`);
+    const german = await teacher.page.$eval(`${de} sl-rich-text`, (el) => el.value);
+    // Chrome keeps the space after the bold word as `&nbsp;`.
+    assert.match(german, /^<b>fett<\/b>(?:&nbsp;| )und <code>x = 1<\/code>$/);
+
+    // A paste from a web page keeps words and basic formatting only; a
+    // pasted image file goes through the upload.
+    await teacher.page.click(`${en} .sl-rich-text-area`);
+    await teacher.page.evaluate((selector, pixel) => {
+      const area = document.querySelector(`${selector} .sl-rich-text-area`);
+      const paste = (fill) => {
+        const data = new DataTransfer();
+        fill(data);
+        area.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+      };
+      paste((data) => data.setData("text/html", '<p style="color:red" class="x" onclick="alert(1)">Pasted <span style="font-weight:bold"><strong>bold</strong></span><script>alert(1)</script></p>'));
+      const bytes = Uint8Array.from(atob(pixel), (c) => c.charCodeAt(0));
+      paste((data) => data.items.add(new File([bytes], "clip.png", { type: "image/png" })));
+    }, en, pixel);
+    await teacher.page.waitForFunction((selector) => document.querySelector(`${selector} .sl-rich-text-area img`), { timeout: 10000 }, en);
+    const english = await teacher.page.$eval(`${en} sl-rich-text`, (el) => el.value);
+    assert.match(english, /^<p>Pasted <strong>bold<\/strong><img src="\/exam\/api\/pool\/uploads\/[0-9a-f]{32}" alt=""><\/p>$/);
+
+    // The image button uploads a chosen file; a PDF is refused under the field.
+    const dir = mkdtempSync(path.join(os.tmpdir(), "safelearn-editor-upload-"));
+    try {
+      writeFileSync(path.join(dir, "button.png"), Buffer.from(otherPixel, "base64"));
+      writeFileSync(path.join(dir, "fake.png"), "%PDF-1.7\n");
+      const input = await teacher.page.$(`${de} input[type=file]`);
+      await teacher.page.click(`${de} .sl-rich-text-area`);
+      await input.uploadFile(path.join(dir, "fake.png"));
+      await teacher.page.waitForFunction((selector) => /not an image/.test(document.querySelector(`${selector} .sl-rich-text-status`).textContent), { timeout: 10000 }, de);
+      await input.uploadFile(path.join(dir, "button.png"));
+      await teacher.page.waitForFunction((selector) => document.querySelector(`${selector} .sl-rich-text-area img`), { timeout: 10000 }, de);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+
+    const answers = await teacher.page.$$(".sl-exam-editor-answer");
+    for (const [index, row] of answers.entries()) {
+      await (await row.$(".sl-exam-editor-de .sl-rich-text-area")).type(`Antwort ${index + 1}`);
+      await (await row.$(".sl-exam-editor-en .sl-rich-text-area")).type(`Answer ${index + 1}`);
+    }
+    await (await answers[0].$("input[type=radio]")).click();
+    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), teacher.page.click(".sl-exam-editor-actions button[type=submit]")]);
+    const created = (await fetchAs(teacher, `/exam/api/pool/questions?category=${categoryId}&q=Formatiert`)).json;
+    assert.equal(created.length, 1);
+    const stored = await editable(created[0].id);
+    assert.match(stored.textDe, /^<b>fett<\/b>(?:&nbsp;| )und <code>x = 1<\/code><img src="\/exam\/api\/images\/\d+" alt="">$/);
+    assert.match(stored.textEn, /^<p>Pasted <strong>bold<\/strong><img src="\/exam\/api\/images\/\d+" alt=""><\/p>$/);
+    assert.notEqual(/images\/(\d+)/.exec(stored.textDe)[1], /images\/(\d+)/.exec(stored.textEn)[1], "two different pictures, two images");
+    assert.deepEqual(stored.answers.map((a) => [a.textDe, a.textEn, a.correct]), [["Antwort 1", "Answer 1", true], ["Antwort 2", "Answer 2", false]]);
+  });
+
+  test("uploads: 20 MB and a renamed PDF refused, an unsaved one gone after the purge", async () => {
+    const huge = await uploadAs(teacher, { size: 20 * 1024 * 1024 });
+    assert.equal(huge.status, 413);
+    assert.match(huge.json.error, /2 MB/);
+    const pdf = await uploadAs(teacher, { base64: Buffer.from("%PDF-1.7\n%âãÏÓ\n1 0 obj\n").toString("base64"), name: "picture.png" });
+    assert.equal(pdf.status, 400);
+    assert.match(pdf.json.error, /not an image/);
+    const staged = await uploadAs(teacher, { base64: pixel });
+    assert.equal(staged.status, 200, JSON.stringify(staged.json));
+    assert.deepEqual(await imageAs(teacher, staged.json.src), { status: 200, bytes: Buffer.from(pixel, "base64").length });
+    // A day passes without a save; the server purges at start and daily with
+    // this same function.
+    database((db) => {
+      db.prepare("UPDATE image_upload SET uploaded_at = ?").run(new Date(Date.now() - 25 * 3600 * 1000).toISOString());
+      purgeUploads(db);
+    });
+    assert.equal((await imageAs(teacher, staged.json.src)).status, 404, "the unsaved upload is gone");
+  });
+
+  test("a new question with an uploaded image is shown in the browser and in a test assembled from it", async () => {
+    const { src } = (await uploadAs(teacher, { base64: otherPixel })).json;
+    const question = await newQuestion({ nameDe: "Bildfrage", nameEn: "Picture question", textDe: `<p>Siehe <img src="${src}" alt=""></p>`, textEn: `<p>See <img src="${src}" alt=""></p>` });
+    const [, imageId] = /\/exam\/api\/images\/(\d+)/.exec(question.textDe);
+    assert.equal(question.textEn, `<p>See <img src="/exam/api/images/${imageId}" alt=""></p>`, "one image for both languages");
+    assert.equal((await imageAs(teacher, src)).status, 404, "the upload became the question's image");
+
+    await teacher.page.goto(`${applicationUrl}/exam/pool?category=${categoryId}`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(`.sl-exam-pool-questions tr[data-question="${question.id}"]`, { timeout: 20000 });
+    await teacher.page.click(`.sl-exam-pool-questions tr[data-question="${question.id}"] button`);
+    await teacher.page.waitForSelector(".sl-exam-pool-text img", { timeout: 10000 });
+    await teacher.page.waitForFunction(() => [...document.querySelectorAll(".sl-exam-pool-text img")].every((img) => img.complete && img.naturalWidth === 1), { timeout: 10000 });
+
+    const test = await testOf("Editor: picture", [question.id]);
+    await teacher.page.goto(`${applicationUrl}/exam/tests/${test.id}`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(".sl-exam-test-questions img", { timeout: 20000 });
+    await teacher.page.waitForFunction(() => [...document.querySelectorAll(".sl-exam-test-questions img")].every((img) => img.complete && img.naturalWidth === 1), { timeout: 10000 });
+    await fetchAs(teacher, `/exam/api/tests/${test.id}`, { method: "DELETE" });
+  });
+
+  test("retire, revive and delete: a used question stays and is only retired, a fresh one goes with its images", async () => {
+    const used = await newQuestion({ nameDe: "Benutzt", nameEn: "Used" });
+    const test = await testOf("Editor: usage", [used.id]);
+    const refused = await fetchAs(teacher, `/exam/api/pool/questions/${used.id}`, { method: "DELETE" });
+    assert.equal(refused.status, 409);
+    assert.match(refused.json.error, /Retire it instead/);
+    const snapshot = (await fetchAs(teacher, `/exam/api/tests/${test.id}`)).json.questions;
+    const retired = await fetchAs(teacher, `/exam/api/pool/questions/${used.id}/retire`, { method: "POST" });
+    assert.equal(retired.json.retired, true);
+    assert.deepEqual(retired.json.usage.map((u) => u.testId), [test.id], "the usage stays");
+    assert.deepEqual((await fetchAs(teacher, `/exam/api/tests/${test.id}`)).json.questions, snapshot, "the test stays");
+    assert.ok(!(await fetchAs(teacher, `/exam/api/pool/questions?category=${categoryId}`)).json.some((q) => q.id === used.id), "hidden in the browser");
+    assert.ok((await fetchAs(teacher, `/exam/api/pool/questions?category=${categoryId}&retired=1`)).json.some((q) => q.id === used.id && q.retired), "listed when asked for");
+    const assembled = await fetchAs(teacher, `/exam/api/courses/${course.id}/tests`, { method: "POST", body: { name: "Editor: retired", questionIds: [used.id] } });
+    assert.equal(assembled.status, 400);
+    assert.match(assembled.json.error, /retired/);
+    assert.equal((await fetchAs(teacher, `/exam/api/pool/questions/${used.id}/revive`, { method: "POST" })).json.retired, false);
+    const again = await testOf("Editor: revived", [used.id]);
+    await fetchAs(teacher, `/exam/api/tests/${again.id}`, { method: "DELETE" });
+    await fetchAs(teacher, `/exam/api/tests/${test.id}`, { method: "DELETE" });
+
+    const { src } = (await uploadAs(teacher, { base64: pixel })).json;
+    const fresh = await newQuestion({ nameDe: "Frisch", nameEn: "Fresh", textDe: `<p><img src="${src}"></p>` });
+    const [, imageId] = /\/exam\/api\/images\/(\d+)/.exec(fresh.textDe);
+    assert.equal((await fetchAs(teacher, `/exam/api/pool/questions/${fresh.id}`, { method: "DELETE" })).status, 200);
+    assert.equal((await fetchAs(teacher, `/exam/api/pool/questions/${fresh.id}`)).status, 404);
+    assert.equal((await imageAs(teacher, `/exam/api/images/${imageId}`)).status, 404, "its image is gone");
+    assert.equal(database((db) => db.prepare("SELECT COUNT(*) AS n FROM answer WHERE question_id = ?").get(fresh.id).n), 0, "and its answers");
+  });
+
+  test("categories: a non-empty one is not deleted, none moves into its own subtree, a moved question keeps its usage", async () => {
+    const parent = (await fetchAs(teacher, "/exam/api/pool/categories", { method: "POST", body: { parentId: categoryId, nameDe: "HTTP und REST", nameEn: "HTTP and REST" } })).json;
+    const child = (await fetchAs(teacher, "/exam/api/pool/categories", { method: "POST", body: { parentId: parent.id, nameDe: "Caching", nameEn: "Caching" } })).json;
+    const duplicate = await fetchAs(teacher, "/exam/api/pool/categories", { method: "POST", body: { parentId: parent.id, nameDe: "Caching", nameEn: "Other" } });
+    assert.equal(duplicate.status, 409);
+    const tree = async () => JSON.stringify((await fetchAs(teacher, "/exam/api/pool/categories")).json);
+    const before = await tree();
+    const cycle = await fetchAs(teacher, `/exam/api/pool/categories/${parent.id}`, { method: "PUT", body: { parentId: child.id } });
+    assert.equal(cycle.status, 400);
+    assert.equal(await tree(), before, "the tree is unchanged");
+
+    const question = await newQuestion({ nameDe: "Wandert", nameEn: "Moves", categoryId: child.id });
+    const test = await testOf("Editor: moving", [question.id]);
+    const full = await fetchAs(teacher, `/exam/api/pool/categories/${child.id}`, { method: "DELETE" });
+    assert.equal(full.status, 409);
+    assert.match(full.json.error, /1 question/);
+    const input = { ...(await editable(question.id)), categoryId: parent.id };
+    assert.equal((await fetchAs(teacher, `/exam/api/pool/questions/${question.id}`, { method: "PUT", body: input })).status, 200);
+    const listed = (await fetchAs(teacher, `/exam/api/pool/questions?category=${parent.id}`)).json.find((q) => q.id === question.id);
+    assert.deepEqual([listed.category.de.at(-1), listed.uses], ["HTTP und REST", 1]);
+    assert.equal((await fetchAs(teacher, `/exam/api/pool/categories/${child.id}`, { method: "DELETE" })).status, 200, "empty now, it goes");
+
+    await teacher.page.goto(`${applicationUrl}/exam/pool/categories`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(`.sl-exam-categories-tree li[data-category="${parent.id}"]`, { timeout: 20000 });
+    await fetchAs(teacher, `/exam/api/tests/${test.id}`, { method: "DELETE" });
+  });
+
+  test("an unwritten test takes up an edit only on request, with the same questions in the same order", async () => {
+    const question = await newQuestion({ nameDe: "Nachziehen", nameEn: "Take up" });
+    const other = await newQuestion({ nameDe: "Daneben", nameEn: "Beside" });
+    const unwritten = await testOf("Editor: next week", [other.id, question.id]);
+    const written = await testOf("Editor: last week", [question.id], { written: true });
+
+    await teacher.page.goto(`${applicationUrl}/exam/pool/questions/${question.id}`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(".sl-exam-editor sl-rich-text .sl-rich-text-area", { timeout: 20000 });
+    await teacher.page.click(".sl-exam-editor-en .sl-rich-text-area");
+    await teacher.page.evaluate(() => {
+      document.querySelectorAll(".sl-exam-editor-row:not(.sl-exam-editor-answer) sl-rich-text")[1].value = "<p>What is correct?</p>";
+    });
+    await teacher.page.click(".sl-exam-editor-actions button[type=submit]");
+    await teacher.page.waitForSelector(".sl-exam-editor-tests li", { timeout: 10000 });
+    const offered = await teacher.page.$$eval(".sl-exam-editor-tests button", (buttons) => buttons.map((b) => Number(b.dataset.test)));
+    assert.deepEqual(offered, [unwritten.id], "only the unwritten test is offered");
+    const texts = async (id) => (await fetchAs(teacher, `/exam/api/tests/${id}`)).json.questions.map((q) => [q.questionId, q.textEn]);
+    assert.deepEqual(await texts(unwritten.id), [[other.id, "<p>What is right?</p>"], [question.id, "<p>What is right?</p>"]], "not asked: the old text");
+
+    await teacher.page.click(`.sl-exam-editor-tests button[data-test="${unwritten.id}"]`);
+    await teacher.page.waitForFunction(() => /Updated/.test(document.querySelector(".sl-exam-editor-tests [role=status]").textContent), { timeout: 10000 });
+    assert.deepEqual(await texts(unwritten.id), [[other.id, "<p>What is right?</p>"], [question.id, "<p>What is correct?</p>"]], "taken up, same order");
+    assert.deepEqual(await texts(written.id), [[question.id, "<p>What is right?</p>"]], "the written test keeps its text");
+
+    const late = await fetchAs(teacher, `/exam/api/tests/${written.id}`, { method: "PUT", body: { questionIds: [question.id] } });
+    assert.equal(late.status, 409, "a test written in the meantime is refused");
+    await fetchAs(teacher, `/exam/api/tests/${unwritten.id}`, { method: "DELETE" });
   });
 });
 

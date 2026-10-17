@@ -67,6 +67,8 @@ export function registerPoolRoutes(router, { db, handle, startPage }) {
       // browser assembles tests for it.
       const context = contextFromQuery(req.query);
       const params = context.courseId === null ? {} : { course: String(context.courseId) };
+      // The category the browser opens with, e.g. when the editor returns.
+      if (typeof req.query.category === "string" && /^[1-9]\d{0,9}$/.test(req.query.category)) params.category = req.query.category;
       res.send(await teacherShell({ db, startPage, req, title: "Question pool", context, kind: "pool", params, current: "pool" }));
     })
   );

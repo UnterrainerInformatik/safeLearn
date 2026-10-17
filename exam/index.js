@@ -27,6 +27,8 @@ import { ConflictError, InvalidInputError, listYears, NotFoundError } from "./cl
 import { registerClassRoutes } from "./routes-classes.js";
 import { registerGradebookRoutes } from "./routes-gradebook.js";
 import { registerPoolRoutes } from "./routes-pool.js";
+import { registerPoolEditRoutes } from "./routes-pool-edit.js";
+import { purgeUploads, QuestionProblemsError } from "./pool-edit.js";
 import { registerTestRoutes } from "./routes-tests.js";
 import { registerAttemptRoutes } from "./routes-attempts.js";
 import { registerLiveRoutes } from "./routes-live.js";
@@ -66,6 +68,7 @@ function buildEmbedHandlers() {
 
 /** The status a refusal of the module's own is answered with, or null for a failure. */
 function refusalStatus(error) {
+  if (error instanceof QuestionProblemsError) return 422;
   if (error instanceof InvalidInputError) return 400;
   if (error instanceof NotFoundError) return 404;
   if (error instanceof ConflictError) return 409;
@@ -96,6 +99,7 @@ function buildRouter(db, startPage) {
   registerClassRoutes(router, { db, handle, startPage });
   registerGradebookRoutes(router, { db, handle, startPage });
   registerPoolRoutes(router, { db, handle, startPage });
+  registerPoolEditRoutes(router, { db, handle, startPage });
   registerTestRoutes(router, { db, handle, startPage });
   registerAttemptRoutes(router, { db, handle, startPage });
   registerLiveRoutes(router, { db, handle, startPage });
@@ -140,7 +144,8 @@ function buildRouter(db, startPage) {
       return;
     }
     if (status !== null) {
-      res.status(status).json({ error: error.message });
+      // A question the editor cannot save names every problem at its field.
+      res.status(status).json(error.problems ? { error: error.message, problems: error.problems } : { error: error.message });
       return;
     }
     console.error(`[exam] ${req.method} ${req.originalUrl} failed:`, error);
@@ -169,7 +174,18 @@ export async function init({ startPage }) {
   if (migrated.from !== migrated.to) {
     console.log(`[exam] Migrated ${dbPath} from schema version ${migrated.from} to ${migrated.to}.`);
   }
-  scheduleDailyBackups(db, dbPath);
+  // Images uploaded into the editor and never saved are dropped after a day:
+  // now, and with every daily backup.
+  const purge = () => {
+    const purged = purgeUploads(db);
+    if (purged > 0) console.log(`[exam] Purged ${purged} unsaved image upload${purged === 1 ? "" : "s"}.`);
+  };
+  try {
+    purge();
+  } catch (error) {
+    console.error(`[exam] Purging unsaved image uploads failed: ${error.message}`);
+  }
+  scheduleDailyBackups(db, dbPath, { alsoDaily: purge });
   // Attempts whose deadline passed while nobody asked - the page closed, the
   // server down - are submitted now, and from then on every 30 s.
   scheduleSweep(db);

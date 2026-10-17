@@ -8,6 +8,9 @@
  *   question's row also chooses it for a test - or unchooses it - and the
  *   chosen rows are coloured; they become a new test for that course, or are
  *   added to one of its tests that has not been written yet (`online-test`).
+ *   It leads into the editor (`question-editor`): "Edit" on the preview, "New
+ *   question" with a category chosen, and the category page; retired
+ *   questions are listed, marked, only when asked for.
  *
  * The API refuses every session not acting as a teacher; this element only
  * draws what it answers.
@@ -55,7 +58,8 @@ class PoolView extends ExamElement {
     this.course = course;
     this.chosen = new Set();
     this.assembly = course ? this.assemblyPanel(course, tests) : null;
-    this.categoryId = null;
+    this.categoryId = this.params.category ? Number(this.params.category) : null;
+    this.includeRetired = false;
     this.query = "";
     this.language = "de";
     this.list = h("div", { class: "sl-exam-pool-list" });
@@ -84,7 +88,7 @@ class PoolView extends ExamElement {
           "button",
           {
             type: "button",
-            class: "sl-exam-pool-category",
+            class: category.id === this.categoryId ? "sl-exam-pool-category is-chosen" : "sl-exam-pool-category",
             "data-category": String(category.id),
             onClick: (event) => this.chooseCategory(category.id, event.currentTarget),
           },
@@ -105,7 +109,12 @@ class PoolView extends ExamElement {
           {},
           h(
             "button",
-            { type: "button", class: "sl-exam-pool-category is-chosen", "data-category": "", onClick: (event) => this.chooseCategory(null, event.currentTarget) },
+            {
+              type: "button",
+              class: this.categoryId === null ? "sl-exam-pool-category is-chosen" : "sl-exam-pool-category",
+              "data-category": "",
+              onClick: (event) => this.chooseCategory(null, event.currentTarget),
+            },
             "All categories"
           )
         ),
@@ -113,15 +122,31 @@ class PoolView extends ExamElement {
       )
     );
 
-    this.refreshList();
+    const categories = h("a", { href: `/exam/pool/categories${this.params.course ? `?course=${this.params.course}` : ""}`, class: "sl-exam-pool-categories-link" }, "Edit categories");
     if (tree.length === 0) {
-      return h("div", { class: "sl-exam" }, h("p", {}, "The question pool is empty. It is filled once by the import of the Moodle pool."));
+      return h("div", { class: "sl-exam" }, h("p", {}, "The question pool is empty. Create a category to start: "), categories);
     }
+    this.newQuestion = h("a", { class: "sl-exam-pool-new", hidden: this.categoryId === null }, "New question");
+    this.updateNewQuestion();
+    const retired = h("input", {
+      type: "checkbox",
+      onChange: () => {
+        this.includeRetired = retired.checked;
+        this.refreshList();
+      },
+    });
+    this.refreshList();
     return h(
       "div",
       { class: "sl-exam sl-exam-pool" },
-      this.tree,
-      h("div", { class: "sl-exam-pool-main" }, this.assembly, search, this.list),
+      h("div", {}, this.tree, h("p", { class: "sl-exam-pool-tree-tools" }, categories)),
+      h(
+        "div",
+        { class: "sl-exam-pool-main" },
+        this.assembly,
+        h("div", { class: "sl-exam-pool-tools" }, search, h("label", { class: "sl-exam-quiet" }, retired, " show retired"), this.newQuestion),
+        this.list
+      ),
       this.preview
     );
   }
@@ -214,13 +239,32 @@ class PoolView extends ExamElement {
     this.categoryId = categoryId;
     for (const chosen of this.tree.querySelectorAll(".is-chosen")) chosen.classList.remove("is-chosen");
     button.classList.add("is-chosen");
+    this.updateNewQuestion();
     this.refreshList();
+  }
+
+  /** "New question" is offered with a category chosen, and creates the question there. */
+  updateNewQuestion() {
+    this.newQuestion.hidden = this.categoryId === null;
+    const query = new URLSearchParams();
+    if (this.categoryId !== null) query.set("category", String(this.categoryId));
+    if (this.params.course) query.set("course", this.params.course);
+    this.newQuestion.href = `/exam/pool/questions/new?${query}`;
+  }
+
+  /** The editor of a question, returning to the browser with its category chosen. */
+  editAddress(question) {
+    const query = new URLSearchParams();
+    if (this.params.course) query.set("course", this.params.course);
+    const text = query.toString();
+    return `/exam/pool/questions/${question.id}${text ? `?${text}` : ""}`;
   }
 
   async refreshList() {
     const params = new URLSearchParams();
     if (this.categoryId !== null) params.set("category", String(this.categoryId));
     if (this.query.trim()) params.set("q", this.query.trim());
+    if (this.includeRetired) params.set("retired", "1");
     const asked = params.toString();
     this.asked = asked;
     let questions;
@@ -259,7 +303,7 @@ class PoolView extends ExamElement {
             "tr",
             {
               "data-question": String(question.id),
-              class: this.course && this.chosen.has(question.id) ? "is-chosen" : null,
+              class: [this.course && this.chosen.has(question.id) ? "is-chosen" : null, question.retired ? "is-retired" : null].filter(Boolean).join(" ") || null,
               "aria-selected": this.course ? String(this.chosen.has(question.id)) : null,
               // Anywhere on the row: the preview, and with a course in the
               // bar, choosing or unchoosing the question for the test.
@@ -273,7 +317,11 @@ class PoolView extends ExamElement {
               {},
               h("button", { type: "button", class: "sl-exam-link" }, question.nameDe),
               h("div", { class: "sl-exam-quiet" }, question.excerptDe),
-              h("div", { class: "sl-exam-quiet sl-exam-pool-kind" }, `${question.category.de.join(" / ")} · ${typeLabels[question.type] ?? question.type}`)
+              h(
+                "div",
+                { class: "sl-exam-quiet sl-exam-pool-kind" },
+                `${question.category.de.join(" / ")} · ${typeLabels[question.type] ?? question.type}${question.retired ? " · retired" : ""}`
+              )
             ),
             h("td", {}, `${question.uses}×`),
             h("td", {}, displayDate(question.lastUsedOn))
@@ -345,7 +393,7 @@ class PoolView extends ExamElement {
           ` · ${typeLabels[question.type] ?? question.type}`,
           question.retired ? " · retired" : ""
         ),
-        switcher,
+        h("div", { class: "sl-exam-pool-question-tools" }, switcher, h("a", { href: this.editAddress(question), class: "sl-exam-pool-edit" }, "Edit")),
         storedMarkup(de ? question.textDe : question.textEn, "sl-exam-pool-text"),
         h(
           "ol",

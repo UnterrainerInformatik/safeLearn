@@ -100,9 +100,19 @@ function newestDailyCopy(dbPath) {
  * Takes a daily copy now if the newest one is a day old or missing, and then
  * once a day. A failing copy is logged and tried again the next day; it never
  * disables the module. The timer does not keep the process alive.
+ *
+ * `alsoDaily` runs on the same timer, before each copy, so what it tidies is
+ * not copied; it fails on its own, like the copy.
  */
-export function scheduleDailyBackups(db, dbPath) {
+export function scheduleDailyBackups(db, dbPath, { alsoDaily = null } = {}) {
   const run = () => {
+    if (alsoDaily) {
+      try {
+        alsoDaily();
+      } catch (error) {
+        console.error(`[exam] Daily housekeeping failed: ${error.message}`);
+      }
+    }
     try {
       backupDaily(db, dbPath);
     } catch (error) {

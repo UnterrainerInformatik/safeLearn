@@ -48,7 +48,7 @@ export function categoryTree(db) {
 }
 
 /** The ids of `categoryId` and every category below it. */
-function categoryAndBelow(db, categoryId) {
+export function categoryAndBelow(db, categoryId) {
   return new Set(
     db
       .prepare(
@@ -126,15 +126,16 @@ export function listQuestions(db, { categoryId = null, query = "", includeRetire
 }
 
 /**
- * One question as the preview shows it: both languages, every answer in its
- * original order with its correct flag, the category's path, and each test it
- * was used in, with course and date.
+ * One question as the preview and the editor show it: both languages, every
+ * answer in its original order with its correct flag, the category's path,
+ * each test it was used in, with course and date, and the version a save has
+ * to name (exam-question-editor design D7).
  */
 export function getQuestion(db, id) {
   const row = db
     .prepare(
       `SELECT id, category_id AS categoryId, type, name_de AS nameDe, name_en AS nameEn,
-         text_de AS textDe, text_en AS textEn, retired
+         text_de AS textDe, text_en AS textEn, retired, version
        FROM question WHERE id = ?`
     )
     .get(id);

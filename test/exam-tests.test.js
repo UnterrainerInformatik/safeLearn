@@ -150,7 +150,7 @@ describe("the migration to online tests", () => {
     }
     const questions = db.prepare("SELECT COUNT(*) AS n FROM question").get().n;
 
-    assert.deepEqual(migrate(db, dbPath), { from: 5, to: 6 });
+    assert.deepEqual(migrate(db, dbPath, readMigrations().slice(0, 6)), { from: 5, to: 6 });
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM question").get().n, questions, "the pool is untouched");
     for (const [key, proposed] of Object.entries(before)) {
       const [username, semester] = key.split("/");

@@ -7,12 +7,14 @@
 
 /**
  * The error an API call rejects with: the status, and the module's own message
- * where it sent one (a refused input, a duplicate), for the element to show.
+ * where it sent one (a refused input, a duplicate), for the element to show -
+ * with every problem at its field for a question the editor cannot save.
  */
 export class ExamApiError extends Error {
-  constructor(status, message) {
+  constructor(status, message, problems = null) {
     super(message ?? `The exam module answered ${status}.`);
     this.status = status;
+    this.problems = problems;
   }
 }
 
@@ -33,13 +35,13 @@ export async function examApi(path, { method = "GET", body } = {}) {
   }
   const response = await fetch(`/exam/api${path}`, init);
   if (!response.ok) {
-    let message;
+    let answer = {};
     try {
-      message = (await response.json()).error;
+      answer = await response.json();
     } catch {
       // No message of the module's own.
     }
-    throw new ExamApiError(response.status, message);
+    throw new ExamApiError(response.status, answer?.error, answer?.problems ?? null);
   }
   return response.json();
 }

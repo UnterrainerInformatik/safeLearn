@@ -21,19 +21,10 @@
 import { createHash } from "node:crypto";
 import { JSDOM } from "jsdom";
 
-import { sanitizeHtml } from "../sanitize.js";
+import { cleanStoredHtml, trueFalseText } from "./stored-html.js";
 
 /** The types the pool keeps. `essay` is dropped; anything else refuses the import. */
 export const questionTypes = ["multichoiceset", "multichoice", "truefalse"];
-
-/** Moodle's inline layout, which the instance's own styles replace. */
-const forbiddenAttributes = ["style", "dir", "class", "role"];
-
-/** What a true/false question's two answers read in each language. */
-const trueFalseText = {
-  de: { true: "Richtig", false: "Falsch" },
-  en: { true: "True", false: "False" },
-};
 
 const imageTypes = {
   png: "image/png",
@@ -221,16 +212,10 @@ function escapeText(text) {
  */
 function storedHtml(text, placeImage, where) {
   if (text.format !== "html") return `<p>${escapeText(text.html.trim())}</p>`;
-  const clean = sanitizeHtml(text.html, { FORBID_ATTR: forbiddenAttributes });
-  const fragment = JSDOM.fragment(`<div>${clean}</div>`).firstChild;
-  for (const img of fragment.querySelectorAll("img")) {
-    const src = img.getAttribute("src") ?? "";
+  return cleanStoredHtml(text.html, (src) => {
     // Moodle's editor also leaves pasted images inline, as a data URI.
     const inline = /^data:(image\/[a-z+.-]+);base64,([A-Za-z0-9+/=\s]+)$/i.exec(src);
-    if (inline) {
-      img.setAttribute("src", placeImage({ mime: inline[1].toLowerCase(), name: "inline image", data: inline[2] }));
-      continue;
-    }
+    if (inline) return placeImage({ mime: inline[1].toLowerCase(), name: "inline image", data: inline[2] });
     if (!src.startsWith("@@PLUGINFILE@@/")) {
       throw new PoolImportError(`${where} embeds an image from ${src.slice(0, 40)}, which the pool cannot keep.`);
     }
@@ -239,9 +224,8 @@ function storedHtml(text, placeImage, where) {
     if (data === undefined) {
       throw new PoolImportError(`${where} references the file ${name}, which is not part of it.`);
     }
-    img.setAttribute("src", placeImage({ mime: imageType(name), name, data }));
-  }
-  return fragment.innerHTML;
+    return placeImage({ mime: imageType(name), name, data });
+  }, where);
 }
 
 function trueFalseAnswer(answer, language) {
