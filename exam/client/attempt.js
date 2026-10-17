@@ -12,6 +12,11 @@
  * the attempt. The page reports leaving it and coming back (the focus log),
  * which a teacher sees and which never changes the grade.
  *
+ * With `preview: 1` a teacher tries the test as a student would see it, on
+ * the test's own preview page: shuffled, in the course's language, with the
+ * first sitting's countdown - but nothing is saved, the focus is not
+ * reported, and submitting is switched off.
+ *
  * Answers are identified by the tokens the server gave this attempt; the page
  * never learns which answer is correct. A question's text and answers are
  * stored markup, sanitized when the pool was imported.
@@ -56,6 +61,7 @@ class WriteTest extends ExamElement {
     // A block names its test by the id the test's page shows; anything else names none.
     if (test !== undefined && !/^[1-9]\d{0,9}$/.test(test)) throw new ExamApiError(404);
     const me = await examApi("/me");
+    if (this.params.preview === "1" && me.teacher && test) return { writing: await examApi(`/tests/${test}/preview`) };
     if (me.teacher) return { teacher: true };
     const { tests } = await examApi(`/my/tests${test ? `?test=${test}` : ""}`);
     // A running attempt is resumed at once, as a reload of its page expects.
@@ -110,6 +116,7 @@ class WriteTest extends ExamElement {
   writingPage(writing) {
     if (writing.submitted) return this.resultPage(writing);
     this.stop?.();
+    this.preview = writing.preview === true;
     this.attempt = writing.attempt;
     this.status = h("p", { class: "sl-exam-message", role: "status" });
     this.countdown = h("span", { class: "sl-exam-countdown", "aria-live": "off" });
@@ -117,6 +124,10 @@ class WriteTest extends ExamElement {
     const questions = writing.questions.map((question) => this.questionField(question, writing.questions.length, de));
     const submit = h("button", { type: "button", class: "sl-exam-primary sl-exam-attempt-submit" }, de ? "Abgeben" : "Submit");
     submit.addEventListener("click", () => {
+      if (this.preview) {
+        this.status.textContent = de ? "Probeansicht: Es wird nichts abgegeben." : "Preview: nothing is submitted.";
+        return;
+      }
       if (submit.dataset.armed !== "1") {
         submit.dataset.armed = "1";
         submit.textContent = de ? "Wirklich abgeben? Danach ist nichts mehr änderbar." : "Really submit? Nothing can be changed afterwards.";
@@ -124,12 +135,34 @@ class WriteTest extends ExamElement {
       }
       this.submit();
     });
-    this.track(writing.remainingMs);
-    this.watchFocus();
+    if (writing.remainingMs !== null) this.track(writing.remainingMs);
+    if (!this.preview) this.watchFocus();
+    else
+      this.stop = () => {
+        clearInterval(this.timer);
+        this.timer = null;
+        this.stop = null;
+      };
+    const notice = this.preview
+      ? h(
+          "p",
+          { class: "sl-exam-attempt-preview", role: "note" },
+          de
+            ? "Probeansicht für Lehrkräfte: Antworten werden nicht gespeichert, und Abgeben ist abgeschaltet. Ein Neuladen mischt neu."
+            : "Teacher preview: answers are not saved, and submitting is switched off. A reload shuffles anew."
+        )
+      : null;
     return h(
       "div",
-      { class: "sl-exam sl-exam-attempt sl-exam-writing", lang: writing.language },
-      h("div", { class: "sl-exam-attempt-head" }, h("strong", {}, writing.name), " · ", de ? "noch " : "time left ", this.countdown),
+      { class: "sl-exam sl-exam-attempt sl-exam-writing", lang: writing.language, "data-preview": this.preview ? "1" : null },
+      notice,
+      h(
+        "div",
+        { class: "sl-exam-attempt-head" },
+        h("strong", {}, writing.name),
+        " · ",
+        writing.remainingMs === null ? (de ? "noch kein Termin, keine Zeitgrenze" : "no sitting yet, no time limit") : [de ? "noch " : "time left ", this.countdown]
+      ),
       questions,
       h("p", {}, submit),
       this.status
@@ -172,6 +205,11 @@ class WriteTest extends ExamElement {
     let inFlight = false;
     let queued = null;
     const send = async (tokens) => {
+      if (this.preview) {
+        state.textContent = de ? "nicht gespeichert (Probe)" : "not saved (preview)";
+        state.dataset.state = "preview";
+        return;
+      }
       inFlight = true;
       state.textContent = de ? "wird gespeichert…" : "saving…";
       state.dataset.state = "saving";
@@ -263,6 +301,11 @@ class WriteTest extends ExamElement {
     if (this.finishing) return;
     this.finishing = true;
     for (const input of this.querySelectorAll(".sl-exam-writing input, .sl-exam-writing button")) input.disabled = true;
+    if (this.preview) {
+      clearInterval(this.timer);
+      this.status.textContent = "Time is up. In a real attempt the server would submit now.";
+      return;
+    }
     try {
       const answer = await examApi(`/attempts/${this.attempt}`);
       if (answer.submitted) {

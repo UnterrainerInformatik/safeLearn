@@ -398,16 +398,82 @@ a.sl-exam-button {
 
 /* The question pool: the category tree beside the list and the preview. */
 
+/* Three columns: the tree, the list in the middle, the chosen question on the
+   right. The list scrolls on its own; the tree and the question stay in view
+   below the module bar (`--sl-exam-bar-bottom`, set by the bar's client). */
 .sl-exam-pool {
+  --sl-exam-pool-top: calc(var(--sl-exam-bar-bottom, 140px) + 8px);
   display: grid;
-  grid-template-columns: minmax(12em, 18em) minmax(0, 1fr);
-  gap: 16px 24px;
+  grid-template-columns: minmax(8em, 13em) minmax(0, 3fr) minmax(14em, 2fr);
+  gap: 16px 20px;
   align-items: start;
 }
 
-@media (max-width: 800px) {
+.sl-exam-pool-tree,
+.sl-exam-pool-preview {
+  position: sticky;
+  top: var(--sl-exam-pool-top);
+  max-height: calc(100vh - var(--sl-exam-pool-top) - 8px);
+  overflow-y: auto;
+}
+
+.sl-exam-pool-main {
+  position: sticky;
+  top: var(--sl-exam-pool-top);
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - var(--sl-exam-pool-top) - 8px);
+  min-height: 20em;
+}
+
+.sl-exam-pool-list {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.sl-exam-pool-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.sl-exam-pool-questions {
+  margin-top: 0;
+}
+
+.sl-exam-pool-questions thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.sl-exam-pool-questions tbody tr.is-marked > td {
+  position: sticky;
+  top: var(--sl-exam-pool-head, 2.5em);
+  bottom: 0;
+  z-index: 1;
+}
+
+@media (max-width: 1000px) {
   .sl-exam-pool {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sl-exam-pool-tree,
+  .sl-exam-pool-preview,
+  .sl-exam-pool-main {
+    position: static;
+    max-height: none;
+  }
+
+  .sl-exam-pool-main {
+    min-height: 0;
+  }
+
+  .sl-exam-pool-scroll {
+    max-height: 60vh;
   }
 }
 
@@ -454,7 +520,7 @@ a.sl-exam-button {
 }
 
 .sl-exam-pool-question {
-  margin-top: 1em;
+  margin-top: 0;
   padding: 8px 16px;
   border: 1px solid rgba(27, 31, 35, 0.15);
   border-radius: 6px;
@@ -707,4 +773,126 @@ a.sl-exam-button {
 
 .sl-exam-live-summary {
   font-weight: 600;
+}
+
+/* The live view's head: whether the sitting is live, its window, the
+   server's time. */
+
+.sl-exam-live-head {
+  margin-bottom: 0.6em;
+  padding-bottom: 0.4em;
+  border-bottom: 1px solid rgba(27, 31, 35, 0.15);
+}
+
+#markdown-content.dark-mode .sl-exam-live-head {
+  border-bottom-color: rgba(255, 255, 255, 0.2);
+}
+
+.sl-exam-live-head p {
+  margin: 0.2em 0;
+}
+
+.sl-exam-live-badge {
+  display: inline-block;
+  padding: 1px 10px;
+  border-radius: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  background-color: rgba(27, 31, 35, 0.12);
+}
+
+.sl-exam-live-badge[data-state="open"] {
+  color: #ffffff;
+  background-color: #c0392b;
+}
+
+.sl-exam-live-window,
+.sl-exam-live-clock {
+  font-variant-numeric: tabular-nums;
+}
+
+.sl-exam-live-window {
+  font-weight: 600;
+}
+
+/* A participant's share of time in focus: green above 98 %, yellow from
+   70 %, red below. */
+
+.sl-exam-live-bar {
+  display: inline-block;
+  width: 6em;
+  height: 0.7em;
+  vertical-align: middle;
+  overflow: hidden;
+  border-radius: 3px;
+  background-color: rgba(27, 31, 35, 0.12);
+}
+
+#markdown-content.dark-mode .sl-exam-live-bar {
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+.sl-exam-live-bar-fill {
+  display: block;
+  height: 100%;
+}
+
+.sl-exam-live-focus[data-level="good"] .sl-exam-live-bar-fill {
+  background-color: #2e9e4f;
+}
+
+.sl-exam-live-focus[data-level="warn"] .sl-exam-live-bar-fill {
+  background-color: #e0b000;
+}
+
+.sl-exam-live-focus[data-level="bad"] .sl-exam-live-bar-fill {
+  background-color: #d0392b;
+}
+
+.sl-exam-live-share {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A question chosen for the test being assembled. Opaque, so the chosen
+   row that sticks to the top of the list covers the rows it passes over. */
+
+.sl-exam-pool-questions tbody tr {
+  cursor: pointer;
+}
+
+.sl-exam-pool-questions tbody tr.is-chosen > td {
+  background-color: #d3ecd9;
+}
+
+.sl-exam-pool-questions tbody tr.is-chosen.is-marked > td {
+  background-color: #b9e0c3;
+}
+
+#markdown-content.dark-mode .sl-exam-pool-questions tbody tr.is-chosen > td {
+  background-color: #23402b;
+}
+
+#markdown-content.dark-mode .sl-exam-pool-questions tbody tr.is-chosen.is-marked > td {
+  background-color: #2c5636;
+}
+
+/* The question clicked last, chosen or not, keeps the marked row's edge. */
+.sl-exam-pool-questions tbody tr.is-marked > td {
+  box-shadow: inset 0 2px 0 #4a90d9, inset 0 -2px 0 #4a90d9;
+}
+
+/* A teacher trying a test: said at the top, before anything else. */
+.sl-exam-attempt-preview {
+  padding: 6px 12px;
+  border: 2px dashed #e0b000;
+  border-radius: 6px;
+  font-weight: 600;
+}
+
+.sl-exam-pool-questions .sl-exam-quiet {
+  font-size: 0.85em;
+}
+
+.sl-exam-pool-questions td:nth-child(n + 2) {
+  white-space: nowrap;
 }

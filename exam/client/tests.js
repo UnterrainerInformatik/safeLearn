@@ -150,6 +150,12 @@ class TestDetail extends ExamElement {
         ` (${course.yearName}) · ${en ? "English" : "Deutsch"} · ${test.questions.length} ${test.questions.length === 1 ? "question" : "questions"} · `,
         test.started ? `written by ${test.attempts.started}, ${test.attempts.submitted} submitted` : "not written yet"
       ),
+      h(
+        "p",
+        {},
+        h("a", { href: `/exam/tests/${test.id}/preview`, target: "_blank", rel: "noopener", class: "sl-exam-test-preview" }, "Try this test as a student sees it"),
+        h("span", { class: "sl-exam-quiet" }, " (new window; nothing is saved or submitted)")
+      ),
       this.renameForm(test),
       this.message,
       this.sittingsSection(test),

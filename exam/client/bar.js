@@ -73,7 +73,19 @@ function openCreator(bar, what) {
   dialog.showModal();
 }
 
+/**
+ * Tells the page's styles where the sticky bar ends (`--sl-exam-bar-bottom`),
+ * so a column that stays in view can start below it; the bar wraps to more
+ * lines on a narrow screen.
+ */
+function publishBottom(bar) {
+  const set = () => document.documentElement.style.setProperty("--sl-exam-bar-bottom", `${Math.ceil(50 + bar.offsetHeight)}px`);
+  set();
+  if (typeof ResizeObserver === "function") new ResizeObserver(set).observe(bar);
+}
+
 export function connectBar(bar) {
+  publishBottom(bar);
   bar.addEventListener("change", (event) => {
     const select = event.target.closest("select[data-position]");
     if (!select) return;

@@ -1263,18 +1263,31 @@ describe("online tests: assembly", () => {
   test("without a course in the bar the browser offers no way to create a test", async () => {
     await teacher.page.goto(`${applicationUrl}/exam/pool`, { waitUntil: "domcontentloaded" });
     await teacher.page.waitForSelector(".sl-exam-pool-questions tbody tr", { timeout: 20000 });
+    const [first] = await teacher.page.$$(".sl-exam-pool-questions tbody tr");
+    await first.click();
+    await teacher.page.waitForSelector(".sl-exam-pool-question", { timeout: 10000 });
     const seen = await teacher.page.evaluate(() => ({
-      ticks: document.querySelectorAll(".sl-exam-pool-tick").length,
+      chosen: document.querySelectorAll(".sl-exam-pool-questions tr.is-chosen, .sl-exam-pool-questions tr[aria-selected]").length,
       assembly: Boolean(document.querySelector(".sl-exam-pool-assembly")),
     }));
-    assert.deepEqual(seen, { ticks: 0, assembly: false });
+    assert.deepEqual(seen, { chosen: 0, assembly: false }, "a click shows the preview and chooses nothing");
   });
 
   test("with a course in the bar, ticked questions become a test with their usage shown in the browser", async () => {
     await teacher.page.goto(`${applicationUrl}/exam/pool?course=${course.id}`, { waitUntil: "domcontentloaded" });
-    await teacher.page.waitForSelector(".sl-exam-pool-tick", { timeout: 20000 });
+    await teacher.page.waitForSelector(".sl-exam-pool-questions tbody tr", { timeout: 20000 });
     assert.match(await teacher.page.$eval(".sl-exam-pool-assembly h2", (el) => el.textContent), /9XGB GB/);
-    for (const question of questions) await teacher.page.click(`tr[data-question="${question.id}"] .sl-exam-pool-tick`);
+    assert.equal(await teacher.page.$$eval(".sl-exam-pool-questions input[type=checkbox]", (inputs) => inputs.length), 0, "no tick boxes");
+    const chosen = () => teacher.page.$$eval(".sl-exam-pool-questions tr.is-chosen", (rows) => rows.map((row) => Number(row.dataset.question)));
+    // A click anywhere on a row chooses it, a second one unchooses it.
+    await teacher.page.click(`tr[data-question="${questions[0].id}"] td:nth-child(2)`);
+    assert.deepEqual(await chosen(), [questions[0].id]);
+    await teacher.page.click(`tr[data-question="${questions[0].id}"] td:nth-child(3)`);
+    assert.deepEqual(await chosen(), [], "unchosen again");
+    await teacher.page.waitForSelector(".sl-exam-pool-question", { timeout: 10000 });
+    for (const question of questions) await teacher.page.click(`tr[data-question="${question.id}"] td:nth-child(1) .sl-exam-pool-kind`);
+    assert.deepEqual((await chosen()).sort(), questions.map((q) => q.id).sort());
+    assert.match(await teacher.page.$eval(".sl-exam-pool-count", (el) => el.textContent), /2 questions chosen/);
     await teacher.page.type(".sl-exam-pool-create input[name=name]", "HTTP basics");
     await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), teacher.page.click(".sl-exam-pool-create button[type=submit]")]);
     const testId = Number(new URL(teacher.page.url()).pathname.split("/").pop());
@@ -1293,7 +1306,7 @@ describe("online tests: assembly", () => {
     assert.deepEqual(shown.usage.map((u) => [u.testId, u.subject, u.className]), [[testId, "GB", "9xgb"]]);
     await teacher.page.goto(`${applicationUrl}/exam/pool?course=${course.id}`, { waitUntil: "domcontentloaded" });
     await teacher.page.waitForSelector(`tr[data-question="${questions[0].id}"]`, { timeout: 20000 });
-    assert.equal(await teacher.page.$eval(`tr[data-question="${questions[0].id}"] td:nth-child(5)`, (td) => td.textContent), "1×", "the browser shows the usage");
+    assert.equal(await teacher.page.$eval(`tr[data-question="${questions[0].id}"] td:nth-child(2)`, (td) => td.textContent), "1×", "the browser shows the usage");
 
     const listed = (await fetchAs(teacher, `/exam/api/tests?course=${course.id}`)).json.groups[0].tests;
     assert.deepEqual(listed.map((t) => [t.id, t.name, t.questions]), [[testId, "HTTP basics", 2]]);
@@ -1497,6 +1510,42 @@ describe("online tests: writing", () => {
     assert.deepEqual(Object.keys(again.json).sort(), ["grade", "questionCount", "score", "submitted"]);
     assert.equal((await fetchAs(student, `/exam/api/tests/${test.id}/attempt`, { method: "POST" })).status, 409, "no second attempt");
     assert.deepEqual((await fetchAs(student, "/exam/api/my/tests")).json.tests.filter((t) => t.testId === test.id), [], "the test is hidden");
+  });
+
+  test("a teacher tries a test in a window of its own, and nothing is saved, submitted or graded", async () => {
+    const test = await openTest("Preview");
+    await teacher.page.goto(`${applicationUrl}/exam/tests/${test.id}`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(".sl-exam-test-preview", { timeout: 20000 });
+    assert.deepEqual(
+      await teacher.page.$eval(".sl-exam-test-preview", (a) => [a.getAttribute("href"), a.getAttribute("target")]),
+      [`/exam/tests/${test.id}/preview`, "_blank"],
+      "it opens in a new window"
+    );
+    const writes = [];
+    const watch = (request) => {
+      if (request.method() !== "GET" && new URL(request.url()).pathname.startsWith("/exam/api/")) writes.push(`${request.method()} ${new URL(request.url()).pathname}`);
+    };
+    teacher.page.on("request", watch);
+    try {
+      await teacher.page.goto(`${applicationUrl}/exam/tests/${test.id}/preview`, { waitUntil: "domcontentloaded" });
+      await teacher.page.waitForSelector(".sl-exam-writing[data-preview='1'] .sl-exam-attempt-question", { timeout: 20000 });
+      assert.equal(await teacher.page.$(".sl-exam-bar"), null, "as a student sees it, without the bar");
+      assert.match(await teacher.page.$eval(".sl-exam-attempt-preview", (el) => el.textContent), /Probeansicht/);
+      assert.match(await teacher.page.$eval(".sl-exam-countdown", (el) => el.textContent), /^1[45]:\d\d$/, "the sitting's duration");
+      await teacher.page.click(".sl-exam-attempt-answers label");
+      await teacher.page.click(".sl-exam-attempt-submit");
+      await teacher.page.click(".sl-exam-attempt-submit");
+      assert.match(await teacher.page.$eval(".sl-exam-writing .sl-exam-message", (el) => el.textContent), /nichts abgegeben/);
+      assert.equal(await teacher.page.$(".sl-exam-attempt-result"), null, "no result");
+    } finally {
+      teacher.page.off("request", watch);
+    }
+    assert.deepEqual(writes, [], "the preview wrote nothing");
+    const preview = (await fetchAs(teacher, `/exam/api/tests/${test.id}/preview`)).json;
+    assert.doesNotMatch(JSON.stringify(preview), /"correct"|"position"|"id"/, "the preview carries no flags either");
+    assert.equal(database((db) => db.prepare("SELECT COUNT(*) AS n FROM attempt WHERE test_id = ?").get(test.id).n), 0, "no attempt");
+    assert.equal((await fetchAs(student, `/exam/api/tests/${test.id}/preview`)).status, 403, "a student is refused");
+    assert.deepEqual(await fetchAs(student, `/exam/tests/${test.id}/preview`), await fetchAs(student, absent), "and finds no page");
   });
 
   test("a submitted attempt is a read-only field of its test's column in the sheet, and counts in the proposal", async () => {
@@ -1740,7 +1789,16 @@ describe("online tests: the live view", () => {
     await teacher.page.waitForSelector(`li[data-sitting="${sitting.id}"][data-state="scheduled"] a[href="/exam/sittings/${sitting.id}/live"]`, { timeout: 20000 });
     await teacher.page.goto(`${applicationUrl}/exam/sittings/${sitting.id}/live`, { waitUntil: "domcontentloaded" });
     await teacher.page.waitForFunction(() => document.querySelector("sl-exam-live")?.dataset.mode === "stream", { timeout: 20000 });
-    assert.match(await teacher.page.$eval("sl-exam-live .sl-exam-quiet", (el) => el.textContent), /not open yet/);
+    const head = await teacher.page.evaluate(() => ({
+      badge: document.querySelector(".sl-exam-live-badge").textContent,
+      window: document.querySelector(".sl-exam-live-window").textContent,
+      clock: document.querySelector(".sl-exam-live-clock").textContent,
+      first: document.querySelector("sl-exam-live .sl-exam-live-head") === document.querySelector("sl-exam-live .sl-exam").firstElementChild,
+    }));
+    assert.equal(head.badge, "Not open yet");
+    assert.match(head.window, /opens in (9|10):\d\d$/, head.window);
+    assert.match(head.clock, /\d{1,2}:\d\d:\d\d/, "the server's time, in the viewer's time zone");
+    assert.ok(head.first, "the state stands at the top");
     assert.deepEqual(await studentRow(), { status: "not started", focus: "–" });
     assert.equal((await fetchAs(student, `/exam/api/tests/${written.id}/attempt`, { method: "POST" })).status, 404, "nobody writes before it opens");
     // The sitting opens.
@@ -1752,6 +1810,10 @@ describe("online tests: the live view", () => {
     }
     await fetchAs(student, `/exam/api/tests/${written.id}/attempt`, { method: "POST" });
     await teacher.page.waitForFunction((u) => document.querySelector(`sl-exam-live tr[data-username="${u}"]`)?.dataset.status === "writing", { timeout: 5000 }, student.username.toLowerCase());
+    await teacher.page.waitForFunction(() => document.querySelector(".sl-exam-live-badge").textContent === "Live", { timeout: 3000 });
+    assert.match(await teacher.page.$eval(".sl-exam-live-window", (el) => el.textContent), /closes in \d+:\d\d$/);
+    const focus = await teacher.page.$eval(`sl-exam-live tr[data-username="${student.username.toLowerCase()}"] .sl-exam-live-focus`, (td) => ({ level: td.dataset.level, share: td.querySelector(".sl-exam-live-share").textContent }));
+    assert.deepEqual(focus, { level: "good", share: "100 %" }, "never left: a full green bar");
   });
 
   test("a teacher who switches to the student view gets refused, and the view says why", async () => {

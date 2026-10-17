@@ -399,3 +399,35 @@ export function releaseAttempt(db, id) {
   notify(row.sitting_id, "released", row.username);
   return { released: id };
 }
+
+// ---------------------------------------------------------- a teacher's try
+
+/**
+ * A test as a student would write it, for its teacher to try beforehand: the
+ * snapshot shuffled and behind fresh tokens like an attempt, in the course's
+ * language, with the first sitting's duration if one is scheduled. Nothing is
+ * written - no attempt, no tokens kept - so nothing can be saved or submitted,
+ * and no grade or usage changes.
+ */
+export function previewView(db, testId) {
+  const test = db.prepare("SELECT id, name, course_id FROM test WHERE id = ?").get(testId);
+  if (!test) throw new NotFoundError("There is no such test.");
+  const language = getCourse(db, test.course_id).language;
+  const text = language === "en" ? "text_en" : "text_de";
+  const first = db.prepare("SELECT duration_s FROM sitting WHERE test_id = ? ORDER BY opens_at, id LIMIT 1").get(testId);
+  const questions = db.prepare(`SELECT id, type, ${text} AS text FROM test_question WHERE test_id = ? ORDER BY position`).all(testId);
+  const answersOf = db.prepare(`SELECT ${text} AS text FROM test_answer WHERE test_question_id = ? ORDER BY position`);
+  return {
+    preview: true,
+    name: test.name,
+    language,
+    remainingMs: first ? first.duration_s * 1000 : null,
+    questions: shuffle(questions).map((question, index) => ({
+      n: index + 1,
+      type: question.type,
+      text: question.text,
+      answers: shuffle(answersOf.all(question.id)).map((answer) => ({ token: randomToken(), text: answer.text })),
+      chosen: [],
+    })),
+  };
+}

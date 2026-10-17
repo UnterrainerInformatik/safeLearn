@@ -44,6 +44,8 @@ function participantFrom(row, attempt, refused, at) {
     familyName: row.family_name,
     status,
     attemptId: attempt?.id ?? null,
+    startedAt: attempt?.started_at ?? null,
+    submittedAt: attempt?.submitted_at ?? null,
     remainingMs: status === "writing" ? Math.max(0, Date.parse(attempt.deadline) - Date.parse(at)) : null,
     away: Boolean(attempt?.away_since) && status === "writing",
     focusCount: attempt?.focus_count ?? 0,
@@ -77,7 +79,10 @@ export function liveParticipant(db, sittingId, username, at = now()) {
   return participantFrom(row, attempt, refused, at);
 }
 
-/** A sitting as its live view shows it: the test, the window, its state, and every participant. */
+/**
+ * A sitting as its live view shows it: the server's clock, the test, the
+ * window, its state, and every participant.
+ */
 export function liveSnapshot(db, sittingId, at = now()) {
   const sitting = sittingRow(db, sittingId);
   const test = db.prepare("SELECT id, name, course_id FROM test WHERE id = ?").get(sitting.test_id);
@@ -90,6 +95,7 @@ export function liveSnapshot(db, sittingId, at = now()) {
       .map((row) => [row.username, row.n])
   );
   return {
+    serverTime: at,
     sitting: {
       id: sitting.id,
       opensAt: sitting.opens_at,

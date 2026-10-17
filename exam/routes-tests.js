@@ -7,7 +7,8 @@
  */
 
 import { createSitting, createTest, deleteSitting, deleteTest, getTest, listTests, updateSitting, updateTest } from "./tests.js";
-import { releaseAttempt } from "./attempts.js";
+import { previewView, releaseAttempt } from "./attempts.js";
+import { embedPlaceholder, wrapInPage } from "../obsidian.js";
 import { NotFoundError } from "./classes.js";
 import { requireTeacher, teacherPage } from "./gate.js";
 import { contextFromQuery, teacherShell } from "./bar.js";
@@ -38,6 +39,7 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
   api("put", "/sittings/:id", (req) => updateSitting(db, idParam(req.params.id), req.body ?? {}));
   api("delete", "/sittings/:id", (req) => deleteSitting(db, idParam(req.params.id)));
   api("post", "/attempts/:id/release", (req) => releaseAttempt(db, idParam(req.params.id)));
+  api("get", "/tests/:id/preview", (req) => previewView(db, idParam(req.params.id)));
 
   // The list the bar's "Online tests" button opens: the chosen course's tests,
   // or the school year's when no course is chosen.
@@ -71,6 +73,21 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
           current: "tests",
         })
       );
+    })
+  );
+
+  // A teacher trying a test as a student would see it, in a window of its
+  // own and without the bar. The element saves and submits nothing.
+  router.get(
+    "/tests/:id/preview",
+    teacherPage,
+    handle(async (req, res) => {
+      const test = getTest(db, idParam(req.params.id));
+      const title = `Try: ${test.name}`;
+      const body = `
+        <h1>${title.replaceAll("&", "&amp;").replaceAll("<", "&lt;")}</h1>
+        ${embedPlaceholder("test", { test: String(test.id), preview: "1" })}`;
+      res.send(await wrapInPage(body, startPage(), req, { title, wide: true }));
     })
   );
 }

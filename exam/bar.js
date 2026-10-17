@@ -101,7 +101,7 @@ export function renderBar(db, context, current = null) {
       data-year="${year?.id ?? ""}" data-class="${klass?.id ?? ""}" data-course="${course?.id ?? ""}" data-current="${current ?? ""}">
     ${position({
       name: "year",
-      label: "School year",
+      label: "Year",
       href: year ? `/exam/?year=${year.id}` : null,
       choices: years.map((candidate) => ({ value: String(candidate.id), label: candidate.current ? `${candidate.name} (current)` : candidate.name })),
       chosen: year ? String(year.id) : null,
@@ -128,7 +128,7 @@ export function renderBar(db, context, current = null) {
     })}
     ${position({
       name: "gradebook",
-      label: "Gradebook",
+      label: "Grades",
       href: course ? `/exam/courses/${course.id}/gradebook?semester=${shownSemester}` : null,
       choices: course ? semesters.map((value) => ({ value, label: semesterLabels[value] })) : [],
       chosen: semester,

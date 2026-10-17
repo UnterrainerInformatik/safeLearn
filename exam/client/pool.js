@@ -4,9 +4,10 @@
  * - `pool`: the category tree, a text search, the matching questions with how
  *   often and when each was used, and a preview of one question in German or
  *   English with its correct answers marked and its usage history. With a
- *   course chosen in the module bar (`data-sl-course`), the questions can be
- *   ticked and assembled into a new test for that course, or added to one of
- *   its tests that has not been written yet (`online-test`).
+ *   course chosen in the module bar (`data-sl-course`), a click anywhere on a
+ *   question's row also chooses it for a test - or unchooses it - and the
+ *   chosen rows are coloured; they become a new test for that course, or are
+ *   added to one of its tests that has not been written yet (`online-test`).
  *
  * The API refuses every session not acting as a teacher; this element only
  * draws what it answers.
@@ -120,7 +121,8 @@ class PoolView extends ExamElement {
       "div",
       { class: "sl-exam sl-exam-pool" },
       this.tree,
-      h("div", { class: "sl-exam-pool-main" }, this.assembly, search, this.list, this.preview)
+      h("div", { class: "sl-exam-pool-main" }, this.assembly, search, this.list),
+      this.preview
     );
   }
 
@@ -129,7 +131,7 @@ class PoolView extends ExamElement {
    * "Create test", or one of the course's unwritten tests to add them to.
    */
   assemblyPanel(course, tests) {
-    this.count = h("span", { class: "sl-exam-pool-count" }, "No question ticked.");
+    this.count = h("span", { class: "sl-exam-pool-count" }, "No question chosen - click a question to choose it.");
     this.message = h("p", { class: "sl-exam-message", role: "status" });
     const name = h("input", { type: "text", name: "name", maxlength: "80", placeholder: "Name of the test", "aria-label": "Name of the test", required: true });
     const create = h(
@@ -184,7 +186,7 @@ class PoolView extends ExamElement {
   /** Sends the assembly `request` and opens the test it answers. */
   async assemble(request) {
     if (this.chosen.size === 0) {
-      this.message.textContent = "Tick at least one question.";
+      this.message.textContent = "Choose at least one question.";
       return;
     }
     this.message.textContent = "";
@@ -197,11 +199,15 @@ class PoolView extends ExamElement {
     }
   }
 
-  tick(id, ticked) {
-    if (ticked) this.chosen.add(id);
-    else this.chosen.delete(id);
+  /** Chooses a question for the test, or unchooses it, and colours its row. */
+  toggle(id, row) {
+    if (this.chosen.has(id)) this.chosen.delete(id);
+    else this.chosen.add(id);
+    const chosen = this.chosen.has(id);
+    row.classList.toggle("is-chosen", chosen);
+    row.setAttribute("aria-selected", String(chosen));
     const n = this.chosen.size;
-    this.count.textContent = n === 0 ? "No question ticked." : n === 1 ? "1 question ticked." : `${n} questions ticked.`;
+    this.count.textContent = n === 0 ? "No question chosen - click a question to choose it." : n === 1 ? "1 question chosen." : `${n} questions chosen.`;
   }
 
   chooseCategory(categoryId, button) {
@@ -240,10 +246,7 @@ class PoolView extends ExamElement {
         h(
           "tr",
           {},
-          this.course ? h("th", { "aria-label": "In the test" }) : null,
           h("th", {}, "Question"),
-          h("th", {}, "Category"),
-          h("th", {}, "Type"),
           h("th", {}, "Used"),
           h("th", {}, "Last used")
         )
@@ -254,35 +257,34 @@ class PoolView extends ExamElement {
         questions.map((question) =>
           h(
             "tr",
-            { "data-question": String(question.id) },
-            this.course
-              ? h(
-                  "td",
-                  {},
-                  h("input", {
-                    type: "checkbox",
-                    class: "sl-exam-pool-tick",
-                    "aria-label": `Put "${question.nameDe}" in the test`,
-                    checked: this.chosen.has(question.id),
-                    onChange: (event) => this.tick(question.id, event.currentTarget.checked),
-                  })
-                )
-              : null,
+            {
+              "data-question": String(question.id),
+              class: this.course && this.chosen.has(question.id) ? "is-chosen" : null,
+              "aria-selected": this.course ? String(this.chosen.has(question.id)) : null,
+              // Anywhere on the row: the preview, and with a course in the
+              // bar, choosing or unchoosing the question for the test.
+              onClick: (event) => {
+                this.showQuestion(question.id);
+                if (this.course) this.toggle(question.id, event.currentTarget);
+              },
+            },
             h(
               "td",
               {},
-              h("button", { type: "button", class: "sl-exam-link", onClick: () => this.showQuestion(question.id) }, question.nameDe),
-              h("div", { class: "sl-exam-quiet" }, question.excerptDe)
+              h("button", { type: "button", class: "sl-exam-link" }, question.nameDe),
+              h("div", { class: "sl-exam-quiet" }, question.excerptDe),
+              h("div", { class: "sl-exam-quiet sl-exam-pool-kind" }, `${question.category.de.join(" / ")} · ${typeLabels[question.type] ?? question.type}`)
             ),
-            h("td", {}, question.category.de.join(" / ")),
-            h("td", {}, typeLabels[question.type] ?? question.type),
             h("td", {}, `${question.uses}×`),
             h("td", {}, displayDate(question.lastUsedOn))
           )
         )
       )
     );
-    this.list.replaceChildren(h("p", { class: "sl-exam-quiet" }, `${questions.length} questions`), markRows(table));
+    this.list.replaceChildren(h("p", { class: "sl-exam-quiet" }, `${questions.length} questions`), h("div", { class: "sl-exam-scroll sl-exam-pool-scroll" }, markRows(table)));
+    // The question chosen last stays in view while the list scrolls: its
+    // row sticks just below the list's sticky head.
+    requestAnimationFrame(() => table.style.setProperty("--sl-exam-pool-head", `${table.tHead.offsetHeight}px`));
   }
 
   async showQuestion(id) {

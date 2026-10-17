@@ -127,7 +127,7 @@ class ClassesHome extends ExamElement {
       return h(
         "div",
         { class: "sl-exam" },
-        h("p", {}, "There is no school year yet. Create the first one with the + beside School year above."),
+        h("p", {}, "There is no school year yet. Create the first one with the + beside Year above."),
         moduleLinks()
       );
     }

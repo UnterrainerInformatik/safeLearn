@@ -116,7 +116,15 @@ export function registerLiveRoutes(router, { db, handle, startPage }) {
         });
       };
       stop = listen(sittingId, (event) =>
-        checked(() => stream.send("change", { type: event.type, participant: liveParticipant(db, sittingId, event.username) }))
+        checked(() => {
+          const at = new Date().toISOString();
+          stream.send("change", {
+            type: event.type,
+            serverTime: at,
+            sitting: liveSnapshot(db, sittingId, at).sitting,
+            participant: liveParticipant(db, sittingId, event.username, at),
+          });
+        })
       );
       heartbeat = setInterval(() => checked(() => stream.comment("heartbeat")), heartbeatMs);
     })
