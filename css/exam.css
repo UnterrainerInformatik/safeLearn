@@ -427,12 +427,31 @@ a.sl-exam-button,
   align-items: start;
 }
 
-.sl-exam-pool-tree,
+/* The tree scrolls inside its column so the links below it stay reachable
+   however long it grows. */
+.sl-exam-pool-side,
 .sl-exam-pool-preview {
   position: sticky;
   top: var(--sl-exam-pool-top);
   max-height: calc(100vh - var(--sl-exam-pool-top) - 8px);
   overflow-y: auto;
+}
+
+.sl-exam-pool-side {
+  display: flex;
+  flex-direction: column;
+  overflow-y: visible;
+}
+
+.sl-exam-pool-tree {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.sl-exam-pool-tree-tools {
+  flex: 0 0 auto;
+  margin-bottom: 0;
 }
 
 .sl-exam-pool-main {
@@ -479,7 +498,7 @@ a.sl-exam-button,
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .sl-exam-pool-tree,
+  .sl-exam-pool-side,
   .sl-exam-pool-preview,
   .sl-exam-pool-main {
     position: static;

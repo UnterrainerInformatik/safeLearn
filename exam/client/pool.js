@@ -165,7 +165,7 @@ class PoolView extends ExamElement {
     return h(
       "div",
       { class: "sl-exam sl-exam-pool" },
-      h("div", {}, this.tree, h("p", { class: "sl-exam-pool-tree-tools" }, categories, " · ", importing)),
+      h("div", { class: "sl-exam-pool-side" }, this.tree, h("p", { class: "sl-exam-pool-tree-tools" }, categories, " · ", importing)),
       h(
         "div",
         { class: "sl-exam-pool-main" },

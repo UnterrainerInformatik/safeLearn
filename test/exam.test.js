@@ -1223,6 +1223,33 @@ describe("the question pool", () => {
     assert.match(await teacher.page.$eval(".sl-exam-pool-text", (el) => el.textContent), /en picture/);
   });
 
+  test("a long category tree keeps the links below it reachable at the bottom of the page", async () => {
+    const viewport = teacher.page.viewport();
+    await teacher.page.setViewport({ width: 1280, height: 600 });
+    try {
+      await teacher.page.goto(`${applicationUrl}/exam/pool`, { waitUntil: "domcontentloaded" });
+      await teacher.page.waitForSelector(".sl-exam-pool-questions tbody tr", { timeout: 20000 });
+      const reachable = await teacher.page.evaluate(async () => {
+        const list = document.querySelector(".sl-exam-pool-tree ul");
+        for (let i = 0; i < 80; i++) {
+          list.append(Object.assign(document.createElement("li"), { textContent: `Filler ${i}` }));
+        }
+        window.scrollTo(0, document.documentElement.scrollHeight);
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        return [".sl-exam-pool-categories-link", ".sl-exam-pool-import-link"].map((selector) => {
+          const link = document.querySelector(selector);
+          // A link wrapped over two lines has a gap in its bounding box; hit its first line.
+          const line = link.getClientRects()[0];
+          const hit = document.elementFromPoint(line.left + line.width / 2, line.top + line.height / 2);
+          return link.getBoundingClientRect().bottom <= window.innerHeight && hit === link;
+        });
+      });
+      assert.deepEqual(reachable, [true, true], "Edit categories and Import questions stay visible and clickable");
+    } finally {
+      await teacher.page.setViewport(viewport);
+    }
+  });
+
   test("the home page leads a teacher to the pool", async () => {
     await teacher.page.goto(`${applicationUrl}/exam/`, { waitUntil: "domcontentloaded" });
     await teacher.page.waitForSelector('a[href="/exam/pool"]', { timeout: 20000 });
