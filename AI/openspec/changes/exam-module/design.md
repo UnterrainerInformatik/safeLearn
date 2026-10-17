@@ -93,27 +93,13 @@ The constraints that shape the approach:
 - **Semester assignment.** An entry belongs to the semester its date falls in - for a manual result, its column's date. The WS proposal uses WS entries. The SS proposal is the year grade: the winter semester's result and the summer semester's own entries, combined by the course's winter share, as `year-grade` (change `exam-navigation-and-grid`, its D10) defines. Teachers can always override.
 - Fractions are stored as `REAL`. Thresholds are compared with `>=` on the percentage, after rounding the fraction to 4 decimal places, so that 0.75 computed as 0.7499999 is not demoted.
 
-### D8 — Attempts: server deadline, lazy plus swept finalization, device cookie
+### D8 — Attempts
 
-- **Starting.** On first open, the server inserts the attempt with `startedAt` and `deadline = min(startedAt + duration, window.to)`, generates the per-attempt permutation of questions and answers, and generates a random 128-bit token per answer. The mapping stays on the server.
-- **Saving.** Each answer change is a `PUT` that the server accepts only while `now < deadline` and `submittedAt` is null.
-- **Finalization.** An attempt past its deadline is finalized (graded and written to the gradebook) on the next request that touches it, and by a sweep every 30 s. No client involvement is needed.
-- **Device binding.** At start, the server sets an `httpOnly`, `SameSite=Strict` cookie `sl-attempt-<id>` with a random secret, and stores a hash of the secret on the attempt. A request without the matching cookie is refused and logged as a refused device. The binding is to the cookie, not to the express session id, because sessions die on restart (spec `online-test`: a restart must not lock a student out). The teacher's "release" clears the hash, and the next browser to open the attempt binds anew.
-- **Focus log.** The page sends `visibilitychange`/`blur`/`focus` events as small `POST`s, and if needed `navigator.sendBeacon` on `pagehide`. The server aggregates the count and the duration away per attempt.
+Moved to `exam-online-tests`, design D5 and D6.
 
-### D9 — Live view by SSE on its own authenticated stream
+### D9 — Live view
 
-- **Stream.** The live view opens `GET /exam/api/sittings/:id/events` (`text/event-stream`). The route sits behind `checkAuthenticated` and the teacher gate (D5) like every module route. It sends one full snapshot on connect and then an event per change: attempt started, answer saved (remaining time only, never answers), submitted, focus loss, refused device, release. A heartbeat comment every 25 s keeps proxies from closing an idle stream.
-- **Who opens it.** Only the live view, both as `safelearn-live` embed and as module page. No other module page holds a stream.
-- **Not over `/hot-reload`.** That channel is registered ahead of `checkAuthenticated` and carries no identity. Exam data never travels over it, and it is not extended.
-- **Re-check per event.** The role set is rebuilt per request, but a stream is one request. So before each event the server re-checks the session (still authenticated, still teacher after the student-view downgrade). If it fails, the server sends a final `refused` event and closes the stream.
-- **Source of events.** The module's write paths (start, save, submit, focus, refusal, release, the 30 s sweep) notify an in-process emitter keyed by sitting. That needs no database polling and no extra process.
-- **Reuse.** The hot-reload code in `app.js` (headers, client map, cleanup on `close`) is inline today. Its stream setup is extracted into a small helper that both use, without changing hot-reload's behavior.
-- **Fallback.** If the stream drops, `EventSource` reconnects by itself, and the reconnect gets a fresh snapshot. If it fails three times in a row, the client switches to polling `GET /exam/api/sittings/:id/live` every 5 s and retries the stream every minute. The snapshot endpoint exists anyway for the initial load and for the fallback.
-
-*Alternative:* polling every 2 s. It is simpler and needs no connection, but it is less immediate, and SSE is already the transport the app uses for live updates.
-
-*Risk:* browsers allow six HTTP/1.1 connections per host. Every content page already holds one `/hot-reload` stream, so a teacher with many tabs plus a live view could run out of connections, and requests would then queue. Mitigation: only the live view opens a second stream, the fallback above covers a refused stream, and over HTTP/2 the limit does not apply (task 5.10a checks whether the proxy in front of babylon5 serves HTTP/2).
+Moved to `exam-online-tests`, design D7.
 
 ### D10 — One-time import as a tool script using jsdom's XML parser
 

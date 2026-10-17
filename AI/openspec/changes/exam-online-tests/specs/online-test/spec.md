@@ -6,16 +6,49 @@ Defines the online multiple-choice test from its assembly to its grade: tests, s
 
 ### Requirement: A test is assembled by hand and snapshots its questions
 
-A teacher SHALL create a test for a course by choosing questions from the pool. Creating the test SHALL copy every chosen question, with its answers, both languages and correct flags, into the test. Editing or deleting a pool question later SHALL NOT change any existing test or any grade derived from one. Every student SHALL get all of the test's questions.
+A teacher SHALL create a test for a course by choosing questions from the pool, in the question browser, with that course chosen in the module bar, and giving the test a name. A retired question SHALL NOT be offered. Creating the test SHALL copy every chosen question, with its answers, both languages, correct flags and images, into the test, and SHALL record the question's usage for that course. Editing, retiring or deleting a pool question later SHALL NOT change any existing test or any grade derived from one. Every student SHALL get all of the test's questions. A test without a question SHALL be refused.
 
 #### Scenario: A question is edited after the test
 
 - **WHEN** a pool question is edited after a test containing it was written
 - **THEN** the test, its attempts and their grades are unchanged
 
+#### Scenario: Assembling for a course
+
+- **WHEN** a teacher with `WMC 4BHIF 2026/27` chosen in the bar ticks four questions in the browser and creates the test `HTTP caching`
+- **THEN** the course has the test `HTTP caching` with those four questions, and each of them shows the usage `WMC 4BHIF` in the browser
+
+#### Scenario: No course chosen
+
+- **WHEN** a teacher browses the pool with no course chosen in the bar
+- **THEN** the browser offers no way to create a test
+
+### Requirement: A test can be changed only until it is first written
+
+Until the first attempt of a test has started, a teacher SHALL be able to rename it, change its questions (taking a fresh snapshot of the chosen ones) and delete it; deleting SHALL remove its usage records and its sittings. Once an attempt has started, the test's questions SHALL NOT change and the test SHALL NOT be deleted; renaming SHALL remain possible.
+
+#### Scenario: Deleting a written test
+
+- **WHEN** a teacher deletes a test of which one student has started an attempt
+- **THEN** it is refused, and the test, the attempt and the gradebook are unchanged
+
+#### Scenario: Correcting a test before the sitting
+
+- **WHEN** a teacher swaps one question of a test whose sitting has not yet opened
+- **THEN** the test holds the new question's snapshot, and the swapped-out question no longer shows that usage
+
+### Requirement: A course lists its tests
+
+Each course SHALL have a list of its tests, reachable from the module bar, showing per test its name, number of questions, its sittings with their windows and their state (scheduled, open, over), and how many participants have submitted. From the list a teacher SHALL open a test's sittings, its live view while a sitting is open, and the questions of its snapshot. A student SHALL NOT reach the list.
+
+#### Scenario: The course's tests
+
+- **WHEN** a teacher opens the online tests of `WMC 4BHIF 2026/27`
+- **THEN** every test of that course is listed with its sittings and the count of submitted attempts, and no test of another course appears
+
 ### Requirement: A sitting sets the window and the duration
 
-A test SHALL be written in one or more sittings. A sitting SHALL have a window (from, to), an attempt duration that is shorter than the window, and its participants: the whole roster for the first sitting, or selected students for a make-up. A make-up sitting SHALL use the same duration. A student SHALL see a test only while a sitting they participate in is open, and only until they have submitted.
+A test SHALL be written in one or more sittings. A sitting SHALL have a window (from, to), an attempt duration that is shorter than the window, and its participants: the whole roster for the first sitting, or selected students for a make-up. Only students on the course's roster who have not left SHALL be participants. A make-up sitting SHALL use the same duration. A student SHALL see a test only while a sitting they participate in is open, and only until they have submitted. The test SHALL be shown in the course's language.
 
 #### Scenario: Duration longer than the window
 
@@ -76,7 +109,7 @@ The order of questions and the order of answers within each question SHALL be sh
 
 ### Requirement: Grading is server-side and all-or-nothing
 
-At submission the server SHALL grade each question as 1 if the set of chosen answers equals the set of correct answers and 0 otherwise, and SHALL store the attempt's fraction (points over number of questions) as an online-test result in the course's gradebook. After submission the student SHALL see their points and grade and SHALL NOT see which answers were correct.
+At submission the server SHALL grade each question as 1 if the set of chosen answers equals the set of correct answers and 0 otherwise, and SHALL store the attempt's fraction (points over number of questions). That fraction SHALL be the student's result in the test's column of the online-test category of the course's gradebook (`gradebook-sheet`). The column SHALL be dated by the start of the test's first sitting, which decides its semester, including for results from a later make-up. A participant who never started an attempt SHALL have no result in the column, not a zero. After submission the student SHALL see their points and grade and SHALL NOT see which answers were correct.
 
 #### Scenario: One correct answer missed
 
@@ -87,6 +120,16 @@ At submission the server SHALL grade each question as 1 if the set of chosen ans
 
 - **WHEN** a student has submitted 3 of 4 correct
 - **THEN** they see 3/4 and the grade for 0.75, and no answer is marked correct or wrong
+
+#### Scenario: Into the sheet
+
+- **WHEN** a student's attempt at `HTTP caching`, whose first sitting started on 2026-12-01, is submitted with 3 of 4
+- **THEN** the course's sheet shows 0.75 for that student in the online-test column `HTTP caching` dated 2026-12-01, and the winter-semester proposal includes it
+
+#### Scenario: Absent and no make-up
+
+- **WHEN** a participant never opened the test and the sitting is over
+- **THEN** their field in the test's column is empty, and their online-test category is computed without it
 
 ### Requirement: An attempt is bound to the device that started it
 
@@ -147,9 +190,14 @@ During a sitting a teacher SHALL see, per participant: not started, writing (wit
 
 ### Requirement: Tests are not visible after they were written
 
-A test SHALL be hidden from a student once they have submitted or their deadline has passed. Its questions SHALL NOT be retrievable by any student afterwards.
+A test SHALL be hidden from a student once they have submitted or their deadline has passed. Its questions SHALL NOT be retrievable by any student afterwards. An image of a question SHALL be served to a student only while they have an open attempt whose test contains that question.
 
 #### Scenario: After the sitting
 
 - **WHEN** a student requests a test's questions after their attempt was submitted
 - **THEN** the request is refused
+
+#### Scenario: An image during and after the attempt
+
+- **WHEN** a student requests an image of a question in their open attempt, and again after submitting
+- **THEN** the first request is served and the second is refused

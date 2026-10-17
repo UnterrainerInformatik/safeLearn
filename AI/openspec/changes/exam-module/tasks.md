@@ -54,22 +54,7 @@ Phases in the plan's order. Each phase ends deployable with `EXAM_MODULE` unset 
 
 ## 5. P3 — Online tests
 
-- [ ] 5.1 Migration: test, test question (snapshot incl. answers and flags), sitting (window, duration, participants), attempt (student, startedAt, deadline, submittedAt, device hash, focus count/duration, permutation), response (answer tokens chosen), answer token map
-- [ ] 5.2 Test assembly UI from the question browser: pick questions, create the snapshot, record usage
-- [ ] 5.3 Sitting and make-up UI: window, duration < window, participants (roster or selection), same duration for make-ups
-- [ ] 5.4 Attempt start: one per student and test across sittings, server-side permutation of questions and answers, random per-answer tokens, deadline = min(start + duration, window end)
-- [ ] 5.5 Writing page (`safelearn-test` embed and module page) in the course language, with `studentMaySeeImage` answering yes for the images of an open attempt's questions: no correctness in any payload, autosave per change, server-time countdown, resume on reload
-- [ ] 5.6 Save API refusing writes after the deadline or after submission; explicit submit
-- [ ] 5.7 Finalization: lazy on access plus a 30 s sweep; all-or-nothing grading; fraction written as the student's result in that test's column of the online-test category (`gradebook-sheet`); test hidden afterwards
-- [ ] 5.8 Device binding via `httpOnly` `SameSite=Strict` attempt cookie with hashed secret; refused-device record; teacher release; survives a server restart
-- [ ] 5.9 Focus log: `visibilitychange`/`blur`/`focus` reports and `sendBeacon` on `pagehide`; aggregated per attempt; never affects the grade
-- [ ] 5.10 Teacher live view (`safelearn-live` embed and module page) over SSE: `GET /exam/api/sittings/:id/events` behind `checkAuthenticated` and the teacher gate, snapshot on connect, an event per change from an in-process emitter per sitting, 25 s heartbeat, session re-check before each event with a closing `refused` event; snapshot endpoint `GET /exam/api/sittings/:id/live`; client fallback to 5 s snapshot polling after three failed reconnects; shows status, remaining time, focus losses, refused devices, release button
-- [ ] 5.10a Check whether the reverse proxy in front of babylon5 serves HTTP/2 to browsers (and whether it buffers `text/event-stream`, which would delay events); record the result in `design.md` D9. With HTTP/2 the six-connection risk is moot; with buffering, configure the proxy or send `X-Accel-Buffering: no`
-- [ ] 5.10b Extract the event-stream setup of `/hot-reload` in `app.js` into a small helper used by both, without changing hot-reload's behavior; the existing hot-reload checks stay green
-- [ ] 5.11 Student post-submission view: points and grade only
-- [ ] 5.12 Harness checks: payload contains no correct flag or original order; late write refused; reload resumes; second device refused and released; restart keeps the attempt; auto-submit at deadline; questions unretrievable after submission; event stream refused without a teacher session; a submission reaches the live view's stream; no hot-reload message carries sitting data; teacher in student view loses the stream
-- [ ] 5.13 Load check: a simulated class of 30 autosaving for 10 minutes against `DatabaseSync`, response times recorded
-- [ ] 5.14 Pilot sitting with one class before the first graded test
+Moved to the change `exam-online-tests` on 2026-10-17, together with the spec `online-test` and design D8/D9. Its tasks, numbered there, replace the former 5.1–5.14.
 
 ## 6. P6 — Board solution
 
@@ -80,7 +65,7 @@ Phases in the plan's order. Each phase ends deployable with `EXAM_MODULE` unset 
 
 - [ ] 7.1 Editor page with DE and EN side by side: type, text, answers, correct flags, category; validation that both languages match and flags fit the type
 - [ ] 7.2 Category maintenance: create, rename, move; refuse deleting a non-empty category
-- [ ] 7.3 Image upload into question text: raster types only, size limit, stored like imported images
+- [ ] 7.3 Image upload into question text: raster types only, size limit, stored like imported images; an edit adds new images and never overwrites or deletes one a test snapshot links to (`exam-online-tests` D2)
 - [ ] 7.4 Retire instead of delete for used questions; unused questions may be deleted; retired questions hidden from assembly
 - [ ] 7.5 Harness checks: mismatch refused, snapshot of an existing test unchanged after an edit, retire keeps usage history
 

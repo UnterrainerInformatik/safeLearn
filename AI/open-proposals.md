@@ -52,6 +52,8 @@ Kurze Multiple-Choice-Tests (typisch 4 Fragen in 10 min), die in safeLearn gesch
 
 **Stand 2026-10-17, später:** P2 ist live. Der Fragenpool ist in secureLectures importiert: 94 Fragen in 22 Kategorien, 9 Essays verworfen, 7 Bilder. Lehrer browsen ihn unter `/exam/pool`. Als Nächstes P3 (Online-Tests).
 
+**2026-10-17, Planung:** P3 ist als eigener Change `exam-online-tests` herausgelöst (Tasks, Spec `online-test`, Design D8/D9 aus `exam-module` dorthin verschoben), zusammen mit zwei Knöpfen in der Modulleiste: Question Pool und Online-Tests. `exam-module` behält P6, P7 und P5 und damit diesen Eintrag.
+
 ## Betriebsstufe 1: Publishing ohne Keycloak (eigener Change, nach P4)
 safeLearn soll sich auch ohne Keycloak betreiben lassen: `AUTH=none`, kein Login, jeder Leser hat genau die Rollen aus `READER_ROLES` (z. B. `teacher,examParticipant,4bhif`). Ohne die Variable hat er keine Rolle, und jeder eingeschränkte Abschnitt bleibt verborgen. Gedacht für den WYSIWYG-Container, dessen Vorlage `READER_ROLES=teacher` mitbringt, und für reines Publishing. Einstellungen und zuletzt besuchte Seite liegen im Browser. Was der Server beim Rendern braucht (`vt`, `ve`, …), muss als Cookie mitkommen, nicht über `localStorage`. Die Umschalter bleiben sichtbar, soweit die Rollen sie erlauben. `AUTH=none` muss ausdrücklich gesetzt sein und darf nie als Rückfall greifen, und `EXAM_MODULE=on` zusammen mit `AUTH=none` bricht den Start ab. Die Details stehen in `AI/exam-module-plan.md`, Abschnitt 3. Geschätzt 3–5 Arbeitstage, nicht auf dem kritischen Pfad für den 05.02.2027.
 
