@@ -149,12 +149,17 @@
   }
 }
 
-/* An anchor drawn as the top bar's buttons are. */
-a.sl-exam-button {
+/* An anchor drawn as the top bar's buttons are, in their ink: the buttons stay
+   light in the dark theme, so the theme's link colours (`movement.css`, at a
+   higher specificity) would paint a pale icon on a light button. */
+a.sl-exam-button,
+.dark-mode a.sl-exam-button:link,
+.dark-mode a.sl-exam-button:visited,
+.dark-mode a.sl-exam-button:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: inherit;
+  color: #24292e;
   text-decoration: none;
 }
 
