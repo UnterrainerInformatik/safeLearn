@@ -8,7 +8,7 @@ Each section ends deployable to secureLectures, where `EXAM_MODULE=on` already r
 
 ## 2. Format and check
 
-- [ ] 2.1 `exam/question-import-format.md` from `format-draft.md` (review with Gerald first). It asks for the hint on `multichoice` too, while the check keeps it optional (design, Open Questions 2)
+- [x] 2.1 `exam/question-import-format.md` from `format-draft.md` (review with Gerald first). It asks for the hint on `multichoice` too, while the check keeps it optional (design, Open Questions 2)
 - [x] 2.2 `exam/question-import.js`: `parseQuestionFile` per D3 (front matter, fences, headings, header lines, `marked` lexer, task lists, line numbers). Unit tests: the description's example parses with zero problems, `#` inside a code block, `CI/CD` in a path, CRLF and BOM, missing `en:`, question before any category, image and raw HTML refused
 - [x] 2.3 `checkQuestionFile` per D4: editor rules through `questionProblems` mapped to lines, pairing pattern, hint (required for `multichoiceset` in both languages and equal to the count, 1 if present for `multichoice`), category path depth, limits, same hash. Unit tests for each rule and several problems at once. Timing test with 200 questions
 - [x] 2.4 Plan for a clean file: counts per category and type, new categories, near duplicates (D4)
