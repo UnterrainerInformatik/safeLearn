@@ -705,6 +705,14 @@ describe("the gradebook", () => {
       3,
       "a + for manual tests, participation and homework, none for online tests"
     );
+    assert.deepEqual(
+      await teacher.page.evaluate(() => {
+        const cell = [...document.querySelectorAll(".sl-exam-sheet .sl-exam-category")].find((th) => th.textContent.startsWith("Online tests ("));
+        return cell ? [...document.querySelectorAll(".sl-exam-sheet .sl-exam-column-head")].map((th) => th.textContent).filter((text) => text === "no tests yet").length : null;
+      }),
+      1,
+      "online tests keep their heading with the weight before any test is written"
+    );
 
     await teacher.page.click('button.sl-exam-add[aria-label="Add a column to Manual tests"]');
     await teacher.page.waitForSelector("dialog[open] input[name=name]");
@@ -871,7 +879,7 @@ describe("the gradebook", () => {
       proposal: document.querySelector(`tr[data-student="${who}"] .sl-exam-proposal`).textContent,
       columns: [...document.querySelectorAll('.sl-exam-column-head input[aria-label="Column name"]')].map((input) => input.value),
     }), username);
-    assert.deepEqual(seen.leading, ["Student", "Winter", "Year proposal", "Override", "Grade"]);
+    assert.deepEqual(seen.leading, ["Student", "Winter", "Calculated Proposal", "Teacher Override", "Actual Grade"]);
     assert.equal(seen.winter, "1 (override)");
     assert.ok(seen.proposal.startsWith("2 ("), seen.proposal);
     assert.deepEqual(seen.columns, ["summer test"], "the summer semester's columns only");

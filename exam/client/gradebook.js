@@ -178,9 +178,8 @@ class GradebookView extends ExamElement {
           Object.entries(semesterLabels).map(([value, label]) => h("option", { value, selected: value === semester }, label))
         );
     this.line = messageLine();
-    const groups = categories
-      .map((category) => ({ category, columns: overview.columns.filter((column) => column.category === category) }))
-      .filter((group) => group.columns.length > 0 || addableKinds[group.category]);
+    // Every category is shown with its weight, even without columns yet.
+    const groups = categories.map((category) => ({ category, columns: overview.columns.filter((column) => column.category === category) }));
     return h(
       "div",
       { class: "sl-exam" },
@@ -211,7 +210,9 @@ class GradebookView extends ExamElement {
 
   /** The leading columns, left to right: the year view adds the winter grade it builds on. */
   leading(semester) {
-    return semester === "ss" ? ["Student", "Winter", "Year proposal", "Override", "Grade"] : ["Student", "Proposal", "Override", "Grade"];
+    return semester === "ss"
+      ? ["Student", "Winter", "Calculated Proposal", "Teacher Override", "Actual Grade"]
+      : ["Student", "Calculated Proposal", "Teacher Override", "Actual Grade"];
   }
 
   /**
@@ -241,7 +242,9 @@ class GradebookView extends ExamElement {
       "tr",
       {},
       groups.map((group) =>
-        group.columns.length ? group.columns.map((column) => this.columnHead(course, column, editable)) : h("th", { class: "sl-exam-column-head sl-exam-quiet" }, "no columns yet")
+        group.columns.length
+          ? group.columns.map((column) => this.columnHead(course, column, editable))
+          : h("th", { class: "sl-exam-column-head sl-exam-quiet" }, addableKinds[group.category] ? "no columns yet" : "no tests yet")
       )
     );
     const ordered = groups.flatMap((group) => group.columns);
@@ -568,12 +571,12 @@ class GradebookStudent extends ExamElement {
             {},
             categories.map((category) => h("tr", {}, h("td", { "data-sticky": "0" }, `${categoryLabels[category]} (${course.weights[category]} %)`), categoryCell(values.categories[category]))),
             semester === "ss" ? h("tr", {}, h("td", { "data-sticky": "0" }, `Winter semester (${course.winterShare} % of the year)`), h("td", {}, winterText(values.winter))) : null,
-            h("tr", {}, h("td", { "data-sticky": "0" }, semester === "ss" ? "Year proposal" : "Proposal"), proposalCell),
-            h("tr", {}, h("td", { "data-sticky": "0" }, "Grade"), gradeCell)
+            h("tr", {}, h("td", { "data-sticky": "0" }, "Calculated Proposal"), proposalCell),
+            h("tr", {}, h("td", { "data-sticky": "0" }, "Actual Grade"), gradeCell)
           )
         )
       ),
-      h("p", {}, h("label", {}, "Override ", override)),
+      h("p", {}, h("label", {}, "Teacher Override ", override)),
       h("p", {}, h("label", {}, "Comment", h("br"), comment)),
       h("p", {}, h("label", {}, visible, " The student sees the comment")),
       h("h3", {}, `Results (${own.length})`),
