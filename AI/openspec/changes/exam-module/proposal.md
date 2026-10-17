@@ -4,7 +4,7 @@ Source: AI/open-proposals.md — **Prüfungsmodul: Online-MC-Tests und Notenbuch
 
 Short multiple-choice tests (typically 4 questions in 10 minutes) and the per-course gradebook currently live outside safeLearn, in Moodle and in spreadsheets, so lecture material, tests and grades are three systems with three logins. safeLearn already knows who a reader is, which class they are in and whether they teach. What it lacks is any place to keep state. The WS 2026/27 grade entry closes on **05.02.2027**, and a gradebook that proposes the semester grade is useful by then even before the first online test runs.
 
-The full plan, with every decision and its reasoning, is `AI/exam-module-plan.md`. This change implements all of it as one change, phase by phase in the plan's order, except three parts that have changes of their own: operating tier 1 (`publishing-without-keycloak`), access control for attachments (`attachment-access-control`) and the online tests of P3 (`exam-online-tests`).
+The full plan, with every decision and its reasoning, is `AI/exam-module-plan.md`. This change implements all of it as one change, phase by phase in the plan's order, except four parts that have changes of their own: operating tier 1 (`publishing-without-keycloak`), access control for attachments (`attachment-access-control`), the online tests of P3 (`exam-online-tests`) and the question editor of P7 (`exam-question-editor`).
 
 ## What Changes
 
@@ -15,7 +15,7 @@ The full plan, with every decision and its reasoning, is `AI/exam-module-plan.md
 - **Question pool (P2).** A one-time import of the Moodle XML pool (DE original plus EN translation, paired by position and verified), a question browser with preview, selection and usage history.
 - **Online tests (P3).** Moved to the change `exam-online-tests` (2026-10-17), with the capability `online-test`.
 - **Board solution (P6).** A teacher-only presentation of a written test in the existing Reveal view.
-- **Question editor (P7).** Creating and editing questions online, DE and EN together, with categories and images.
+- **Question editor (P7).** Moved to the change `exam-question-editor` (2026-10-17), with the capability `question-editor`.
 - **Year change (P5).** Closing and archiving a school year and preparing the next one.
 
 ## Capabilities
@@ -28,7 +28,6 @@ The full plan, with every decision and its reasoning, is `AI/exam-module-plan.md
 - `gradebook`: the grading scale, manual entries, the semester grade proposal, overrides and what teachers and students see of it.
 - `question-pool`: the one-time import, the question model with its two languages, the question browser and usage history.
 - `board-solution`: the teacher-only solution presentation.
-- `question-editor`: creating and editing pool questions online.
 - `school-year-change`: closing a school year and starting the next.
 
 ### Modified Capabilities

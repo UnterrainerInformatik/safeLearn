@@ -63,11 +63,7 @@ Moved to the change `exam-online-tests` on 2026-10-17, together with the spec `o
 
 ## 7. P7 — Question editor
 
-- [ ] 7.1 Editor page with DE and EN side by side: type, text, answers, correct flags, category; validation that both languages match and flags fit the type
-- [ ] 7.2 Category maintenance: create, rename, move; refuse deleting a non-empty category
-- [ ] 7.3 Image upload into question text: raster types only, size limit, stored like imported images; an edit adds new images and never overwrites or deletes one a test snapshot links to (`exam-online-tests` D2)
-- [ ] 7.4 Retire instead of delete for used questions; unused questions may be deleted; retired questions hidden from assembly
-- [ ] 7.5 Harness checks: mismatch refused, snapshot of an existing test unchanged after an edit, retire keeps usage history
+Moved to the change `exam-question-editor` on 2026-10-17, together with the spec `question-editor`. Its tasks, numbered there, replace the former 7.1–7.5.
 
 ## 8. P5 — Year change
 
