@@ -14,6 +14,7 @@
 
 import { elementFor } from "./frame.js";
 import "./classes.js";
+import "./gradebook.js";
 
 export { ExamElement, defineExamElement, examApi } from "./frame.js";
 

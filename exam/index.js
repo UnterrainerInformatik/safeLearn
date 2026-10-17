@@ -24,6 +24,7 @@ import { SessionEndedError } from "../middlewares/keycloak-middleware.js";
 import { actsAsTeacher, identityOf, teacherPage } from "./gate.js";
 import { ConflictError, InvalidInputError, NotFoundError } from "./classes.js";
 import { registerClassRoutes } from "./routes-classes.js";
+import { registerGradebookRoutes } from "./routes-gradebook.js";
 
 const clientDir = path.join(import.meta.dirname, "client");
 const clientScript = "/exam/assets/exam-client.js";
@@ -87,6 +88,7 @@ function buildRouter(db, startPage) {
   );
 
   registerClassRoutes(router, { db, handle, startPage });
+  registerGradebookRoutes(router, { db, handle, startPage });
 
   // The module's home page, for teachers: the school years, their classes and
   // the classes' courses.
@@ -96,7 +98,8 @@ function buildRouter(db, startPage) {
     handle(async (req, res) => {
       const body = `
         <h1>Classes and courses</h1>
-        ${embedPlaceholder("classes-home", {})}`;
+        ${embedPlaceholder("classes-home", {})}
+        <p class="sl-exam-quiet"><a href="/exam/scale">Grading scale</a></p>`;
       res.send(await wrapInPage(body, startPage(), req, { title: "Classes and courses" }));
     })
   );

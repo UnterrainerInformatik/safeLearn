@@ -30,15 +30,15 @@ Phases in the plan's order. Each phase ends deployable with `EXAM_MODULE` unset 
 
 ## 3. P4 — Gradebook
 
-- [ ] 3.1 Migration: grading scale (seeded 88/75/63/50), manual entry (course, student, kind, value, date, note), semester grade (course, student, semester, override, comment, comment-visible)
-- [ ] 3.2 Pure grading functions with unit tests: fraction → grade incl. threshold rounding, category means, weighted mean with renormalization for empty categories, WS vs. SS (whole year) entry selection, the 0.815 → 2 example
-- [ ] 3.3 Manual entry API and teacher UI: fraction or points/max for test and homework, +/− for participation, edit and delete
-- [ ] 3.4 Override and comment API and UI; proposal stays visible to teachers beside the override
-- [ ] 3.5 Teacher course overview page per semester: one row per roster student, categories, proposal, override, effective grade; left students listed separately
-- [ ] 3.6 Student results: `safelearn-results` embed and a module page; proposal until override, override afterwards, comment only if marked visible; no other student's data by any request
-- [ ] 3.7 `safelearn-gradebook` embed for teacher pages (course overview inline)
-- [ ] 3.8 Grading-scale admin for teachers
-- [ ] 3.9 Harness checks: entries → proposal end to end, override visibility to the student, cross-student access refused, embed off/on
+- [x] 3.1 Migration: grading scale (seeded 88/75/63/50), manual entry (course, student, kind, value, date, note), semester grade (course, student, semester, override, comment, comment-visible)
+- [x] 3.2 Pure grading functions with unit tests: fraction → grade incl. threshold rounding, category means, weighted mean with renormalization for empty categories, WS vs. SS (whole year) entry selection, the 0.815 → 2 example
+- [x] 3.3 Manual entry API and teacher UI: fraction or points/max for test and homework, +/− for participation, edit and delete
+- [x] 3.4 Override and comment API and UI; proposal stays visible to teachers beside the override
+- [x] 3.5 Teacher course overview page per semester: one row per roster student, categories, proposal, override, effective grade; left students listed separately
+- [x] 3.6 Student results: `safelearn-results` embed and a module page; proposal until override, override afterwards, comment only if marked visible; no other student's data by any request
+- [x] 3.7 `safelearn-gradebook` embed for teacher pages (course overview inline)
+- [x] 3.8 Grading-scale admin for teachers
+- [x] 3.9 Harness checks: entries → proposal end to end, override visibility to the student, cross-student access refused, embed off/on
 - [ ] 3.10 Milestone: switch on in secureLectures (`EXAM_MODULE=on` in `deploy/.env` and compose), redeploy, smoke-check with a real teacher account; record in `AI/open-proposals.md`/architecture
 
 ## 4. P2 — Question pool

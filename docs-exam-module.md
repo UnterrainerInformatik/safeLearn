@@ -3,7 +3,7 @@ Here you can find how the exam module is switched on, where it keeps its data, h
 
 [Back](README.md) to the main page.
 
-The module is being built in phases (`AI/exam-module-plan.md`). What exists today is its foundation (the switch, the database, backups, the teacher/student gate, the embedding syntax) and classes and courses, at `/exam/`. Tests, the gradebook and the question pool follow.
+The module is being built in phases (`AI/exam-module-plan.md`). What exists today is its foundation (the switch, the database, backups, the teacher/student gate, the embedding syntax), classes and courses at `/exam/`, and the gradebook. Online tests and the question pool follow.
 
 ## The Switch
 The module exists only when the instance's environment says `EXAM_MODULE=on`. Any other value, or none, and the instance is exactly the one it was before the module: its code is not loaded, no database file is opened or created, nothing answers under `/exam/`, and no page links to it.
@@ -60,6 +60,16 @@ Teachers manage these at `/exam/`. Everything here belongs to teachers. A studen
 - **The roster** changes only when a teacher changes it. A student who joins the directory unit later is listed under "Add students" but is not added on their own. You can also add someone from the whole directory, or by username when the directory is not available on the instance or is still loading. Removing a student keeps their entry, marked as left, so what is recorded for them stays theirs. "Refresh names" updates names from the directory and never changes who is on the roster.
 - **A course** is a class, a subject and the class's school year, and exists once per class however the subject is capitalized. It has no owner, so every teacher sees and edits every course. Its language (German or English) decides how its tests are presented. Its config sheet weighs the gradebook's four categories (online tests, manual tests, participation, homework) in whole percentages that add up to 100. A new course starts at 25 % each.
 
+## The Gradebook
+Each course has a gradebook, reached from the course's and the class's page (`/exam/courses/<id>/gradebook`). Like classes and courses it belongs to teachers, with one exception: every student sees their own results.
+
+- **Every result is a fraction** from 0 to 1. A manual test or a homework is entered as points out of a maximum (`17` of `24`, kept and shown as `17/24`) or as a percentage; a participation mark is `+` (1) or `−` (0). Every entry has a date, which decides its semester, and an optional note. **The student sees the note.** Entries can be edited and deleted by any teacher. "Record an entry for the class" enters one test for every student at once; students left empty get nothing.
+- **The proposal** for a semester is computed whenever it is shown, never stored. Each category (online tests, manual tests, participation, homework) is the mean of its entries; the proposal is the mean of the categories weighted by the course's config sheet, and the grading scale turns it into a grade. A category without entries is left out and the other weights are scaled up, so a course without online tests yet grades by the other three. The winter semester counts the entries dated in it; the summer semester's grade is the year grade and counts every entry of the school year.
+- **The grading scale** is one for all courses, at `/exam/scale`: from 88 % a 1, from 75 % a 2, from 63 % a 3, from 50 % a 4, below a 5, to begin with. A result exactly on a threshold gets the better grade. A change applies to every proposal at once.
+- **An override** replaces the proposal for one student's semester, with an optional comment. Teachers keep seeing the proposal beside it; removing the override makes the proposal the grade again. The comment reaches the student only when "The student sees the comment" is ticked.
+- **The overview** lists one row per student on the roster for the chosen semester — each category, the proposal, the override and the grade — and students who left the roster separately, with what was recorded for them.
+- **A student's own results** are at `/exam/results`, or wherever a page places a `safelearn-results` block: per course their entries, the category fractions and the grade. While no override exists that is the proposal; once one does, the student sees the override and no longer the proposal. The year grade appears once the summer semester has begun. No request can name another student: the route answers about the session's own identity only.
+
 ## Placing An Element In A Page
 A page places an element with a fenced block whose info string is `safelearn-<kind>`, with the element's parameters as `key: value` lines:
 
@@ -69,7 +79,21 @@ test: http-caching-1
 ```
 ````
 
-The kinds are `test`, `results`, `gradebook` and `live`. Their elements arrive with the phases that build them; until then a placed element says that it is not available on this instance yet.
+The kinds are `test`, `results`, `gradebook` and `live`. `test` and `live` arrive with the online tests; until then a placed one says that it is not available on this instance yet.
+
+| Kind | Parameters | Shows |
+| --- | --- | --- |
+| `results` | `subject` (optional) | The reader's own results, in the current school year, for that subject or for all their courses |
+| `gradebook` | `class` and `subject`, optionally `year` (like `2026/27`, the current year otherwise); or `course` (its id) | A course's overview for teachers, with the entry form. Teacher-only |
+
+A block naming a course by class and subject keeps working from one school year to the next: next year it shows next year's course of that name.
+
+````
+```safelearn-gradebook
+class: 4BHIF
+subject: WMC
+```
+````
 
 - **The block goes through the permission filter like any other content.** One inside `@@@ teacher` is gone for a student before it is ever looked at. That is presentation, not protection: every request an element makes is decided by the module on the server again.
 - **Teacher-only kinds** (`gradebook`, `live`) render nothing for a session that does not act as a teacher, wherever they sit.

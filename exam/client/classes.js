@@ -12,7 +12,7 @@
 
 import { defineExamElement, ExamApiError, ExamElement, examApi, h } from "./frame.js";
 
-const categoryLabels = {
+export const categoryLabels = {
   onlineTests: "Online tests",
   manualTests: "Manual tests",
   participation: "Participation (+/−)",
@@ -22,17 +22,17 @@ const categoryLabels = {
 const languageLabels = { de: "German", en: "English" };
 
 /** A class name as people write it: `5ahif` → `5AHIF`. */
-function displayClass(name) {
+export function displayClass(name) {
   return name.toUpperCase();
 }
 
 /** A person's name for a list, family name first; the username where none is known. */
-function displayPerson(person) {
+export function displayPerson(person) {
   const name = [person.familyName, person.givenName].filter(Boolean).join(" ");
   return name || person.username;
 }
 
-function displayDate(iso) {
+export function displayDate(iso) {
   return iso ? new Date(iso).toLocaleDateString() : "";
 }
 
@@ -47,7 +47,7 @@ function reason(error) {
  * A line under a form that says what just happened. `report(text)` or
  * `report(text, true)` for a failure; an empty text clears it.
  */
-function messageLine() {
+export function messageLine() {
   const line = h("p", { class: "sl-exam-message", role: "status" });
   line.report = (text, failed = false) => {
     line.textContent = text;
@@ -57,7 +57,7 @@ function messageLine() {
 }
 
 /** Runs `action`, reports its failure on `line`, and keeps `button` disabled meanwhile. */
-async function act(button, line, action) {
+export async function act(button, line, action) {
   button.disabled = true;
   line.report("");
   try {
@@ -419,7 +419,7 @@ class ClassView extends ExamElement {
       {},
       h("h2", {}, "Courses"),
       klass.courses.length
-        ? h("ul", {}, klass.courses.map((course) => h("li", {}, h("a", { href: `/exam/courses/${course.id}` }, course.subject), ` (${languageLabels[course.language]})`)))
+        ? h("ul", {}, klass.courses.map((course) => h("li", {}, h("a", { href: `/exam/courses/${course.id}` }, course.subject), ` (${languageLabels[course.language]}) · `, h("a", { href: `/exam/courses/${course.id}/gradebook` }, "Gradebook"))))
         : h("p", {}, "This class has no courses yet."),
       h("p", {}, subject, " ", language, " ", h("button", { type: "button", onclick: create }, "Create course")),
       line
@@ -462,7 +462,7 @@ class CourseView extends ExamElement {
     return h(
       "div",
       { class: "sl-exam" },
-      h("p", {}, h("a", { href: `/exam/classes/${course.classId}` }, `Class ${displayClass(course.className)}`)),
+      h("p", {}, h("a", { href: `/exam/classes/${course.classId}` }, `Class ${displayClass(course.className)}`), " · ", h("a", { href: `/exam/courses/${course.id}/gradebook` }, "Gradebook")),
       h("p", {}, h("label", {}, "Tests are presented in ", language)),
       h("h2", {}, "Config sheet"),
       h("p", { class: "sl-exam-quiet" }, "How much each category counts towards the semester grade. A category without entries is left out and the others are scaled up."),

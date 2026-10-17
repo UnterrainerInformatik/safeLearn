@@ -26,11 +26,11 @@ export const languages = Object.freeze(["de", "en"]);
 
 const isoDate = /^\d{4}-\d{2}-\d{2}$/;
 
-function now() {
+export function now() {
   return new Date().toISOString();
 }
 
-function validDate(value, what) {
+export function validDate(value, what) {
   if (typeof value !== "string" || !isoDate.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) {
     throw new InvalidInputError(`${what} has to be a date of the form YYYY-MM-DD.`);
   }
@@ -41,7 +41,7 @@ function validDate(value, what) {
  * Runs `fn` inside one transaction: everything it writes lands, or nothing
  * does.
  */
-function inTransaction(db, fn) {
+export function inTransaction(db, fn) {
   db.exec("BEGIN");
   try {
     const result = fn();

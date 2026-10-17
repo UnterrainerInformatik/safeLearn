@@ -102,3 +102,27 @@
 #markdown-content.dark-mode .sl-exam .sl-embed-error {
   color: #ff7b72;
 }
+
+/* The gradebook. */
+
+.sl-exam-number {
+  width: 5em;
+}
+
+.sl-exam-grade {
+  font-weight: bold;
+}
+
+.sl-exam-gradebook td,
+.sl-exam-gradebook th {
+  white-space: nowrap;
+}
+
+.sl-exam-entry summary {
+  cursor: pointer;
+  margin: 0.8em 0 0.4em;
+}
+
+.sl-exam-comment {
+  font-style: italic;
+}

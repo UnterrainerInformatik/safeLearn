@@ -149,7 +149,7 @@ describe("the instance with the exam module", () => {
     }
   });
 
-  test("a teacher's page mounts both elements, and the client reports what it cannot show yet", async () => {
+  test("a teacher's page mounts every element, and the client reports what it cannot show", async () => {
     await render(teacher, fixture);
     const seen = await moduleTraces(teacher.page);
     assert.deepEqual(seen.placeholders.map((p) => p.kind), ["test", "test", "gradebook"]);
@@ -158,9 +158,14 @@ describe("the instance with the exam module", () => {
     assert.equal(seen.placeholders[2].params.slCourse, "embedding-fixture-course");
     assert.equal(seen.notices, 0);
     assert.deepEqual(seen.moduleScripts, ["/exam/assets/exam-client.js"]);
-    for (const placeholder of seen.placeholders) {
+    for (const placeholder of seen.placeholders.filter((p) => p.kind === "test")) {
       assert.match(placeholder.status, /not available on this instance yet/, "the client ran and drew its frame");
     }
+    await teacher.page.waitForFunction(() => !document.querySelector("sl-exam-gradebook .sl-embed-status:not(.sl-embed-error)"), {
+      timeout: 10000,
+    });
+    const gradebook = await teacher.page.evaluate(() => document.querySelector("sl-exam-gradebook").textContent.trim());
+    assert.equal(gradebook, "This record does not exist.", "a gradebook naming no course says so in its own area");
   });
 
   test("a student's page holds the open test element only", async () => {
@@ -340,7 +345,7 @@ describe("classes and courses", () => {
     const seen = await teacher.page.evaluate(() => ({
       heading: document.querySelector("#markdown-content h1").textContent,
       rows: document.querySelectorAll(".sl-exam-roster tr").length,
-      courses: [...document.querySelectorAll('a[href^="/exam/courses/"]')].map((a) => a.textContent),
+      courses: [...document.querySelectorAll('a[href^="/exam/courses/"]:not([href$="/gradebook"])')].map((a) => a.textContent),
     }));
     assert.equal(seen.heading, `Class ${klass.name.toUpperCase()} – 2026/27`);
     assert.equal(seen.rows, candidates.length + 1, "the attending members and the one who left");
@@ -389,5 +394,202 @@ describe("classes and courses", () => {
     const afterwards = await fetchAs(teacher, `/exam/api/classes/${klass.id}`);
     assert.equal(afterwards.json.roster.filter((e) => !e.leftAt).length, candidates.length, "nothing a refused request asked for happened");
     assert.equal(afterwards.json.courses.length, 1);
+  });
+});
+
+describe("the gradebook", () => {
+  const fixturePage = "/md/test-exam-gradebook.md";
+  const other = "gb-other-student";
+  let student;
+  let teacher;
+  let year;
+  let course;
+  let entry;
+
+  /** The student's GB course in their own results. */
+  async function ownResults(session = student) {
+    const answer = await fetchAs(session, "/exam/api/my/results");
+    assert.equal(answer.status, 200);
+    return { answer, gb: answer.json.courses.find((c) => c.subject === "GB") };
+  }
+
+  /** The row of `username` in the course's overview for `semester`. */
+  async function overviewRow(username, semester = "ws") {
+    const answer = await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=${semester}`);
+    assert.equal(answer.status, 200, JSON.stringify(answer.json));
+    return answer.json.students.find((row) => row.username === username);
+  }
+
+  before(async () => {
+    student = await sharedSession("student");
+    teacher = await sharedSession("teacher");
+    await setPreferences(student, {});
+    await setPreferences(teacher, {});
+    const years = await fetchAs(teacher, "/exam/api/years");
+    year = years.json.current;
+    if (!year) {
+      year = (
+        await fetchAs(teacher, "/exam/api/years", {
+          method: "POST",
+          body: { name: "2026/27", startsOn: "2026-09-07", summerStartsOn: "2027-02-15", endsOn: "2027-07-02" },
+        })
+      ).json;
+    }
+    // The class the fixture page names, with the shared student and one
+    // username the directory does not know.
+    const klass = await fetchAs(teacher, `/exam/api/years/${year.id}/classes`, {
+      method: "POST",
+      body: { name: "9XGB", students: [student.username, other] },
+    });
+    assert.equal(klass.status, 200, JSON.stringify(klass.json));
+    const created = await fetchAs(teacher, `/exam/api/classes/${klass.json.id}/courses`, {
+      method: "POST",
+      body: { subject: "GB", language: "de", weights: { onlineTests: 40, manualTests: 30, participation: 15, homework: 15 } },
+    });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    course = created.json;
+  });
+
+  test("entries become a proposal, end to end", async () => {
+    const username = student.username.toLowerCase();
+    const date = year.startsOn;
+    const recorded = await fetchAs(teacher, `/exam/api/courses/${course.id}/entries`, {
+      method: "POST",
+      body: {
+        entries: [
+          { username, kind: "test", points: 18, maxPoints: 24, date, note: "1st test" },
+          { username, kind: "plusminus", mark: "+", date },
+          { username, kind: "homework", fraction: 0.9, date },
+          { username: other, kind: "test", points: 6, maxPoints: 24, date },
+        ],
+      },
+    });
+    assert.equal(recorded.status, 200, JSON.stringify(recorded.json));
+    entry = recorded.json[0];
+    assert.deepEqual([entry.points, entry.maxPoints, entry.grade], [18, 24, 2], "17/24-style points are kept and graded");
+
+    const row = await overviewRow(username);
+    assert.equal(row.categories.manualTests.fraction, 0.75);
+    assert.equal(row.categories.participation.fraction, 1);
+    assert.equal(row.categories.homework.fraction, 0.9);
+    assert.equal(row.categories.onlineTests, undefined, "no online test yet, so the category is left out");
+    // (30 × 0.75 + 15 × 1 + 15 × 0.9) / 60
+    assert.ok(Math.abs(row.proposal.fraction - 0.85) < 1e-9, `the proposal is ${row.proposal.fraction}`);
+    assert.equal(row.proposal.grade, 2);
+    assert.equal(row.effective, 2);
+    assert.equal((await overviewRow(other)).effective, 5);
+
+    const refused = await fetchAs(teacher, `/exam/api/courses/${course.id}/entries`, {
+      method: "POST",
+      body: { entries: [{ username: "not-on-the-roster", kind: "test", fraction: 1, date }] },
+    });
+    assert.equal(refused.status, 400, "only a student on the roster gets an entry");
+  });
+
+  test("the student sees their proposal, then the override instead, and the comment only once it is visible", async () => {
+    const username = student.username.toLowerCase();
+    let { gb } = await ownResults();
+    assert.ok(gb, "the student's results list the course");
+    assert.deepEqual([gb.semesters.ws.grade, gb.semesters.ws.overridden], [2, false]);
+    assert.ok(Math.abs(gb.semesters.ws.fraction - 0.85) < 1e-9);
+
+    const grade = (body) =>
+      fetchAs(teacher, `/exam/api/courses/${course.id}/grades/${username}/ws`, { method: "PUT", body });
+    assert.equal((await grade({ override: 1, comment: "strong oral exam", commentVisible: false })).status, 200);
+    ({ gb } = await ownResults());
+    assert.deepEqual([gb.semesters.ws.grade, gb.semesters.ws.fraction, gb.semesters.ws.overridden, gb.semesters.ws.comment], [1, null, true, null]);
+    const row = await overviewRow(username);
+    assert.deepEqual([row.proposal.grade, row.override, row.comment, row.effective], [2, 1, "strong oral exam", 1], "teachers see both");
+
+    await grade({ override: 1, comment: "strong oral exam", commentVisible: true });
+    ({ gb } = await ownResults());
+    assert.equal(gb.semesters.ws.comment, "strong oral exam");
+
+    await student.page.goto(`${applicationUrl}/exam/results`, { waitUntil: "domcontentloaded" });
+    await student.page.waitForFunction(() => document.querySelector(".sl-exam-results"), { timeout: 20000 });
+    const page = await student.page.evaluate(() => document.querySelector(".sl-exam-results").textContent);
+    assert.match(page, /GB – 9XGB/);
+    assert.match(page, /grade 1/);
+    assert.match(page, /strong oral exam/);
+  });
+
+  test("a student reaches nobody else's data and no teacher route, nor does a teacher in student view", async () => {
+    const api = [
+      ["GET", `/exam/api/courses/${course.id}/gradebook`],
+      ["GET", `/exam/api/courses/${course.id}/students/${other}`],
+      ["POST", `/exam/api/courses/${course.id}/entries`, { entries: [{ username: other, kind: "test", fraction: 1, date: year.startsOn }] }],
+      ["PUT", `/exam/api/courses/${course.id}/grades/${other}/ws`, { override: 1 }],
+      ["PUT", `/exam/api/entries/${entry.id}`, { kind: "test", fraction: 1, date: year.startsOn }],
+      ["DELETE", `/exam/api/entries/${entry.id}`],
+      ["GET", "/exam/api/scale"],
+      ["PUT", "/exam/api/scale", { thresholds: { 1: 10, 2: 8, 3: 6, 4: 4 } }],
+      ["GET", "/exam/api/course-lookup?class=9xgb&subject=GB"],
+    ];
+    const pages = [`/exam/courses/${course.id}/gradebook`, `/exam/courses/${course.id}/students/${other}`, "/exam/scale"];
+    const probe = async (session) => {
+      const nothing = await fetchAs(session, absent);
+      for (const [method, reference, body] of api) {
+        const answer = await fetchAs(session, reference, { method, body });
+        assert.equal(answer.status, 403, `${method} ${reference} answered ${answer.status}`);
+      }
+      for (const reference of pages) {
+        assert.deepEqual(await fetchAs(session, reference), nothing, `${reference} is not there`);
+      }
+      // The one route of a student's own takes no username; naming one changes nothing.
+      for (const reference of [`/exam/api/my/results?username=${other}`, `/exam/api/my/results?user=${other}`]) {
+        const answer = await fetchAs(session, reference);
+        assert.equal(answer.status, 200);
+        assert.ok(!JSON.stringify(answer.json).includes(other), `${reference} mentions ${other}`);
+      }
+    };
+
+    await probe(student);
+    await setPreferences(teacher, { vt: 0 });
+    try {
+      await probe(teacher);
+    } finally {
+      await setPreferences(teacher, {});
+    }
+
+    const after = await fetchAs(teacher, `/exam/api/courses/${course.id}/students/${other}`);
+    assert.equal(after.json.entries.length, 1, "nothing a refused request asked for happened");
+    assert.equal(after.json.semesters.ws.override, null);
+    assert.equal((await fetchAs(teacher, "/exam/api/scale")).json[0].minPercent, 88);
+  });
+
+  test("the page's elements: the results for everyone, the gradebook for a teacher only", async () => {
+    const drawn = async (session, selectors) => {
+      await session.page.waitForFunction(
+        (selectors) => selectors.every((selector) => document.querySelector(selector)),
+        { timeout: 20000 },
+        selectors
+      );
+      return session.page.evaluate(() => ({
+        kinds: [...document.querySelectorAll(".sl-embed")].map((el) => el.dataset.slEmbed),
+        results: document.querySelector(".sl-exam-results")?.textContent ?? "",
+        gradebookRows: document.querySelectorAll(".sl-exam-gradebook tbody tr").length,
+      }));
+    };
+
+    await render(student, fixturePage);
+    const asStudent = await drawn(student, [".sl-exam-results"]);
+    assert.deepEqual(asStudent.kinds, ["results"]);
+    assert.match(asStudent.results, /grade 1/);
+    assert.match(asStudent.results, /18\/24/, "the entry as it was entered");
+
+    await render(teacher, fixturePage);
+    const asTeacher = await drawn(teacher, [".sl-exam-results", ".sl-exam-gradebook"]);
+    assert.deepEqual(asTeacher.kinds, ["results", "gradebook"]);
+    assert.equal(asTeacher.gradebookRows, 2, "the student and the one the directory does not know");
+    assert.match(asTeacher.results, /no results for you/, "a teacher is on no roster");
+
+    await setPreferences(teacher, { vt: 0 });
+    try {
+      await render(teacher, fixturePage);
+      const inStudentView = await drawn(teacher, [".sl-exam-results"]);
+      assert.deepEqual(inStudentView.kinds, ["results"], "no gradebook in student view");
+    } finally {
+      await setPreferences(teacher, {});
+    }
   });
 });

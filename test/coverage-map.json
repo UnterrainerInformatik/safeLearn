@@ -310,7 +310,7 @@
       "corpus": []
     },
     "test/checks/exam-embedding.js": {
-      "what": "Embedded exam-module elements on an instance without the module: a teacher sees a notice per known element (also in the presentation and document views), a student and a teacher in student view see nothing, an unknown kind and the blocks' source never show, an example inside a longer fence stays text, no page names the module's script or requests /exam/, and every path under /exam/ answers as a path with nothing behind it.",
+      "what": "Embedded exam-module elements on an instance without the module: a teacher sees a notice per known element (also in the presentation and document views), a student and a teacher in student view see nothing, an unknown kind and the blocks' source never show, an example inside a longer fence stays text, the gradebook's results and gradebook blocks are a notice each for a teacher and nothing for a student, no page names the module's script or requests /exam/, and every path under /exam/ answers as a path with nothing behind it.",
       "guards": [
         "obsidian.js",
         "app.js",
@@ -319,11 +319,12 @@
         "test/harness.js"
       ],
       "corpus": [
-        "md/test-exam-embedding.md"
+        "md/test-exam-embedding.md",
+        "md/test-exam-gradebook.md"
       ]
     },
     "test/exam.test.js": {
-      "what": "The instance with the exam module on, in a process of its own against a database created for the run and removed afterwards: the start-up log names that database and a fresh migration, /exam/api/me reports the identity and the student-view downgrade, an unauthenticated request is refused, the module page is shown to teachers in the instance's frame and to nobody else, elements mount as placeholders the client draws its frame into (teacher-only ones only for teachers), the presentation and document views and pages without elements load no module script, and the database is not retrievable over HTTP. Classes and courses against the demo realm: a teacher creates the current school year (twice is refused), ticks a roster from the directory's client-role class (exactly the ticked members, names from the directory), cannot put a teacher on a roster, removes a student who stays listed as left, creates a course once per class and subject however it is capitalized and saves weights only when they make 100 %, sees the class page drawn by the client, and every route of classes and courses refuses a student and a teacher in student view (403 for the API, nothing for the pages) without changing anything.",
+      "what": "The instance with the exam module on, in a process of its own against a database created for the run and removed afterwards: the start-up log names that database and a fresh migration, /exam/api/me reports the identity and the student-view downgrade, an unauthenticated request is refused, the module page is shown to teachers in the instance's frame and to nobody else, elements mount as placeholders the client draws its frame into (teacher-only ones only for teachers), the presentation and document views and pages without elements load no module script, and the database is not retrievable over HTTP. Classes and courses against the demo realm: a teacher creates the current school year (twice is refused), ticks a roster from the directory's client-role class (exactly the ticked members, names from the directory), cannot put a teacher on a roster, removes a student who stays listed as left, creates a course once per class and subject however it is capitalized and saves weights only when they make 100 %, sees the class page drawn by the client, and every route of classes and courses refuses a student and a teacher in student view (403 for the API, nothing for the pages) without changing anything. The gradebook: entries for a roster of the shared student and a username the directory does not know become a proposal with an empty category left out, an entry for someone off the roster is refused, the student sees the proposal, then the override instead of it, and the comment only once marked visible (through the API and on /exam/results), teachers see proposal and override side by side, every gradebook route refuses a student and a teacher in student view while the student's own route ignores any username it is given, and the fixture page draws the results for everyone and the gradebook for a teacher only.",
       "guards": [
         "exam/index.js",
         "exam/gate.js",
@@ -339,11 +340,17 @@
         "exam/client/frame.js",
         "exam/client/classes.js",
         "css/exam.css",
-        "middlewares/directory-service.js"
+        "middlewares/directory-service.js",
+        "exam/gradebook.js",
+        "exam/grading.js",
+        "exam/routes-gradebook.js",
+        "exam/client/gradebook.js",
+        "exam/migrations/003-gradebook.sql"
       ],
       "corpus": [
         "md/test-exam-embedding.md",
-        "md/test-md-file.md"
+        "md/test-md-file.md",
+        "md/test-exam-gradebook.md"
       ]
     },
     "test/exam-foundation.test.js": {
@@ -368,6 +375,17 @@
         "exam/db.js",
         "exam/migrations/001-skeleton.sql",
         "exam/migrations/002-classes-and-courses.sql"
+      ],
+      "corpus": []
+    },
+    "test/exam-gradebook.test.js": {
+      "what": "The gradebook unit by unit, without browser or server: the scale's thresholds with the better grade on a threshold and rounding to four decimals before comparing, category means, the weighted mean with empty categories left out and the rest renormalized, no proposal without entries or with weightless categories only, the 0.815 → 2 example, WS entries for the winter semester and the whole year for the summer semester; manual entries as points out of a maximum (kept for display), as +/− and as fractions, malformed or off-roster or out-of-year entries refused and a batch landing all or nothing, editing and deleting; proposals following new entries and new weights, an override beside the proposal and its removal, an override's range; the overview with students who left listed separately, finding a course by class, subject and year; a student's own results with the proposal until an override, the override and no proposal afterwards, the comment only when visible, the year grade only from the summer semester on, and no other student's data; and the scale's seed, its change applying to every proposal, and malformed thresholds refused.",
+      "guards": [
+        "exam/grading.js",
+        "exam/gradebook.js",
+        "exam/classes.js",
+        "exam/db.js",
+        "exam/migrations/003-gradebook.sql"
       ],
       "corpus": []
     }

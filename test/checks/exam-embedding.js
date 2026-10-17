@@ -36,13 +36,16 @@ async function moduleTraces(page) {
   }));
 }
 
+/** The page placing the gradebook's elements: results in the open, a gradebook for teachers. */
+const gradebookFixture = "/md/test-exam-gradebook.md";
+
 /** Renders the fixture and records every request the page made while loading. */
-async function renderRecording(session, view = "page") {
+async function renderRecording(session, view = "page", page = fixture) {
   const requested = [];
   const record = (request) => requested.push(request.url());
   session.page.on("request", record);
   try {
-    const rendered = await render(session, fixture, { view });
+    const rendered = await render(session, page, { view });
     return { ...(await moduleTraces(session.page)), text: rendered.text, requested };
   } finally {
     session.page.off("request", record);
@@ -117,9 +120,25 @@ describe("exam-module elements without the module", () => {
     }
   });
 
+  test("the gradebook's elements are a notice each for a teacher and nothing for a student", async () => {
+    await setPreferences(teacher, {});
+    await setPreferences(student, {});
+    const asTeacher = await renderRecording(teacher, "page", gradebookFixture);
+    assert.equal(asTeacher.notices.length, 2);
+    assert.ok(asTeacher.notices[0].includes("results"));
+    assert.ok(asTeacher.notices[1].includes("gradebook"));
+    const asStudent = await renderRecording(student, "page", gradebookFixture);
+    assert.deepEqual(asStudent.notices, []);
+    assert.ok(!asStudent.html.includes("9XGB"), "no trace of the gradebook block");
+    for (const seen of [asTeacher, asStudent]) {
+      assert.equal(seen.placeholders, 0);
+      assert.deepEqual(seen.requested.filter((url) => new URL(url).pathname.startsWith("/exam/")), []);
+    }
+  });
+
   test("every path under /exam/ answers as a path with nothing behind it", async () => {
     const nothing = await answerTo(teacher, absent);
-    for (const reference of ["/exam/", "/exam/api/me", "/exam/assets/exam-client.js"]) {
+    for (const reference of ["/exam/", "/exam/api/me", "/exam/assets/exam-client.js", "/exam/results", "/exam/api/my/results"]) {
       assert.deepEqual(
         await answerTo(teacher, reference),
         nothing,
