@@ -39,6 +39,7 @@ import "./checks/search-keyboard.js";
 import "./checks/directory-search.js";
 import "./checks/session-lifecycle.js";
 import "./checks/attachments.js";
+import "./checks/exam-embedding.js";
 // Last on purpose: its reference walk requests every page the navigation tree
 // links to, and each of those writes `lastVisitedUrl` back to the shared account
 // after the answer has been sent. Nothing that sets a preference may follow it.

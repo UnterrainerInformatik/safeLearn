@@ -19,11 +19,17 @@ services:
       # quiet, which is deliberately indistinguishable from not being logged in.
       - DIRECTORY_SERVICE_CLIENT_ID=${DIRECTORY_SERVICE_CLIENT_ID}
       - DIRECTORY_SERVICE_CLIENT_SECRET=${DIRECTORY_SERVICE_CLIENT_SECRET}
+      # The exam module (docs-exam-module.md): "on" loads it, anything else -
+      # including empty - leaves the instance without it. Its database lives on
+      # the data volume below, beside the directory cache.
+      - EXAM_MODULE=${EXAM_MODULE}
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
       # The directory-search endpoint's disk cache (middlewares/directory-service.js)
       # lives at /app/data so it survives a redeploy, not just a process restart —
       # without this mount every push would force the next search back through the
-      # full, multi-minute Keycloak admin-API fetch it exists to avoid.
+      # full, multi-minute Keycloak admin-API fetch it exists to avoid. The exam
+      # module's database (exam.sqlite) and its backups (exam-backups/) live
+      # here too, when the module is on.
       - ${DATA_DIR}:/app/data

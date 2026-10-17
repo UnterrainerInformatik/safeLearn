@@ -32,6 +32,9 @@ One run does the following:
 | `test/checks/deployment-surface.js` | What a running instance publishes over HTTP: that `keycloak.json`, the application's own sources and the dependency manifests are not served and that a refusal looks like a path with no file behind it, that the assets a page addresses still answer, that every same-origin reference of a rendered page resolves in all three views, and that `/hot-reload` — the one endpoint that answers before authentication — survives a parameter it cannot interpret. |
 | `test/directive-grammar.test.js` | What a permission directive means, entry by entry: a table of edge-case directive lines read by `parseFirstLineForPermissions`, and the companion plugin's own reading of the same lines held against it. No browser, no login, no server — but it does need the plugin checkout, for the reason below. |
 | `test/coverage.test.js` | The coverage record. No browser, no login. |
+| `test/checks/exam-embedding.js` | Exam-module elements on an instance without the module: a notice per known element for a teacher (also in the presentation and document views), nothing for a student or a teacher in student view, no module script and no request to `/exam/`, and every path under `/exam/` answering as a path with nothing behind it. |
+| `test/exam.test.js` | The instance **with** the exam module, in a process and on a port of its own, against a database created for the run and removed afterwards — see [The exam-module run](#the-exam-module-run). |
+| `test/exam-foundation.test.js` | The exam module unit by unit: database, migrations, backups, the teacher/student gate, the embedding hooks, and failure isolation. No browser, no login, no server. |
 | `test/deployment-config.test.js` | That every environment variable the application reads reaches a deployed instance — through the image's own `.env` or through the container's environment — and that neither path is wired up only halfway. No browser, no login, no server: it reads the workflow, the compose file and the application's own sources. |
 
 `test/directive-grammar.test.js` is the one check in this run that reaches outside the repository. The plugin has to reach the same conclusion about a directive as the server does — that is the whole of what it is for — and its mirror of `parsePermissionEntry`, `parsePermissionWindow` and `parseLocalDateTime` is checked against those functions rather than against a reading of them. It transpiles the plugin's `main.ts` and runs its grammar over the same table. So `npm test` needs the plugin checkout the same way `npm run test:obsidian` does: the symlink `AI/plugin`, or `SAFELEARN_TEST_PLUGIN_DIR`. It does not need Obsidian, and it builds nothing.
@@ -44,6 +47,15 @@ npm test
 `npm install` also downloads a Chromium build (~150 MB) into your npm cache. Puppeteer is a `devDependency`, so `npm install --omit=dev` in the `Dockerfile` keeps it out of the production image.
 
 Each check reports on its own, and the process exits non-zero if any of them failed.
+
+### The exam-module run
+`test/exam.test.js` is part of `npm test` but proves a different instance: one with `EXAM_MODULE=on`. It calls `useExamModule()` from the harness before its first session, which
+
+* creates a directory under the system's temporary directory and points `EXAM_DB_PATH` into it, so the run's database and its backups live there and nowhere else;
+* starts the instance on a port of its own, `SAFELEARN_TEST_EXAM_PORT` (default `8089`, registered on the demo client; the WYSIWYG container's `8081` stays free), and **never adopts** an instance it finds there — an instance this run did not start holds a database this run did not create, so a busy port fails the run with a message saying so;
+* removes the directory when the run ends, by success, failure or interruption.
+
+Two runs in a row therefore never see each other's records. Every other check runs against an instance started with `EXAM_MODULE` passed as empty, so a developer's `.env` cannot switch the module on underneath them.
 
 ### Watching it run
 ```bash
@@ -195,6 +207,7 @@ Every value has a default; set only what you need to change. No file in the repo
 | `SAFELEARN_TEST_HEADED`               | unset                              | `1` runs with a visible browser window.                        |
 | `SAFELEARN_TEST_STARTUP_TIMEOUT_MS`   | `120000`                           | How long to wait for the application to answer.                |
 | `SAFELEARN_TEST_NAVIGATION_TIMEOUT_MS`| `45000`                            | How long any single navigation may take.                       |
+| `SAFELEARN_TEST_EXAM_PORT`            | `8089`                             | Port of the instance `test/exam.test.js` starts with the exam module. |
 
 Note that the port is not a free choice: SafeLearn derives its OIDC redirect URI from the server URL, and that URI must be registered on the Keycloak client. `http://localhost:8080/auth/callback` is registered on the demo client; another port needs a matching entry in the Keycloak admin console.
 

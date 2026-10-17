@@ -50,8 +50,23 @@ const optionalWithDefault = new Map([
 ]);
 
 /**
+ * Variables the application reads that no deployment may set: they exist for
+ * the verification harness. Named here, with the reason, for the same reason
+ * as the map above - and checked in the other direction below, so a compose
+ * file that starts passing one fails a run.
+ */
+const testOnly = new Map([
+  [
+    "EXAM_DB_PATH",
+    "exam/db.js reads it so the harness can point a run at a database of its own; a deployment " +
+      "keeps the default, data/exam.sqlite on the data volume (design.md of exam-module, D2).",
+  ],
+]);
+
+/**
  * The files the `Dockerfile` copies into the image and the application runs:
- * the root `*.js` files and `middlewares/`. Deliberately not `test/` or
+ * the root `*.js` files, `middlewares/` and the exam module's server side in
+ * `exam/` (its `client/` runs in the browser and reads no environment). Deliberately not `test/` or
  * `tools/` — a variable only a test or a local tool reads is not something a
  * deployment owes anybody.
  */
@@ -59,6 +74,7 @@ function applicationSources() {
   const roots = [
     { dir: projectRoot, prefix: "" },
     { dir: path.join(projectRoot, "middlewares"), prefix: "middlewares/" },
+    { dir: path.join(projectRoot, "exam"), prefix: "exam/" },
   ];
   const sources = [];
   for (const { dir, prefix } of roots) {
@@ -133,7 +149,7 @@ const containerEnv = composeEnvironment();
 
 test("every environment variable the application reads reaches a deployed instance", () => {
   for (const [name, file] of reads) {
-    if (optionalWithDefault.has(name)) continue;
+    if (optionalWithDefault.has(name) || testOnly.has(name)) continue;
     const throughImage = imageEnv.has(name);
     const throughContainer = deployEnv.has(name) && containerEnv.has(name);
     assert.ok(
@@ -186,4 +202,60 @@ test("the directory-service credentials travel by container environment, not in 
         `of it. It belongs in the container's environment, which it already reaches.`
     );
   }
+});
+
+test("a variable that exists for the harness reaches no deployed instance", () => {
+  for (const [name, reason] of testOnly) {
+    assert.ok(reads.has(name), `${name} is declared test-only here, but the application no longer reads it.`);
+    assert.ok(
+      !imageEnv.has(name) && !deployEnv.has(name) && !containerEnv.has(name),
+      `${name} is set by the deployment, and it must not be: ${reason}`
+    );
+  }
+});
+
+test("the exam module is switched by the container's environment", () => {
+  assert.ok(
+    containerEnv.has("EXAM_MODULE") && deployEnv.has("EXAM_MODULE"),
+    `EXAM_MODULE is expected in ${composePath}'s environment: block and in deploy/.env — see ` +
+      `docs-exam-module.md.`
+  );
+  assert.ok(
+    !imageEnv.has("EXAM_MODULE"),
+    `EXAM_MODULE is baked into the image's own .env by ${workflowPath}. One image serves every ` +
+      `deployment, the WYSIWYG container included, which runs without the module.`
+  );
+  assert.match(
+    readFileSync(path.join(projectRoot, "Dockerfile"), "utf8"),
+    /^COPY exam\/ \/app\/exam$/m,
+    "the Dockerfile has to copy exam/ into the image, or EXAM_MODULE=on finds no module to load"
+  );
+});
+
+test("the WYSIWYG containers run without the exam module", () => {
+  for (const template of ["wysiwyg-container-linux", "wysiwyg-container-windows"]) {
+    const file = `${template}/docker-compose.yml`;
+    const text = readFileSync(path.join(projectRoot, file), "utf8");
+    assert.ok(!/EXAM_MODULE/.test(text), `${file} sets EXAM_MODULE; the WYSIWYG container runs without the module.`);
+    assert.ok(!/\/app\/data/.test(text), `${file} mounts a data volume; the WYSIWYG container keeps no data.`);
+  }
+});
+
+test("no static mount reaches the data directory", () => {
+  // Every directory express.static serves, read from the sources that mount one.
+  for (const file of ["app.js", "exam/index.js"]) {
+    const text = readFileSync(path.join(projectRoot, file), "utf8");
+    for (const match of text.matchAll(/express\.static\(([^)]*)\)/g)) {
+      assert.ok(
+        !/["'`]data["'`/]/.test(match[1]) && !/\bdata(Dir|Path)\b/i.test(match[1]),
+        `${file} serves ${match[1]} statically. The data directory holds the exam database and its ` +
+          `backups, which must never be retrievable over HTTP.`
+      );
+    }
+  }
+  assert.match(
+    readFileSync(path.join(projectRoot, "exam/index.js"), "utf8"),
+    /express\.static\(clientDir\)/,
+    "the exam module serves its client directory and nothing else"
+  );
 });

@@ -14,6 +14,7 @@ If you'd like to run a local container of this server in order to see changes yo
 - Adjust the contents of the `.env` file
 - Adjust the contents of the `keycloak.json` file
 - Run `./up.sh` to start your container as a persistent container. Both directories ship that script; the Windows one is started from your WSL instance as well, which is why there is no PowerShell variant.
+The container runs without the [exam module](docs-exam-module.md): it keeps no data, so a page that places an exam element shows teachers a short notice in its place and students nothing.
 ### `.env` File
 
 | Field             | Example-value                    | Description                                                                                                                                                                                                                                                |

@@ -110,11 +110,11 @@ const DOMPurify = createDOMPurify(window);
 const app = express();
 app.set("trust proxy", true);
 
-import { highlightExtension, scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions, wrapAsDocument, resolveFileVisibility, registerVisibilityChangeCallback, searchCorpus, minimumQueryLength, recordAttachmentGrants, hasAttachmentGrant, dropAttachmentGrants, mayServeAttachment, normalizeCorpusPath } from "./obsidian.js";
+import { registerEmbedHandler, registerEmbedClientScript, highlightExtension, scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions, wrapAsDocument, resolveFileVisibility, registerVisibilityChangeCallback, searchCorpus, minimumQueryLength, recordAttachmentGrants, hasAttachmentGrant, dropAttachmentGrants, mayServeAttachment, normalizeCorpusPath } from "./obsidian.js";
 
 import chokidar from "chokidar";
 
-async function sanitizeAndParseMarkdown(data, req) {
+async function sanitizeAndParseMarkdown(data, req, options = {}) {
   try {
     await refreshAccessToken(req);
     let d = data.replace(/^[\u200B\u200C\u200D\u200E\u200F\uFEFF]/, "");
@@ -136,7 +136,7 @@ async function sanitizeAndParseMarkdown(data, req) {
       // Strip the first line since it held the permissions
       d = d.split("\n").slice(1).join("\n");
     }
-    d = await preParse(d, req);
+    d = await preParse(d, req, options);
     
     let dm = 0;
     if (req.user.accessTokenDecoded.config) {
@@ -304,7 +304,45 @@ app.use((req, res, next) => {
   next();
 });
 
-initKeycloak(app).then(() => {
+/**
+ * The exam module, when the deployment switches it on (`exam-foundation`).
+ *
+ * With `EXAM_MODULE` anything but "on", its code is never loaded: no database
+ * is opened, no route exists, and the instance is the one it was before the
+ * module. With it on, a module that cannot start - the import fails, the
+ * database cannot be opened, a migration fails - is logged as disabled and the
+ * reader starts without it. Resolves to the started module or null.
+ */
+async function loadExamModule() {
+  if (process.env.EXAM_MODULE !== "on") {
+    console.log(`Exam module: disabled (EXAM_MODULE is not "on").`);
+    return null;
+  }
+  try {
+    const { init } = await import("./exam/index.js");
+    const started = await init({ startPage: getStartPage });
+    if (!started.active) {
+      console.error(`Exam module: disabled - ${started.reason}`);
+      return null;
+    }
+    for (const [kind, handler] of Object.entries(started.embedHandlers)) {
+      registerEmbedHandler(kind, handler);
+    }
+    registerEmbedClientScript(started.clientScript);
+    console.log(`Exam module: active, database ${started.dbPath}`);
+    return started;
+  } catch (error) {
+    console.error(`Exam module: disabled - it failed to load: ${error?.stack ?? error}`);
+    return null;
+  }
+}
+
+initKeycloak(app).then(async () => {
+  // Awaited before any route is registered, so the order below - the module's
+  // router after checkAuthenticated and before the catch-all - holds from the
+  // first request on.
+  const examModule = await loadExamModule();
+
   // Ahead of checkAuthenticated on purpose, and never added to its chain: the
   // caller here is identified by a bearer token proven fresh against Keycloak's
   // introspection endpoint (see middlewares/directory-service.js), not by the
@@ -397,13 +435,15 @@ initKeycloak(app).then(() => {
       // The body of a corpus file is what this session was just allowed to see,
       // so the attachments it addresses are granted to it. Nothing else the
       // renderer is handed may grant anything (`attachment-access`).
+      // `options` reaches preParse: the presentation and document views render
+      // embedded module elements as they would with the module off.
       const render = filePath.startsWith(corpusRoot)
-        ? (data) =>
-            sanitizeAndParseMarkdown(data, req).then((html) => {
+        ? (data, options) =>
+            sanitizeAndParseMarkdown(data, req, options).then((html) => {
               recordAttachmentGrants(req, html);
               return html;
             })
-        : (data) => sanitizeAndParseMarkdown(data, req);
+        : (data, options) => sanitizeAndParseMarkdown(data, req, options);
       fs.readFile(filePath, "utf8", (err, data) => {
         if (err) {
           console.error(`Error reading file ${filePath}`, err);
@@ -412,7 +452,7 @@ initKeycloak(app).then(() => {
         }
         const reveal = req.query.reveal;
         if (reveal) {
-          render(data)
+          render(data, { embedDefaults: true })
             .then((html) => wrapInReveal(splitForReveal(html), req))
             .then((r) => {
               res.send(r);
@@ -421,7 +461,7 @@ initKeycloak(app).then(() => {
         } else {
           const doc = req.query.document;
           if  (doc) {
-            render(data)
+            render(data, { embedDefaults: true })
               .then((html) => wrapAsDocument(html, req))
               .then((r) => {
                 rememberLastVisited(req);
@@ -640,6 +680,15 @@ initKeycloak(app).then(() => {
       app.listen(process.env.NEXT_PUBLIC_PORT, "0.0.0.0");
     });
   });
+
+  // The exam module's routes, behind the same authentication as everything
+  // above. Its client assets under /exam/assets/ are served by its own router,
+  // so the allowlist above gains that mount only while the module is active.
+  // With the module off, a path under /exam/ falls through to the catch-all
+  // like any path with nothing behind it.
+  if (examModule) {
+    app.use("/exam", checkAuthenticated, examModule.router);
+  }
 
   // If file is not found, redirect to the start page.
   app.use((_, res) => res.redirect(getStartPage()));

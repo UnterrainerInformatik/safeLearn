@@ -1,0 +1,43 @@
+/* Embedded exam-module elements (`exam-embedding`). Here rather than in the
+   module's own directory: the teacher notice renders on every instance,
+   including one without the module, so its rules have to ship with every page.
+   Colours are translucent over the inherited text colour, so one rule reads in
+   both themes; dark mode only adjusts the edge. */
+
+.sl-embed-notice {
+  margin: 0.6em 0;
+  padding: 4px 10px;
+  font-size: 0.85em;
+  opacity: 0.75;
+  border: 1px dashed rgba(27, 31, 35, 0.3);
+  border-radius: 6px;
+}
+
+#markdown-content.dark-mode .sl-embed-notice {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.sl-embed {
+  margin: 0.8em 0;
+  padding: 8px 12px;
+  border: 1px solid rgba(27, 31, 35, 0.15);
+  border-radius: 6px;
+}
+
+#markdown-content.dark-mode .sl-embed {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.sl-embed-status {
+  font-size: 0.9em;
+  opacity: 0.7;
+}
+
+.sl-embed-status.sl-embed-error {
+  opacity: 1;
+  color: #c0392b;
+}
+
+#markdown-content.dark-mode .sl-embed-status.sl-embed-error {
+  color: #ff7b72;
+}

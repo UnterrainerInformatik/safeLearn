@@ -13,6 +13,9 @@ COPY assets/ /app/assets
 COPY middlewares/ /app/middlewares
 # Copy the css folder to app directory.
 COPY css/ /app/css
+# The exam module. Loaded only when EXAM_MODULE=on; shipped either way, so one
+# image serves every deployment.
+COPY exam/ /app/exam
 
 # Copy package.json app directory.
 COPY package.json /app

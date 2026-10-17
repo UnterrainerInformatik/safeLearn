@@ -1059,9 +1059,17 @@ export const highlightExtension = {
   ],
 };
 
-export async function preParse(md, req) {
+/**
+ * `options.embedDefaults` makes every embedded module element render as it does
+ * with the module off - the presentation and document views pass it, because
+ * interactive elements belong to the page view (`exam-embedding`).
+ */
+export async function preParse(md, req, options = {}) {
   let r = md;
   r = await removeForbiddenContent(r, req);
+  // After the permission filter, so a block inside a hidden section is already
+  // gone, and before preMarkCode, so the block is not protected as code.
+  r = await preReplaceEmbeds(r, req, { defaultsOnly: options.embedDefaults === true });
   r = await preReplacePlantUml(r, req);
   r = await preReplaceMermaid(r, req);
   r = preMarkCode(r);
@@ -1157,6 +1165,139 @@ export async function filterForbiddenSegments(md, req) {
 async function removeForbiddenContent(md, req) {
   const segments = await filterForbiddenSegments(md, req);
   return segments.map((segment) => segment.text).join("");
+}
+
+// ################### Embedded module elements ###################
+
+/**
+ * The kinds of element a module can place in a page, as fenced blocks with the
+ * info string `safelearn-<kind>` and `key: value` lines as their body
+ * (`exam-embedding`). A kind listed here renders a teacher notice while no
+ * handler is registered for it; any other kind renders nothing for anyone.
+ */
+export const knownEmbedKinds = Object.freeze(["test", "results", "gradebook", "live"]);
+
+const embedHandlers = new Map();
+let embedClientScript = null;
+
+/**
+ * Registers what a block of `kind` renders to while the module is active.
+ * `handler(params, req)` returns the HTML placeholder the module's client
+ * mounts into, or "" for nothing. It renders no data on the server - the
+ * element fetches its own - so the page stays decided by permission alone.
+ */
+export function registerEmbedHandler(kind, handler) {
+  embedHandlers.set(kind, handler);
+}
+
+/**
+ * The module script a page view loads when, and only when, it carries at least
+ * one placeholder. Set by the module at start-up; without it no page names the
+ * script.
+ */
+export function registerEmbedClientScript(src) {
+  embedClientScript = src;
+}
+
+function escapeHtmlAttribute(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/**
+ * The placeholder an element mounts into. Kind and parameters travel as
+ * `data-*` attributes, which `DOMPurify.sanitize` keeps; the values are
+ * escaped, and a key that is not a plain word is dropped rather than escaped,
+ * since it becomes part of an attribute name.
+ */
+export function embedPlaceholder(kind, params, loadingText = "Loading…") {
+  const attributes = [`class="sl-embed"`, `data-sl-embed="${escapeHtmlAttribute(kind)}"`];
+  for (const [key, value] of Object.entries(params)) {
+    attributes.push(`data-sl-${key}="${escapeHtmlAttribute(value)}"`);
+  }
+  return `<div ${attributes.join(" ")}><span class="sl-embed-status">${escapeHtmlAttribute(loadingText)}</span></div>`;
+}
+
+/**
+ * What a block renders to while no handler is registered for its kind: for a
+ * known kind, a short notice for a session acting as a teacher - the same rule
+ * as `@@@ teacher`, so a teacher in student view sees what a student sees - and
+ * nothing for anyone else. The notice carries no data and makes no request.
+ */
+async function defaultEmbed(kind, req) {
+  if (!knownEmbedKinds.includes(kind)) return "";
+  if (!(await hasSomeRoles(req, ["teacher"], true))) return "";
+  return (
+    `<div class="sl-embed-notice">Exam module element <code>${escapeHtmlAttribute(kind)}</code>: ` +
+    `only available on an instance with the exam database.</div>`
+  );
+}
+
+function parseEmbedParams(body) {
+  const params = {};
+  for (const line of body) {
+    const match = /^\s*([A-Za-z][A-Za-z0-9-]*)\s*:\s*(.*?)\s*$/.exec(line);
+    if (match) params[match[1].toLowerCase()] = match[2];
+  }
+  return params;
+}
+
+/**
+ * Replaces every top-level `safelearn-<kind>` fenced block with what its kind
+ * renders to. A block written inside a longer fence - an example of the syntax
+ * in documentation - is part of that fence's text and stays as it is, and so
+ * does a block that is never closed.
+ *
+ * A document without such a block costs nothing: no permission question is
+ * asked unless a block is found.
+ */
+export async function preReplaceEmbeds(md, req, { defaultsOnly = false } = {}) {
+  if (!md.includes("safelearn-")) return md;
+  const lines = md.split("\n");
+  const fence = /^[ \t]{0,3}(`{3,}|~{3,})(.*)$/;
+  const blocks = [];
+  let open = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].replace(/\r$/, "");
+    if (open === null) {
+      const match = fence.exec(line);
+      if (match) {
+        const embed = /^safelearn-([a-z0-9-]+)$/i.exec(match[2].trim());
+        open = { start: i, marker: match[1], kind: embed ? embed[1].toLowerCase() : null };
+      }
+    } else {
+      const trimmed = line.trim();
+      if (trimmed.length >= open.marker.length && trimmed === open.marker[0].repeat(trimmed.length)) {
+        if (open.kind !== null) blocks.push({ ...open, end: i });
+        open = null;
+      }
+    }
+  }
+  if (blocks.length === 0) return md;
+
+  const rendered = await Promise.all(
+    blocks.map(async ({ start, end, kind }) => {
+      const handler = defaultsOnly ? undefined : embedHandlers.get(kind);
+      if (handler === undefined) return defaultEmbed(kind, req);
+      return handler(parseEmbedParams(lines.slice(start + 1, end)), req);
+    })
+  );
+  // From the last block back, so the line numbers of the earlier ones hold. The
+  // blank lines around the HTML make it an HTML block of its own for marked.
+  for (let b = blocks.length - 1; b >= 0; b--) {
+    const { start, end } = blocks[b];
+    lines.splice(start, end - start + 1, ...(rendered[b] ? ["", rendered[b], ""] : [""]));
+  }
+  return lines.join("\n");
+}
+
+/** Whether a rendered body holds a placeholder the module's client mounts into. */
+function carriesEmbedPlaceholder(html) {
+  return html.includes('class="sl-embed"');
 }
 
 // ################### Searching the corpus ###################
@@ -2818,17 +2959,19 @@ async function getTopdownMenu(req) {
   `;
 }
 
-async function getTopBar(startPage, req) {
+async function getTopBar(startPage, req, title = null) {
   return `
     <button class="sl-button topbar-burger" style="height: 32px; margin: 6px; margin-left: 0px;" onclick="toggleSidebar()">${lucideIcon(
       "Menu"
     )}</button>
     <div class="topbar-title nav-font">${
-      decodeURIComponent(
-        req.path.startsWith(`/${dirPrefix}`)
-          ? req.path.slice(dirPrefix.length + 1)
-          : req.path
-      )
+      title !== null
+        ? escapeHtmlAttribute(title)
+        : decodeURIComponent(
+            req.path.startsWith(`/${dirPrefix}`)
+              ? req.path.slice(dirPrefix.length + 1)
+              : req.path
+          )
     }</div>
     <div class="topbar-menu">
       ${
@@ -3169,7 +3312,12 @@ function getAutoReloadScript() {
 </script>`;
 }
 
-export async function wrapInPage(html, startPage, req) {
+/**
+ * `options.title` names a page that is not a corpus file - a module page under
+ * /exam/ - in the top bar and the tab, where a corpus page shows its path.
+ */
+export async function wrapInPage(html, startPage, req, options = {}) {
+  const title = options.title ?? null;
   const pre = `
       <!DOCTYPE html>
       <html lang="en">
@@ -3186,7 +3334,7 @@ export async function wrapInPage(html, startPage, req) {
         </style>
         <link rel="stylesheet" href="/css/main.css">
         <link rel="shortcut icon" href="/assets/favicon.ico" type="image/x-icon" />
-        <title>${req.file.name}</title>
+        <title>${title !== null ? escapeHtmlAttribute(title) : req.file.name}</title>
       </head>
       <!-- Hidden from the first byte the browser renders, and inline for that
            reason: a hide expressed in a stylesheet would only hold once the
@@ -3197,7 +3345,7 @@ export async function wrapInPage(html, startPage, req) {
            is the only thing that does; wrapAsDocument below serves the body the
            same way for the same reason. -->
       <body style="display: none;">
-        <div id="topbar" class="nav-font">${await getTopBar(startPage, req)}</div>
+        <div id="topbar" class="nav-font">${await getTopBar(startPage, req, title)}</div>
         <div id="wrapper">
           <div id="sidebar" class="nav-font">&nbsp;<br>${await getSideBar(
             startPage,
@@ -3221,6 +3369,11 @@ export async function wrapInPage(html, startPage, req) {
         init();
         </script>
         ${openNavTreeScript}
+        ${
+          embedClientScript !== null && carriesEmbedPlaceholder(html)
+            ? `<script type="module" src="${embedClientScript}"></script>`
+            : ""
+        }
       </body>
       </html>
     `;

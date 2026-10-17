@@ -150,8 +150,9 @@ Each entry is marked with its implementation status:
 | `middlewares/keycloak-middleware.js` | The whole authentication flow: OIDC discovery, session, Passport strategy, `/test` login trigger, `/auth/callback`, logout, token refresh, LDAP group extraction, and Keycloak account-attribute read/write. |
 | `middlewares/directory-service.js` | The directory behind the plugin's picker: introspects the caller's bearer token, caches the realm's users (with their role mappings) in memory and on disk, answers `searchDirectory` with `{ name, firstName, lastName, email, roles }` per match, and reports fetch progress. |
 | `AI/plugin` (separate repo, gitignored symlink) | The Obsidian plugin: editor decorations for the tags, the authoring commands (`AUTHORING_COMMANDS`), the directory login, and the `DirectoryPicker` that "Restricted section per name…", "Restrict selection…" and "Invitation list…" share. |
+| `exam/` | The exam module (`docs-exam-module.md`), loaded by a dynamic `import()` from `app.js` only when `EXAM_MODULE=on`; nothing else imports from it. `index.js` (`init()`: opens the database, schedules backups, returns the router, the embed handlers and the client script, or a reason it is disabled), `db.js` (`node:sqlite`, `user_version` migrations from `migrations/*.sql`), `backup.js` (`VACUUM INTO` copies and their retention), `gate.js` (identity by lowercased `preferred_username`, `requireTeacher`/`requireStudent`/`teacherPage` on `hasSomeRoles(req, ["teacher"], true)`), `client/` (the browser-side ES module that mounts elements into placeholders). |
 | `middlewares/extract-filename-middleware.js` | Small helper: parses the request path into `req.filePath` and `req.file`, used for page titles. |
-| `css/` | 16 stylesheets. `css/main.css` is the single entry point linked by the page and document wrappers and `@import`s 13 of them: layout (`body`, `topbar`, `sidebar`, `media`), content (`markdown`, `callouts`, `highlights`, `fixes`), controls (`search`, `buttons`, `flipswitch`), animation (`movement`, `reveals-rotates`). Two are outside that chain and linked by `wrapInReveal` alone: `css/reveal-theme-moon.css`, the derivation of Reveal's `moon` theme, and `css/reveal.css`, this deck's rules over it — linked last, because that is what makes them overrides. `css/highlights.css` is the one file in both: imported by `main.css` and linked by `wrapInReveal` as well, because a deck shows highlights too. |
+| `css/` | 17 stylesheets. `css/main.css` is the single entry point linked by the page and document wrappers and `@import`s 14 of them: layout (`body`, `topbar`, `sidebar`, `media`), content (`markdown`, `callouts`, `highlights`, `fixes`), controls (`search`, `buttons`, `flipswitch`), embedded exam elements and their teacher notice (`exam`, needed with the module off too), animation (`movement`, `reveals-rotates`). Two are outside that chain and linked by `wrapInReveal` alone: `css/reveal-theme-moon.css`, the derivation of Reveal's `moon` theme, and `css/reveal.css`, this deck's rules over it — linked last, because that is what makes them overrides. `css/highlights.css` is the one file in both: imported by `main.css` and linked by `wrapInReveal` as well, because a deck shows highlights too. |
 | `assets/` | `favicon.ico` plus `main-fonts/` (11 offered typefaces in 42 files) and `nav-fonts/` (8 typefaces in 16), each with its licence beside it and a `SOURCES.md` recording which release every family came from. A typeface is one family carrying the cuts it ships: `<Name>.ttf` is the regular and `<Name>-700`, `-italic`, `-700italic` are the others, in any of `.ttf`/`.otf`/`.woff`/`.woff2`. `getFontImports()` emits one `@font-face` per cut under one family name, so the browser selects a bold rather than smearing one. A weight that is neither 400 nor 700 is not composed into a family — `Lato-300.ttf` and `Lato-300italic.ttf` belong to the deck theme, which declares `Lato` itself. The reader's choice is stored by typeface name (`tf`/`ntf`), not as a position: the arrays are sorted, so a position would have meant something different the moment they were. |
 | `md/` | The content root and the test corpus — permission tests, a presentation, folder-name edge cases (spaces, special characters, empty folders), and `assets/` with pasted images. In production this directory is replaced or bind-mounted. |
 | `deploy/` | Server-side deployment artifacts: `docker-compose.yml` (image, port mapping, `TZ=Europe/Vienna`) and `up.sh` (pull + recreate). Uploaded by the GitHub Action. |
@@ -179,11 +180,14 @@ All content routes sit behind `checkAuthenticated`, which redirects unauthentica
 | GET | `/api/admin/directory/status` | bearer token, introspected | Registered immediately beside the search route and gated identically — same introspection, same teacher/admin decision, same bare `403`. Reports `{ fetching, phase, done, total, startedAt, entries, builtAt, skipped }`: which phase of a directory fetch is running (`idle`, `counting`, `entries`, `roles`) and how far through it, plus how many entries are currently held, when they were actually built, and how many records were skipped building them. Raw per-phase figures rather than one blended percentage — the two phases' relative cost is realm-specific, so any weighting invented here would produce a bar that stalls and then leaps. Reads process memory only: no Keycloak call, no disk access, and it never starts a fetch, which is what makes it safe for the Obsidian plugin to poll every two seconds while it waits |
 | GET | `/md/**` (non-Markdown) | required, and `attachment-access` | Attachments. A gate in front of `express.static` serves a path only when the session holds a live render-time grant for it or `mayServeAttachment` (`obsidian.js`) finds a referencing place the session may see; anything else leaves the router and is answered by the catch-all, like a path with no file. Served answers carry `Cache-Control: private, no-cache`. An unreferenced attachment is never served |
 | GET | `/assets/**`, `/css/**`, `/obsidian-page.js`, `/logo-{64,128,256,512}.png`, `/index.html`, `/node_modules/mermaid/dist/**`, `/node_modules/@mermaid-js/layout-elk/dist/**` | required | The served set. One mount per location, each one there because a rendered page references it — except `/index.html`, which is there because `getStartPage` falls back to it |
+| GET | `/exam/` | required, teacher | Only with `EXAM_MODULE=on`. The module's home page in the instance's frame (`wrapInPage` with a title). A session not acting as a teacher leaves the module's router and lands in the catch-all, so the page does not reveal that it exists |
+| GET | `/exam/api/me` | required | Only with the module on. `{ username, teacher }`: the identity the module records the session under and whether it acts as a teacher after the student-view downgrade |
+| GET | `/exam/assets/**` | required | Only with the module on. The module's `exam/client/` directory and nothing beside it |
 | GET | *(everything else)* | required | Not served, whether or not a file exists at that path — including `/keycloak.json`, `/app.js`, `/utils.js`, `/obsidian.js` and `/package*.json`. Falls through to a redirect to the start page, the same answer a path with no file behind it gets |
 
 Two security headers are set globally on every response in `app.js`: `X-Frame-Options: SAMEORIGIN` and `Content-Security-Policy: frame-ancestors 'self'`.
 
-Middleware order in `app.js` is load-bearing and reads: body parsers → security headers → `initKeycloak` (session, Passport, refresh, auth routes) → `checkAuthenticated` → root redirect → `fileNameExtractor` → the `.md` handler → the static mounts → `/userattributes` → catch-all redirect → error handler. The error handler answers a `SessionEndedError` the way `checkAuthenticated` answers a missing session and everything else with a logged `500`, so a failing request cannot become an unhandled rejection that terminates the process — every route handler's promise chain ends in `.catch(next)`. The `.md` handler sitting above the mounts is what keeps whole-file permissions from being bypassed through `/md`.
+Middleware order in `app.js` is load-bearing and reads: body parsers → security headers → `initKeycloak` (session, Passport, refresh, auth routes) → `checkAuthenticated` → root redirect → `fileNameExtractor` → the `.md` handler → the static mounts → `/userattributes` → the exam module's router at `/exam`, when it is active → catch-all redirect → error handler. The module is loaded before any of this is registered, so its router has its place from the first request; its own error handler answers a failing module request with a `500` and passes a `SessionEndedError` on. The error handler answers a `SessionEndedError` the way `checkAuthenticated` answers a missing session and everything else with a logged `500`, so a failing request cannot become an unhandled rejection that terminates the process — every route handler's promise chain ends in `.catch(next)`. The `.md` handler sitting above the mounts is what keeps whole-file permissions from being bypassed through `/md`.
 
 ## 6. Render Pipeline
 
@@ -195,14 +199,16 @@ read file (app.js)
   └─ parseFirstLineForPermissions  whole-file gate; the directive line is stripped
   └─ preParse (obsidian.js)
        1. removeForbiddenContent      drop @@@ blocks the user may not see
-       2. preReplacePlantUml          deflate + encode, substitute a diagram image link
-       3. preReplaceMermaid           rewrite the fence to <pre class="mermaid">
-       4. preMarkCode                 park fenced code in an array behind a placeholder
-       5. preReplaceObsidianFileLinks resolve [[wiki-links]] to absolute URLs
-       6. preMarkCallouts             convert > [!type] blocks to internal markers
-       7. preprocessFragments         ##fragment  → HTML comment marker
-       8. preprocessSideBySide        ##side-by-side-* → column divs
-       9. unmarkCode                  restore the parked code blocks
+       2. preReplaceEmbeds            ```safelearn-<kind> blocks → module placeholder,
+                                      teacher notice, or nothing (exam-embedding)
+       3. preReplacePlantUml          deflate + encode, substitute a diagram image link
+       4. preReplaceMermaid           rewrite the fence to <pre class="mermaid">
+       5. preMarkCode                 park fenced code in an array behind a placeholder
+       6. preReplaceObsidianFileLinks resolve [[wiki-links]] to absolute URLs
+       7. preMarkCallouts             convert > [!type] blocks to internal markers
+       8. preprocessFragments         ##fragment  → HTML comment marker
+       9. preprocessSideBySide        ##side-by-side-* → column divs
+      10. unmarkCode                  restore the parked code blocks
   └─ marked.parse                  markedDark or markedLight, chosen by preference `dm`;
                                    both carry highlightExtension (==text==, ==🔴text==)
   └─ manipulateHtml (obsidian.js)
@@ -214,7 +220,9 @@ read file (app.js)
   └─ DOMPurify.sanitize            final output filter
 ```
 
-Code blocks are parked before the link, callout and fragment passes and restored afterwards (steps 4 and 9), so those rewrites cannot corrupt code samples. Callouts may nest; the code markers may not.
+Code blocks are parked before the link, callout and fragment passes and restored afterwards (steps 5 and 10), so those rewrites cannot corrupt code samples. Callouts may nest; the code markers may not.
+
+`preReplaceEmbeds` (step 2) runs after the permission filter, so an element block inside a hidden section is already gone, and before the code parking, so the block is not treated as code. A block inside a longer fence stays text. A kind with a handler registered by the exam module renders that handler's placeholder; otherwise a known kind renders a notice for a session acting as a teacher and nothing for anyone else. The presentation and document views pass `embedDefaults`, which forces the second behaviour. `wrapInPage` adds the module's client script only when a handler set it and the body carries a placeholder.
 
 After sanitizing, one of three wrappers builds the response: `wrapInPage` (top bar, sidebar, settings menu), `wrapAsDocument` (content only, for printing), or `wrapInReveal` — which first calls `splitForReveal` to cut the HTML into `<section>` elements at `h2` (horizontal) and `h3` (vertical) boundaries.
 
@@ -283,13 +291,15 @@ When `allowOverride` is set and the teacher's preference `vt == 0`, `hasRoles` s
 | `NEXT_PUBLIC_IS_APP_FOLDER` | `app.js`, `obsidian.js` | Switches the base path to `/app/` for in-container operation |
 | `NEXT_AUTOSCAN` | `app.js` | Enables the `chokidar` watcher on `md/` |
 | `PERMISSION_VISIBILITY_INTERVAL_MS` | `obsidian.js` | Visibility poll interval, default 5000 ms, minimum 1000 ms |
+| `EXAM_MODULE` | `app.js` | `on` loads the exam module; anything else leaves the instance without it. Reaches production through `deploy/docker-compose.yml`, filled from the repository variable of the same name |
+| `EXAM_DB_PATH` | `exam/db.js` | Test-only: the harness points a run at its own database. Default `data/exam.sqlite`; a deployment never sets it |
 | `SESSION_SECRET` | `keycloak-middleware.js` | Signs the session cookies. **Required** — `initKeycloak` exits at startup when it is missing or empty, with no fallback, so no two deployments share a secret |
 
 `keycloak.json` (realm, auth-server-url, resource, client secret) is read from the working directory at startup. Both it and `.env` are generated by the pipeline from GitHub secrets; the repository's `.gitignore` excludes `/keycloak*` at the root.
 
 ### Image
 
-`Dockerfile` is a single stage on `node:24-alpine`. It copies `site/` (the pipeline-generated `.env` and `keycloak.json`), then `md/`, `assets/`, `middlewares/`, `css/`, the manifests and the root `*.js`/`*.css` files, runs `npm install --omit=dev`, exposes 8080 and starts `npm run prod`.
+`Dockerfile` is a single stage on `node:24-alpine`. It copies `site/` (the pipeline-generated `.env` and `keycloak.json`), then `md/`, `assets/`, `middlewares/`, `css/`, `exam/`, the manifests and the root `*.js`/`*.css` files, runs `npm install --omit=dev`, exposes 8080 and starts `npm run prod`.
 
 ### Pipeline
 

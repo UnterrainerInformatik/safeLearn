@@ -98,6 +98,8 @@ If you're interested about the software used behind the scenes or some of the UR
 ## Render Pipeline
 How a Markdown file becomes the HTML your browser receives — every step in between, and why they run in that order — is described [here](docs-render-pipeline.md).
 ## Search Function
+Short online tests and a gradebook, kept in a database an instance can switch on — how the switch works, where the data lives and how a page places an element — are described [here](docs-exam-module.md).
+
 How the search field beside the navigation tree answers a query — the two passes behind it, why a stale index cannot leak anything, and the keys the result list answers to — is described [here](docs-search.md).
 ## Development: Building this Project
 Here you can find information about [building](docs-building.md) this project.

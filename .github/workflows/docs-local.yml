@@ -163,6 +163,11 @@ jobs:
             # directory" step above only creates DATA_DIR on the host — it never
             # reaches docker-compose itself without also being in this file.
             echo DATA_DIR=${{ secrets.DATA_DIR }} >> ./deploy/.env
+            # The exam module's switch (docs-exam-module.md). A repository
+            # variable rather than a secret, since "on" hides nothing. Unset, the
+            # instance runs without the module, which is what a deployment gets
+            # until it decides otherwise.
+            echo EXAM_MODULE=${{ vars.EXAM_MODULE }} >> ./deploy/.env
       - name: Normalize line endings for deploy scripts
         run: |
             sudo apt-get update -y

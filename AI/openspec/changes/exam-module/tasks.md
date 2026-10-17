@@ -2,22 +2,22 @@ Phases in the plan's order. Each phase ends deployable with `EXAM_MODULE` unset 
 
 ## 1. P0 — Foundation
 
-- [ ] 1.1 Create the `exam/` module directory with `index.js` exporting an async `init()` that returns `{ router, embedHandlers }` or `null` with a reason; no other file in the repo imports from `exam/` except `app.js`
-- [ ] 1.2 In `app.js`, load the module with a dynamic `import()` only when `EXAM_MODULE === "on"`, wrapped in `try/catch`; mount the router at `/exam` after `checkAuthenticated` and before the catch-all; log "active" with the DB path or "disabled" with the reason
-- [ ] 1.3 Database access on `node:sqlite` (`DatabaseSync`): path `data/exam.sqlite`, override `EXAM_DB_PATH`, WAL mode, `foreign_keys=ON`; refuse a schema newer than the code
-- [ ] 1.4 Migration runner over numbered SQL files in `exam/migrations/`, one transaction per file, `PRAGMA user_version`; first migration creates the schema skeleton (school year, class, student, roster entry, course, grading scale) per the plan's data model
-- [ ] 1.5 Backups: `VACUUM INTO data/exam-backups/` before the first pending migration and daily by timer; retention of 14 daily and 90 days of pre-migration copies; unit test that a copy opens as a database
-- [ ] 1.6 Self-disabling: a failed open, migration or read-only data directory leaves the server running without the module; a throwing module request answers 500 and touches nothing else (spec `exam-foundation`)
-- [ ] 1.7 Gate helpers: `requireTeacher` (`hasSomeRoles(req, ["teacher"], true)`, with `allowOverride`, so the student-view downgrade applies), `requireStudent`, and the identity key from `preferred_username`, lowercased; unit tests for both, for a teacher in student view being refused teacher actions, and for switching back
-- [ ] 1.8 Embedding hooks in `obsidian.js`: `registerEmbedHandler(kind, handler)`, `preReplaceEmbeds(md, req)` in `preParse` after `removeForbiddenContent` and before `preMarkCode`, default handlers (teacher notice / nothing / nothing for unknown kinds), and a flag that forces the defaults in the presentation and document views
-- [ ] 1.9 Teacher notice markup and CSS for both themes; verify the placeholder and its `data-*` attributes survive `DOMPurify.sanitize`, with attribute values escaped
-- [ ] 1.10 Client entry `exam/client/exam-client.js` (ES module, custom elements, no build) with a shared loading/error frame; `/exam/assets/` mount in the static allowlist; `wrapInPage` adds the script only when the module is active and the page has a placeholder
-- [ ] 1.11 Page shell for module pages that reuses the top bar, theme and fonts and follows `page-bootstrap`
-- [ ] 1.12 Deployment: pass `EXAM_MODULE` through `deploy/docker-compose.yml`'s `environment:`; declare `EXAM_DB_PATH` as test-only in `test/deployment-config.test.js`; assert the WYSIWYG templates (`wysiwyg-container-linux`/`-windows`) set no `EXAM_MODULE`; assert no static mount reaches `data/`
-- [ ] 1.13 Harness: a second instance configuration with `EXAM_MODULE=on` and `EXAM_DB_PATH` in a temp directory created and removed per run (also on interruption); the module-off run asserts `/exam/*` answers as nothing-behind-it and that pages are unchanged
-- [ ] 1.14 Content checks for embedding: a fixture page in `md/` with a `safelearn-test` block outside and one inside `@@@ teacher`; student vs. teacher vs. module on/off vs. `?reveal=1`; update `test/coverage-map.json` for the guarded code
+- [x] 1.1 Create the `exam/` module directory with `index.js` exporting an async `init()` that returns `{ router, embedHandlers }` or `null` with a reason; no other file in the repo imports from `exam/` except `app.js`
+- [x] 1.2 In `app.js`, load the module with a dynamic `import()` only when `EXAM_MODULE === "on"`, wrapped in `try/catch`; mount the router at `/exam` after `checkAuthenticated` and before the catch-all; log "active" with the DB path or "disabled" with the reason
+- [x] 1.3 Database access on `node:sqlite` (`DatabaseSync`): path `data/exam.sqlite`, override `EXAM_DB_PATH`, WAL mode, `foreign_keys=ON`; refuse a schema newer than the code
+- [x] 1.4 Migration runner over numbered SQL files in `exam/migrations/`, one transaction per file, `PRAGMA user_version`; first migration creates the schema skeleton (school year, class, student, roster entry, course, grading scale) per the plan's data model
+- [x] 1.5 Backups: `VACUUM INTO data/exam-backups/` before the first pending migration and daily by timer; retention of 14 daily and 90 days of pre-migration copies; unit test that a copy opens as a database
+- [x] 1.6 Self-disabling: a failed open, migration or read-only data directory leaves the server running without the module; a throwing module request answers 500 and touches nothing else (spec `exam-foundation`)
+- [x] 1.7 Gate helpers: `requireTeacher` (`hasSomeRoles(req, ["teacher"], true)`, with `allowOverride`, so the student-view downgrade applies), `requireStudent`, and the identity key from `preferred_username`, lowercased; unit tests for both, for a teacher in student view being refused teacher actions, and for switching back
+- [x] 1.8 Embedding hooks in `obsidian.js`: `registerEmbedHandler(kind, handler)`, `preReplaceEmbeds(md, req)` in `preParse` after `removeForbiddenContent` and before `preMarkCode`, default handlers (teacher notice / nothing / nothing for unknown kinds), and a flag that forces the defaults in the presentation and document views
+- [x] 1.9 Teacher notice markup and CSS for both themes; verify the placeholder and its `data-*` attributes survive `DOMPurify.sanitize`, with attribute values escaped
+- [x] 1.10 Client entry `exam/client/exam-client.js` (ES module, custom elements, no build) with a shared loading/error frame; `/exam/assets/` mount in the static allowlist; `wrapInPage` adds the script only when the module is active and the page has a placeholder
+- [x] 1.11 Page shell for module pages that reuses the top bar, theme and fonts and follows `page-bootstrap`
+- [x] 1.12 Deployment: pass `EXAM_MODULE` through `deploy/docker-compose.yml`'s `environment:`; declare `EXAM_DB_PATH` as test-only in `test/deployment-config.test.js`; assert the WYSIWYG templates (`wysiwyg-container-linux`/`-windows`) set no `EXAM_MODULE`; assert no static mount reaches `data/`
+- [x] 1.13 Harness: a second instance configuration with `EXAM_MODULE=on` and `EXAM_DB_PATH` in a temp directory created and removed per run (also on interruption); the module-off run asserts `/exam/*` answers as nothing-behind-it and that pages are unchanged
+- [x] 1.14 Content checks for embedding: a fixture page in `md/` with a `safelearn-test` block outside and one inside `@@@ teacher`; student vs. teacher vs. module on/off vs. `?reveal=1`; update `test/coverage-map.json` for the guarded code
 - [ ] 1.15 Off-host backup: add `data/exam-backups/` to babylon5's backup, or document the copy job (with Gerald)
-- [ ] 1.16 Docs: `docs-exam-module.md` (switch, data, backups, embed syntax), a pointer from `README.md` and `docs-wysiwyg.md` (module off there), `AI/architecture.md` component map and route table
+- [x] 1.16 Docs: `docs-exam-module.md` (switch, data, backups, embed syntax), a pointer from `README.md` and `docs-wysiwyg.md` (module off there), `AI/architecture.md` component map and route table
 
 ## 2. P1 — Classes & courses
 

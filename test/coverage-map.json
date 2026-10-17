@@ -27,7 +27,8 @@
         "test/checks/directory-search.js",
         "test/checks/session-lifecycle.js",
         "test/checks/deployment-surface.js",
-        "test/checks/attachments.js"
+        "test/checks/attachments.js",
+        "test/checks/exam-embedding.js"
       ],
       "corpus": []
     },
@@ -294,13 +295,61 @@
       "corpus": []
     },
     "test/deployment-config.test.js": {
-      "what": "That every environment variable the application reads reaches a deployed instance through one of the two channels a deployment has - the image's own .env, written by the workflow and baked in by the Dockerfile, or the container's environment, written to deploy/.env and interpolated by docker-compose.yml - and that neither channel is wired up only halfway. Added after DIRECTORY_SERVICE_CLIENT_ID/_SECRET were read by the directory-search endpoint for two changes while nothing in the pipeline set them.",
+      "what": "That every environment variable the application reads reaches a deployed instance through one of the two channels a deployment has - the image's own .env, written by the workflow and baked in by the Dockerfile, or the container's environment, written to deploy/.env and interpolated by docker-compose.yml - and that neither channel is wired up only halfway. Added after DIRECTORY_SERVICE_CLIENT_ID/_SECRET were read by the directory-search endpoint for two changes while nothing in the pipeline set them. That the exam module's switch EXAM_MODULE travels by the container's environment and not in the image, that the Dockerfile ships exam/, that EXAM_DB_PATH (the harness's own database) reaches no deployed instance, that the WYSIWYG templates run without the module and mount no data volume, and that no static mount reaches the data directory.",
       "guards": [
         ".github/workflows/docs-local.yml",
         "deploy/docker-compose.yml",
         "Dockerfile",
         "middlewares/directory-service.js",
-        "app.js"
+        "app.js",
+        "exam/db.js",
+        "exam/index.js",
+        "wysiwyg-container-linux/docker-compose.yml",
+        "wysiwyg-container-windows/docker-compose.yml"
+      ],
+      "corpus": []
+    },
+    "test/checks/exam-embedding.js": {
+      "what": "Embedded exam-module elements on an instance without the module: a teacher sees a notice per known element (also in the presentation and document views), a student and a teacher in student view see nothing, an unknown kind and the blocks' source never show, an example inside a longer fence stays text, no page names the module's script or requests /exam/, and every path under /exam/ answers as a path with nothing behind it.",
+      "guards": [
+        "obsidian.js",
+        "app.js",
+        "css/exam.css",
+        "utils.js",
+        "test/harness.js"
+      ],
+      "corpus": [
+        "md/test-exam-embedding.md"
+      ]
+    },
+    "test/exam.test.js": {
+      "what": "The instance with the exam module on, in a process of its own against a database created for the run and removed afterwards: the start-up log names that database and a fresh migration, /exam/api/me reports the identity and the student-view downgrade, an unauthenticated request is refused, the module page is shown to teachers in the instance's frame and to nobody else, elements mount as placeholders the client draws its frame into (teacher-only ones only for teachers), the presentation and document views and pages without elements load no module script, and the database is not retrievable over HTTP.",
+      "guards": [
+        "exam/index.js",
+        "exam/gate.js",
+        "exam/db.js",
+        "exam/backup.js",
+        "exam/client/exam-client.js",
+        "obsidian.js",
+        "app.js",
+        "test/harness.js"
+      ],
+      "corpus": [
+        "md/test-exam-embedding.md",
+        "md/test-md-file.md"
+      ]
+    },
+    "test/exam-foundation.test.js": {
+      "what": "The exam module unit by unit, without browser or server: database creation with WAL and foreign keys, migrations one transaction each with rollback on failure, refusal of a newer schema without touching the file, refusal of a read-only directory, pre-migration and daily VACUUM INTO copies that open on their own and their retention, the teacher/student gates including the student-view downgrade and switching back, the identity key, the embedding hooks (defaults, unknown kinds, nested fences, parameters, escaping, survival through DOMPurify, the presentation/document defaults), start-up failure disabling the module, and a throwing module request failing alone.",
+      "guards": [
+        "exam/db.js",
+        "exam/backup.js",
+        "exam/gate.js",
+        "exam/index.js",
+        "exam/migrations/001-skeleton.sql",
+        "obsidian.js",
+        "utils.js",
+        "permission-context.js"
       ],
       "corpus": []
     }

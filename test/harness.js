@@ -15,8 +15,9 @@
  */
 
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -26,12 +27,23 @@ const projectRoot = path.resolve(import.meta.dirname, "..");
 const runtimeDir = path.join(import.meta.dirname, ".runtime");
 const profileDir = path.join(runtimeDir, `browser-profile-${process.pid}`);
 
-const port = process.env.SAFELEARN_TEST_PORT || process.env.NEXT_PUBLIC_PORT || "8080";
+let port = process.env.SAFELEARN_TEST_PORT || process.env.NEXT_PUBLIC_PORT || "8080";
 
-/** Base URL of the application under test. */
-export const applicationUrl = (
+/**
+ * Base URL of the application under test. A `let`, because `useExamModule()`
+ * moves a run to the instance with the module; importers see the change.
+ */
+export let applicationUrl = (
   process.env.SAFELEARN_TEST_SERVER_URL || `http://localhost:${port}`
 ).replace(/\/$/, "");
+
+/**
+ * The instance configuration of this run. By default the instance runs without
+ * the exam module, and `EXAM_MODULE` is passed as empty so a developer's `.env`
+ * cannot switch it on underneath the existing checks (dotenv never overrides a
+ * variable that is already set). `useExamModule()` replaces it.
+ */
+let instance = { env: { EXAM_MODULE: "" }, adopt: true, examDir: null };
 
 /** The realm the login form is expected to belong to. */
 const realm = process.env.SAFELEARN_TEST_REALM || "safeLearn";
@@ -82,7 +94,7 @@ export const knownRoles = Object.keys(accounts);
  * diagram service by accident — and so `hostsContactedWhile` reports a request
  * to one of them whether or not it would have been answered.
  */
-const reachableHosts = new Set([
+let reachableHosts = new Set([
   new URL(applicationUrl).host,
   new URL(identityProviderUrl).host,
 ]);
@@ -218,6 +230,14 @@ async function ensureServer() {
   if (server) return server;
 
   if (await answers(3000)) {
+    if (!instance.adopt) {
+      throw new Error(
+        `Something already answers on ${applicationUrl}. The exam-module checks need an instance of ` +
+          `their own, started with a database created for this run, and never adopt one. Stop ` +
+          `whatever listens there, or point SAFELEARN_TEST_EXAM_PORT at a free port the realm accepts ` +
+          `as a redirect.`
+      );
+    }
     server = { adopted: true, child: null, output: [] };
     return server;
   }
@@ -231,6 +251,7 @@ async function ensureServer() {
       ...process.env,
       NEXT_PUBLIC_PORT: String(port),
       NEXT_PUBLIC_SERVER_URL: applicationUrl,
+      ...instance.env,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -278,16 +299,64 @@ export async function applicationStillRunning() {
 async function stopServer() {
   const running = server;
   server = null;
-  if (!running || running.adopted) return;
+  if (running && !running.adopted) {
+    const child = running.child;
+    if (child && child.exitCode === null && child.signalCode === null) {
+      const ended = new Promise((resolve) => child.once("exit", resolve));
+      child.kill("SIGTERM");
+      const hard = setTimeout(() => child.kill("SIGKILL"), 5000);
+      await ended;
+      clearTimeout(hard);
+    }
+  }
+  removeExamDir();
+}
 
-  const child = running.child;
-  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+// ################### The exam-module instance ###################
 
-  const ended = new Promise((resolve) => child.once("exit", resolve));
-  child.kill("SIGTERM");
-  const hard = setTimeout(() => child.kill("SIGKILL"), 5000);
-  await ended;
-  clearTimeout(hard);
+/**
+ * Moves this run to an instance with the exam module switched on, against a
+ * database in a directory created for this run alone and removed when the run
+ * ends - by success, failure or interruption (`browser-verification`). Called
+ * once, before the first session; the checks then address `applicationUrl` as
+ * usual.
+ *
+ * The instance listens on a port of its own (`SAFELEARN_TEST_EXAM_PORT`,
+ * default 8089, one the demo realm accepts as a redirect and the WYSIWYG
+ * container, on 8081, does not occupy), and is never
+ * adopted: an instance this run did not start holds a database this run did
+ * not create.
+ */
+export function useExamModule() {
+  if (server || browser) {
+    throw new Error("useExamModule() has to be called before the first session of a run.");
+  }
+  port = process.env.SAFELEARN_TEST_EXAM_PORT || "8089";
+  applicationUrl = `http://localhost:${port}`;
+  reachableHosts = new Set([new URL(applicationUrl).host, new URL(identityProviderUrl).host]);
+  const examDir = mkdtempSync(path.join(os.tmpdir(), "safelearn-exam-run-"));
+  instance = {
+    env: { EXAM_MODULE: "on", EXAM_DB_PATH: path.join(examDir, "exam.sqlite") },
+    adopt: false,
+    examDir,
+  };
+  return { databasePath: instance.env.EXAM_DB_PATH, directory: examDir };
+}
+
+/** Removes this run's exam database directory. Synchronous, so `exit` can call it. */
+function removeExamDir() {
+  if (!instance.examDir) return;
+  try {
+    rmSync(instance.examDir, { recursive: true, force: true });
+  } catch {
+    // Already gone, or the next run's mkdtemp picks another name anyway.
+  }
+  instance.examDir = null;
+}
+
+/** What the instance this run started has printed so far. */
+export function applicationOutput() {
+  return server ? server.output.join("") : "";
 }
 
 // ################### Browser ###################
@@ -1081,6 +1150,7 @@ function killChildren() {
       // The process is already gone.
     }
   }
+  removeExamDir();
 }
 
 process.once("exit", killChildren);
