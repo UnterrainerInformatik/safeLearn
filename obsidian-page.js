@@ -191,6 +191,15 @@ function toggleTopdownMenu() {
   }
 }
 
+// Any click outside the open settings menu closes it. The chevron is left
+// out, as its own onclick already toggles the menu.
+document.addEventListener("click", (event) => {
+  const menu = document.querySelector("#topdown-menu");
+  if (!menu || !menu.classList.contains("width-reveal")) return;
+  if (menu.contains(event.target) || event.target.closest(".topdown-menu-chevron")) return;
+  toggleTopdownMenu();
+});
+
 function openAsPresentation(print, sameWindow = false) {
   let url = new URL(window.location.href);
   if (print) {
