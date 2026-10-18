@@ -15,23 +15,46 @@
  * draw what it answers.
  */
 
-import { defineExamElement, ExamApiError, ExamElement, examApi, h, markRows } from "./frame.js";
+import { defineExamElement, ExamApiError, ExamElement, examApi, examMe, h, markRows } from "./frame.js";
 import { displayClass, displayPerson } from "./classes.js";
+import { defaultPeriods, matchWindow, periodTimes, viennaLocal, windowFor } from "./periods.js";
 
 const stateLabels = { scheduled: "scheduled", open: "open", over: "over" };
 
 const viennaTime = new Intl.DateTimeFormat("de-AT", { timeZone: "Europe/Vienna", dateStyle: "short", timeStyle: "short" });
 const viennaClock = new Intl.DateTimeFormat("de-AT", { timeZone: "Europe/Vienna", timeStyle: "short" });
+const viennaDay = new Intl.DateTimeFormat("de-AT", { timeZone: "Europe/Vienna", weekday: "short", day: "2-digit", month: "2-digit" });
 
 /** A timestamp as a teacher in Vienna reads it. */
 export function displayTime(iso) {
   return viennaTime.format(new Date(iso));
 }
 
-/** A sitting's window, the end without its date when it closes on the day it opens. */
-export function displayWindow({ opensAt, closesAt }) {
+/** "Di 20.10.": the Vienna day of a timestamp. */
+function displayDay(iso) {
+  const parts = Object.fromEntries(viennaDay.formatToParts(new Date(iso)).map((part) => [part.type, part.value]));
+  return `${parts.weekday.replace(/\.$/, "")} ${parts.day}.${parts.month}.`;
+}
+
+/**
+ * "periods 3–4", or "period 3", with the clock times as its tooltip. Every
+ * period the module shows is drawn here, so none lacks its times
+ * (`school-periods`, design.md, D6).
+ */
+export function periodLabel(periods, from, to = from) {
+  return h("span", { class: "sl-exam-periods", title: periodTimes(periods, from, to) }, from === to ? `period ${from}` : `periods ${from}–${to}`);
+}
+
+/**
+ * A sitting's window as an element: the day and its periods when it lies on
+ * period boundaries, otherwise its clock times, the end without its date when
+ * it closes on the day it opens.
+ */
+export function displayWindow({ opensAt, closesAt }, periods = []) {
+  const match = matchWindow(periods, opensAt, closesAt);
+  if (match) return h("span", { class: "sl-exam-window" }, `${displayDay(opensAt)} · `, periodLabel(periods, match.from, match.to));
   const sameDay = viennaTime.format(new Date(opensAt)).split(",")[0] === viennaTime.format(new Date(closesAt)).split(",")[0];
-  return `${displayTime(opensAt)} – ${sameDay ? viennaClock.format(new Date(closesAt)) : displayTime(closesAt)}`;
+  return h("span", { class: "sl-exam-window" }, `${displayTime(opensAt)} – ${sameDay ? viennaClock.format(new Date(closesAt)) : displayTime(closesAt)}`);
 }
 
 /**
@@ -52,7 +75,9 @@ class TestList extends ExamElement {
   async load() {
     const { course, class: klass, year } = this.params;
     const query = course ? `?course=${course}` : klass ? `?class=${klass}` : year ? `?year=${year}` : "";
-    return examApi(`/tests${query}`);
+    const [list, me] = await Promise.all([examApi(`/tests${query}`), examMe()]);
+    this.periods = me.periods ?? [];
+    return list;
   }
 
   render(list) {
@@ -101,7 +126,9 @@ class TestList extends ExamElement {
                               h(
                                 "li",
                                 { "data-state": sitting.state },
-                                `${sitting.makeup ? "Make-up " : ""}${displayWindow(sitting)} · ${stateLabels[sitting.state]}`,
+                                sitting.makeup ? "Make-up " : null,
+                                displayWindow(sitting, this.periods),
+                                ` · ${stateLabels[sitting.state]}`,
                                 sitting.state !== "over" ? sittingLinks(sitting) : null
                               )
                             )
@@ -142,7 +169,8 @@ function localInput(iso) {
 /** One test for its teacher. */
 class TestDetail extends ExamElement {
   async load() {
-    const test = await examApi(`/tests/${this.params.test}`);
+    const [test, me] = await Promise.all([examApi(`/tests/${this.params.test}`), examMe()]);
+    this.periods = me.periods ?? [];
     const klass = await examApi(`/classes/${test.course.classId}`);
     this.roster = klass.roster.filter((entry) => !entry.leftAt);
     return test;
@@ -233,7 +261,8 @@ class TestDetail extends ExamElement {
                 "li",
                 { "data-sitting": String(sitting.id), "data-state": sitting.state },
                 h("strong", {}, sitting.makeup ? "Make-up: " : "Sitting: "),
-                `${displayWindow(sitting)}, ${Math.round(sitting.durationS / 60)} min per attempt · ${sitting.state} · `,
+                displayWindow(sitting, this.periods),
+                `, ${Math.round(sitting.durationS / 60)} min per attempt · ${sitting.state} · `,
                 sitting.makeup || sitting.participants.length < this.roster.length
                   ? sitting.participants.map((username) => names.get(username) ?? username).join(", ")
                   : "the whole class",
@@ -260,19 +289,52 @@ class TestDetail extends ExamElement {
     );
   }
 
-  /** The form for a new sitting, or for changing `sitting`. */
+  /**
+   * The form for a new sitting, or for changing `sitting`. Its window is one
+   * state that two editors read and write: date and periods when the school's
+   * periods are configured, clock times otherwise or when the teacher switches
+   * to them (`school-periods`, design.md, D7).
+   */
   drawSittingForm(test, sitting) {
     const first = test.sittings.find((candidate) => !candidate.makeup) ?? null;
     const makeup = sitting ? sitting.makeup : first !== null;
-    const start = new Date(Date.now() + 60 * 60 * 1000);
-    start.setMinutes(0, 0, 0);
-    const opensAt = h("input", { type: "datetime-local", name: "opensAt", required: true, value: localInput(sitting?.opensAt ?? start.toISOString()) });
-    const closesAt = h("input", {
-      type: "datetime-local",
-      name: "closesAt",
-      required: true,
-      value: localInput(sitting?.closesAt ?? new Date(start.getTime() + 50 * 60 * 1000).toISOString()),
-    });
+    const periods = this.periods;
+    let windowState;
+    if (sitting) {
+      windowState = { opensAt: sitting.opensAt, closesAt: sitting.closesAt };
+    } else if (periods.length > 0) {
+      const proposed = defaultPeriods(periods);
+      windowState = windowFor(periods, proposed.date, proposed.from, proposed.to);
+    } else {
+      const start = new Date(Date.now() + 60 * 60 * 1000);
+      start.setMinutes(0, 0, 0);
+      windowState = { opensAt: start.toISOString(), closesAt: new Date(start.getTime() + 50 * 60 * 1000).toISOString() };
+    }
+    let byPeriods = matchWindow(periods, windowState.opensAt, windowState.closesAt) !== null;
+    const windowEditor = h("div", { class: "sl-exam-sitting-window" });
+    const drawWindowEditor = () => {
+      const toggle = h(
+        "button",
+        {
+          type: "button",
+          class: "sl-exam-sitting-mode",
+          onClick: () => {
+            if (!byPeriods) {
+              // A window on period boundaries is carried over; any other keeps
+              // its date and gets the periods a new sitting would.
+              const match = matchWindow(periods, windowState.opensAt, windowState.closesAt);
+              const proposed = match ?? { ...defaultPeriods(periods), date: viennaLocal(windowState.opensAt).date };
+              windowState = windowFor(periods, proposed.date, proposed.from, proposed.to);
+            }
+            byPeriods = !byPeriods;
+            drawWindowEditor();
+          },
+        },
+        byPeriods ? "Exact times instead" : "Periods instead"
+      );
+      windowEditor.replaceChildren(...(byPeriods ? this.periodsEditor(windowState, (changed) => (windowState = changed)) : this.clockEditor(windowState)), h("p", {}, toggle));
+    };
+    if (periods.length > 0) drawWindowEditor();
     const duration = h("input", {
       type: "number",
       name: "durationMinutes",
@@ -314,8 +376,8 @@ class TestDetail extends ExamElement {
         onSubmit: async (event) => {
           event.preventDefault();
           const body = {
-            opensAt: new Date(opensAt.value).toISOString(),
-            closesAt: new Date(closesAt.value).toISOString(),
+            opensAt: windowState.opensAt,
+            closesAt: windowState.closesAt,
             durationMinutes: Number(duration.value),
             participants: whole.checked ? null : [...people.querySelectorAll("input:checked")].map((input) => input.value),
           };
@@ -328,8 +390,7 @@ class TestDetail extends ExamElement {
         },
       },
       h("h3", {}, sitting ? "Change the sitting" : makeup ? "Schedule a make-up sitting" : "Schedule the sitting"),
-      h("label", {}, "Opens ", opensAt),
-      h("label", {}, "Closes ", closesAt),
+      periods.length > 0 ? windowEditor : this.clockEditor(windowState),
       h("label", {}, "Minutes per attempt ", duration),
       makeup
         ? h(
@@ -345,6 +406,71 @@ class TestDetail extends ExamElement {
       message
     );
     this.sittingForm.replaceChildren(form);
+  }
+
+  /**
+   * The clock-time editor: the two fields of a sitting without periods, in
+   * the browser's time zone. Each writes its instant into `windowState`.
+   */
+  clockEditor(windowState) {
+    const field = (name, label) => {
+      const input = h("input", { type: "datetime-local", name, required: true, value: localInput(windowState[name]) });
+      input.addEventListener("input", () => {
+        const time = new Date(input.value);
+        if (!Number.isNaN(time.getTime())) windowState[name] = time.toISOString();
+      });
+      return h("label", {}, label, input);
+    };
+    return [field("opensAt", "Opens "), field("closesAt", "Closes ")];
+  }
+
+  /**
+   * The periods editor: a date and a from and to period, each choice with its
+   * clock times as its tooltip, the to period never before the from period,
+   * and the window they make shown as it changes. Hands every new window to
+   * `changed`.
+   */
+  periodsEditor(windowState, changed) {
+    const periods = this.periods;
+    const current = matchWindow(periods, windowState.opensAt, windowState.closesAt);
+    const select = (name, numbers, selected) => {
+      const element = h(
+        "select",
+        { name, required: true },
+        numbers.map((period) => h("option", { value: String(period.n), title: periodTimes(periods, period.n) }, String(period.n)))
+      );
+      element.value = String(selected);
+      return element;
+    };
+    const date = h("input", { type: "date", name: "date", required: true, value: current.date });
+    const from = select("fromPeriod", periods, current.from);
+    let to = select("toPeriod", periods.filter((period) => period.n >= current.from), current.to);
+    const toLabel = h("label", {}, "To period ", to);
+    const times = h("span", { class: "sl-exam-sitting-times" });
+    const update = () => {
+      const fromN = Number(from.value);
+      const toN = Math.max(fromN, Number(to.value));
+      if (Number(to.firstChild?.value) !== fromN) {
+        const replaced = select("toPeriod", periods.filter((period) => period.n >= fromN), toN);
+        replaced.addEventListener("change", update);
+        to.replaceWith(replaced);
+        to = replaced;
+      }
+      times.replaceChildren(periodTimes(periods, fromN, toN));
+      if (/^\d{4}-\d{2}-\d{2}$/.test(date.value)) changed(windowFor(periods, date.value, fromN, toN));
+    };
+    for (const input of [date, from, to]) input.addEventListener("change", update);
+    date.addEventListener("input", update);
+    times.replaceChildren(periodTimes(periods, current.from, current.to));
+    return [
+      h("label", {}, "Date ", date),
+      " ",
+      h("label", {}, "From period ", from),
+      " ",
+      toLabel,
+      " ",
+      h("span", { class: "sl-exam-quiet" }, "= ", times),
+    ];
   }
 
   editSitting(test, sitting) {

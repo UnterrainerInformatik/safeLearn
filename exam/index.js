@@ -10,8 +10,8 @@
  *   { active: false, reason }
  *
  * and never rejects for a reason it can name: a database that cannot be opened,
- * a failed migration or a read-only data directory disable the module, and the
- * reader keeps serving.
+ * a failed migration, a read-only data directory or a malformed
+ * `SCHOOL_PERIODS` disable the module, and the reader keeps serving.
  */
 
 import express from "express";
@@ -34,6 +34,7 @@ import { registerTestRoutes } from "./routes-tests.js";
 import { registerAttemptRoutes } from "./routes-attempts.js";
 import { registerLiveRoutes } from "./routes-live.js";
 import { openTestsOf, scheduleSweep } from "./attempts.js";
+import { parsePeriods } from "./client/periods.js";
 
 const clientDir = path.join(import.meta.dirname, "client");
 const clientScript = "/exam/assets/exam-client.js";
@@ -76,7 +77,7 @@ function refusalStatus(error) {
   return null;
 }
 
-function buildRouter(db, startPage) {
+function buildRouter(db, startPage, periods) {
   const router = express.Router();
 
   // The module's client: its directory and nothing beside it. Mounted here, so
@@ -85,6 +86,7 @@ function buildRouter(db, startPage) {
 
   // Who the module takes this session for. The client's first question, and
   // the one place a session can see the student-view downgrade from outside.
+  // It carries the school's periods too, so no element asks a second time.
   router.get(
     "/api/me",
     handle(async (req, res) => {
@@ -93,7 +95,7 @@ function buildRouter(db, startPage) {
         res.status(403).json({ error: "Forbidden" });
         return;
       }
-      res.json({ username, teacher: await actsAsTeacher(req) });
+      res.json({ username, teacher: await actsAsTeacher(req), periods });
     })
   );
 
@@ -165,6 +167,14 @@ function buildRouter(db, startPage) {
  * `startPage` is `app.js`'s own resolver, for the page frame's "Home" link.
  */
 export async function init({ startPage }) {
+  // The school's periods, checked before anything is opened: a value nobody
+  // can read would otherwise fall back to clock times unnoticed.
+  let periods;
+  try {
+    periods = parsePeriods(process.env.SCHOOL_PERIODS);
+  } catch (error) {
+    return { active: false, reason: error.message };
+  }
   const dbPath = databasePath();
   let opened;
   try {
@@ -193,7 +203,7 @@ export async function init({ startPage }) {
   scheduleSweep(db);
   return {
     active: true,
-    router: buildRouter(db, startPage),
+    router: buildRouter(db, startPage, periods),
     embedHandlers: buildEmbedHandlers(),
     clientScript,
     // Whether the session has a test open for it right now, for the colour of

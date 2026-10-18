@@ -30,6 +30,7 @@ import {
 import { openDatabase } from "../exam/db.js";
 import { importPool } from "../exam/pool-import.js";
 import { purgeUploads } from "../exam/pool-edit.js";
+import { viennaInstant, viennaLocal } from "../exam/client/periods.js";
 
 const run = useExamModule();
 
@@ -111,10 +112,10 @@ describe("the instance with the exam module", () => {
   test("answers who a session is, after the student-view downgrade", async () => {
     const asTeacher = await fetchAs(teacher, "/exam/api/me");
     assert.equal(asTeacher.status, 200);
-    assert.deepEqual(asTeacher.json, { username: teacher.username.toLowerCase(), teacher: true });
+    assert.deepEqual(asTeacher.json, { username: teacher.username.toLowerCase(), teacher: true, periods: [] });
 
     const asStudent = await fetchAs(student, "/exam/api/me");
-    assert.deepEqual(asStudent.json, { username: student.username.toLowerCase(), teacher: false });
+    assert.deepEqual(asStudent.json, { username: student.username.toLowerCase(), teacher: false, periods: [] });
 
     await setPreferences(teacher, { vt: 0 });
     try {
@@ -2783,5 +2784,189 @@ describe("online tests: a restart", () => {
     assert.deepEqual(resumed.json.questions.find((q) => q.n === first.n).chosen, [first.answers[1].token], "the saved answer is there");
     assert.ok(resumed.json.remainingMs > 0 && resumed.json.remainingMs <= writing.remainingMs, "and the time left runs on");
     await fetchAs(student, `/exam/api/attempts/${writing.attempt}/submit`, { method: "POST" });
+  });
+});
+
+// After the restart above, and restarting twice more: the school's periods
+// are read when the module starts (`school-periods`).
+describe("the school's periods", () => {
+  const schoolList =
+    "0=07:05-07:55,1=08:00-08:50,2=08:55-09:45,3=10:00-10:50,4=10:55-11:45,5=11:50-12:40,6=12:45-13:35,7=13:40-14:30," +
+    "8=14:35-15:25,9=15:30-16:20,10=16:25-17:15,11=17:20-18:05,12=18:05-18:50,13=19:00-19:45,14=19:45-20:30,15=20:40-21:25,16=21:25-22:10";
+  // Two days ahead, so every sitting below is still scheduled and can change.
+  const date = viennaLocal(Date.now() + 2 * 24 * 60 * 60 * 1000).date;
+  const at = (time) => viennaInstant(date, time).toISOString();
+  let teacher;
+  let course;
+  let questions;
+  let byForm;
+  let offGrid;
+
+  /** A new test of the GB course with the pool's questions. */
+  async function newTest(name) {
+    const created = await fetchAs(teacher, `/exam/api/courses/${course.id}/tests`, { method: "POST", body: { name, questionIds: questions.map((q) => q.id) } });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    return created.json;
+  }
+
+  /** The window of each sitting on a page, with the tooltip of its periods if it shows any. */
+  async function windows(page, selector) {
+    await page.waitForSelector(`${selector} .sl-exam-window`, { timeout: 20000 });
+    return page.$$eval(`${selector} .sl-exam-window`, (spans) =>
+      spans.map((span) => ({ text: span.textContent, title: span.querySelector(".sl-exam-periods")?.title ?? null }))
+    );
+  }
+
+  before(async () => {
+    teacher = await sharedSession("teacher");
+    // The clock-time fields are in the browser's time zone; the periods are Vienna's.
+    await teacher.page.emulateTimezone("Europe/Vienna");
+    const year = (await fetchAs(teacher, "/exam/api/years")).json.current;
+    const gbClass = (await fetchAs(teacher, `/exam/api/years/${year.id}/classes`)).json.find((c) => c.name === "9xgb");
+    course = (await fetchAs(teacher, `/exam/api/classes/${gbClass.id}`)).json.courses.find((c) => c.subject === "GB");
+    questions = (await fetchAs(teacher, "/exam/api/pool/questions")).json;
+  });
+
+  test("without SCHOOL_PERIODS the form and every window are in clock times, as before", async () => {
+    assert.deepEqual((await fetchAs(teacher, "/exam/api/me")).json.periods, []);
+    const plain = await newTest("Periods: none configured");
+    const created = await fetchAs(teacher, `/exam/api/tests/${plain.id}/sittings`, { method: "POST", body: { opensAt: at("10:00"), closesAt: at("11:45"), durationMinutes: 15 } });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    await teacher.page.goto(`${applicationUrl}/exam/tests/${plain.id}`, { waitUntil: "domcontentloaded" });
+    const [shown] = await windows(teacher.page, `li[data-sitting="${created.json.id}"]`);
+    assert.equal(shown.title, null, "no periods");
+    assert.match(shown.text, /^\d\d\.\d\d\.\d\d,? 10:00 – 11:45$/, shown.text);
+    const form = await teacher.page.$eval(".sl-exam-sitting-form form", (form) => ({
+      fields: [...form.querySelectorAll("input, select")].map((input) => input.name),
+      toggle: Boolean(form.querySelector(".sl-exam-sitting-mode")),
+      wrapper: Boolean(form.querySelector(".sl-exam-sitting-window")),
+    }));
+    assert.deepEqual(form.fields.slice(0, 3), ["opensAt", "closesAt", "durationMinutes"], "today's fields, in today's order");
+    assert.equal(form.fields.includes("fromPeriod"), false);
+    assert.equal(form.toggle, false, "no switch");
+    assert.equal(form.wrapper, false);
+  });
+
+  test("a malformed SCHOOL_PERIODS switches the module off and the reader keeps serving", async () => {
+    await restartApplication({ env: { SCHOOL_PERIODS: "1=8-9" } });
+    assert.match(applicationOutput(), /Exam module: disabled - SCHOOL_PERIODS: the entry "1=8-9" is not of the form/);
+    await reauthenticate(teacher);
+    assert.equal((await fetchAs(teacher, plainPage)).status, 200, "pages are served");
+    const me = await fetchAs(teacher, "/exam/api/me");
+    assert.ok(me.redirected && !me.servedFrom.startsWith("/exam/"), "the module is not there: /exam/ lands where a path with nothing behind it lands");
+  });
+
+  test("with the school's list, /me carries the periods", async () => {
+    await restartApplication({ env: { SCHOOL_PERIODS: schoolList } });
+    assert.match(applicationOutput(), /Exam module: active/);
+    await reauthenticate(teacher);
+    const periods = (await fetchAs(teacher, "/exam/api/me")).json.periods;
+    assert.equal(periods.length, 17);
+    assert.deepEqual(periods[12], { n: 12, start: "18:05", end: "18:50" });
+  });
+
+  test("scheduling periods 3 to 4 stores 10:00 to 11:45 Vienna time, each choice with its times as tooltip", async () => {
+    byForm = await newTest("Periods: by form");
+    const page = teacher.page;
+    await page.goto(`${applicationUrl}/exam/tests/${byForm.id}`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".sl-exam-sitting-form select[name=fromPeriod]", { timeout: 20000 });
+    const fresh = await page.$eval(".sl-exam-sitting-form form", (form) => ({
+      opensAt: Boolean(form.querySelector("input[name=opensAt]")),
+      toggle: form.querySelector(".sl-exam-sitting-mode")?.textContent,
+      tag: form.querySelector(".sl-exam-sitting-mode")?.tagName,
+    }));
+    assert.deepEqual(fresh, { opensAt: false, toggle: "Exact times instead", tag: "BUTTON" }, "a new sitting starts with periods");
+    await page.$eval(
+      ".sl-exam-sitting-form input[name=date]",
+      (input, value) => {
+        input.value = value;
+        input.dispatchEvent(new Event("change"));
+      },
+      date
+    );
+    await page.select(".sl-exam-sitting-form select[name=fromPeriod]", "5");
+    assert.deepEqual(
+      await page.$eval(".sl-exam-sitting-form select[name=toPeriod]", (select) => ({ first: select.options[0].value, value: select.value })),
+      { first: "5", value: "5" },
+      "the to period offers nothing before the from period, and moves up to it"
+    );
+    await page.select(".sl-exam-sitting-form select[name=fromPeriod]", "3");
+    await page.select(".sl-exam-sitting-form select[name=toPeriod]", "4");
+    const chosen = await page.$eval(".sl-exam-sitting-form form", (form) => ({
+      times: form.querySelector(".sl-exam-sitting-times").textContent,
+      twelve: form.querySelector('select[name=toPeriod] option[value="12"]').title,
+      three: form.querySelector('select[name=fromPeriod] option[value="3"]').title,
+    }));
+    assert.deepEqual(chosen, { times: "10:00–11:45", twelve: "18:05–18:50", three: "10:00–10:50" });
+    await page.click(".sl-exam-sitting-form button[type=submit]");
+    await page.waitForSelector(".sl-exam-test-sittings li[data-sitting]", { timeout: 10000 });
+    const [stored] = (await fetchAs(teacher, `/exam/api/tests/${byForm.id}`)).json.sittings;
+    assert.equal(stored.opensAt, at("10:00"));
+    assert.equal(stored.closesAt, at("11:45"));
+  });
+
+  test("the sittings of a test, the list of tests and the live view show periods 3–4 with 10:00–11:45 as tooltip", async () => {
+    const [sitting] = (await fetchAs(teacher, `/exam/api/tests/${byForm.id}`)).json.sittings;
+    const expected = { text: new RegExp(`^[A-Z][a-z] ${date.slice(8, 10)}\\.${date.slice(5, 7)}\\. · periods 3–4$`), title: "10:00–11:45" };
+    const check = ([shown], where) => {
+      assert.match(shown.text, expected.text, `${where}: ${shown.text}`);
+      assert.equal(shown.title, expected.title, where);
+    };
+    check(await windows(teacher.page, `li[data-sitting="${sitting.id}"]`), "the sittings of the test");
+    await teacher.page.goto(`${applicationUrl}/exam/tests?course=${course.id}`, { waitUntil: "domcontentloaded" });
+    check(await windows(teacher.page, `tr[data-test="${byForm.id}"]`), "the list of tests");
+    await teacher.page.goto(`${applicationUrl}/exam/sittings/${sitting.id}/live`, { waitUntil: "domcontentloaded" });
+    check(await windows(teacher.page, ".sl-exam-live-window"), "the live view");
+    // Redrawn every second, the time left changes and the periods stay the same node.
+    await teacher.page.$eval(".sl-exam-live-window .sl-exam-periods", (span) => (span.dataset.kept = "1"));
+    const before = await teacher.page.$eval(".sl-exam-live-window", (el) => el.textContent);
+    await new Promise((resolve) => setTimeout(resolve, 2200));
+    const later = await teacher.page.$eval(".sl-exam-live-window", (el) => ({ text: el.textContent, kept: el.querySelector(".sl-exam-periods")?.dataset.kept }));
+    assert.notEqual(later.text, before, "the time left counts");
+    assert.equal(later.kept, "1", "the tooltip's element stays put");
+    await teacher.page.goto(`${applicationUrl}/exam/sittings/${sitting.id}/screen`, { waitUntil: "domcontentloaded" });
+    check(await windows(teacher.page, ".sl-exam-screen-window"), "the class screen");
+  });
+
+  test("switching a sitting on periods to exact times carries its window over", async () => {
+    const [sitting] = (await fetchAs(teacher, `/exam/api/tests/${byForm.id}`)).json.sittings;
+    const page = teacher.page;
+    await page.goto(`${applicationUrl}/exam/tests/${byForm.id}`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(`li[data-sitting="${sitting.id}"] .sl-exam-sitting-edit`, { timeout: 20000 });
+    await page.click(`li[data-sitting="${sitting.id}"] .sl-exam-sitting-edit`);
+    const editing = await page.$eval(".sl-exam-sitting-form form", (form) => ({
+      from: form.querySelector("select[name=fromPeriod]")?.value,
+      to: form.querySelector("select[name=toPeriod]")?.value,
+      date: form.querySelector("input[name=date]")?.value,
+    }));
+    assert.deepEqual(editing, { from: "3", to: "4", date });
+    await page.click(".sl-exam-sitting-form .sl-exam-sitting-mode");
+    const exact = await page.$eval(".sl-exam-sitting-form form", (form) => ({
+      opensAt: form.querySelector("input[name=opensAt]").value,
+      closesAt: form.querySelector("input[name=closesAt]").value,
+      toggle: form.querySelector(".sl-exam-sitting-mode").textContent,
+    }));
+    assert.deepEqual(exact, { opensAt: `${date}T10:00`, closesAt: `${date}T11:45`, toggle: "Periods instead" });
+  });
+
+  test("a sitting off the periods shows clock times and opens the form in exact times", async () => {
+    offGrid = await newTest("Periods: off the grid");
+    const created = await fetchAs(teacher, `/exam/api/tests/${offGrid.id}/sittings`, { method: "POST", body: { opensAt: at("10:05"), closesAt: at("10:55"), durationMinutes: 15 } });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    const page = teacher.page;
+    await page.goto(`${applicationUrl}/exam/tests/${offGrid.id}`, { waitUntil: "domcontentloaded" });
+    const [shown] = await windows(page, `li[data-sitting="${created.json.id}"]`);
+    assert.equal(shown.title, null);
+    assert.match(shown.text, /10:05 – 10:55$/, shown.text);
+    await page.click(`li[data-sitting="${created.json.id}"] .sl-exam-sitting-edit`);
+    const editing = await page.$eval(".sl-exam-sitting-form form", (form) => ({
+      opensAt: form.querySelector("input[name=opensAt]")?.value,
+      closesAt: form.querySelector("input[name=closesAt]")?.value,
+      toggle: form.querySelector(".sl-exam-sitting-mode")?.textContent,
+    }));
+    assert.deepEqual(editing, { opensAt: `${date}T10:05`, closesAt: `${date}T10:55`, toggle: "Periods instead" });
+    // Back to periods: the date stays, the periods are the ones a new sitting gets.
+    await page.click(".sl-exam-sitting-form .sl-exam-sitting-mode");
+    assert.equal(await page.$eval(".sl-exam-sitting-form input[name=date]", (input) => input.value), date);
   });
 });

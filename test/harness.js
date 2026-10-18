@@ -300,10 +300,12 @@ export async function applicationStillRunning() {
  * process ends and a new one starts against the same directory. Every
  * session held in the old process's memory is gone; `reauthenticate` brings a
  * session back through the identity provider's single sign-on, without a new
- * login.
+ * login. `env`, if given, is merged into the instance's environment from this
+ * start on.
  */
-export async function restartApplication() {
+export async function restartApplication({ env } = {}) {
   if (!server || server.adopted) throw new Error("Only an instance this run started can be restarted.");
+  if (env) instance.env = { ...instance.env, ...env };
   await stopServer({ keepExamDir: true });
   await ensureServer();
 }
@@ -362,7 +364,9 @@ export function useExamModule() {
   reachableHosts = new Set([new URL(applicationUrl).host, new URL(identityProviderUrl).host]);
   const examDir = mkdtempSync(path.join(os.tmpdir(), "safelearn-exam-run-"));
   instance = {
-    env: { EXAM_MODULE: "on", EXAM_DB_PATH: path.join(examDir, "exam.sqlite") },
+    // No school periods unless a check restarts with them, whatever the
+    // shell running the suite has set.
+    env: { EXAM_MODULE: "on", EXAM_DB_PATH: path.join(examDir, "exam.sqlite"), SCHOOL_PERIODS: "" },
     adopt: false,
     examDir,
   };

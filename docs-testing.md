@@ -54,6 +54,7 @@ Each check reports on its own, and the process exits non-zero if any of them fai
 * creates a directory under the system's temporary directory and points `EXAM_DB_PATH` into it, so the run's database and its backups live there and nowhere else;
 * starts the instance on a port of its own, `SAFELEARN_TEST_EXAM_PORT` (default `8089`, registered on the demo client; the WYSIWYG container's `8081` stays free), and **never adopts** an instance it finds there — an instance this run did not start holds a database this run did not create, so a busy port fails the run with a message saying so;
 * removes the directory when the run ends, by success, failure or interruption.
+* passes `SCHOOL_PERIODS` as empty, so the run starts without the school's periods whatever the shell has set; the last checks of the file restart the instance with a malformed list and then with the school's list (`restartApplication({ env })`).
 
 Two runs in a row therefore never see each other's records. Every other check runs against an instance started with `EXAM_MODULE` passed as empty, so a developer's `.env` cannot switch the module on underneath them.
 

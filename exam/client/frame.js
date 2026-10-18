@@ -46,6 +46,20 @@ export async function examApi(path, { method = "GET", body } = {}) {
   return response.json();
 }
 
+let me = null;
+
+/**
+ * What `/me` answers - who the module takes this session for, and the
+ * school's periods - asked once per page and shared by every element on it.
+ */
+export function examMe() {
+  me ??= examApi("/me").catch((error) => {
+    me = null;
+    throw error;
+  });
+  return me;
+}
+
 /**
  * Builds an element: `h("a", { href: "/x", class: "y" }, "text", child)`.
  * Properties starting with `on` become listeners; text is always set as text,

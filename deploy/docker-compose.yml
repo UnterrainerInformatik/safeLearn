@@ -23,6 +23,10 @@ services:
       # including empty - leaves the instance without it. Its database lives on
       # the data volume below, beside the directory cache.
       - EXAM_MODULE=${EXAM_MODULE}
+      # The school's teaching periods for scheduling sittings, e.g.
+      # "1=08:00-08:50,2=08:55-09:45" (docs-exam-module.md). Empty, sittings are
+      # scheduled and shown in clock times; malformed, the module stays off.
+      - SCHOOL_PERIODS=${SCHOOL_PERIODS}
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro

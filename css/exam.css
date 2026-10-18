@@ -706,8 +706,32 @@ a.sl-exam-button.sl-exam-open:hover,
   max-width: 34em;
 }
 
-.sl-exam-sitting-form input {
+.sl-exam-sitting-form input,
+.sl-exam-sitting-form select {
   font: inherit;
+}
+
+/* The window of a sitting with the school's periods: date and periods, or
+   the clock times, with the button that switches between them. */
+.sl-exam-sitting-window {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sl-exam-sitting-window p {
+  margin: 0;
+}
+
+.sl-exam-sitting-times {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A period or range of periods; its clock times are its tooltip. */
+.sl-exam-periods {
+  text-decoration: underline dotted;
+  text-underline-offset: 0.2em;
+  cursor: help;
 }
 
 .sl-exam-sitting-people {

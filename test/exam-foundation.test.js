@@ -375,9 +375,22 @@ describe("the embedding hooks", () => {
 
 describe("starting the module", () => {
   const originalDbPath = process.env.EXAM_DB_PATH;
+  const originalPeriods = process.env.SCHOOL_PERIODS;
   afterEach(() => {
     if (originalDbPath === undefined) delete process.env.EXAM_DB_PATH;
     else process.env.EXAM_DB_PATH = originalDbPath;
+    if (originalPeriods === undefined) delete process.env.SCHOOL_PERIODS;
+    else process.env.SCHOOL_PERIODS = originalPeriods;
+  });
+
+  test("a malformed SCHOOL_PERIODS disables the module with the entry named, before the database is opened", async () => {
+    const dir = temporaryDir();
+    process.env.EXAM_DB_PATH = path.join(dir, "exam.sqlite");
+    process.env.SCHOOL_PERIODS = "1=08:00-08:50,2=08:45-09:35";
+    const started = await init({ startPage: () => "/index.html" });
+    assert.equal(started.active, false);
+    assert.match(started.reason, /^SCHOOL_PERIODS: period 2 \("2=08:45-09:35"\) overlaps period 1/);
+    assert.equal(fs.existsSync(process.env.EXAM_DB_PATH), false, "no database is created");
   });
 
   test("a database that cannot be opened disables the module with a reason", { skip: process.getuid?.() === 0 }, async () => {
@@ -392,6 +405,7 @@ describe("starting the module", () => {
 
   test("a module request that throws fails alone with a server error", async () => {
     process.env.EXAM_DB_PATH = path.join(temporaryDir(), "exam.sqlite");
+    delete process.env.SCHOOL_PERIODS;
     const started = await init({ startPage: () => "/index.html" });
     assert.equal(started.active, true);
 
@@ -425,7 +439,7 @@ describe("starting the module", () => {
 
       const next = await originalFetch(`${base}/exam/api/me`);
       assert.equal(next.status, 200, "the next request is answered as if nothing happened");
-      assert.deepEqual(await next.json(), { username: "sdent", teacher: false });
+      assert.deepEqual(await next.json(), { username: "sdent", teacher: false, periods: [] });
     } finally {
       console.error = originalConsoleError;
       await new Promise((resolve) => server.close(resolve));

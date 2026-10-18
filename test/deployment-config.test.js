@@ -232,11 +232,25 @@ test("the exam module is switched by the container's environment", () => {
   );
 });
 
+test("the school's periods reach the container through its environment", () => {
+  assert.ok(
+    containerEnv.has("SCHOOL_PERIODS") && deployEnv.has("SCHOOL_PERIODS"),
+    `SCHOOL_PERIODS is expected in ${composePath}'s environment: block and in deploy/.env — see ` +
+      `docs-exam-module.md.`
+  );
+  assert.ok(
+    !imageEnv.has("SCHOOL_PERIODS"),
+    `SCHOOL_PERIODS is baked into the image's own .env by ${workflowPath}. The periods are one ` +
+      `school's, and the image serves every deployment.`
+  );
+});
+
 test("the WYSIWYG containers run without the exam module", () => {
   for (const template of ["wysiwyg-container-linux", "wysiwyg-container-windows"]) {
     const file = `${template}/docker-compose.yml`;
     const text = readFileSync(path.join(projectRoot, file), "utf8");
     assert.ok(!/EXAM_MODULE/.test(text), `${file} sets EXAM_MODULE; the WYSIWYG container runs without the module.`);
+    assert.ok(!/SCHOOL_PERIODS/.test(text), `${file} sets SCHOOL_PERIODS; the WYSIWYG container runs without the module.`);
     assert.ok(!/\/app\/data/.test(text), `${file} mounts a data volume; the WYSIWYG container keeps no data.`);
   }
 });

@@ -299,8 +299,8 @@ app.use((req, res, next) => {
  * With `EXAM_MODULE` anything but "on", its code is never loaded: no database
  * is opened, no route exists, and the instance is the one it was before the
  * module. With it on, a module that cannot start - the import fails, the
- * database cannot be opened, a migration fails - is logged as disabled and the
- * reader starts without it. Resolves to the started module or null.
+ * database cannot be opened, a migration fails, `SCHOOL_PERIODS` is malformed -
+ * is logged as disabled and the reader starts without it. Resolves to the started module or null.
  */
 async function loadExamModule() {
   if (process.env.EXAM_MODULE !== "on") {

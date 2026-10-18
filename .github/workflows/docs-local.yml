@@ -168,6 +168,10 @@ jobs:
             # instance runs without the module, which is what a deployment gets
             # until it decides otherwise.
             echo EXAM_MODULE=${{ vars.EXAM_MODULE }} >> ./deploy/.env
+            # The school's periods for the exam module (docs-exam-module.md),
+            # a repository variable for the same reason. Unset, sittings are
+            # scheduled in clock times.
+            echo SCHOOL_PERIODS=${{ vars.SCHOOL_PERIODS }} >> ./deploy/.env
       - name: Normalize line endings for deploy scripts
         run: |
             sudo apt-get update -y

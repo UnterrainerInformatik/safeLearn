@@ -21,7 +21,7 @@
  * is told so, and the view stops.
  */
 
-import { defineExamElement, ExamApiError, ExamElement, examApi, h } from "./frame.js";
+import { defineExamElement, ExamApiError, ExamElement, examApi, examMe, h } from "./frame.js";
 import { displayClass, displayPerson } from "./classes.js";
 import { displayWindow } from "./tests.js";
 
@@ -68,7 +68,9 @@ class LiveView extends ExamElement {
   }
 
   async load() {
-    return examApi(`/sittings/${this.params.sitting}/live`);
+    const [snapshot, me] = await Promise.all([examApi(`/sittings/${this.params.sitting}/live`), examMe()]);
+    this.periods = me.periods ?? [];
+    return snapshot;
   }
 
   render(snapshot) {
@@ -76,7 +78,12 @@ class LiveView extends ExamElement {
     this.sitting = snapshot.sitting;
     this.badge = h("span", { class: "sl-exam-live-badge" });
     this.state = h("span", { class: "sl-exam-quiet sl-exam-live-state", role: "status" });
-    this.windowLine = h("span", { class: "sl-exam-live-window" });
+    // The window is drawn only when it changes, the time beside it every
+    // second, so a period's tooltip stays put under the cursor.
+    this.windowShown = h("span", {});
+    this.windowKey = null;
+    this.remainingText = h("span", {});
+    this.windowLine = h("span", { class: "sl-exam-live-window" }, "Window ", this.windowShown, this.remainingText);
     this.serverClock = h("span", { class: "sl-exam-live-clock" });
     this.message = h("p", { class: "sl-exam-message", role: "status" });
     this.body = h("tbody", {});
@@ -167,13 +174,17 @@ class LiveView extends ExamElement {
     this.badge.dataset.state = state;
     const remaining = state === "scheduled" ? `opens in ${span(opens - now)}` : state === "open" ? `closes in ${span(closes - now)}` : `closed ${span(now - closes)} ago`;
     this.serverClock.textContent = localClock.format(new Date(now));
+    const key = `${this.sitting.opensAt} ${this.sitting.closesAt}`;
+    if (key !== this.windowKey) {
+      this.windowKey = key;
+      this.windowShown.replaceChildren(displayWindow(this.sitting, this.periods));
+    }
     if (this.bigRemaining) {
-      this.windowLine.textContent = `Window ${displayWindow(this.sitting)}`;
       this.bigLabel.textContent = state === "scheduled" ? "Opens in" : state === "open" ? "Closes in" : "Closed";
       this.bigRemaining.textContent = state === "over" ? "–" : span(state === "scheduled" ? opens - now : closes - now);
       return;
     }
-    this.windowLine.textContent = `Window ${displayWindow(this.sitting)} · ${remaining}`;
+    this.remainingText.textContent = ` · ${remaining}`;
   }
 
   /** Draws a whole snapshot. */
