@@ -61,10 +61,12 @@ Kurze Multiple-Choice-Tests (typisch 4 Fragen in 10 min), die in safeLearn gesch
 ## Betriebsstufe 1: Publishing ohne Keycloak (eigener Change, nach P4)
 safeLearn soll sich auch ohne Keycloak betreiben lassen: `AUTH=none`, kein Login, jeder Leser hat genau die Rollen aus `READER_ROLES` (z. B. `teacher,examParticipant,4bhif`). Ohne die Variable hat er keine Rolle, und jeder eingeschränkte Abschnitt bleibt verborgen. Gedacht für den WYSIWYG-Container, dessen Vorlage `READER_ROLES=teacher` mitbringt, und für reines Publishing. Einstellungen und zuletzt besuchte Seite liegen im Browser. Was der Server beim Rendern braucht (`vt`, `ve`, …), muss als Cookie mitkommen, nicht über `localStorage`. Die Umschalter bleiben sichtbar, soweit die Rollen sie erlauben. `AUTH=none` muss ausdrücklich gesetzt sein und darf nie als Rückfall greifen, und `EXAM_MODULE=on` zusammen mit `AUTH=none` bricht den Start ab. Die Details stehen in `AI/exam-module-plan.md`, Abschnitt 3. Geschätzt 3–5 Arbeitstage, nicht auf dem kritischen Pfad für den 05.02.2027.
 
-## Admin-Seiten für Lehrer im Menü
+## Admin-Seiten für Lehrer im Menü (Change `teacher-admin-pages` angelegt 2026-10-18)
 Eigene Übersichtsseiten in der Web-App, die Lehrer über das Menü öffnen können. Erste zwei Seiten: (1) **unreferenzierte Anhänge**: die Liste, die `attachment-access-control` beim Start ins Log schreibt, als Seite, damit man die Dateien aus dem Repo werfen kann; (2) **Directory-/LDAP-Zustand**: das, was das Obsidian-Plugin heute auf seiner Übersichtsseite zeigt (Fetch-Status, Einträge, `builtAt`, übersprungene Datensätze, siehe `/api/admin/directory/status`). Hier im Browser mit Session-Auth statt Bearer-Token. Gibt es nur in Stufe 2 und 3, weil sie eine Lehrer-Identität brauchen.
 
 # Prüfungsmodul-UI (Design-Review 2026-10-18)
+
+Als Changes angelegt am 2026-10-18: alles außer den letzten beiden Einträgen in `exam-ui-consistency`, dazu `exam-my-hide-results-while-writing` und `exam-live-bound-browser`.
 
 Leitlinien von Gerald für alle Einträge hier:
 - Aktionen sind Buttons, keine Links.
@@ -144,12 +146,12 @@ Ein Muster fürs ganze Modul; der Zweimal-Klick passt zu "keine Browser-Dialoge"
 - **Datum:** de-AT im Pool und Import, Browser-Locale in Klassen und Notenbuch.
 - **Schreibseite:** Sie ist DE/EN lokalisiert, ihre Ergebnisanzeige und "Time is up" in der Vorschau sind aber nur Englisch.
 
-## Schüler-Seite "Exams" (`/exam/my`): Ergebnisse während des Schreibens
+## Schüler-Seite "Exams" (`/exam/my`): Ergebnisse während des Schreibens (Change `exam-my-hide-results-while-writing`)
 Seit 2026-10-18 zeigt die Seite offene Tests und Ergebnisse untereinander. Läuft ein Versuch, steht die Schreibansicht oben und die Ergebnisse darunter.
 
 **Entschieden (Gerald, 2026-10-18):** Während eines laufenden Versuchs werden die Ergebnisse ausgeblendet. Bis zur Abgabe sind sie uninteressant und lenken nur ab. Nach der Abgabe erscheinen sie wieder.
 
-## Live-Ansicht: "bound to browser" statt "Release to another browser"
+## Live-Ansicht: "bound to browser" statt "Release to another browser" (Change `exam-live-bound-browser`)
 In der Live-Ansicht (`client/live.js`) gibt es pro Schüler, der gerade schreibt, den Button **Release to another browser**. Er hebt die Bindung des Versuchs an den Browser auf, in dem er gestartet wurde, damit der Schüler auf einem anderen Gerät weiterschreiben kann. Das versteht man ohne Erklärung nicht.
 
 **Gerald, 2026-10-18:**
