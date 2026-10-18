@@ -232,6 +232,16 @@ test("the exam module is switched by the container's environment", () => {
   );
 });
 
+test("the image ships the interface catalogs", () => {
+  // app.js and obsidian.js import i18n/ on every instance, module or not; an
+  // image without it does not start.
+  assert.match(
+    readFileSync(path.join(projectRoot, "Dockerfile"), "utf8"),
+    /^COPY i18n\/ \/app\/i18n$/m,
+    "the Dockerfile has to copy i18n/ into the image"
+  );
+});
+
 test("the school's periods reach the container through its environment", () => {
   assert.ok(
     containerEnv.has("SCHOOL_PERIODS") && deployEnv.has("SCHOOL_PERIODS"),

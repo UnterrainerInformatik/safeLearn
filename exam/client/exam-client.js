@@ -12,8 +12,9 @@
  * own, imported here before anything is mounted.
  */
 
-import { elementFor } from "./frame.js";
+import { elementFor, t } from "./frame.js";
 import { connectBar } from "./bar.js";
+import "./date-input.js";
 import "./classes.js";
 import "./gradebook.js";
 import "./pool.js";
@@ -36,7 +37,7 @@ function mount(placeholder) {
   if (!name) {
     const status = placeholder.querySelector(".sl-embed-status") ?? placeholder;
     status.classList.add("sl-embed-error");
-    status.textContent = "This element is not available on this instance yet.";
+    status.textContent = t("exam.frame.notAvailable");
     return;
   }
   const element = document.createElement(name);

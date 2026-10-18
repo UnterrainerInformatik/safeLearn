@@ -19,12 +19,17 @@ import { identityOf, requireStudent, sessionNow } from "./gate.js";
 import { listenTests } from "./live.js";
 import { openEventStream } from "../event-stream.js";
 import { embedPlaceholder, wrapInPage } from "../obsidian.js";
+import { i18nOf } from "../i18n/server.js";
 
 /** A record id from the path; anything but a positive integer names nothing. */
 function idParam(value) {
   const id = typeof value === "string" && /^[1-9]\d{0,9}$/.test(value) ? Number(value) : null;
-  if (id === null) throw new NotFoundError("There is no such record.");
+  if (id === null) throw new NotFoundError("exam.errors.attempts.noSuchRecord");
   return id;
+}
+
+function escapeHtml(text) {
+  return String(text).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 }
 
 const cookieName = (attemptId) => `sl-attempt-${attemptId}`;
@@ -209,13 +214,15 @@ export function registerAttemptRoutes(router, { db, handle, startPage }) {
     "/my",
     (req, res, next) => (identityOf(req) ? next() : next("router")),
     handle(async (req, res) => {
-      const title = "Exams";
+      const { t } = await i18nOf(req);
+      const title = t("exam.my.title");
+      const loading = t("app.embed.loading");
       const body = `
-        <h1>${title}</h1>
-        <h2>Open online tests</h2>
-        ${embedPlaceholder("test", {})}
-        <h2>My results</h2>
-        ${embedPlaceholder("results", { page: "1" })}`;
+        <h1>${escapeHtml(title)}</h1>
+        <h2>${escapeHtml(t("exam.my.openTests"))}</h2>
+        ${embedPlaceholder("test", {}, loading)}
+        <h2>${escapeHtml(t("exam.my.results"))}</h2>
+        ${embedPlaceholder("results", { page: "1" }, loading)}`;
       res.send(await wrapInPage(body, startPage(), req, { title, wide: true }));
     })
   );

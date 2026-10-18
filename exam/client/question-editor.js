@@ -19,14 +19,14 @@
  * draws what it answers.
  */
 
-import { defineExamElement, ExamApiError, ExamElement, examApi, h } from "./frame.js";
+import { defineExamElement, ExamApiError, ExamElement, examApi, h, t } from "./frame.js";
 import { displayClass } from "./classes.js";
 import "./rich-text.js";
 
 export const typeLabels = {
-  multichoice: "One correct answer",
-  multichoiceset: "Several correct answers",
-  truefalse: "True / false",
+  multichoice: t("exam.editor.type.multichoice"),
+  multichoiceset: t("exam.editor.type.multichoiceset"),
+  truefalse: t("exam.pool.type.truefalse"),
 };
 
 /** The category tree as a flat list of `{ id, label }`, indented by depth. */
@@ -65,23 +65,23 @@ class QuestionEditor extends ExamElement {
     const initialCategory = stored ? stored.categoryId : Number(this.params.category) || this.categories[0]?.id || null;
     this.backAddress = () => poolAddress(Number(this.category.value) || initialCategory, this.params.course);
     if (this.categories.length === 0) {
-      return h("div", { class: "sl-exam" }, h("p", {}, "There is no category yet. "), h("a", { href: "/exam/pool/categories" }, "Create one first."));
+      return h("div", { class: "sl-exam" }, h("p", {}, `${t("exam.categories.none")} `), h("a", { href: "/exam/pool/categories" }, t("exam.editor.createCategoryFirst")));
     }
 
     this.type = h(
       "select",
-      { name: "type", "aria-label": "Type", onChange: () => this.typeChanged() },
+      { name: "type", "aria-label": t("exam.editor.typeLabel"), onChange: () => this.typeChanged() },
       Object.entries(typeLabels).map(([value, label]) => h("option", { value, selected: (stored?.type ?? "multichoice") === value }, label))
     );
     this.category = h(
       "select",
-      { name: "categoryId", "aria-label": "Category" },
+      { name: "categoryId", "aria-label": t("exam.import.category") },
       this.categories.map((category) => h("option", { value: String(category.id), selected: category.id === initialCategory }, category.label))
     );
-    this.nameDe = h("input", { type: "text", name: "nameDe", value: stored?.nameDe ?? "", "aria-label": "German title", maxlength: "200" });
-    this.nameEn = h("input", { type: "text", name: "nameEn", value: stored?.nameEn ?? "", "aria-label": "English title", maxlength: "200" });
-    this.textDe = richText("German question text", stored?.textDe);
-    this.textEn = richText("English question text", stored?.textEn);
+    this.nameDe = h("input", { type: "text", name: "nameDe", value: stored?.nameDe ?? "", "aria-label": t("exam.editor.germanTitle"), maxlength: "200" });
+    this.nameEn = h("input", { type: "text", name: "nameEn", value: stored?.nameEn ?? "", "aria-label": t("exam.editor.englishTitle"), maxlength: "200" });
+    this.textDe = richText(t("exam.editor.germanText"), stored?.textDe);
+    this.textEn = richText(t("exam.editor.englishText"), stored?.textEn);
 
     // The answers while the type is not true/false; kept when switching back.
     this.answers = stored && stored.type !== "truefalse"
@@ -97,7 +97,7 @@ class QuestionEditor extends ExamElement {
     const row = (label, de, en) =>
       h("div", { class: "sl-exam-editor-row" }, h("div", { class: "sl-exam-editor-label" }, label), h("div", { class: "sl-exam-editor-de", lang: "de" }, de), h("div", { class: "sl-exam-editor-en", lang: "en" }, en));
 
-    this.saveButton = h("button", { type: "submit", class: "sl-exam-primary" }, stored ? "Save" : "Create question");
+    this.saveButton = h("button", { type: "submit", class: "sl-exam-primary" }, stored ? t("exam.categories.save") : t("exam.editor.createQuestion"));
     const form = h(
       "form",
       {
@@ -111,19 +111,19 @@ class QuestionEditor extends ExamElement {
       h(
         "div",
         { class: "sl-exam-editor-meta" },
-        h("label", {}, "Type ", this.type),
-        h("label", {}, "Category ", this.category)
+        h("label", {}, `${t("exam.editor.typeLabel")} `, this.type),
+        h("label", {}, `${t("exam.import.category")} `, this.category)
       ),
       h("div", { class: "sl-exam-editor-row sl-exam-editor-head" }, h("div"), h("div", {}, "Deutsch"), h("div", {}, "English")),
-      row("Title", this.nameDe, this.nameEn),
-      row("Question", this.textDe, this.textEn),
+      row(t("exam.editor.title"), this.nameDe, this.nameEn),
+      row(t("exam.pool.question"), this.textDe, this.textEn),
       this.answerList,
       this.problemList,
       h(
         "div",
         { class: "sl-exam-editor-actions" },
         this.saveButton,
-        h("a", { href: this.backAddress(), class: "sl-exam-editor-back", onClick: (event) => (event.currentTarget.href = this.backAddress()) }, "Back to the pool"),
+        h("a", { href: this.backAddress(), class: "sl-exam-editor-back", onClick: (event) => (event.currentTarget.href = this.backAddress()) }, t("exam.categories.backToPool")),
         stored ? this.lifecycleButtons(stored) : null
       ),
       this.message,
@@ -134,15 +134,15 @@ class QuestionEditor extends ExamElement {
   }
 
   retiredNotice() {
-    this.retiredBox = h("p", { class: "sl-exam-editor-retired", hidden: !this.stored?.retired }, "This question is retired: it is not offered for new tests. Its tests and usage stay as they are.");
+    this.retiredBox = h("p", { class: "sl-exam-editor-retired", hidden: !this.stored?.retired }, t("exam.editor.retiredNotice"));
     return this.retiredBox;
   }
 
   /** Retire or revive, and delete, for a stored question. */
   lifecycleButtons(stored) {
-    this.retire = h("button", { type: "button", "data-action": "retire", hidden: stored.retired, onClick: () => this.setRetired(true) }, "Retire");
-    this.revive = h("button", { type: "button", "data-action": "revive", hidden: !stored.retired, onClick: () => this.setRetired(false) }, "Revive");
-    const remove = h("button", { type: "button", "data-action": "delete", onClick: () => this.remove() }, "Delete");
+    this.retire = h("button", { type: "button", "data-action": "retire", hidden: stored.retired, onClick: () => this.setRetired(true) }, t("exam.editor.retire"));
+    this.revive = h("button", { type: "button", "data-action": "revive", hidden: !stored.retired, onClick: () => this.setRetired(false) }, t("exam.editor.revive"));
+    const remove = h("button", { type: "button", "data-action": "delete", onClick: () => this.remove() }, t("exam.categories.delete"));
     return h("span", { class: "sl-exam-editor-lifecycle" }, this.retire, this.revive, remove);
   }
 
@@ -150,8 +150,8 @@ class QuestionEditor extends ExamElement {
   answerRow(answer = null) {
     const row = {
       correct: h("input", { type: "checkbox", checked: answer?.correct ?? false }),
-      de: richText("German answer", answer?.textDe),
-      en: richText("English answer", answer?.textEn),
+      de: richText(t("exam.editor.germanAnswer"), answer?.textDe),
+      en: richText(t("exam.editor.englishAnswer"), answer?.textEn),
     };
     return row;
   }
@@ -184,8 +184,15 @@ class QuestionEditor extends ExamElement {
           ` ${label}`
         );
       this.answerList.replaceChildren(
-        h("div", { class: "sl-exam-editor-label" }, "Answer"),
-        h("div", { class: "sl-exam-editor-truefalse", role: "radiogroup", "aria-label": "The statement is" }, "The statement is ", choice(true, "true (Richtig)"), " ", choice(false, "false (Falsch)"))
+        h("div", { class: "sl-exam-editor-label" }, t("exam.editor.answer")),
+        h(
+          "div",
+          { class: "sl-exam-editor-truefalse", role: "radiogroup", "aria-label": t("exam.editor.statementIs") },
+          `${t("exam.editor.statementIs")} `,
+          choice(true, t("exam.editor.statementTrue")),
+          " ",
+          choice(false, t("exam.editor.statementFalse"))
+        )
       );
       return;
     }
@@ -193,7 +200,7 @@ class QuestionEditor extends ExamElement {
     const rows = this.answers.map((answer, index) => {
       answer.correct.type = single ? "radio" : "checkbox";
       answer.correct.name = single ? "correct" : "";
-      answer.correct.setAttribute("aria-label", `Answer ${index + 1} is correct`);
+      answer.correct.setAttribute("aria-label", t("exam.editor.answerCorrect", { n: index + 1 }));
       return h(
         "div",
         { class: "sl-exam-editor-row sl-exam-editor-answer", "data-answer": String(index + 1) },
@@ -203,7 +210,7 @@ class QuestionEditor extends ExamElement {
           h("label", {}, answer.correct, ` ${index + 1}`),
           h(
             "button",
-            { type: "button", class: "sl-exam-editor-remove", title: "Remove", "aria-label": `Remove answer ${index + 1}`, onClick: () => this.removeAnswer(index) },
+            { type: "button", class: "sl-exam-editor-remove", title: t("exam.editor.remove"), "aria-label": t("exam.editor.removeAnswer", { n: index + 1 }), onClick: () => this.removeAnswer(index) },
             "✕"
           )
         ),
@@ -212,9 +219,9 @@ class QuestionEditor extends ExamElement {
       );
     });
     this.answerList.replaceChildren(
-      h("div", { class: "sl-exam-editor-row sl-exam-editor-head" }, h("div", {}, single ? "Correct" : "Correct ones"), h("div"), h("div")),
+      h("div", { class: "sl-exam-editor-row sl-exam-editor-head" }, h("div", {}, single ? t("exam.editor.correct") : t("exam.editor.correctOnes")), h("div"), h("div")),
       ...rows,
-      h("button", { type: "button", class: "sl-exam-editor-add", onClick: () => this.addAnswer() }, "Add answer")
+      h("button", { type: "button", class: "sl-exam-editor-add", onClick: () => this.addAnswer() }, t("exam.editor.addAnswer"))
     );
   }
 
@@ -288,7 +295,7 @@ class QuestionEditor extends ExamElement {
         return;
       }
       this.stored = answer.question;
-      this.message.textContent = "Saved.";
+      this.message.textContent = t("exam.editor.saved");
       this.offerTests(answer.unwrittenTests);
     } catch (error) {
       if (error instanceof ExamApiError && error.status === 422) {
@@ -296,10 +303,10 @@ class QuestionEditor extends ExamElement {
       } else if (error instanceof ExamApiError && error.status === 409) {
         this.message.replaceChildren(
           h("p", { class: "sl-embed-error" }, error.message),
-          h("a", { href: `/exam/pool/questions/${this.stored.id}`, target: "_blank", rel: "noopener", class: "sl-exam-editor-current" }, "Open the current version in a new tab")
+          h("a", { href: `/exam/pool/questions/${this.stored.id}`, target: "_blank", rel: "noopener", class: "sl-exam-editor-current" }, t("exam.editor.openCurrent"))
         );
       } else {
-        this.message.replaceChildren(h("p", { class: "sl-embed-error" }, error instanceof ExamApiError && error.status < 500 ? error.message : "The question could not be saved. Please try again."));
+        this.message.replaceChildren(h("p", { class: "sl-embed-error" }, error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.editor.saveFailed")));
       }
     } finally {
       this.saveButton.disabled = false;
@@ -309,8 +316,8 @@ class QuestionEditor extends ExamElement {
   /** The unwritten tests holding the question, each with the offer to take up the saved version. */
   offerTests(tests) {
     this.after.replaceChildren(
-      h("h2", {}, "Tests not yet written with this question"),
-      h("p", { class: "sl-exam-quiet" }, "They keep the version they were assembled with until you update them."),
+      h("h2", {}, t("exam.editor.unwrittenHeading")),
+      h("p", { class: "sl-exam-quiet" }, t("exam.editor.unwrittenExplained")),
       h(
         "ul",
         { class: "sl-exam-editor-tests" },
@@ -327,15 +334,15 @@ class QuestionEditor extends ExamElement {
                 try {
                   const current = await examApi(`/tests/${test.id}`);
                   await examApi(`/tests/${test.id}`, { method: "PUT", body: { questionIds: current.questions.map((question) => question.questionId) } });
-                  status.textContent = " Updated.";
+                  status.textContent = ` ${t("exam.editor.updated")}`;
                 } catch (error) {
                   button.disabled = false;
                   status.classList.add("sl-embed-error");
-                  status.textContent = ` ${error instanceof ExamApiError && error.status < 500 ? error.message : "The test could not be updated."}`;
+                  status.textContent = ` ${error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.editor.updateFailed")}`;
                 }
               },
             },
-            "Update this test"
+            t("exam.editor.updateTest")
           );
           return h(
             "li",
@@ -347,7 +354,7 @@ class QuestionEditor extends ExamElement {
           );
         })
       ),
-      h("p", {}, h("a", { href: this.backAddress() }, "Back to the pool"))
+      h("p", {}, h("a", { href: this.backAddress() }, t("exam.categories.backToPool")))
     );
   }
 
@@ -358,14 +365,14 @@ class QuestionEditor extends ExamElement {
       this.retire.hidden = this.stored.retired;
       this.revive.hidden = !this.stored.retired;
       this.retiredBox.hidden = !this.stored.retired;
-      this.message.textContent = retired ? "Retired." : "Revived: offered for new tests again.";
+      this.message.textContent = retired ? t("exam.editor.retired") : t("exam.editor.revived");
     } catch (error) {
-      this.message.replaceChildren(h("p", { class: "sl-embed-error" }, error instanceof ExamApiError && error.status < 500 ? error.message : "That did not work. Please try again."));
+      this.message.replaceChildren(h("p", { class: "sl-embed-error" }, error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.pool.actionFailed")));
     }
   }
 
   async remove() {
-    if (!window.confirm(`Delete the question "${this.stored.nameDe}" with its answers and images?`)) return;
+    if (!window.confirm(t("exam.editor.confirmDelete", { name: this.stored.nameDe }))) return;
     this.message.replaceChildren();
     try {
       await examApi(`/pool/questions/${this.stored.id}`, { method: "DELETE" });
@@ -373,8 +380,8 @@ class QuestionEditor extends ExamElement {
     } catch (error) {
       const used = error instanceof ExamApiError && error.status === 409;
       this.message.replaceChildren(
-        h("p", { class: "sl-embed-error" }, error instanceof ExamApiError && error.status < 500 ? error.message : "The question could not be deleted."),
-        used && !this.stored.retired ? h("button", { type: "button", "data-action": "retire-instead", onClick: () => this.setRetired(true) }, "Retire it instead") : null
+        h("p", { class: "sl-embed-error" }, error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.editor.deleteFailed")),
+        used && !this.stored.retired ? h("button", { type: "button", "data-action": "retire-instead", onClick: () => this.setRetired(true) }, t("exam.editor.retireInstead")) : null
       );
     }
   }

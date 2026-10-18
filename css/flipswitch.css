@@ -35,7 +35,7 @@
 }
 
 .flipswitch-inner:before {
-  content: "student";
+  content: attr(data-off);
   padding-left: 8px;
   padding-right: 20px;
   padding-top: 3px;
@@ -44,7 +44,7 @@
 }
 
 .flipswitch-inner:after {
-  content: "teacher";
+  content: attr(data-on);
   padding-right: 8px;
   padding-top: 3px;
   background-color: #ff5050f0;
@@ -85,15 +85,4 @@
 .menu.flipswitch-switch {
   right: 170px;
 }
-.answers.flipswitch-inner:before {
-  content: "no answers";
-}
-.answers.flipswitch-inner:after {
-  content: "answers";
-}
-.exam.flipswitch-inner:before {
-  content: "show practice";
-}
-.exam.flipswitch-inner:after {
-  content: "show exam";
-}
+/* The labels come from the markup (data-off, data-on), in the reader's language. */

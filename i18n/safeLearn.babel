@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<babeledit_project be_version="3.0.0" version="1.3">
+	<!--
+	The interface catalogs of safeLearn (ui-language). Open this file in
+	BabelEdit; it reads en.json and de.json beside it, nested JSON with English
+	as the primary language. Keys are English and descriptive, never the text.
+	-->
+	<framework>generic-json</framework>
+	<filename>safeLearn.babel</filename>
+	<source_root_dir></source_root_dir>
+	<folder_node>
+		<name></name>
+		<children></children>
+	</folder_node>
+	<isTemplateProject>false</isTemplateProject>
+	<languages>
+		<language>
+			<code>en</code>
+			<source_file>en.json</source_file>
+		</language>
+		<language>
+			<code>de</code>
+			<source_file>de.json</source_file>
+		</language>
+	</languages>
+	<translation_packages>
+		<translation_package>
+			<name>main</name>
+			<translation_urls>
+				<translation_url>
+					<path>en.json</path>
+					<language>en</language>
+				</translation_url>
+				<translation_url>
+					<path>de.json</path>
+					<language>de</language>
+				</translation_url>
+			</translation_urls>
+		</translation_package>
+	</translation_packages>
+	<editor_configuration>
+		<primary_language>en</primary_language>
+		<save_empty_translations>false</save_empty_translations>
+		<translation_order>ascending</translation_order>
+	</editor_configuration>
+	<primary_language>en</primary_language>
+	<configuration>
+		<indent>2</indent>
+		<format>namespaced-json</format>
+		<support_arrays>false</support_arrays>
+	</configuration>
+</babeledit_project>

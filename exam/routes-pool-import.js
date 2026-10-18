@@ -11,18 +11,17 @@ import express from "express";
 
 import { checkQuestionFile, fileLimitBytes, formatDescription, importQuestionFile, listImports, takeBackImport } from "./question-import.js";
 import { markReviewed } from "./pool-edit.js";
-import { NotFoundError } from "./classes.js";
+import { NotFoundError, readableMessage } from "./classes.js";
 import { identityOf, requireTeacher, teacherPage } from "./gate.js";
 import { contextFromQuery, teacherShell } from "./bar.js";
+import { i18nOf } from "../i18n/server.js";
 
 /** A record id from the path or query; anything but a positive integer names nothing. */
 function idParam(value) {
   const id = typeof value === "string" && /^[1-9]\d{0,9}$/.test(value) ? Number(value) : null;
-  if (id === null) throw new NotFoundError("There is no such record.");
+  if (id === null) throw new NotFoundError("exam.errors.noSuchRecord");
   return id;
 }
-
-const tooLarge = "The file is larger than 1 MB. Split it into several files.";
 
 /**
  * The file as raw text, whatever type it is declared as, and on these routes
@@ -32,7 +31,12 @@ const tooLarge = "The file is larger than 1 MB. Split it into several files.";
 function rawText(req, res, next) {
   express.text({ type: () => true, limit: fileLimitBytes })(req, res, (error) => {
     if (error?.type === "entity.too.large") {
-      res.status(413).json({ error: tooLarge, problems: [{ line: 1, question: null, message: tooLarge }] });
+      i18nOf(req)
+        .then(({ t }) => {
+          const tooLarge = t("exam.errors.import.fileTooLarge");
+          res.status(413).json({ error: tooLarge, problems: [{ line: 1, question: null, message: tooLarge }] });
+        })
+        .catch(next);
       return;
     }
     next(error);
@@ -59,9 +63,11 @@ export function registerPoolImportRoutes(router, { db, handle, startPage }) {
       })
     );
 
-  api("post", "/pool/imports/check", rawText)((req) => {
+  api("post", "/pool/imports/check", rawText)(async (req) => {
     const { problems, plan } = checkQuestionFile(db, bodyText(req), fileNameOf(req));
-    return { problems, plan };
+    // Each problem in the reader's language (`ui-language`).
+    const { t } = await i18nOf(req);
+    return { problems: problems.map((problem) => ({ ...problem, message: readableMessage(problem, t) })), plan };
   });
   api("post", "/pool/imports", rawText)((req) => importQuestionFile(db, bodyText(req), { fileName: fileNameOf(req), username: identityOf(req) }));
   api("get", "/pool/imports")(() => listImports(db));
@@ -89,7 +95,7 @@ export function registerPoolImportRoutes(router, { db, handle, startPage }) {
     handle(async (req, res) => {
       const context = contextFromQuery(req.query);
       const params = context.courseId === null ? {} : { course: String(context.courseId) };
-      res.send(await teacherShell({ db, startPage, req, title: "Import questions", context, kind: "pool-import", params, current: "pool" }));
+      res.send(await teacherShell({ db, startPage, req, title: (t) => t("exam.pages.importQuestions"), context, kind: "pool-import", params, current: "pool" }));
     })
   );
 }

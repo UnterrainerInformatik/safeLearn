@@ -19,6 +19,7 @@ import { requireTeacher, sessionNow, teacherPage } from "./gate.js";
 import { teacherShell } from "./bar.js";
 import { openEventStream } from "../event-stream.js";
 import { embedPlaceholder } from "../obsidian.js";
+import { i18nOf } from "../i18n/server.js";
 
 function escapeHtml(text) {
   return String(text).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
@@ -27,7 +28,7 @@ function escapeHtml(text) {
 /** A record id from the path; anything but a positive integer names nothing. */
 function idParam(value) {
   const id = typeof value === "string" && /^[1-9]\d{0,9}$/.test(value) ? Number(value) : null;
-  if (id === null) throw new NotFoundError("There is no such record.");
+  if (id === null) throw new NotFoundError("exam.errors.noSuchRecord");
   return id;
 }
 
@@ -104,7 +105,7 @@ export function registerLiveRoutes(router, { db, handle, startPage }) {
           db,
           startPage,
           req,
-          title: `Live: ${sitting.testName}`,
+          title: (t) => t("exam.pages.live", { name: sitting.testName }),
           context: { courseId: sitting.courseId },
           kind: "live",
           params: { sitting: String(sitting.id) },
@@ -124,8 +125,9 @@ export function registerLiveRoutes(router, { db, handle, startPage }) {
     handle(async (req, res) => {
       const sitting = getSitting(db, idParam(req.params.id));
       const title = escapeHtml(sitting.testName);
+      const { t, lang, loc } = await i18nOf(req);
       res.send(`<!DOCTYPE html>
-<html lang="en">
+<html lang="${lang}" data-sl-locale="${loc}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -135,7 +137,7 @@ export function registerLiveRoutes(router, { db, handle, startPage }) {
 </head>
 <body class="sl-exam-screen-page">
   <div id="markdown-content" class="sl-exam-screen-content">
-    ${embedPlaceholder("live", { sitting: String(sitting.id), screen: "1" })}
+    ${embedPlaceholder("live", { sitting: String(sitting.id), screen: "1" }, t("app.embed.loading"))}
   </div>
   <script type="module" src="/exam/assets/exam-client.js"></script>
 </body>

@@ -12,6 +12,10 @@
  * the attempt. The page reports leaving it and coming back (the focus log),
  * which a teacher sees and which never changes the grade.
  *
+ * The controls - buttons, countdown, messages - are in the reader's own
+ * language; questions and answers stay in the course's language and are
+ * marked with it (`ui-language`, design.md, D7).
+ *
  * With `preview: 1` a teacher tries the test as a student would see it, on
  * the test's own preview page: shuffled, in the course's language, with the
  * first sitting's countdown - but nothing is saved, the focus is not
@@ -22,7 +26,7 @@
  * stored markup, sanitized when the pool was imported.
  */
 
-import { defineExamElement, ExamApiError, ExamElement, examApi, h } from "./frame.js";
+import { defineExamElement, ExamApiError, ExamElement, examApi, h, t } from "./frame.js";
 import { displayClass } from "./classes.js";
 
 /** "12:05" or "1:02:05" for a number of milliseconds left. */
@@ -34,11 +38,6 @@ function clock(ms) {
   return hours > 0 ? `${hours}:${String(minutes).padStart(2, "0")}:${seconds}` : `${minutes}:${seconds}`;
 }
 
-function minutes(seconds) {
-  const n = Math.round(seconds / 60);
-  return n === 1 ? "1 minute" : `${n} minutes`;
-}
-
 /** Stored, sanitized markup as a node. */
 function storedMarkup(html, className) {
   const container = h("div", { class: className });
@@ -48,7 +47,7 @@ function storedMarkup(html, className) {
 
 /** Why the server refused, in a sentence for the student. */
 function refusal(error) {
-  return error instanceof ExamApiError && error.status < 500 ? error.message : "That could not be saved. Please try again.";
+  return error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.frame.saveFailed");
 }
 
 /** How long a stream the browser gave up on waits before it is tried again. */
@@ -115,7 +114,7 @@ class WriteTest extends ExamElement {
       return h(
         "div",
         { class: "sl-exam sl-exam-attempt" },
-        h("p", { class: "sl-exam-quiet" }, "Students write their open online tests here. ", h("a", { href: "/exam/tests" }, "Online tests"))
+        h("p", { class: "sl-exam-quiet" }, t("exam.attempt.teacherHint"), " ", h("a", { href: "/exam/tests" }, t("exam.attempt.onlineTests")))
       );
     }
     if (data.writing) return this.writingPage(data.writing);
@@ -127,7 +126,7 @@ class WriteTest extends ExamElement {
     this.shownKey = JSON.stringify(tests.map((test) => [test.testId, test.closesAt]));
     this.watch();
     if (tests.length === 0) {
-      return h("div", { class: "sl-exam sl-exam-attempt" }, h("p", { class: "sl-exam-quiet" }, "No online test is open for you right now."));
+      return h("div", { class: "sl-exam sl-exam-attempt" }, h("p", { class: "sl-exam-quiet" }, t("exam.attempt.noneOpen")));
     }
     this.message = h("p", { class: "sl-exam-message", role: "status" });
     return h(
@@ -138,8 +137,12 @@ class WriteTest extends ExamElement {
           "section",
           { class: "sl-exam-attempt-open", "data-test": String(test.testId) },
           h("h3", {}, test.name),
-          h("p", { class: "sl-exam-quiet" }, `${test.subject} – ${displayClass(test.className)} · ${minutes(test.durationS)} once you start`),
-          h("button", { type: "button", class: "sl-exam-primary", onClick: () => this.start(test.testId) }, "Start the test")
+          h(
+            "p",
+            { class: "sl-exam-quiet" },
+            t("exam.attempt.openDetails", { subject: test.subject, className: displayClass(test.className), count: Math.round(test.durationS / 60) })
+          ),
+          h("button", { type: "button", class: "sl-exam-primary", onClick: () => this.start(test.testId) }, t("exam.attempt.start"))
         )
       ),
       this.message
@@ -164,17 +167,16 @@ class WriteTest extends ExamElement {
     this.attempt = writing.attempt;
     this.status = h("p", { class: "sl-exam-message", role: "status" });
     this.countdown = h("span", { class: "sl-exam-countdown", "aria-live": "off" });
-    const de = writing.language === "de";
-    const questions = writing.questions.map((question) => this.questionField(question, writing.questions.length, de));
-    const submit = h("button", { type: "button", class: "sl-exam-primary sl-exam-attempt-submit" }, de ? "Abgeben" : "Submit");
+    const questions = writing.questions.map((question) => this.questionField(question, writing.questions.length, writing.language));
+    const submit = h("button", { type: "button", class: "sl-exam-primary sl-exam-attempt-submit" }, t("exam.attempt.submit"));
     submit.addEventListener("click", () => {
       if (this.preview) {
-        this.status.textContent = de ? "Probeansicht: Es wird nichts abgegeben." : "Preview: nothing is submitted.";
+        this.status.textContent = t("exam.attempt.previewNotSubmitted");
         return;
       }
       if (submit.dataset.armed !== "1") {
         submit.dataset.armed = "1";
-        submit.textContent = de ? "Wirklich abgeben? Danach ist nichts mehr änderbar." : "Really submit? Nothing can be changed afterwards.";
+        submit.textContent = t("exam.attempt.confirmSubmit");
         return;
       }
       this.submit();
@@ -191,21 +193,19 @@ class WriteTest extends ExamElement {
       ? h(
           "p",
           { class: "sl-exam-attempt-preview", role: "note" },
-          de
-            ? "Probeansicht für Lehrkräfte: Antworten werden nicht gespeichert, und Abgeben ist abgeschaltet. Ein Neuladen mischt neu."
-            : "Teacher preview: answers are not saved, and submitting is switched off. A reload shuffles anew."
+          t("exam.attempt.previewNotice")
         )
       : null;
     return h(
       "div",
-      { class: "sl-exam sl-exam-attempt sl-exam-writing", lang: writing.language, "data-preview": this.preview ? "1" : null },
+      { class: "sl-exam sl-exam-attempt sl-exam-writing", "data-language": writing.language, "data-preview": this.preview ? "1" : null },
       notice,
       h(
         "div",
         { class: "sl-exam-attempt-head" },
         h("strong", {}, writing.name),
         " · ",
-        writing.remainingMs === null ? (de ? "noch kein Termin, keine Zeitgrenze" : "no sitting yet, no time limit") : [de ? "noch " : "time left ", this.countdown]
+        writing.remainingMs === null ? t("exam.attempt.noTimeLimit") : [t("exam.attempt.timeLeft"), " ", this.countdown]
       ),
       questions,
       h("p", {}, submit),
@@ -213,7 +213,8 @@ class WriteTest extends ExamElement {
     );
   }
 
-  questionField(question, count, de) {
+  /** One question: its number in the reader's language, its text and answers in the course's (`language`). */
+  questionField(question, count, language) {
     const multiple = question.type === "multichoiceset";
     const state = h("span", { class: "sl-exam-attempt-state", role: "status" });
     const inputs = question.answers.map((answer) =>
@@ -227,15 +228,19 @@ class WriteTest extends ExamElement {
     const field = h(
       "fieldset",
       { class: "sl-exam-attempt-question", "data-n": String(question.n) },
-      h("legend", {}, de ? `Frage ${question.n} von ${count}` : `Question ${question.n} of ${count}`, " ", state),
-      storedMarkup(question.text, "sl-exam-pool-text"),
+      h("legend", {}, t("exam.attempt.questionOf", { n: question.n, count }), " ", state),
       h(
-        "ul",
-        { class: "sl-exam-attempt-answers" },
-        question.answers.map((answer, index) => h("li", {}, h("label", {}, inputs[index], storedMarkup(answer.text, "sl-exam-pool-answer"))))
+        "div",
+        { class: "sl-exam-attempt-content", lang: language },
+        storedMarkup(question.text, "sl-exam-pool-text"),
+        h(
+          "ul",
+          { class: "sl-exam-attempt-answers" },
+          question.answers.map((answer, index) => h("li", {}, h("label", {}, inputs[index], storedMarkup(answer.text, "sl-exam-pool-answer"))))
+        )
       )
     );
-    const save = this.saver(question.n, state, de);
+    const save = this.saver(question.n, state);
     field.addEventListener("change", () => save(inputs.filter((input) => input.checked).map((input) => input.value)));
     return field;
   }
@@ -245,23 +250,23 @@ class WriteTest extends ExamElement {
    * only the latest choice waits behind it, so a slow answer never overwrites
    * a newer one.
    */
-  saver(n, state, de) {
+  saver(n, state) {
     let inFlight = false;
     let queued = null;
     const send = async (tokens) => {
       if (this.preview) {
-        state.textContent = de ? "nicht gespeichert (Probe)" : "not saved (preview)";
+        state.textContent = t("exam.attempt.notSavedPreview");
         state.dataset.state = "preview";
         return;
       }
       inFlight = true;
-      state.textContent = de ? "wird gespeichert…" : "saving…";
+      state.textContent = t("exam.attempt.saving");
       state.dataset.state = "saving";
       try {
         const saved = await examApi(`/attempts/${this.attempt}/questions/${n}`, { method: "PUT", body: { tokens } });
         this.track(saved.remainingMs);
         if (queued === null) {
-          state.textContent = de ? "gespeichert" : "saved";
+          state.textContent = t("exam.attempt.saved");
           state.dataset.state = "saved";
         }
       } catch (error) {
@@ -347,7 +352,7 @@ class WriteTest extends ExamElement {
     for (const input of this.querySelectorAll(".sl-exam-writing input, .sl-exam-writing button")) input.disabled = true;
     if (this.preview) {
       clearInterval(this.timer);
-      this.status.textContent = "Time is up. In a real attempt the server would submit now.";
+      this.status.textContent = t("exam.attempt.timeIsUpPreview");
       return;
     }
     try {
@@ -370,8 +375,8 @@ class WriteTest extends ExamElement {
     return h(
       "div",
       { class: "sl-exam sl-exam-attempt sl-exam-attempt-result" },
-      h("p", {}, h("strong", {}, "Submitted. ")),
-      h("p", {}, `${result.score} of ${result.questionCount} ${result.questionCount === 1 ? "question" : "questions"} correct – grade ${result.grade}.`)
+      h("p", {}, h("strong", {}, t("exam.attempt.submitted"), " ")),
+      h("p", {}, t("exam.attempt.result", { score: result.score, count: result.questionCount, grade: result.grade }))
     );
   }
 }

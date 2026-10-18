@@ -8,6 +8,7 @@ import {
   SessionEndedError,
 } from "./middlewares/keycloak-middleware.js";
 import { getPermissionContext } from "./permission-context.js";
+import { languages } from "./i18n/t.js";
 import {
   verifyCallerIdentity,
   searchDirectory,
@@ -537,6 +538,13 @@ initKeycloak(app).then(async () => {
     });
   };
   app.get("/obsidian-page.js", checkAuthenticated, serveFile("obsidian-page.js"));
+  // The interface catalogs and the two modules the browser shares with the
+  // server (`ui-language`), by name: the BabelEdit project and the server's
+  // own loader beside them stay unpublished. Revalidated on every use, as /css
+  // is, so a changed text reaches the next page view.
+  for (const file of ["t.js", "format.js", ...languages.map((lang) => `${lang}.json`)]) {
+    app.get(`/i18n/${file}`, checkAuthenticated, serveFile(path.join("i18n", file)));
+  }
   // The start page a deployment falls back to when it configures none, which is
   // why it is served although nothing links to it: `getStartPage` names it, and
   // a start page that is not served would be redirected to itself.

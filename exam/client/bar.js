@@ -6,7 +6,7 @@
  * page's bar has it chosen.
  */
 
-import { elementFor, h } from "./frame.js";
+import { elementFor, h, t } from "./frame.js";
 
 /**
  * Where a choice leads on the page of one of the bar's buttons (`pool`,
@@ -50,9 +50,9 @@ function destination(position, value, { year, class: klass, course, current }) {
 
 /** The element a "new …" button opens, and the parameters it needs. */
 const creators = {
-  year: { kind: "year-new", title: "New school year", params: () => ({}) },
-  class: { kind: "class-new", title: "New class", params: (bar) => ({ slYear: bar.dataset.year }) },
-  course: { kind: "course-new", title: "New course", params: (bar) => ({ slClass: bar.dataset.class }) },
+  year: { kind: "year-new", title: () => t("exam.bar.newYear"), params: () => ({}) },
+  class: { kind: "class-new", title: () => t("exam.bar.newClassDialog"), params: (bar) => ({ slYear: bar.dataset.year }) },
+  course: { kind: "course-new", title: () => t("exam.bar.newCourseDialog"), params: (bar) => ({ slClass: bar.dataset.class }) },
 };
 
 function openCreator(bar, what) {
@@ -63,10 +63,10 @@ function openCreator(bar, what) {
   Object.assign(element.dataset, creator.params(bar));
   const dialog = h(
     "dialog",
-    { class: "sl-exam-dialog sl-exam", "aria-label": creator.title },
-    h("h3", {}, creator.title),
+    { class: "sl-exam-dialog sl-exam", "aria-label": creator.title() },
+    h("h3", {}, creator.title()),
     element,
-    h("p", {}, h("button", { type: "button", onclick: () => dialog.close() }, "Cancel"))
+    h("p", {}, h("button", { type: "button", onclick: () => dialog.close() }, t("exam.common.cancel")))
   );
   dialog.addEventListener("close", () => dialog.remove());
   bar.after(dialog);

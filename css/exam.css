@@ -1398,3 +1398,126 @@ sl-rich-text {
 #markdown-content.dark-mode .sl-exam-import-new {
   border-color: #81c784;
 }
+
+/* ------------------------------------------------ the module's date field */
+/* <sl-date-input> (locale-formats): a text field in the reader's format, a
+   button for the month grid, and the reason beside the field when a value
+   cannot be read. The grid's days are touch-sized. */
+
+sl-date-input {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  position: relative;
+  vertical-align: middle;
+}
+
+sl-date-input .sl-date-input-text {
+  width: 8.5em;
+}
+
+sl-date-input .sl-date-input-time {
+  width: 4.5em;
+}
+
+sl-date-input .sl-date-input-toggle {
+  min-width: 2.2em;
+  min-height: 2.2em;
+}
+
+sl-date-input.is-invalid .sl-date-input-text,
+sl-date-input.is-invalid .sl-date-input-time[aria-invalid="true"] {
+  outline: 2px solid #c62828;
+}
+
+sl-date-input .sl-date-input-message:empty {
+  display: none;
+}
+
+sl-date-input .sl-date-input-message {
+  flex-basis: 100%;
+  color: #c62828;
+  font-size: 0.85em;
+}
+
+sl-date-input .sl-date-input-popup {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 50;
+  margin-top: 4px;
+  padding: 8px;
+  background: #ffffff;
+  color: #1f2328;
+  border: 1px solid #8c959f;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+.dark-mode sl-date-input .sl-date-input-popup {
+  background: #22272e;
+  color: #e6edf3;
+  border-color: #545d68;
+}
+
+sl-date-input .sl-date-input-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+sl-date-input .sl-date-input-head button {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+}
+
+sl-date-input .sl-date-input-month {
+  font-weight: bold;
+}
+
+sl-date-input .sl-date-input-grid {
+  border-collapse: collapse;
+}
+
+sl-date-input .sl-date-input-grid th,
+sl-date-input .sl-date-input-grid td {
+  padding: 1px;
+  border: none;
+  text-align: center;
+  font-size: 0.85em;
+}
+
+sl-date-input .sl-date-input-grid button {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+sl-date-input .sl-date-input-grid button:focus-visible {
+  outline: 2px solid #0969da;
+}
+
+sl-date-input .sl-date-input-grid button.is-other-month {
+  opacity: 0.5;
+}
+
+sl-date-input .sl-date-input-grid button[aria-current="date"] {
+  border-color: currentColor;
+}
+
+sl-date-input .sl-date-input-grid button.is-selected {
+  background: #0969da;
+  color: #ffffff;
+}
+
+sl-date-input .sl-date-input-grid button.is-disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}

@@ -141,3 +141,21 @@
   border-top-right-radius: 0px;
   border-bottom-right-radius: 0px;
 }
+
+/* A choice of the settings menu (language, format): its name, then the group. */
+.sl-menu-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  margin-left: 4px;
+}
+
+.sl-menu-choice-label {
+  min-width: 70px;
+}
+
+.sl-menu-choice .button-group-left,
+.sl-menu-choice .button-group-right {
+  padding-top: 0px;
+}

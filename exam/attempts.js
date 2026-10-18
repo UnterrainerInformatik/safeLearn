@@ -25,7 +25,7 @@ import { notify } from "./live.js";
 /** A request for an attempt from another browser than the one it is bound to. Answered with 409. */
 export class DeviceRefusedError extends ConflictError {
   constructor() {
-    super("This test is open in another browser. Ask your teacher to release it to this one.");
+    super("exam.errors.attempts.otherBrowser");
   }
 }
 
@@ -246,7 +246,7 @@ export function startAttempt(db, username, testId, at = now()) {
   finalizeDue(db, at, username);
   const existing = db.prepare("SELECT * FROM attempt WHERE test_id = ? AND username = ?").get(testId, username);
   if (existing) {
-    if (existing.submitted_at !== null) throw new ConflictError("You have submitted this test.");
+    if (existing.submitted_at !== null) throw new ConflictError("exam.errors.attempts.submittedByYou");
     return { attemptId: existing.id, created: false };
   }
   const sitting = db
@@ -256,7 +256,7 @@ export function startAttempt(db, username, testId, at = now()) {
        ORDER BY s.closes_at DESC, s.id LIMIT 1`
     )
     .get(testId, username, at, at);
-  if (!sitting) throw new NotFoundError("No such test is open for you.");
+  if (!sitting) throw new NotFoundError("exam.errors.attempts.noOpenTest");
   const secret = randomToken();
   const attemptId = inTransaction(db, () => {
     const questions = db.prepare("SELECT id FROM test_question WHERE test_id = ? ORDER BY position").all(testId);
@@ -289,7 +289,7 @@ export function startAttempt(db, username, testId, at = now()) {
  */
 export function ownAttempt(db, id, username, at = now()) {
   const row = db.prepare("SELECT * FROM attempt WHERE id = ? AND username = ?").get(id, username);
-  if (!row) throw new NotFoundError("There is no such attempt.");
+  if (!row) throw new NotFoundError("exam.errors.attempts.noAttempt");
   if (row.submitted_at === null && row.deadline <= at) {
     finalize(db, row, at);
     return db.prepare("SELECT * FROM attempt WHERE id = ?").get(id);
@@ -322,7 +322,7 @@ export function checkDevice(db, row, secret, at = now()) {
 /** Refuses anything but reading the result once an attempt is submitted or past its deadline. */
 function requireOpen(row, at) {
   if (row.submitted_at !== null || row.deadline <= at) {
-    throw new ConflictError("The time for this test is up; nothing can be changed any more.");
+    throw new ConflictError("exam.errors.attempts.timeUp");
   }
 }
 
@@ -382,7 +382,7 @@ export function writingView(db, row, at = now()) {
 export function saveAnswer(db, row, n, tokens, at = now()) {
   requireOpen(row, at);
   if (!Array.isArray(tokens) || !tokens.every((token) => typeof token === "string") || new Set(tokens).size !== tokens.length) {
-    throw new InvalidInputError("An answer is a list of the chosen answers' tokens.");
+    throw new InvalidInputError("exam.errors.attempts.answerShape");
   }
   const question = db
     .prepare(
@@ -390,9 +390,9 @@ export function saveAnswer(db, row, n, tokens, at = now()) {
        WHERE aq.attempt_id = ? AND aq.position = ?`
     )
     .get(row.id, Number(n) - 1);
-  if (!question) throw new NotFoundError("There is no such question in this attempt.");
+  if (!question) throw new NotFoundError("exam.errors.attempts.noQuestion");
   if (question.type !== "multichoiceset" && tokens.length > 1) {
-    throw new InvalidInputError("This question takes one answer.");
+    throw new InvalidInputError("exam.errors.attempts.oneAnswer");
   }
   const answerOf = db.prepare(
     `SELECT a.id FROM attempt_token t JOIN test_answer a ON a.id = t.test_answer_id
@@ -400,7 +400,7 @@ export function saveAnswer(db, row, n, tokens, at = now()) {
   );
   const answerIds = tokens.map((token) => {
     const answer = answerOf.get(row.id, token, question.id);
-    if (!answer) throw new InvalidInputError("That is not an answer of this question.");
+    if (!answer) throw new InvalidInputError("exam.errors.attempts.notAnAnswer");
     return answer.id;
   });
   inTransaction(db, () => {
@@ -429,7 +429,7 @@ export function submitAttempt(db, row, at = now()) {
  * scoring.
  */
 export function recordFocus(db, row, state, at = now()) {
-  if (state !== "away" && state !== "back") throw new InvalidInputError("The focus is away or back.");
+  if (state !== "away" && state !== "back") throw new InvalidInputError("exam.errors.attempts.focusState");
   if (row.submitted_at !== null || row.deadline <= at) return { recorded: false };
   if (state === "away") {
     if (row.away_since !== null) return { recorded: false };
@@ -449,8 +449,8 @@ export function recordFocus(db, row, state, at = now()) {
  */
 export function releaseAttempt(db, id) {
   const row = db.prepare("SELECT * FROM attempt WHERE id = ?").get(id);
-  if (!row) throw new NotFoundError("There is no such attempt.");
-  if (row.submitted_at !== null) throw new ConflictError("This attempt is submitted already.");
+  if (!row) throw new NotFoundError("exam.errors.attempts.noAttempt");
+  if (row.submitted_at !== null) throw new ConflictError("exam.errors.attempts.submittedAlready");
   db.prepare("UPDATE attempt SET device_hash = NULL WHERE id = ?").run(id);
   notify(row.sitting_id, "released", row.username);
   return { released: id };
@@ -463,7 +463,7 @@ export function releaseAttempt(db, id) {
  */
 export function deleteAttempt(db, id) {
   const row = db.prepare("SELECT * FROM attempt WHERE id = ?").get(id);
-  if (!row) throw new NotFoundError("There is no such attempt.");
+  if (!row) throw new NotFoundError("exam.errors.attempts.noAttempt");
   db.prepare("DELETE FROM attempt WHERE id = ?").run(id);
   notify(row.sitting_id, "deleted", row.username);
   return { deleted: id };
@@ -480,7 +480,7 @@ export function deleteAttempt(db, id) {
  */
 export function previewView(db, testId) {
   const test = db.prepare("SELECT id, name, course_id FROM test WHERE id = ?").get(testId);
-  if (!test) throw new NotFoundError("There is no such test.");
+  if (!test) throw new NotFoundError("exam.errors.attempts.noTest");
   const language = getCourse(db, test.course_id).language;
   const text = language === "en" ? "text_en" : "text_de";
   const first = db.prepare("SELECT duration_s FROM sitting WHERE test_id = ? ORDER BY opens_at, id LIMIT 1").get(testId);

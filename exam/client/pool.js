@@ -26,24 +26,18 @@
  * the module's image route only.
  */
 
-import { defineExamElement, ExamApiError, ExamElement, examApi, h, markRows } from "./frame.js";
+import { defineExamElement, ExamApiError, ExamElement, examApi, format, h, markRows, t } from "./frame.js";
 import { displayClass } from "./classes.js";
 
 const typeLabels = {
-  multichoiceset: "Several correct",
-  multichoice: "One correct",
-  truefalse: "True / false",
+  multichoiceset: t("exam.pool.type.multichoiceset"),
+  multichoice: t("exam.pool.type.multichoice"),
+  truefalse: t("exam.pool.type.truefalse"),
 };
 
+/** A date or the day of a timestamp in the reader's format, "–" for none. */
 function displayDate(iso) {
-  if (!iso) return "–";
-  const [year, month, day] = iso.split("-");
-  return `${day}.${month}.${year}`;
-}
-
-/** The day of an ISO timestamp, as the module writes dates. */
-function displayDay(iso) {
-  return iso ? new Date(iso).toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit", year: "numeric" }) : "–";
+  return iso ? format.date(iso) : "–";
 }
 
 /** Stored, sanitized markup as a node. */
@@ -76,12 +70,12 @@ class PoolView extends ExamElement {
     this.query = "";
     this.language = "de";
     this.list = h("div", { class: "sl-exam-pool-list" });
-    this.preview = h("div", { class: "sl-exam-pool-preview" }, h("p", { class: "sl-exam-quiet" }, "Choose a question to see it."));
+    this.preview = h("div", { class: "sl-exam-pool-preview" }, h("p", { class: "sl-exam-quiet" }, t("exam.pool.choosePrompt")));
 
     const search = h("input", {
       type: "search",
-      placeholder: "Search the questions",
-      "aria-label": "Search the questions",
+      placeholder: t("exam.pool.search"),
+      "aria-label": t("exam.pool.search"),
       class: "sl-exam-pool-search",
     });
     let timer;
@@ -113,7 +107,7 @@ class PoolView extends ExamElement {
 
     this.tree = h(
       "nav",
-      { class: "sl-exam-pool-tree", "aria-label": "Categories" },
+      { class: "sl-exam-pool-tree", "aria-label": t("exam.pool.categories") },
       h(
         "ul",
         {},
@@ -128,7 +122,7 @@ class PoolView extends ExamElement {
               "data-category": "",
               onClick: (event) => this.chooseCategory(null, event.currentTarget),
             },
-            "All categories"
+            t("exam.pool.allCategories")
           )
         ),
         tree.map(node)
@@ -136,12 +130,12 @@ class PoolView extends ExamElement {
     );
 
     const courseQuery = this.params.course ? `?course=${this.params.course}` : "";
-    const categories = h("a", { href: `/exam/pool/categories${courseQuery}`, class: "sl-exam-pool-categories-link" }, "Edit categories");
-    const importing = h("a", { href: `/exam/pool/import${courseQuery}`, class: "sl-exam-pool-import-link" }, "Import questions");
+    const categories = h("a", { href: `/exam/pool/categories${courseQuery}`, class: "sl-exam-pool-categories-link" }, t("exam.pool.editCategories"));
+    const importing = h("a", { href: `/exam/pool/import${courseQuery}`, class: "sl-exam-pool-import-link" }, t("exam.pool.importQuestions"));
     if (tree.length === 0) {
-      return h("div", { class: "sl-exam" }, h("p", {}, "The question pool is empty. Create a category to start, or import questions: "), categories, " · ", importing);
+      return h("div", { class: "sl-exam" }, h("p", {}, t("exam.pool.empty")), categories, " · ", importing);
     }
-    this.newQuestion = h("a", { class: "sl-exam-pool-new", hidden: this.categoryId === null }, "New question");
+    this.newQuestion = h("a", { class: "sl-exam-pool-new", hidden: this.categoryId === null }, t("exam.pool.newQuestion"));
     this.updateNewQuestion();
     const retired = h("input", {
       type: "checkbox",
@@ -158,7 +152,7 @@ class PoolView extends ExamElement {
         this.refreshList();
       },
     });
-    this.unreviewedLabel = h("span", {}, " Not reviewed");
+    this.unreviewedLabel = h("span", {}, ` ${t("exam.pool.notReviewed")}`);
     this.unreviewedFilter = h("label", { class: "sl-exam-pool-unreviewed-filter", hidden: true }, this.unreviewedBox, this.unreviewedLabel);
     this.refreshList();
     this.countUnreviewed();
@@ -174,7 +168,7 @@ class PoolView extends ExamElement {
           "div",
           { class: "sl-exam-pool-tools" },
           search,
-          h("label", { class: "sl-exam-quiet" }, retired, " show retired"),
+          h("label", { class: "sl-exam-quiet" }, retired, ` ${t("exam.pool.showRetired")}`),
           this.unreviewedFilter,
           this.newQuestion
         ),
@@ -189,9 +183,9 @@ class PoolView extends ExamElement {
    * "Create test", or one of the course's unwritten tests to add them to.
    */
   assemblyPanel(course, tests) {
-    this.count = h("span", { class: "sl-exam-pool-count" }, "No question chosen - click a question to choose it.");
+    this.count = h("span", { class: "sl-exam-pool-count" }, t("exam.pool.noneChosen"));
     this.message = h("p", { class: "sl-exam-message", role: "status" });
-    const name = h("input", { type: "text", name: "name", maxlength: "80", placeholder: "Name of the test", "aria-label": "Name of the test", required: true });
+    const name = h("input", { type: "text", name: "name", maxlength: "80", placeholder: t("exam.pool.testName"), "aria-label": t("exam.pool.testName"), required: true });
     const create = h(
       "form",
       {
@@ -202,13 +196,13 @@ class PoolView extends ExamElement {
         },
       },
       name,
-      h("button", { type: "submit" }, "Create test")
+      h("button", { type: "submit" }, t("exam.pool.createTest"))
     );
     let add = null;
     if (tests.length > 0) {
       const target = h(
         "select",
-        { name: "test", "aria-label": "Test to add the questions to" },
+        { name: "test", "aria-label": t("exam.pool.addTarget") },
         tests.map((test) => h("option", { value: String(test.id) }, test.name))
       );
       add = h(
@@ -225,15 +219,15 @@ class PoolView extends ExamElement {
             });
           },
         },
-        "or add them to ",
+        `${t("exam.pool.orAddTo")} `,
         target,
-        h("button", { type: "submit" }, "Add")
+        h("button", { type: "submit" }, t("exam.pool.add"))
       );
     }
     return h(
       "section",
-      { class: "sl-exam-pool-assembly", "aria-label": "Assemble a test" },
-      h("h2", {}, `A test for ${displayClass(course.className)} ${course.subject}`),
+      { class: "sl-exam-pool-assembly", "aria-label": t("exam.pool.assemble") },
+      h("h2", {}, t("exam.pool.testFor", { course: `${displayClass(course.className)} ${course.subject}` })),
       h("p", {}, this.count),
       create,
       add,
@@ -244,7 +238,7 @@ class PoolView extends ExamElement {
   /** Sends the assembly `request` and opens the test it answers. */
   async assemble(request) {
     if (this.chosen.size === 0) {
-      this.message.textContent = "Choose at least one question.";
+      this.message.textContent = t("exam.pool.chooseOne");
       return;
     }
     this.message.textContent = "";
@@ -253,7 +247,7 @@ class PoolView extends ExamElement {
       window.location.assign(`/exam/tests/${test.id}`);
     } catch (error) {
       this.message.textContent =
-        error instanceof ExamApiError && error.status < 500 ? error.message : "The test could not be saved. Please try again.";
+        error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.pool.testSaveFailed");
     }
   }
 
@@ -272,9 +266,8 @@ class PoolView extends ExamElement {
     if (!this.count) return;
     const n = this.chosen.size;
     const unreviewed = [...this.chosen].filter((id) => this.unreviewedIds.has(id)).length;
-    const reminder =
-      unreviewed === 0 ? "" : ` ${unreviewed} of ${n} chosen question${n === 1 ? " is" : unreviewed === 1 ? "s is" : "s are"} not reviewed yet.`;
-    this.count.textContent = (n === 0 ? "No question chosen - click a question to choose it." : n === 1 ? "1 question chosen." : `${n} questions chosen.`) + reminder;
+    const reminder = unreviewed === 0 ? "" : ` ${n === 1 ? t("exam.pool.chosenUnreviewedOne", { count: unreviewed, total: n }) : t("exam.pool.chosenUnreviewed", { count: unreviewed, total: n })}`;
+    this.count.textContent = (n === 0 ? t("exam.pool.noneChosen") : t("exam.pool.chosen", { count: n })) + reminder;
   }
 
   /** The filter "Not reviewed (n)", shown while any question awaits review or the filter is on. */
@@ -287,7 +280,7 @@ class PoolView extends ExamElement {
       return;
     }
     for (const question of questions) this.unreviewedIds.add(question.id);
-    this.unreviewedLabel.textContent = ` Not reviewed (${questions.length})`;
+    this.unreviewedLabel.textContent = ` ${t("exam.pool.notReviewedCount", { count: questions.length })}`;
     this.unreviewedFilter.hidden = questions.length === 0 && !this.onlyUnreviewed;
   }
 
@@ -329,7 +322,7 @@ class PoolView extends ExamElement {
       questions = await examApi(`/pool/questions${asked ? `?${asked}` : ""}`);
     } catch (error) {
       console.error("[exam] the pool's questions could not be loaded:", error);
-      this.list.replaceChildren(h("p", { class: "sl-embed-error" }, "The questions could not be loaded."));
+      this.list.replaceChildren(h("p", { class: "sl-embed-error" }, t("exam.pool.questionsLoadFailed")));
       return;
     }
     // A slower answer to an older question does not overwrite a newer one.
@@ -339,7 +332,7 @@ class PoolView extends ExamElement {
       else this.unreviewedIds.delete(question.id);
     }
     if (questions.length === 0) {
-      this.list.replaceChildren(h("p", { class: "sl-exam-quiet" }, "No question matches."));
+      this.list.replaceChildren(h("p", { class: "sl-exam-quiet" }, t("exam.pool.noMatch")));
       return;
     }
     const table = h(
@@ -351,9 +344,9 @@ class PoolView extends ExamElement {
         h(
           "tr",
           {},
-          h("th", {}, "Question"),
-          h("th", {}, "Used"),
-          h("th", {}, "Last used")
+          h("th", {}, t("exam.pool.question")),
+          h("th", {}, t("exam.pool.used")),
+          h("th", {}, t("exam.pool.lastUsed"))
         )
       ),
       h(
@@ -384,12 +377,12 @@ class PoolView extends ExamElement {
               "td",
               {},
               h("button", { type: "button", class: "sl-exam-link" }, question.nameDe),
-              question.unreviewed ? h("span", { class: "sl-exam-pool-badge" }, "not reviewed") : null,
+              question.unreviewed ? h("span", { class: "sl-exam-pool-badge" }, t("exam.pool.badge")) : null,
               h("div", { class: "sl-exam-quiet" }, question.excerptDe),
               h(
                 "div",
                 { class: "sl-exam-quiet sl-exam-pool-kind" },
-                `${question.category.de.join(" / ")} · ${typeLabels[question.type] ?? question.type}${question.retired ? " · retired" : ""}`
+                `${question.category.de.join(" / ")} · ${typeLabels[question.type] ?? question.type}${question.retired ? ` · ${t("exam.pool.retired")}` : ""}`
               )
             ),
             h("td", {}, `${question.uses}×`),
@@ -398,7 +391,7 @@ class PoolView extends ExamElement {
         )
       )
     );
-    this.list.replaceChildren(h("p", { class: "sl-exam-quiet" }, `${questions.length} questions`), h("div", { class: "sl-exam-scroll sl-exam-pool-scroll" }, markRows(table)));
+    this.list.replaceChildren(h("p", { class: "sl-exam-quiet" }, t("exam.pool.questionCount", { count: questions.length })), h("div", { class: "sl-exam-scroll sl-exam-pool-scroll" }, markRows(table)));
     // The question chosen last stays in view while the list scrolls: its
     // row sticks just below the list's sticky head.
     requestAnimationFrame(() => table.style.setProperty("--sl-exam-pool-head", `${table.tHead.offsetHeight}px`));
@@ -411,7 +404,7 @@ class PoolView extends ExamElement {
       question = await examApi(`/pool/questions/${id}`);
     } catch (error) {
       console.error("[exam] the question could not be loaded:", error);
-      this.preview.replaceChildren(h("p", { class: "sl-embed-error" }, "The question could not be loaded."));
+      this.preview.replaceChildren(h("p", { class: "sl-embed-error" }, t("exam.pool.questionLoadFailed")));
       return;
     }
     if (this.shown !== id) return;
@@ -424,7 +417,7 @@ class PoolView extends ExamElement {
     const de = this.language === "de";
     const switcher = h(
       "div",
-      { class: "sl-exam-pool-languages", role: "group", "aria-label": "Language" },
+      { class: "sl-exam-pool-languages", role: "group", "aria-label": t("exam.pool.language") },
       ["de", "en"].map((language) =>
         h(
           "button",
@@ -442,7 +435,7 @@ class PoolView extends ExamElement {
     );
     const usage =
       question.usage.length === 0
-        ? h("p", { class: "sl-exam-quiet" }, "Not used in any test yet.")
+        ? h("p", { class: "sl-exam-quiet" }, t("exam.pool.notUsed"))
         : h(
             "ul",
             { class: "sl-exam-pool-usage" },
@@ -460,10 +453,10 @@ class PoolView extends ExamElement {
           { class: "sl-exam-quiet" },
           (de ? question.category.de : question.category.en).join(" / "),
           ` · ${typeLabels[question.type] ?? question.type}`,
-          question.retired ? " · retired" : ""
+          question.retired ? ` · ${t("exam.pool.retired")}` : ""
         ),
         question.unreviewed ? this.reviewBanner(question) : null,
-        h("div", { class: "sl-exam-pool-question-tools" }, switcher, h("a", { href: this.editAddress(question), class: "sl-exam-pool-edit" }, "Edit")),
+        h("div", { class: "sl-exam-pool-question-tools" }, switcher, h("a", { href: this.editAddress(question), class: "sl-exam-pool-edit" }, t("exam.pool.edit"))),
         storedMarkup(de ? question.textDe : question.textEn, "sl-exam-pool-text"),
         h(
           "ol",
@@ -472,12 +465,12 @@ class PoolView extends ExamElement {
             h(
               "li",
               { class: answer.correct ? "is-correct" : "" },
-              h("span", { class: "sl-exam-pool-mark", "aria-label": answer.correct ? "correct" : "wrong" }, answer.correct ? "✓" : "✗"),
+              h("span", { class: "sl-exam-pool-mark", "aria-label": answer.correct ? t("exam.pool.correct") : t("exam.pool.wrong") }, answer.correct ? "✓" : "✗"),
               storedMarkup(de ? answer.textDe : answer.textEn, "sl-exam-pool-answer")
             )
           )
         ),
-        h("h3", {}, `Used ${question.uses}×`),
+        h("h3", {}, t("exam.pool.usedTimes", { count: question.uses })),
         usage
       )
     );
@@ -492,11 +485,11 @@ class PoolView extends ExamElement {
       h(
         "p",
         {},
-        question.importedAt ? `Imported on ${displayDay(question.importedAt)} by ${question.importedBy} from ` : "Imported, ",
+        question.importedAt ? `${t("exam.pool.importedOn", { date: displayDate(question.importedAt), teacher: question.importedBy })} ` : `${t("exam.pool.imported")} `,
         question.importFileName ? h("code", {}, question.importFileName) : null,
-        question.importedAt ? ", not reviewed yet." : "not reviewed yet."
+        question.importedAt ? `, ${t("exam.pool.notReviewedYet")}` : t("exam.pool.notReviewedYet")
       ),
-      h("button", { type: "button", onClick: () => this.markReviewed(question.id, message) }, "Mark as reviewed"),
+      h("button", { type: "button", onClick: () => this.markReviewed(question.id, message) }, t("exam.pool.markReviewed")),
       message
     );
   }
@@ -510,7 +503,7 @@ class PoolView extends ExamElement {
     try {
       await examApi(`/pool/questions/${id}/reviewed`, { method: "POST" });
     } catch (error) {
-      message.textContent = error instanceof ExamApiError && error.status < 500 ? error.message : "That did not work. Please try again.";
+      message.textContent = error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.pool.actionFailed");
       return;
     }
     this.unreviewedIds.delete(id);

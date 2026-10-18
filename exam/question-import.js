@@ -18,7 +18,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { Marked } from "marked";
 
-import { ConflictError, inTransaction, NotFoundError, now } from "./classes.js";
+import { ConflictError, englishText, inTransaction, NotFoundError, now, withKey } from "./classes.js";
+import { createFormat } from "../i18n/format.js";
 import { categoryTree, plainText } from "./pool.js";
 import { questionTypes } from "./pool-import.js";
 import { insertCategory, insertQuestion, QuestionProblemsError, questionProblems } from "./pool-edit.js";
@@ -42,6 +43,15 @@ export const formatDescriptionPath = path.join(import.meta.dirname, "question-im
 const markdown = new Marked({ gfm: true, breaks: false });
 
 const languageNames = { de: "German", en: "English" };
+
+/**
+ * A problem of the file at `line`: `{ line, question, message }`, the message
+ * English, with `key` and `params` unlisted so the route that answers can
+ * show it in the reader's language (`readableMessage`).
+ */
+function fileProblem(line, question, key, params = {}) {
+  return withKey({ line, question, message: englishText(key, params) }, key, params);
+}
 
 /** The hint at the end of a question text, by language: the number of correct answers. */
 const hintPattern = {
@@ -95,9 +105,9 @@ function readSection(lines, { withAnswers, problem }) {
   const content = located.filter(({ token }) => token.type !== "space");
 
   const refused = {
-    image: "embeds an image. Images cannot be imported; leave them out, the teacher adds them in the editor.",
-    html: "contains HTML. Write the text in Markdown only.",
-    heading: "contains a heading. A question text has no headings; a line starting with # ends the question.",
+    image: "exam.errors.import.sectionImage",
+    html: "exam.errors.import.sectionHtml",
+    heading: "exam.errors.import.sectionHeading",
   };
   let refusedContent = false;
   for (const { token, line } of content) {
@@ -121,20 +131,20 @@ function readSection(lines, { withAnswers, problem }) {
   let textTokens = content;
   if (withAnswers) {
     if (!isTaskList) {
-      problem(firstLine, "has no answers. End the section with the answers as a task list: `- [x] ` for a correct one, `- [ ] ` for a wrong one.");
+      problem(firstLine, "exam.errors.import.sectionNoAnswers");
     } else {
       textTokens = content.slice(0, -1);
       let itemLine = last.line;
       answers = last.token.items.map((item, index) => {
         const line = itemLine;
         itemLine += item.raw.replace(/\n+$/, "\n").match(/\n/g)?.length ?? 0;
-        if (!item.task) problem(line, `answer ${index + 1} is not marked. Start every answer with \`- [x] \` or \`- [ ] \`.`);
-        if (item.tokens.some((token) => token.type === "list")) problem(line, `answer ${index + 1} holds a list. An answer is a single list item.`);
+        if (!item.task) problem(line, "exam.errors.import.sectionAnswerUnmarked", { answer: index + 1 });
+        if (item.tokens.some((token) => token.type === "list")) problem(line, "exam.errors.import.sectionAnswerList", { answer: index + 1 });
         return { line, html: markdown.parser(item.tokens).trim(), correct: item.checked === true };
       });
     }
   } else if (isTaskList) {
-    problem(last.line, "has answers, but a true/false question has none: its answers are always true and false. Remove the task list.");
+    problem(last.line, "exam.errors.import.sectionTrueFalseAnswers");
     textTokens = content.slice(0, -1);
   }
 
@@ -151,7 +161,7 @@ function readSection(lines, { withAnswers, problem }) {
  */
 export function parseQuestionFile(text) {
   const problems = [];
-  const add = (line, question, message) => problems.push({ line, question, message });
+  const add = (line, question, key, params = {}) => problems.push(fileProblem(line, question, key, params));
   const lines = String(text ?? "")
     .replace(/^﻿/, "")
     .replace(/\r\n?/g, "\n")
@@ -159,23 +169,23 @@ export function parseQuestionFile(text) {
   const result = { categories: [], questions: [], problems };
 
   // The front matter: `---`, `format: safelearn-questions/1`, `---`.
-  const notThisFormat = `This is not a question file in the format ${formatVersion}. It has to start with the three lines \`---\`, \`format: ${formatVersion}\`, \`---\`.`;
+  const notThisFormat = "exam.errors.import.notThisFormat";
   if (lines[0]?.trim() !== "---") {
-    add(1, null, notThisFormat);
+    add(1, null, notThisFormat, { format: formatVersion });
     return result;
   }
   const close = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
   if (close === -1) {
-    add(1, null, notThisFormat);
+    add(1, null, notThisFormat, { format: formatVersion });
     return result;
   }
   const format = lines.slice(1, close).map((line) => /^format:\s*(.*?)\s*$/.exec(line)?.[1]).find((value) => value !== undefined);
   if (format === undefined) {
-    add(1, null, notThisFormat);
+    add(1, null, notThisFormat, { format: formatVersion });
     return result;
   }
   if (format !== formatVersion) {
-    add(1 + lines.slice(1, close).findIndex((line) => /^format:/.test(line)) + 1, null, `The file names the format "${format}"; this import reads ${formatVersion} only.`);
+    add(1 + lines.slice(1, close).findIndex((line) => /^format:/.test(line)) + 1, null, "exam.errors.import.otherFormat", { named: format, format: formatVersion });
     return result;
   }
 
@@ -188,10 +198,11 @@ export function parseQuestionFile(text) {
 
   const finishSection = () => {
     if (!section || !question) return;
-    const where = `The ${languageNames[section.language]} section`;
+    // The section by its English name and by its marker, for either catalog.
+    const where = { language: languageNames[section.language], code: section.language };
     const read = readSection(section.lines, {
       withAnswers: question.type !== "truefalse",
-      problem: (line, message) => add(line ?? section.line, question.nameDe, `${where} ${message}`),
+      problem: (line, key, params = {}) => add(line ?? section.line, question.nameDe, key, { ...where, ...params }),
     });
     question[section.language] = { ...read, line: section.line };
     // An image is the parser's problem already; the editor would name it again.
@@ -204,13 +215,13 @@ export function parseQuestionFile(text) {
     if (!question) return;
     if (header) {
       // The heading ended before all its header lines came.
-      add(header.line, question.nameDe, `The line \`${header.expect[0]}: \` is missing below the heading.`);
+      add(header.line, question.nameDe, "exam.errors.import.headerLineMissing", { key: header.expect[0] });
       question.broken = true;
       header = null;
     }
     for (const language of ["de", "en"]) {
       if (!question[language] && !question.broken) {
-        add(question.line, question.nameDe, `The section \`### ${language}\` is missing.`);
+        add(question.line, question.nameDe, "exam.errors.import.sectionMissing", { code: language });
         question.broken = true;
       }
     }
@@ -220,7 +231,7 @@ export function parseQuestionFile(text) {
 
   const finishCategoryHeader = () => {
     if (header?.kind === "category") {
-      add(header.line, null, "The line `en: ` with the English path is missing below the category heading.");
+      add(header.line, null, "exam.errors.import.categoryEnMissing");
       result.categories[category].broken = true;
       header = null;
     }
@@ -234,7 +245,7 @@ export function parseQuestionFile(text) {
     if (fence !== null) {
       if (closesFence(line, fence)) fence = null;
       if (section) section.lines.push({ number, text: line });
-      else if (line.trim() !== "") add(number, question?.nameDe ?? null, "This line is outside a `### de` or `### en` section.");
+      else if (line.trim() !== "") add(number, question?.nameDe ?? null, "exam.errors.import.outsideSection");
       return;
     }
 
@@ -244,7 +255,7 @@ export function parseQuestionFile(text) {
       const ahead = header.expect.findIndex((expected) => new RegExp(`^${expected}:`).test(line));
       if (ahead > 0 && header.kind === "question") {
         for (const missing of header.expect.splice(0, ahead)) {
-          add(number, question.nameDe, `The line \`${missing}: \` is missing or misplaced: it belongs directly below the heading${missing === "en" ? "" : ", after the lines above it"}.`);
+          add(number, question.nameDe, missing === "en" ? "exam.errors.import.headerLineMisplacedFirst" : "exam.errors.import.headerLineMisplaced", { key: missing });
         }
         question.broken = true;
       }
@@ -265,14 +276,14 @@ export function parseQuestionFile(text) {
             question.type = value;
             question.typeLine = number;
             if (!questionTypes.includes(value)) {
-              add(number, question.nameDe, `The type "${value}" is unknown. Use multichoiceset, multichoice or truefalse.`);
+              add(number, question.nameDe, "exam.errors.import.unknownType", { type: value });
               question.broken = true;
             } else if (value === "truefalse") {
               header.expect.push("solution");
             }
           } else if (key === "solution") {
             if (value !== "true" && value !== "false") {
-              add(number, question.nameDe, "A true/false question's line reads `solution: true` or `solution: false`.");
+              add(number, question.nameDe, "exam.errors.import.solutionLine");
               question.broken = true;
             }
             question.solution = value === "true";
@@ -287,7 +298,7 @@ export function parseQuestionFile(text) {
       if (header.kind === "category") {
         finishCategoryHeader();
       } else {
-        add(number, question.nameDe, `The line \`${key}: \` is missing or misplaced: it belongs directly below the heading${key === "en" ? "" : ", after the lines above it"}.`);
+        add(number, question.nameDe, key === "en" ? "exam.errors.import.headerLineMisplacedFirst" : "exam.errors.import.headerLineMisplaced", { key });
         question.broken = true;
         header = null;
       }
@@ -306,7 +317,7 @@ export function parseQuestionFile(text) {
       finishQuestion();
       question = { line: number, categoryIndex: category, nameDe: heading[2].trim(), nameEn: "", type: null, solution: null, de: null, en: null };
       if (category === null) {
-        add(number, question.nameDe, "This question has no category above it. Put a category heading `# <German path>` before the first question.");
+        add(number, question.nameDe, "exam.errors.import.noCategory");
         question.broken = true;
       }
       header = { kind: "question", expect: ["en", "type"], line: number };
@@ -316,10 +327,10 @@ export function parseQuestionFile(text) {
       const language = heading[2].trim();
       finishSection();
       if (question[language]) {
-        add(number, question.nameDe, `The section \`### ${language}\` appears twice.`);
+        add(number, question.nameDe, "exam.errors.import.sectionTwice", { code: language });
         question.broken = true;
       } else if (language === "en" && !question.de) {
-        add(number, question.nameDe, "The section `### en` comes before `### de`. Write the German section first.");
+        add(number, question.nameDe, "exam.errors.import.englishFirst");
         question.broken = true;
       }
       section = { language, line: number, lines: [] };
@@ -333,11 +344,11 @@ export function parseQuestionFile(text) {
     }
     if (line.trim() === "") return;
     if (heading) {
-      add(number, question?.nameDe ?? null, `The heading "${line.trim()}" is not part of the format. Only \`#\` (category), \`##\` (question) and \`### de\` / \`### en\` are.`);
+      add(number, question?.nameDe ?? null, "exam.errors.import.unknownHeading", { heading: line.trim() });
     } else if (question) {
-      add(number, question.nameDe, "This line is outside a `### de` or `### en` section.");
+      add(number, question.nameDe, "exam.errors.import.outsideSection");
     } else {
-      add(number, null, category === null ? "This line is outside any category. The file starts with a category heading `# <German path>`." : "This line is outside any question. A question starts with `## <German short title>`.");
+      add(number, null, category === null ? "exam.errors.import.outsideCategory" : "exam.errors.import.outsideQuestion");
     }
   });
   finishCategoryHeader();
@@ -375,9 +386,9 @@ function importWithHash(db, sha256) {
   return db.prepare("SELECT id, imported_at AS importedAt, imported_by AS importedBy, file_name AS fileName FROM question_import WHERE sha256 = ?").get(sha256) ?? null;
 }
 
-/** A date as the module's pages write it, 17.10.2026. */
+/** A date in the school's default format, 17.10.2026. */
 function dayOf(iso) {
-  return new Date(iso).toLocaleDateString("de-AT", { timeZone: "Europe/Vienna", day: "2-digit", month: "2-digit", year: "numeric" });
+  return createFormat("de-AT").date(iso);
 }
 
 /** The SHA-256 of a file's text. */
@@ -435,18 +446,18 @@ function pattern(answers) {
 export function checkQuestionFile(db, text, fileName = "") {
   const raw = String(text ?? "");
   if (Buffer.byteLength(raw, "utf8") > fileLimitBytes) {
-    return { problems: [{ line: 1, question: null, message: "The file is larger than 1 MB. Split it into several files." }], plan: null };
+    return { problems: [fileProblem(1, null, "exam.errors.import.tooLarge")], plan: null };
   }
   if (raw.replace(/^﻿/, "").trim() === "") {
-    return { problems: [{ line: 1, question: null, message: "The file is empty." }], plan: null };
+    return { problems: [fileProblem(1, null, "exam.errors.import.empty")], plan: null };
   }
   const parsed = parseQuestionFile(raw);
   const problems = [...parsed.problems];
-  const add = (line, question, message) => problems.push({ line, question, message });
+  const add = (line, question, key, params = {}) => problems.push(fileProblem(line, question, key, params));
 
-  if (parsed.problems.length === 0 && parsed.questions.length === 0) add(1, null, "The file holds no question.");
+  if (parsed.problems.length === 0 && parsed.questions.length === 0) add(1, null, "exam.errors.import.noQuestion");
   if (parsed.questions.length > questionLimit) {
-    add(parsed.questions[questionLimit].line, null, `The file holds ${parsed.questions.length} questions; one import takes at most ${questionLimit}. Split it into several files.`);
+    add(parsed.questions[questionLimit].line, null, "exam.errors.import.tooManyQuestions", { count: parsed.questions.length, limit: questionLimit });
   }
 
   // Category paths: the same depth in both languages, names that fit, and
@@ -456,13 +467,13 @@ export function checkQuestionFile(db, text, fileName = "") {
     if (node.broken || node.en === null) continue;
     const de = pathText(node.de);
     if (node.de.some((segment) => segment === "") || node.en.some((segment) => segment === "")) {
-      add(node.line, null, `The category path "${de}" has an empty segment. Separate the names with " / ".`);
+      add(node.line, null, "exam.errors.import.emptySegment", { path: de });
     } else if (node.de.length !== node.en.length) {
-      add(node.enLine, null, `The German path has ${node.de.length} segment${node.de.length === 1 ? "" : "s"}, the English one ${node.en.length}. Both name the same categories, separated by " / ".`);
+      add(node.enLine, null, "exam.errors.import.pathDepth", { count: node.de.length, english: node.en.length });
     } else if ([...node.de, ...node.en].some((segment) => segment.length > nameLimit)) {
-      add(node.line, null, `A category's name is at most ${nameLimit} characters.`);
+      add(node.line, null, "exam.errors.pool.categoryNameLength", { limit: nameLimit });
     } else if (englishOf.has(de) && englishOf.get(de).text !== pathText(node.en)) {
-      add(node.enLine, null, `The category "${de}" is named "${englishOf.get(de).text}" in English on line ${englishOf.get(de).line}, and "${pathText(node.en)}" here. Use one English path for it.`);
+      add(node.enLine, null, "exam.errors.import.twoEnglishPaths", { path: de, english: englishOf.get(de).text, line: englishOf.get(de).line, here: pathText(node.en) });
     } else if (!englishOf.has(de)) {
       englishOf.set(de, { text: pathText(node.en), line: node.enLine });
     }
@@ -476,7 +487,7 @@ export function checkQuestionFile(db, text, fileName = "") {
     const input = editorInput(question, anyCategory);
     for (const found of questionProblems(db, input, null)) {
       if (found.field === "categoryId") continue;
-      add(editorLine(question, found), question.nameDe, found.message);
+      add(editorLine(question, found), question.nameDe, found.key, found.params);
     }
     if (question.type === "truefalse") continue;
 
@@ -484,9 +495,9 @@ export function checkQuestionFile(db, text, fileName = "") {
     const de = question.de.answers;
     const en = question.en.answers;
     if (de.length !== en.length) {
-      add(question.en.line, question.nameDe, `The German section has ${de.length} answers (${pattern(de)}), the English one ${en.length} (${pattern(en)}). Both need the same answers in the same order.`);
+      add(question.en.line, question.nameDe, "exam.errors.import.answerCounts", { german: de.length, germanMarks: pattern(de), english: en.length, englishMarks: pattern(en) });
     } else if (pattern(de) !== pattern(en)) {
-      add(question.en.line, question.nameDe, `The German answers are marked \`${pattern(de)}\`, the English ones \`${pattern(en)}\`. Both need the same answers in the same order with the same marks.`);
+      add(question.en.line, question.nameDe, "exam.errors.import.answerMarks", { germanMarks: pattern(de), englishMarks: pattern(en) });
     }
 
     // The hint with the number of correct answers.
@@ -494,22 +505,22 @@ export function checkQuestionFile(db, text, fileName = "") {
       const section = question[language];
       const correct = section.answers.filter((answer) => answer.correct).length;
       const hint = hintPattern[language].exec(plainText(section.html).trim());
-      const name = languageNames[language];
+      const where = { language: languageNames[language], code: language };
       if (question.type === "multichoiceset") {
         if (!hint) {
-          add(section.line, question.nameDe, `The ${name} question text does not end with the number of correct answers. End it with "${hintText(language, correct)}".`);
+          add(section.line, question.nameDe, "exam.errors.import.hintMissing", { ...where, hint: hintText(language, correct) });
         } else if (Number(hint[1]) !== correct) {
-          add(section.line, question.nameDe, `The ${name} hint says ${hint[1]}, but ${correct} answer${correct === 1 ? " is" : "s are"} marked correct.`);
+          add(section.line, question.nameDe, "exam.errors.import.hintWrong", { ...where, says: hint[1], count: correct });
         }
       } else if (hint && Number(hint[1]) !== 1) {
-        add(section.line, question.nameDe, `The ${name} hint says ${hint[1]}, but a multichoice question has exactly 1 correct answer. End it with "${hintText(language, 1)}".`);
+        add(section.line, question.nameDe, "exam.errors.import.hintSingle", { ...where, says: hint[1], hint: hintText(language, 1) });
       }
     }
   }
 
   const earlier = importWithHash(db, fileHash(raw));
   if (earlier) {
-    add(1, null, `Exactly this file was imported on ${dayOf(earlier.importedAt)} by ${earlier.importedBy} (as "${earlier.fileName}"). Take that import back first to import it again.`);
+    add(1, null, "exam.errors.import.importedBefore", { date: dayOf(earlier.importedAt), by: earlier.importedBy, file: earlier.fileName });
   }
 
   problems.sort((a, b) => a.line - b.line);
@@ -639,7 +650,7 @@ export function listImports(db) {
  */
 export function takeBackImport(db, id) {
   const row = db.prepare("SELECT id, report FROM question_import WHERE id = ?").get(id);
-  if (!row) throw new NotFoundError("There is no such import.");
+  if (!row) throw new NotFoundError("exam.errors.import.noImport");
   return inTransaction(db, () => {
     const used = db
       .prepare(
@@ -651,9 +662,7 @@ export function takeBackImport(db, id) {
       .all(id)
       .map((question) => `"${question.nameDe}"`);
     if (used.length > 0) {
-      throw new ConflictError(
-        `This import cannot be taken back: ${used.length === 1 ? "its question" : `${used.length} of its questions`} ${used.join(", ")} ${used.length === 1 ? "is" : "are"} in a test.`
-      );
+      throw new ConflictError("exam.errors.import.inUse", { count: used.length, names: used.join(", ") });
     }
     const questions = Number(db.prepare("DELETE FROM question WHERE import_id = ?").run(id).changes);
 

@@ -24,11 +24,12 @@ import { getQuestion } from "./pool.js";
 import { NotFoundError } from "./classes.js";
 import { identityOf, requireTeacher, teacherPage } from "./gate.js";
 import { contextFromQuery, teacherShell } from "./bar.js";
+import { i18nOf } from "../i18n/server.js";
 
 /** A record id from the path or query; anything but a positive integer names nothing. */
 function idParam(value) {
   const id = typeof value === "string" && /^[1-9]\d{0,9}$/.test(value) ? Number(value) : null;
-  if (id === null) throw new NotFoundError("There is no such record.");
+  if (id === null) throw new NotFoundError("exam.errors.noSuchRecord");
   return id;
 }
 
@@ -41,7 +42,9 @@ function idParam(value) {
 function rawImage(req, res, next) {
   express.raw({ type: () => true, limit: uploadLimitBytes })(req, res, (error) => {
     if (error?.type === "entity.too.large") {
-      res.status(413).json({ error: "An image may be at most 2 MB." });
+      i18nOf(req)
+        .then(({ t }) => res.status(413).json({ error: t("exam.errors.pool.imageTooLarge") }))
+        .catch(next);
       return;
     }
     next(error);
@@ -83,7 +86,7 @@ export function registerPoolEditRoutes(router, { db, handle, startPage }) {
     requireTeacher,
     handle(async (req, res) => {
       const upload = readUpload(db, req.params.token);
-      if (!upload) throw new NotFoundError("There is no such upload.");
+      if (!upload) throw new NotFoundError("exam.errors.noSuchUpload");
       res.set({ "Content-Type": upload.mime, "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" });
       res.send(Buffer.from(upload.data));
     })
@@ -103,7 +106,7 @@ export function registerPoolEditRoutes(router, { db, handle, startPage }) {
   router.get(
     "/pool/questions/new",
     teacherPage,
-    handle(async (req, res) => editorPage(req, res, { id: null, title: "New question" }))
+    handle(async (req, res) => editorPage(req, res, { id: null, title: (t) => t("exam.pages.newQuestion") }))
   );
 
   router.get(
@@ -111,7 +114,7 @@ export function registerPoolEditRoutes(router, { db, handle, startPage }) {
     teacherPage,
     handle(async (req, res) => {
       const question = getQuestion(db, idParam(req.params.id));
-      await editorPage(req, res, { id: question.id, title: `Edit: ${question.nameDe}` });
+      await editorPage(req, res, { id: question.id, title: (t) => t("exam.pages.editQuestion", { name: question.nameDe }) });
     })
   );
 
@@ -121,7 +124,7 @@ export function registerPoolEditRoutes(router, { db, handle, startPage }) {
     handle(async (req, res) => {
       const context = contextFromQuery(req.query);
       const params = context.courseId === null ? {} : { course: String(context.courseId) };
-      res.send(await teacherShell({ db, startPage, req, title: "Question categories", context, kind: "pool-categories", params, current: "pool" }));
+      res.send(await teacherShell({ db, startPage, req, title: (t) => t("exam.pages.categories"), context, kind: "pool-categories", params, current: "pool" }));
     })
   );
 }

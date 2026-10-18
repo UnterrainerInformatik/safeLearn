@@ -23,7 +23,7 @@ import { databasePath, openDatabase } from "./db.js";
 import { SessionEndedError } from "../middlewares/keycloak-middleware.js";
 import { actsAsAdmin, actsAsTeacher, identityOf, teacherPage } from "./gate.js";
 import { teacherShell } from "./bar.js";
-import { ConflictError, InvalidInputError, listYears, NotFoundError } from "./classes.js";
+import { ConflictError, InvalidInputError, listYears, NotFoundError, readableMessage } from "./classes.js";
 import { registerClassRoutes } from "./routes-classes.js";
 import { registerGradebookRoutes } from "./routes-gradebook.js";
 import { registerPoolRoutes } from "./routes-pool.js";
@@ -35,6 +35,7 @@ import { registerAttemptRoutes } from "./routes-attempts.js";
 import { registerLiveRoutes } from "./routes-live.js";
 import { openTestsOf, scheduleSweep } from "./attempts.js";
 import { parsePeriods } from "./client/periods.js";
+import { i18nOf } from "../i18n/server.js";
 
 const clientDir = path.join(import.meta.dirname, "client");
 const clientScript = "/exam/assets/exam-client.js";
@@ -57,9 +58,9 @@ const handle = (fn) => (req, res, next) => {
  * such a page makes no request for them (`exam-embedding`).
  */
 function buildEmbedHandlers() {
-  const forEveryone = (kind) => async (params) => embedPlaceholder(kind, params);
-  const forTeachers = (kind) => async (params, req) =>
-    (await actsAsTeacher(req)) ? embedPlaceholder(kind, params) : "";
+  const placeholder = async (kind, params, req) => embedPlaceholder(kind, params, (await i18nOf(req)).t("app.embed.loading"));
+  const forEveryone = (kind) => async (params, req) => placeholder(kind, params, req);
+  const forTeachers = (kind) => async (params, req) => ((await actsAsTeacher(req)) ? placeholder(kind, params, req) : "");
   return {
     test: forEveryone("test"),
     results: forEveryone("results"),
@@ -86,7 +87,8 @@ function buildRouter(db, startPage, periods) {
 
   // Who the module takes this session for. The client's first question, and
   // the one place a session can see the student-view downgrade from outside.
-  // It carries the school's periods too, so no element asks a second time.
+  // It carries the school's periods too, so no element asks a second time,
+  // and the reader's language and format (`ui-language`).
   router.get(
     "/api/me",
     handle(async (req, res) => {
@@ -95,7 +97,8 @@ function buildRouter(db, startPage, periods) {
         res.status(403).json({ error: "Forbidden" });
         return;
       }
-      res.json({ username, teacher: await actsAsTeacher(req), admin: await actsAsAdmin(req), periods });
+      const { lang, loc } = await i18nOf(req);
+      res.json({ username, teacher: await actsAsTeacher(req), admin: await actsAsAdmin(req), periods, lang, loc });
     })
   );
 
@@ -122,7 +125,7 @@ function buildRouter(db, startPage, periods) {
           db,
           startPage,
           req,
-          title: "Classes and courses",
+          title: (t) => t("exam.pages.home"),
           context: { yearId: year?.id ?? null },
           kind: "classes-home",
           params,
@@ -148,8 +151,15 @@ function buildRouter(db, startPage, periods) {
       return;
     }
     if (status !== null) {
-      // A question the editor cannot save names every problem at its field.
-      res.status(status).json(error.problems ? { error: error.message, problems: error.problems } : { error: error.message });
+      // In the reader's language (`ui-language`); a question the editor
+      // cannot save names every problem at its field.
+      i18nOf(req)
+        .then(({ t }) => {
+          const answer = { error: readableMessage(error, t) };
+          if (error.problems) answer.problems = error.problems.map((problem) => ({ ...problem, message: readableMessage(problem, t) }));
+          res.status(status).json(answer);
+        })
+        .catch(next);
       return;
     }
     console.error(`[exam] ${req.method} ${req.originalUrl} failed:`, error);
@@ -157,7 +167,9 @@ function buildRouter(db, startPage, periods) {
       res.end();
       return;
     }
-    res.status(500).json({ error: "The exam module could not answer this request." });
+    i18nOf(req)
+      .then(({ t }) => res.status(500).json({ error: t("exam.errors.failed") }))
+      .catch(() => res.status(500).json({ error: "The exam module could not answer this request." }));
   });
 
   return router;

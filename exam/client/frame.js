@@ -1,9 +1,12 @@
 /**
  * What every element of the exam module's client shares: the API call, the
  * frame an element is drawn in, a small DOM builder, and the registry of
- * element names per kind. A module of its own, so the element modules can
- * import it without importing the entry script that mounts them.
+ * element names per kind, and the reader's texts and formats. A module of its
+ * own, so the element modules can import it without importing the entry
+ * script that mounts them.
  */
+
+import { loadI18n } from "./i18n.js";
 
 /**
  * The error an API call rejects with: the status, and the module's own message
@@ -12,7 +15,7 @@
  */
 export class ExamApiError extends Error {
   constructor(status, message, problems = null) {
-    super(message ?? `The exam module answered ${status}.`);
+    super(message ?? t("exam.frame.answeredStatus", { status }));
     this.status = status;
     this.problems = problems;
   }
@@ -60,6 +63,16 @@ export function examMe() {
   return me;
 }
 
+// Asked at once, while the catalogs load; an element asking later joins it.
+examMe().catch(() => {});
+
+/**
+ * The reader's texts and formats (`ui-language`, `locale-formats`): `t(key,
+ * params)` and the formatters of `i18n/format.js`, loaded before any element
+ * of this page is drawn.
+ */
+export const { t, format, lang } = await loadI18n();
+
 /**
  * Builds an element: `h("a", { href: "/x", class: "y" }, "text", child)`.
  * Properties starting with `on` become listeners; text is always set as text,
@@ -100,16 +113,14 @@ export class ExamElement extends HTMLElement {
   }
 
   reload() {
-    this.showStatus("Loading…");
+    this.showStatus(t("app.embed.loading"));
     return Promise.resolve()
       .then(() => this.load())
       .then((data) => this.show(this.render(data)))
       .catch((error) => {
         console.error(`[exam] ${this.localName} could not be loaded:`, error);
         this.showStatus(
-          error instanceof ExamApiError && error.status === 404
-            ? "This record does not exist."
-            : "This element could not be loaded.",
+          error instanceof ExamApiError && error.status === 404 ? t("exam.frame.notFound") : t("exam.frame.loadFailed"),
           true
         );
       });
@@ -236,7 +247,7 @@ window.addEventListener("beforeunload", (event) => {
 
 /** Why a save was refused, in a sentence for the teacher. */
 function refusal(error) {
-  return error instanceof ExamApiError && error.status < 500 ? error.message : "That could not be saved. Please try again.";
+  return error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.frame.saveFailed");
 }
 
 /**

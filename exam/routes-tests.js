@@ -12,6 +12,7 @@ import { createSitting, createTest, deleteSitting, deleteTest, getTest, listTest
 import { correctShares, deleteAttempt, previewView, releaseAttempt, scoreAttempt } from "./attempts.js";
 import { notifySittings } from "./live.js";
 import { embedPlaceholder, wrapInPage, wrapInReveal } from "../obsidian.js";
+import { i18nOf } from "../i18n/server.js";
 import { NotFoundError } from "./classes.js";
 import { actsAsAdmin, requireAdmin, requireTeacher, teacherPage } from "./gate.js";
 import { contextFromQuery, teacherShell } from "./bar.js";
@@ -19,7 +20,7 @@ import { contextFromQuery, teacherShell } from "./bar.js";
 /** A record id from the path; anything but a positive integer names nothing. */
 function idParam(value) {
   const id = typeof value === "string" && /^[1-9]\d{0,9}$/.test(value) ? Number(value) : null;
-  if (id === null) throw new NotFoundError("There is no such record.");
+  if (id === null) throw new NotFoundError("exam.errors.noSuchRecord");
   return id;
 }
 
@@ -119,7 +120,7 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
       if (context.courseId !== null) params.course = String(context.courseId);
       else if (context.classId !== null) params.class = String(context.classId);
       else if (context.yearId !== null) params.year = String(context.yearId);
-      res.send(await teacherShell({ db, startPage, req, title: "Online tests", context, kind: "tests", params, current: "tests" }));
+      res.send(await teacherShell({ db, startPage, req, title: (t) => t("exam.pages.tests"), context, kind: "tests", params, current: "tests" }));
     })
   );
 
@@ -151,7 +152,8 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
     handle(async (req, res) => {
       const test = getTest(db, idParam(req.params.id));
       const slides = solutionSlides(test, correctShares(db, test.id));
-      res.send(await wrapInReveal(slides, req, { title: `${test.name} – Solution` }));
+      const { t } = await i18nOf(req);
+      res.send(await wrapInReveal(slides, req, { title: t("exam.pages.solution", { name: test.name }) }));
     })
   );
 
@@ -162,10 +164,11 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
     teacherPage,
     handle(async (req, res) => {
       const test = getTest(db, idParam(req.params.id));
-      const title = `Try: ${test.name}`;
+      const { t } = await i18nOf(req);
+      const title = t("exam.pages.tryTest", { name: test.name });
       const body = `
         <h1>${title.replaceAll("&", "&amp;").replaceAll("<", "&lt;")}</h1>
-        ${embedPlaceholder("test", { test: String(test.id), preview: "1" })}`;
+        ${embedPlaceholder("test", { test: String(test.id), preview: "1" }, t("app.embed.loading"))}`;
       res.send(await wrapInPage(body, startPage(), req, { title, wide: true }));
     })
   );

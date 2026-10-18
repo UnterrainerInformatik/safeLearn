@@ -6,14 +6,70 @@
  * (`roster-source.js`) decides whom a class's checklist offers.
  */
 
+import { i18nFor } from "../i18n/server.js";
+
+const english = i18nFor("en", "de-AT").t;
+
+/** Whether `text` names a text of the catalogs' `exam.errors` group. */
+function isErrorKey(text) {
+  return typeof text === "string" && /^exam\.errors\.[\w.]+$/.test(text);
+}
+
+/**
+ * A refusal a teacher or student reads (`ui-language`): `key` names its text
+ * in the catalogs' `exam.errors` group and `params` fill it. The message is
+ * the English text, for the log and the unit checks; the module's error
+ * handler answers in the reader's language (`readableMessage`). A plain
+ * sentence in place of a key is kept as it is.
+ */
+class Refusal extends Error {
+  constructor(key, params = {}) {
+    super(isErrorKey(key) ? english(key, params) : key);
+    if (isErrorKey(key)) {
+      this.key = key;
+      this.params = params;
+    }
+  }
+}
+
 /** A request the module refuses as malformed. Answered with 400. */
-export class InvalidInputError extends Error {}
+export class InvalidInputError extends Refusal {}
 
 /** A request that would create something that exists already. Answered with 409. */
-export class ConflictError extends Error {}
+export class ConflictError extends Refusal {}
 
 /** A request about a record there is none of. Answered with 404. */
-export class NotFoundError extends Error {}
+export class NotFoundError extends Refusal {}
+
+/**
+ * A problem at a field, as a list of them reports it: `{ field, answer,
+ * message }`, the message English like a refusal's. `key` and `params` ride
+ * along unlisted, for `readableMessage`, so the problem reads and compares
+ * as it did before it could be translated.
+ */
+export function problemAt(field, key, params = {}, answer = null) {
+  return withKey({ field, answer, message: english(key, params) }, key, params);
+}
+
+/** `item` with `key` and `params` attached unlisted, for `readableMessage`. */
+export function withKey(item, key, params = {}) {
+  Object.defineProperty(item, "key", { value: key });
+  Object.defineProperty(item, "params", { value: params });
+  return item;
+}
+
+/** The English text of `key`, for a message built where no refusal is raised. */
+export function englishText(key, params = {}) {
+  return english(key, params);
+}
+
+/**
+ * The text of a refusal or of a problem in the language `t` speaks: its
+ * catalog text where it has a key, else its message as it was written.
+ */
+export function readableMessage(item, t) {
+  return item.key ? t(item.key, item.params ?? {}) : item.message;
+}
 
 /**
  * The gradebook's categories, in the order a config sheet lists them, and the
@@ -30,9 +86,10 @@ export function now() {
   return new Date().toISOString();
 }
 
-export function validDate(value, what) {
+/** `value` when it is an ISO date; refused with the refusal `key` names otherwise. */
+export function validDate(value, key) {
   if (typeof value !== "string" || !isoDate.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) {
-    throw new InvalidInputError(`${what} has to be a date of the form YYYY-MM-DD.`);
+    throw new InvalidInputError(key);
   }
   return value;
 }
@@ -77,7 +134,7 @@ export function listYears(db) {
 
 export function getYear(db, id) {
   const row = db.prepare("SELECT * FROM school_year WHERE id = ?").get(id);
-  if (!row) throw new NotFoundError(`There is no school year ${id}.`);
+  if (!row) throw new NotFoundError("exam.errors.classes.noYear", { id });
   return yearFromRow(row);
 }
 
@@ -97,13 +154,13 @@ export function createYear(db, { name, startsOn, summerStartsOn, endsOn } = {}) 
   const trimmed = typeof name === "string" ? name.trim() : "";
   const match = /^(\d{4})\/(\d{2})$/.exec(trimmed);
   if (!match || (Number(match[1]) + 1) % 100 !== Number(match[2])) {
-    throw new InvalidInputError(`A school year is named like "2026/27", by the two calendar years it spans.`);
+    throw new InvalidInputError("exam.errors.classes.yearName");
   }
-  validDate(startsOn, "The start");
-  validDate(summerStartsOn, "The start of the summer semester");
-  validDate(endsOn, "The end");
+  validDate(startsOn, "exam.errors.classes.yearStartFormat");
+  validDate(summerStartsOn, "exam.errors.classes.summerStartFormat");
+  validDate(endsOn, "exam.errors.classes.yearEndFormat");
   if (!(startsOn < summerStartsOn && summerStartsOn < endsOn)) {
-    throw new InvalidInputError("The school year has to start before its summer semester, and that before its end.");
+    throw new InvalidInputError("exam.errors.classes.yearOrder");
   }
   try {
     return inTransaction(db, () => {
@@ -116,7 +173,7 @@ export function createYear(db, { name, startsOn, summerStartsOn, endsOn } = {}) 
       return getYear(db, Number(lastInsertRowid));
     });
   } catch (error) {
-    if (isUniqueViolation(error)) throw new ConflictError(`The school year ${trimmed} exists already.`);
+    if (isUniqueViolation(error)) throw new ConflictError("exam.errors.classes.yearExists", { name: trimmed });
     throw error;
   }
 }
@@ -141,7 +198,7 @@ export function setCurrentYear(db, id) {
 export function normalizeClassName(name) {
   const normalized = typeof name === "string" ? name.trim().toLowerCase() : "";
   if (!/^[0-9a-z][0-9a-z_-]{0,31}$/.test(normalized)) {
-    throw new InvalidInputError(`A class is named like "5AHIF": letters and digits, no spaces.`);
+    throw new InvalidInputError("exam.errors.classes.className");
   }
   return normalized;
 }
@@ -153,7 +210,7 @@ export function normalizeClassName(name) {
 function normalizePerson(person) {
   const username = typeof person?.username === "string" ? person.username.trim().toLowerCase() : "";
   if (!/^[^\s/]{1,128}$/.test(username)) {
-    throw new InvalidInputError("A student is added by their directory username.");
+    throw new InvalidInputError("exam.errors.classes.studentUsername");
   }
   const name = (value) => (typeof value === "string" && value.trim().length > 0 ? value.trim() : null);
   return { username, givenName: name(person.givenName), familyName: name(person.familyName) };
@@ -227,7 +284,7 @@ export function rosterOf(db, classId) {
 
 export function getClass(db, id) {
   const row = db.prepare("SELECT * FROM class WHERE id = ?").get(id);
-  if (!row) throw new NotFoundError(`There is no class ${id}.`);
+  if (!row) throw new NotFoundError("exam.errors.classes.noClass", { id });
   const year = getYear(db, row.school_year_id);
   return { ...classFromRow(row), year, roster: rosterOf(db, id), courses: listCourses(db, id) };
 }
@@ -240,7 +297,7 @@ export function getClass(db, id) {
 export function createClass(db, yearId, { name, students = [] } = {}) {
   getYear(db, yearId);
   const normalized = normalizeClassName(name);
-  if (!Array.isArray(students)) throw new InvalidInputError("The roster is a list of students.");
+  if (!Array.isArray(students)) throw new InvalidInputError("exam.errors.classes.rosterList");
   const people = students.map(normalizePerson);
   try {
     return inTransaction(db, () => {
@@ -260,7 +317,7 @@ export function createClass(db, yearId, { name, students = [] } = {}) {
     });
   } catch (error) {
     if (isUniqueViolation(error)) {
-      throw new ConflictError(`The class ${normalized.toUpperCase()} exists already in this school year.`);
+      throw new ConflictError("exam.errors.classes.classExists", { name: normalized.toUpperCase() });
     }
     throw error;
   }
@@ -280,7 +337,7 @@ export function addToRoster(db, classId, person) {
       .prepare("SELECT left_at FROM roster_entry WHERE class_id = ? AND username = ?")
       .get(classId, student.username);
     if (entry && entry.left_at === null) {
-      throw new ConflictError(`${student.username} is on this roster already.`);
+      throw new ConflictError("exam.errors.classes.onRosterAlready", { username: student.username });
     }
     if (entry) {
       db.prepare("UPDATE roster_entry SET left_at = NULL WHERE class_id = ? AND username = ?").run(
@@ -309,7 +366,7 @@ export function removeFromRoster(db, classId, username) {
   const { changes } = db
     .prepare("UPDATE roster_entry SET left_at = ? WHERE class_id = ? AND username = ? AND left_at IS NULL")
     .run(now(), classId, key);
-  if (changes === 0) throw new NotFoundError(`${key} is not on this roster.`);
+  if (changes === 0) throw new NotFoundError("exam.errors.classes.notOnRoster", { username: key });
   return rosterOf(db, classId);
 }
 
@@ -347,23 +404,23 @@ export function refreshNames(db, classId, people) {
  */
 export function normalizeWeights(weights) {
   if (weights === null || typeof weights !== "object" || Array.isArray(weights)) {
-    throw new InvalidInputError("The weights are one percentage per category.");
+    throw new InvalidInputError("exam.errors.classes.weightsShape");
   }
   const unknown = Object.keys(weights).filter((key) => !weightCategories.includes(key));
   if (unknown.length > 0) {
-    throw new InvalidInputError(`There is no category ${unknown.join(", ")}.`);
+    throw new InvalidInputError("exam.errors.classes.noWeightCategory", { names: unknown.join(", ") });
   }
   const normalized = {};
   for (const category of weightCategories) {
     const value = weights[category];
     if (!Number.isInteger(value) || value < 0 || value > 100) {
-      throw new InvalidInputError(`The weight of ${category} has to be a whole percentage from 0 to 100.`);
+      throw new InvalidInputError("exam.errors.classes.weightRange", { category });
     }
     normalized[category] = value;
   }
   const sum = weightCategories.reduce((total, category) => total + normalized[category], 0);
   if (sum !== 100) {
-    throw new InvalidInputError(`The weights have to add up to 100 %, not ${sum} %.`);
+    throw new InvalidInputError("exam.errors.classes.weightsSum", { sum });
   }
   return normalized;
 }
@@ -374,14 +431,14 @@ export function normalizeWeights(weights) {
  */
 export function normalizeWinterShare(share) {
   if (!Number.isInteger(share) || share < 0 || share > 100) {
-    throw new InvalidInputError("The winter semester's share has to be a whole percentage from 0 to 100.");
+    throw new InvalidInputError("exam.errors.classes.winterShare");
   }
   return share;
 }
 
 function normalizeLanguage(language) {
   if (!languages.includes(language)) {
-    throw new InvalidInputError(`A course's language is one of ${languages.join(", ")}.`);
+    throw new InvalidInputError("exam.errors.classes.courseLanguage", { languages: languages.join(", ") });
   }
   return language;
 }
@@ -389,7 +446,7 @@ function normalizeLanguage(language) {
 function normalizeSubject(subject) {
   const trimmed = typeof subject === "string" ? subject.trim() : "";
   if (trimmed.length === 0 || trimmed.length > 40) {
-    throw new InvalidInputError("A course needs a subject, such as WMC.");
+    throw new InvalidInputError("exam.errors.classes.courseSubject");
   }
   return trimmed;
 }
@@ -415,7 +472,7 @@ export function listCourses(db, classId) {
 /** A course with the class and school year it belongs to. */
 export function getCourse(db, id) {
   const row = db.prepare("SELECT * FROM course WHERE id = ?").get(id);
-  if (!row) throw new NotFoundError(`There is no course ${id}.`);
+  if (!row) throw new NotFoundError("exam.errors.classes.noCourse", { id });
   const klass = db.prepare("SELECT * FROM class WHERE id = ?").get(row.class_id);
   return {
     ...courseFromRow(row),
@@ -444,7 +501,7 @@ export function createCourse(db, classId, { subject, language = "de", weights = 
     return getCourse(db, Number(lastInsertRowid));
   } catch (error) {
     if (isUniqueViolation(error)) {
-      throw new ConflictError(`This class has a course ${values.subject} already.`);
+      throw new ConflictError("exam.errors.classes.courseExists", { subject: values.subject });
     }
     throw error;
   }

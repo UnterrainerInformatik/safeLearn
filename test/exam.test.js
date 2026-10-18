@@ -11,7 +11,7 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -112,10 +112,10 @@ describe("the instance with the exam module", () => {
   test("answers who a session is, after the student-view downgrade", async () => {
     const asTeacher = await fetchAs(teacher, "/exam/api/me");
     assert.equal(asTeacher.status, 200);
-    assert.deepEqual(asTeacher.json, { username: teacher.username.toLowerCase(), teacher: true, admin: false, periods: [] });
+    assert.deepEqual(asTeacher.json, { username: teacher.username.toLowerCase(), teacher: true, admin: false, periods: [], lang: "en", loc: "de-AT" });
 
     const asStudent = await fetchAs(student, "/exam/api/me");
-    assert.deepEqual(asStudent.json, { username: student.username.toLowerCase(), teacher: false, admin: false, periods: [] });
+    assert.deepEqual(asStudent.json, { username: student.username.toLowerCase(), teacher: false, admin: false, periods: [], lang: "en", loc: "de-AT" });
 
     await setPreferences(teacher, { vt: 0 });
     try {
@@ -1602,12 +1602,12 @@ describe("online tests: writing", () => {
       await teacher.page.goto(`${applicationUrl}/exam/tests/${test.id}/preview`, { waitUntil: "domcontentloaded" });
       await teacher.page.waitForSelector(".sl-exam-writing[data-preview='1'] .sl-exam-attempt-question", { timeout: 20000 });
       assert.equal(await teacher.page.$(".sl-exam-bar"), null, "as a student sees it, without the bar");
-      assert.match(await teacher.page.$eval(".sl-exam-attempt-preview", (el) => el.textContent), /Probeansicht/);
+      assert.match(await teacher.page.$eval(".sl-exam-attempt-preview", (el) => el.textContent), /Teacher preview/, "the controls follow the teacher's language, English by default");
       assert.match(await teacher.page.$eval(".sl-exam-countdown", (el) => el.textContent), /^1[45]:\d\d$/, "the sitting's duration");
       await teacher.page.click(".sl-exam-attempt-answers label");
       await teacher.page.click(".sl-exam-attempt-submit");
       await teacher.page.click(".sl-exam-attempt-submit");
-      assert.match(await teacher.page.$eval(".sl-exam-writing .sl-exam-message", (el) => el.textContent), /nichts abgegeben/);
+      assert.match(await teacher.page.$eval(".sl-exam-writing .sl-exam-message", (el) => el.textContent), /nothing is submitted/);
       assert.equal(await teacher.page.$(".sl-exam-attempt-result"), null, "no result");
     } finally {
       teacher.page.off("request", watch);
@@ -1945,7 +1945,7 @@ describe("online tests: the live view", () => {
     await teacher.page.waitForFunction(() => document.querySelector(".sl-exam-live-badge").textContent === "Live", { timeout: 3000 });
     assert.match(await teacher.page.$eval(".sl-exam-live-window", (el) => el.textContent), /closes in \d+:\d\d$/);
     const focus = await teacher.page.$eval(`sl-exam-live tr[data-username="${student.username.toLowerCase()}"] .sl-exam-live-focus`, (td) => ({ level: td.dataset.level, share: td.querySelector(".sl-exam-live-share").textContent }));
-    assert.deepEqual(focus, { level: "good", share: "100 %" }, "never left: a full green bar");
+    assert.deepEqual(focus, { level: "good", share: "100\u00a0%" }, "never left: a full green bar");
   });
 
   test("the view for the class shows state, window, time left and clock, without navigation and without a name", async () => {
@@ -2835,9 +2835,9 @@ describe("the school's periods", () => {
     await teacher.page.goto(`${applicationUrl}/exam/tests/${plain.id}`, { waitUntil: "domcontentloaded" });
     const [shown] = await windows(teacher.page, `li[data-sitting="${created.json.id}"]`);
     assert.equal(shown.title, null, "no periods");
-    assert.match(shown.text, /^\d\d\.\d\d\.\d\d,? 10:00 – 11:45$/, shown.text);
+    assert.match(shown.text, /^\d\d\.\d\d\.\d{4},? 10:00 – 11:45$/, shown.text);
     const form = await teacher.page.$eval(".sl-exam-sitting-form form", (form) => ({
-      fields: [...form.querySelectorAll("input, select")].map((input) => input.name),
+      fields: [...form.querySelectorAll("sl-date-input, input[name], select")].map((input) => input.getAttribute("name")),
       toggle: Boolean(form.querySelector(".sl-exam-sitting-mode")),
       wrapper: Boolean(form.querySelector(".sl-exam-sitting-window")),
     }));
@@ -2871,13 +2871,13 @@ describe("the school's periods", () => {
     await page.goto(`${applicationUrl}/exam/tests/${byForm.id}`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".sl-exam-sitting-form select[name=fromPeriod]", { timeout: 20000 });
     const fresh = await page.$eval(".sl-exam-sitting-form form", (form) => ({
-      opensAt: Boolean(form.querySelector("input[name=opensAt]")),
+      opensAt: Boolean(form.querySelector("sl-date-input[name=opensAt]")),
       toggle: form.querySelector(".sl-exam-sitting-mode")?.textContent,
       tag: form.querySelector(".sl-exam-sitting-mode")?.tagName,
     }));
     assert.deepEqual(fresh, { opensAt: false, toggle: "Exact times instead", tag: "BUTTON" }, "a new sitting starts with periods");
     await page.$eval(
-      ".sl-exam-sitting-form input[name=date]",
+      ".sl-exam-sitting-form sl-date-input[name=date]",
       (input, value) => {
         input.value = value;
         input.dispatchEvent(new Event("change"));
@@ -2907,7 +2907,7 @@ describe("the school's periods", () => {
 
   test("the sittings of a test, the list of tests and the live view show lessons 3–4 with 10:00–11:45 as tooltip", async () => {
     const [sitting] = (await fetchAs(teacher, `/exam/api/tests/${byForm.id}`)).json.sittings;
-    const expected = { text: new RegExp(`^[A-Z][a-z] ${date.slice(8, 10)}\\.${date.slice(5, 7)}\\. · lessons 3–4$`), title: "10:00–11:45" };
+    const expected = { text: new RegExp(`^[A-Z][a-z]{2} ${date.slice(8, 10)}\\.${date.slice(5, 7)}\\. · lessons 3–4$`), title: "10:00–11:45" };
     const check = ([shown], where) => {
       assert.match(shown.text, expected.text, `${where}: ${shown.text}`);
       assert.equal(shown.title, expected.title, where);
@@ -2937,13 +2937,13 @@ describe("the school's periods", () => {
     const editing = await page.$eval(".sl-exam-sitting-form form", (form) => ({
       from: form.querySelector("select[name=fromPeriod]")?.value,
       to: form.querySelector("select[name=toPeriod]")?.value,
-      date: form.querySelector("input[name=date]")?.value,
+      date: form.querySelector("sl-date-input[name=date]")?.value,
     }));
     assert.deepEqual(editing, { from: "3", to: "4", date });
     await page.click(".sl-exam-sitting-form .sl-exam-sitting-mode");
     const exact = await page.$eval(".sl-exam-sitting-form form", (form) => ({
-      opensAt: form.querySelector("input[name=opensAt]").value,
-      closesAt: form.querySelector("input[name=closesAt]").value,
+      opensAt: form.querySelector("sl-date-input[name=opensAt]").value,
+      closesAt: form.querySelector("sl-date-input[name=closesAt]").value,
       toggle: form.querySelector(".sl-exam-sitting-mode").textContent,
     }));
     assert.deepEqual(exact, { opensAt: `${date}T10:00`, closesAt: `${date}T11:45`, toggle: "Lessons instead" });
@@ -2960,14 +2960,14 @@ describe("the school's periods", () => {
     assert.match(shown.text, /10:05 – 10:55$/, shown.text);
     await page.click(`li[data-sitting="${created.json.id}"] .sl-exam-sitting-edit`);
     const editing = await page.$eval(".sl-exam-sitting-form form", (form) => ({
-      opensAt: form.querySelector("input[name=opensAt]")?.value,
-      closesAt: form.querySelector("input[name=closesAt]")?.value,
+      opensAt: form.querySelector("sl-date-input[name=opensAt]")?.value,
+      closesAt: form.querySelector("sl-date-input[name=closesAt]")?.value,
       toggle: form.querySelector(".sl-exam-sitting-mode")?.textContent,
     }));
     assert.deepEqual(editing, { opensAt: `${date}T10:05`, closesAt: `${date}T10:55`, toggle: "Lessons instead" });
     // Back to periods: the date stays, the periods are the ones a new sitting gets.
     await page.click(".sl-exam-sitting-form .sl-exam-sitting-mode");
-    assert.equal(await page.$eval(".sl-exam-sitting-form input[name=date]", (input) => input.value), date);
+    assert.equal(await page.$eval(".sl-exam-sitting-form sl-date-input[name=date]", (input) => input.value), date);
   });
 });
 
@@ -3080,6 +3080,218 @@ describe("online tests: an admin's corrections", () => {
       assert.equal(db.prepare("SELECT COUNT(*) AS n FROM attempt WHERE id = ?").get(attempt).n, 0);
     } finally {
       db.close();
+    }
+  });
+});
+
+// The interface in the reader's language and format (`ui-language`,
+// `locale-formats`). The demo accounts are shared, so every check here writes
+// the preferences it depends on and the block puts both back to the baseline
+// (English, de-AT) when it ends, whatever happened.
+describe("the interface in the reader's language and format", () => {
+  let student;
+  let teacher;
+  let course;
+  let column;
+  let questions;
+
+  const catalogs = {
+    en: JSON.parse(readFileSync(path.join(import.meta.dirname, "..", "i18n", "en.json"), "utf8")),
+    de: JSON.parse(readFileSync(path.join(import.meta.dirname, "..", "i18n", "de.json"), "utf8")),
+  };
+  /** A text as the catalog of `lang` writes it, parameters left as they are. */
+  const text = (lang, key) => key.split(".").reduce((node, segment) => node[segment], catalogs[lang]);
+
+  const gradebookPage = () => `${applicationUrl}/exam/courses/${course.id}/gradebook?semester=ws`;
+
+  /** The gradebook in the teacher's page, once the sheet is drawn. */
+  async function openGradebook() {
+    await teacher.page.goto(gradebookPage(), { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(".sl-exam-sheet", { timeout: 20000 });
+  }
+
+  /** The column's date field in the sheet: its value and what its text field shows. */
+  const columnDate = () =>
+    teacher.page.$eval(`.sl-exam-column-head[data-column="${column.id}"] sl-date-input`, (field) => ({
+      value: field.value,
+      shown: field.querySelector(".sl-date-input-text").value,
+    }));
+
+  /** Waits until `condition()` holds, polling for up to ten seconds. */
+  async function waitFor(condition, what) {
+    const until = Date.now() + 10000;
+    while (!(await condition())) {
+      if (Date.now() > until) assert.fail(`timed out: ${what}`);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  }
+
+  const storedDate = () => {
+    const { db } = openDatabase(run.databasePath);
+    try {
+      return db.prepare("SELECT held_on FROM assessment WHERE id = ?").get(column.id).held_on;
+    } finally {
+      db.close();
+    }
+  };
+
+  before(async () => {
+    student = await sharedSession("student");
+    teacher = await sharedSession("teacher");
+    for (const session of [student, teacher]) await reauthenticate(session).catch(() => {});
+    await setPreferences(student, {});
+    await setPreferences(teacher, {});
+    const year = (await fetchAs(teacher, "/exam/api/years")).json.current;
+    const gbClass = (await fetchAs(teacher, `/exam/api/years/${year.id}/classes`)).json.find((c) => c.name === "9xgb");
+    course = (await fetchAs(teacher, `/exam/api/classes/${gbClass.id}`)).json.courses.find((c) => c.subject === "GB");
+    assert.equal(course.language, "de", "the GB course is German, so a student's English is not the course's");
+    const created = await fetchAs(teacher, `/exam/api/courses/${course.id}/assessments`, {
+      method: "POST",
+      body: { kind: "test", name: "Language check", date: "2026-10-20", maxPoints: 10 },
+    });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    column = created.json;
+    questions = (await fetchAs(teacher, "/exam/api/pool/questions")).json;
+  });
+
+  after(async () => {
+    await setPreferences(teacher, {}).catch(() => {});
+    await setPreferences(student, {}).catch(() => {});
+    await fetchAs(teacher, `/exam/api/assessments/${column.id}`, { method: "DELETE" }).catch(() => {});
+  });
+
+  test("a teacher with German sees German in the menu, the sidebar, the bar and the gradebook", async () => {
+    await setPreferences(teacher, { lang: "de" });
+    await openGradebook();
+    const shown = await teacher.page.evaluate(() => ({
+      lang: document.documentElement.lang,
+      site: document.querySelector(".sidebar-title-dirlist b")?.textContent.trim(),
+      search: document.querySelector(".sidebar-title-search b")?.textContent.trim(),
+      choices: [...document.querySelectorAll(".sl-menu-choice-label")].map((label) => label.textContent.trim()),
+      pressed: [...document.querySelectorAll(".sl-menu-choice [aria-pressed='true']")].map((button) => button.textContent.trim()),
+      tests: document.querySelector(".sl-exam-bar-page[data-page='tests']")?.textContent.trim(),
+      categories: [...document.querySelectorAll(".sl-exam-sheet .sl-exam-category")].map((cell) => cell.textContent.trim()),
+    }));
+    assert.equal(shown.lang, "de", "the page declares German as its language");
+    assert.equal(shown.site, text("de", "app.sidebar.site"));
+    assert.equal(shown.search, text("de", "app.sidebar.search"));
+    assert.deepEqual(shown.choices, [text("de", "app.menu.language"), text("de", "app.menu.format")]);
+    assert.deepEqual(shown.pressed, ["Deutsch", "20.10.2026"], "the menu marks the language and the format in effect");
+    assert.equal(shown.tests, text("de", "exam.bar.tests"));
+    assert.ok(
+      shown.categories.some((cell) => cell.startsWith(text("de", "exam.categories.onlineTests"))),
+      `the sheet's categories are German: ${shown.categories.join(" | ")}`
+    );
+  });
+
+  test("English with de-AT gives English labels and 20.10.2026, en-GB gives 20/10/2026", async () => {
+    await setPreferences(teacher, { lang: "en", loc: "de-AT" });
+    await openGradebook();
+    assert.equal(await teacher.page.evaluate(() => document.documentElement.lang), "en");
+    assert.equal(await teacher.page.$eval(".sl-exam-bar-page[data-page='tests']", (a) => a.textContent.trim()), "Online tests");
+    assert.deepEqual(await columnDate(), { value: "2026-10-20", shown: "20.10.2026" });
+
+    await setPreferences(teacher, { loc: "en-GB" });
+    await openGradebook();
+    assert.deepEqual(await columnDate(), { value: "2026-10-20", shown: "20/10/2026" });
+    assert.deepEqual(
+      await teacher.page.$$eval(".sl-menu-choice [aria-pressed='true']", (buttons) => buttons.map((button) => button.textContent.trim())),
+      ["English", "20/10/2026"]
+    );
+  });
+
+  test("a date is entered by typing, by the keyboard in the calendar, and an unreadable one is refused at the field", async () => {
+    await setPreferences(teacher, { lang: "en", loc: "de-AT" });
+    await openGradebook();
+    const field = `.sl-exam-column-head[data-column="${column.id}"] sl-date-input`;
+    const typed = `${field} .sl-date-input-text`;
+
+    await teacher.page.click(typed, { clickCount: 3 });
+    await teacher.page.keyboard.type("21.10.2026");
+    await teacher.page.keyboard.press("Tab");
+    await waitFor(() => storedDate() === "2026-10-21", "the typed date is saved");
+    // A new date redraws the sheet; the field is found anew once it shows it.
+    await waitFor(async () => (await columnDate().catch(() => null))?.shown === "21.10.2026", "the sheet shows the saved date");
+
+    await teacher.page.focus(`${field} .sl-date-input-toggle`);
+    await teacher.page.keyboard.press("Enter");
+    await teacher.page.waitForSelector(`${field} .sl-date-input-popup:not([hidden]) [role=grid]`, { timeout: 5000 });
+    assert.equal(
+      await teacher.page.evaluate(() => document.activeElement?.dataset.day),
+      "2026-10-21",
+      "the calendar opens on the field's date, with the focus on it"
+    );
+    await teacher.page.keyboard.press("ArrowRight");
+    await teacher.page.keyboard.press("ArrowDown");
+    assert.equal(await teacher.page.evaluate(() => document.activeElement?.dataset.day), "2026-10-29", "a day right, a week down");
+    await teacher.page.keyboard.press("Enter");
+    await waitFor(() => storedDate() === "2026-10-29", "Enter takes the focused day and it is saved");
+    await waitFor(async () => (await columnDate().catch(() => null))?.shown === "29.10.2026", "the sheet shows the picked date");
+
+    await teacher.page.click(typed, { clickCount: 3 });
+    await teacher.page.keyboard.type("32.10.2026");
+    await teacher.page.keyboard.press("Tab");
+    const refused = await teacher.page.$eval(field, (element) => ({
+      invalid: element.classList.contains("is-invalid"),
+      message: element.querySelector(".sl-date-input-message").textContent,
+      ariaInvalid: element.querySelector(".sl-date-input-text").getAttribute("aria-invalid"),
+    }));
+    assert.equal(refused.invalid, true);
+    assert.equal(refused.ariaInvalid, "true");
+    assert.match(refused.message, /20\.10\.2026/, "the reason beside the field shows the format");
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.equal(storedDate(), "2026-10-29", "nothing is saved");
+
+    // Back to the column's own date, for anything after this.
+    await fetchAs(teacher, `/exam/api/assessments/${column.id}`, { method: "PUT", body: { date: "2026-10-20" } });
+  });
+
+  test("a student with English writes a German course's test: German content, English controls", async () => {
+    await setPreferences(student, { lang: "en" });
+    const created = await fetchAs(teacher, `/exam/api/courses/${course.id}/tests`, {
+      method: "POST",
+      body: { name: "Language: student", questionIds: questions.slice(0, 2).map((q) => q.id) },
+    });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    const sitting = await fetchAs(teacher, `/exam/api/tests/${created.json.id}/sittings`, {
+      method: "POST",
+      body: { opensAt: new Date(Date.now() - 60000).toISOString(), closesAt: new Date(Date.now() + 50 * 60000).toISOString(), durationMinutes: 15 },
+    });
+    assert.equal(sitting.status, 200, JSON.stringify(sitting.json));
+    const page = student.page;
+    await page.goto(`${applicationUrl}/exam/my`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(`.sl-exam-attempt-open[data-test="${created.json.id}"] button`, { timeout: 20000 });
+    await page.click(`.sl-exam-attempt-open[data-test="${created.json.id}"] button`);
+    await page.waitForSelector(".sl-exam-attempt-question", { timeout: 20000 });
+    const shown = await page.evaluate(() => ({
+      lang: document.documentElement.lang,
+      content: [...document.querySelectorAll(".sl-exam-attempt-content")].map((element) => element.getAttribute("lang")),
+      submit: document.querySelector(".sl-exam-attempt-submit")?.textContent.trim(),
+    }));
+    assert.equal(shown.lang, "en", "the page is the student's English");
+    assert.ok(shown.content.length > 0 && shown.content.every((lang) => lang === "de"), `the questions are the course's German: ${shown.content}`);
+    assert.equal(shown.submit, text("en", "exam.attempt.submit"), "the controls are English");
+    const attempt = (await fetchAs(student, `/exam/api/tests/${created.json.id}/attempt`, { method: "POST" })).json.attempt;
+    await fetchAs(student, `/exam/api/attempts/${attempt}/submit`, { method: "POST" });
+  });
+
+  test("in German at the legibility viewport, the module bar and the gradebook's headings fit", async () => {
+    await setPreferences(teacher, { lang: "de" });
+    const before = teacher.page.viewport();
+    await teacher.page.setViewport({ width: 390, height: 844 });
+    try {
+      await openGradebook();
+      const overflow = await teacher.page.evaluate(() => {
+        const over = (element) => element.scrollWidth > element.clientWidth + 1;
+        return {
+          page: document.documentElement.scrollWidth > window.innerWidth + 1,
+          bar: [...document.querySelectorAll(".sl-exam-bar, .sl-exam-bar-position, .sl-exam-bar-page")].filter(over).map((el) => el.textContent.trim().slice(0, 40)),
+          heads: [...document.querySelectorAll(".sl-exam-sheet thead th")].filter(over).map((el) => el.textContent.trim().slice(0, 40)),
+        };
+      });
+      assert.deepEqual(overflow, { page: false, bar: [], heads: [] }, "nothing of the German bar or sheet heading runs out of its box");
+    } finally {
+      await teacher.page.setViewport(before ?? { width: 1280, height: 800 });
     }
   });
 });

@@ -222,7 +222,7 @@ describe("a lookup that fails", () => {
       assert.equal(context.lookupFailed, true);
       assert.deepEqual(
         context.preferences,
-        { ve: 0, vt: 0, va: 0 },
+        { ve: 0, vt: 0, va: 0, lang: "en", loc: "de-AT" },
         "the defaults are the narrowest values the preferences can take, so a failure only takes content away"
       );
 

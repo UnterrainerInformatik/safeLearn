@@ -27,18 +27,17 @@ import {
   now,
   rosterOf,
 } from "./classes.js";
-
-const viennaDates = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Vienna", year: "numeric", month: "2-digit", day: "2-digit" });
+import { viennaLocal } from "./client/periods.js";
 
 /** The calendar date in Vienna of an ISO timestamp, as `YYYY-MM-DD`. */
 export function viennaDate(iso) {
-  return viennaDates.format(new Date(iso));
+  return viennaLocal(iso).date;
 }
 
 function normalizeName(name) {
   const trimmed = typeof name === "string" ? name.trim() : "";
   if (trimmed.length === 0 || trimmed.length > 80) {
-    throw new InvalidInputError("A test needs a name of at most 80 characters.");
+    throw new InvalidInputError("exam.errors.tests.name");
   }
   return trimmed;
 }
@@ -50,7 +49,7 @@ export function testStarted(db, testId) {
 
 function testRow(db, id) {
   const row = db.prepare("SELECT * FROM test WHERE id = ?").get(id);
-  if (!row) throw new NotFoundError("There is no such test.");
+  if (!row) throw new NotFoundError("exam.errors.tests.noTest");
   return row;
 }
 
@@ -60,19 +59,19 @@ function testRow(db, id) {
  */
 function chosenQuestions(db, questionIds) {
   if (!Array.isArray(questionIds) || questionIds.length === 0) {
-    throw new InvalidInputError("A test needs at least one question.");
+    throw new InvalidInputError("exam.errors.tests.oneQuestion");
   }
   if (!questionIds.every((id) => Number.isInteger(id) && id > 0)) {
-    throw new InvalidInputError("A test's questions are given by their ids.");
+    throw new InvalidInputError("exam.errors.tests.questionIds");
   }
   if (new Set(questionIds).size !== questionIds.length) {
-    throw new InvalidInputError("A question can be in a test only once.");
+    throw new InvalidInputError("exam.errors.tests.questionOnce");
   }
   const read = db.prepare("SELECT * FROM question WHERE id = ?");
   return questionIds.map((id) => {
     const question = read.get(id);
-    if (!question) throw new InvalidInputError(`There is no question ${id} in the pool.`);
-    if (question.retired === 1) throw new InvalidInputError(`The question "${question.name_de}" is retired.`);
+    if (!question) throw new InvalidInputError("exam.errors.tests.noPoolQuestion", { id });
+    if (question.retired === 1) throw new InvalidInputError("exam.errors.tests.questionRetired", { name: question.name_de });
     return question;
   });
 }
@@ -162,7 +161,7 @@ export function updateTest(db, id, { name, questionIds } = {}) {
   const questions = questionIds === undefined ? null : chosenQuestions(db, questionIds);
   return inTransaction(db, () => {
     if (questions !== null) {
-      if (testStarted(db, id)) throw new ConflictError("This test has been written; its questions cannot change any more.");
+      if (testStarted(db, id)) throw new ConflictError("exam.errors.tests.writtenQuestionsFixed");
       dropSnapshot(db, id);
       snapshot(db, test, questions);
     }
@@ -179,7 +178,7 @@ export function updateTest(db, id, { name, questionIds } = {}) {
 export function deleteTest(db, id, { admin = false } = {}) {
   testRow(db, id);
   inTransaction(db, () => {
-    if (testStarted(db, id) && !admin) throw new ConflictError("This test has been written and cannot be deleted.");
+    if (testStarted(db, id) && !admin) throw new ConflictError("exam.errors.tests.writtenCannotDelete");
     // An attempt's questions, tokens, answers and refused browsers go with it.
     db.prepare("DELETE FROM attempt WHERE test_id = ?").run(id);
     dropSnapshot(db, id);
@@ -200,9 +199,9 @@ export function removeWrittenQuestion(db, testId, questionId, rescore) {
   testRow(db, testId);
   return inTransaction(db, () => {
     const question = db.prepare("SELECT id FROM test_question WHERE test_id = ? AND question_id = ?").get(testId, questionId);
-    if (!question) throw new NotFoundError("This question is not in the test.");
+    if (!question) throw new NotFoundError("exam.errors.tests.questionNotInTest");
     if (db.prepare("SELECT COUNT(*) AS n FROM test_question WHERE test_id = ?").get(testId).n === 1) {
-      throw new ConflictError("A test keeps at least one question; delete the test instead.");
+      throw new ConflictError("exam.errors.tests.keepOneQuestion");
     }
     const answers = "SELECT id FROM test_answer WHERE test_question_id = ?";
     db.prepare(`DELETE FROM response WHERE test_answer_id IN (${answers})`).run(question.id);
@@ -368,15 +367,15 @@ export function listTests(db, scope = {}) {
 // ------------------------------------------------------------------ sittings
 
 /** An instant given by the client, as the ISO string the database stores. */
-function instant(value, what) {
+function instant(value, key) {
   const parsed = typeof value === "string" ? Date.parse(value) : Number.NaN;
-  if (Number.isNaN(parsed)) throw new InvalidInputError(`${what} has to be a date and time.`);
+  if (Number.isNaN(parsed)) throw new InvalidInputError(key);
   return new Date(parsed).toISOString();
 }
 
 function sittingRow(db, id) {
   const row = db.prepare("SELECT * FROM sitting WHERE id = ?").get(id);
-  if (!row) throw new NotFoundError("There is no such sitting.");
+  if (!row) throw new NotFoundError("exam.errors.tests.noSitting");
   return row;
 }
 
@@ -398,15 +397,15 @@ function participantsOf(db, test, selected) {
     .filter((entry) => entry.leftAt === null)
     .map((entry) => entry.username);
   if (selected === null || selected === undefined) {
-    if (roster.length === 0) throw new InvalidInputError("The class has nobody on its roster to write the test.");
+    if (roster.length === 0) throw new InvalidInputError("exam.errors.tests.emptyRoster");
     return roster;
   }
   if (!Array.isArray(selected) || selected.length === 0) {
-    throw new InvalidInputError("Choose at least one student.");
+    throw new InvalidInputError("exam.errors.tests.chooseStudent");
   }
   const usernames = [...new Set(selected.map((username) => String(username).trim().toLowerCase()))];
   const strangers = usernames.filter((username) => !roster.includes(username));
-  if (strangers.length > 0) throw new InvalidInputError(`${strangers.join(", ")} ${strangers.length === 1 ? "is" : "are"} not on the class's roster.`);
+  if (strangers.length > 0) throw new InvalidInputError("exam.errors.tests.notOnRoster", { count: strangers.length, names: strangers.join(", ") });
   return usernames;
 }
 
@@ -416,16 +415,16 @@ function participantsOf(db, test, selected) {
  * the window.
  */
 function sittingTimes({ opensAt, closesAt, durationMinutes }, at = now()) {
-  const opens = instant(opensAt, "The start");
-  const closes = instant(closesAt, "The end");
-  if (!(opens < closes)) throw new InvalidInputError("A sitting has to open before it closes.");
-  if (closes <= at) throw new InvalidInputError("A sitting has to close in the future.");
+  const opens = instant(opensAt, "exam.errors.tests.startFormat");
+  const closes = instant(closesAt, "exam.errors.tests.endFormat");
+  if (!(opens < closes)) throw new InvalidInputError("exam.errors.tests.opensBeforeCloses");
+  if (closes <= at) throw new InvalidInputError("exam.errors.tests.closesInFuture");
   if (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 600) {
-    throw new InvalidInputError("An attempt's duration is a whole number of minutes.");
+    throw new InvalidInputError("exam.errors.tests.durationMinutes");
   }
   const durationS = durationMinutes * 60;
   if (durationS * 1000 >= Date.parse(closes) - Date.parse(opens)) {
-    throw new InvalidInputError("An attempt's duration has to be shorter than the sitting's window.");
+    throw new InvalidInputError("exam.errors.tests.durationWindow");
   }
   return { opens, closes, durationS };
 }
@@ -445,7 +444,7 @@ export function createSitting(db, testId, { opensAt, closesAt, durationMinutes, 
   const first = firstSitting(db, testId);
   const makeup = first !== null;
   if (makeup && (participants === null || participants === undefined)) {
-    throw new InvalidInputError("A make-up is written by the students chosen for it.");
+    throw new InvalidInputError("exam.errors.tests.makeupParticipants");
   }
   const times = sittingTimes({ opensAt, closesAt, durationMinutes: makeup ? first.duration_s / 60 : durationMinutes });
   const usernames = participantsOf(db, test, participants);
@@ -463,7 +462,7 @@ export function createSitting(db, testId, { opensAt, closesAt, durationMinutes, 
 
 /** Refuses a change to a sitting that has opened already. */
 function requireNotOpened(row, at = now()) {
-  if (row.opens_at <= at) throw new ConflictError("This sitting has opened already and cannot change any more.");
+  if (row.opens_at <= at) throw new ConflictError("exam.errors.tests.sittingOpened");
 }
 
 /**
@@ -477,10 +476,10 @@ export function updateSitting(db, id, input = {}) {
   const makeups = db.prepare("SELECT COUNT(*) AS n FROM sitting WHERE test_id = ? AND makeup = 1").get(row.test_id).n;
   const durationMinutes = input.durationMinutes ?? row.duration_s / 60;
   if (durationMinutes * 60 !== row.duration_s && (row.makeup === 1 || makeups > 0)) {
-    throw new ConflictError("A make-up keeps the duration of the first sitting; it cannot change while there are make-ups.");
+    throw new ConflictError("exam.errors.tests.makeupDuration");
   }
   const times = sittingTimes({ opensAt: input.opensAt ?? row.opens_at, closesAt: input.closesAt ?? row.closes_at, durationMinutes });
-  if (row.makeup === 1 && input.participants === null) throw new InvalidInputError("A make-up is written by the students chosen for it.");
+  if (row.makeup === 1 && input.participants === null) throw new InvalidInputError("exam.errors.tests.makeupParticipants");
   const usernames = input.participants === undefined ? null : participantsOf(db, test, input.participants);
   return inTransaction(db, () => {
     db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ?, duration_s = ? WHERE id = ?").run(times.opens, times.closes, times.durationS, id);
@@ -499,7 +498,7 @@ export function deleteSitting(db, id) {
   const row = sittingRow(db, id);
   requireNotOpened(row);
   if (row.makeup === 0 && db.prepare("SELECT 1 FROM sitting WHERE test_id = ? AND makeup = 1").get(row.test_id)) {
-    throw new ConflictError("Delete the make-ups first; they take their duration from this sitting.");
+    throw new ConflictError("exam.errors.tests.deleteMakeupsFirst");
   }
   inTransaction(db, () => {
     db.prepare("DELETE FROM sitting WHERE id = ?").run(id);

@@ -31,14 +31,14 @@ import { teacherShell } from "./bar.js";
 /** A record id from the path or query; anything but a positive integer names nothing. */
 function idParam(value) {
   const id = typeof value === "string" && /^[1-9]\d{0,9}$/.test(value) ? Number(value) : null;
-  if (id === null) throw new NotFoundError("There is no such record.");
+  if (id === null) throw new NotFoundError("exam.errors.noSuchRecord");
   return id;
 }
 
 /** The semester a request asks for, or the one running now in the course's year. */
 function semesterParam(value, course) {
   if (value === undefined || value === "") return semesterToday(course.year);
-  if (!semesters.includes(value)) throw new InvalidInputError(`A semester is ${semesters.join(" or ")}.`);
+  if (!semesters.includes(value)) throw new InvalidInputError("exam.errors.gradebook.semester", { semesters: semesters.join(" or ") });
   return value;
 }
 
@@ -70,7 +70,7 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
   api("get", "/course-lookup", (req) => {
     const yearName = typeof req.query.year === "string" && req.query.year ? req.query.year : null;
     const course = findCourse(db, { className: req.query.class, subject: req.query.subject, yearName });
-    if (!course) throw new NotFoundError("There is no such course.");
+    if (!course) throw new NotFoundError("exam.errors.noSuchCourse");
     return course;
   });
 
@@ -121,13 +121,13 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
       })
     );
 
-  page("/courses/:id/gradebook", "Gradebook", (req) => {
+  page("/courses/:id/gradebook", (t) => t("exam.pages.gradebook"), (req) => {
     const courseId = idParam(req.params.id);
     // A page asking for no semester, or for one there is not, shows the one running now.
     const semester = semesters.includes(req.query.semester) ? req.query.semester : semesterToday(getCourse(db, courseId).year);
     return { kind: "gradebook", params: { course: String(courseId), semester, page: "1" }, context: { courseId, semester } };
   });
-  page("/courses/:id/students/:username", "Student", (req) => {
+  page("/courses/:id/students/:username", (t) => t("exam.pages.student"), (req) => {
     const courseId = idParam(req.params.id);
     return {
       kind: "gradebook-student",
@@ -135,7 +135,7 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
       context: { courseId },
     };
   });
-  page("/scale", "Grading scale", () => ({ kind: "scale", params: {}, context: {} }));
+  page("/scale", (t) => t("exam.pages.scale"), () => ({ kind: "scale", params: {}, context: {} }));
 
   // Everyone's own results, a teacher's included - a teacher is on no roster
   // and finds none - now on the student's Exams page (`/exam/my`).

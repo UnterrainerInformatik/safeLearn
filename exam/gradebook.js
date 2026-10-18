@@ -45,18 +45,18 @@ export function readScale(db) {
  */
 export function updateScale(db, thresholds) {
   if (thresholds === null || typeof thresholds !== "object" || Array.isArray(thresholds)) {
-    throw new InvalidInputError("The scale is one threshold in percent for each of the grades 1 to 4.");
+    throw new InvalidInputError("exam.errors.gradebook.scaleShape");
   }
   const values = [1, 2, 3, 4].map((grade) => {
     const value = thresholds[grade];
     if (typeof value !== "number" || !Number.isFinite(value) || value <= 0 || value > 100 || Math.round(value * 10) !== value * 10) {
-      throw new InvalidInputError(`The threshold of grade ${grade} has to be a percentage above 0 and at most 100, with at most one decimal.`);
+      throw new InvalidInputError("exam.errors.gradebook.thresholdRange", { grade });
     }
     return value;
   });
   for (let i = 1; i < values.length; i += 1) {
     if (values[i] >= values[i - 1]) {
-      throw new InvalidInputError(`Grade ${i + 1} has to start below grade ${i}.`);
+      throw new InvalidInputError("exam.errors.gradebook.thresholdOrder", { grade: i + 1, better: i });
     }
   }
   inTransaction(db, () => {
@@ -82,7 +82,9 @@ function normalizeUsername(username) {
 function requireRosterEntry(db, course, username) {
   const key = normalizeUsername(username);
   const entry = rosterEntry(db, course, key);
-  if (!entry) throw new InvalidInputError(`${key || "Nobody"} is not on the roster of this course's class.`);
+  if (!entry) {
+    throw key ? new InvalidInputError("exam.errors.gradebook.notOnCourseRoster", { username: key }) : new InvalidInputError("exam.errors.gradebook.nobodyOnRoster");
+  }
   return entry;
 }
 
@@ -92,9 +94,9 @@ function isNumber(value) {
 
 /** A column's date: inside the course's school year, since it decides the semester. */
 function columnDate(value, year) {
-  const date = validDate(value, "The column's date");
+  const date = validDate(value, "exam.errors.gradebook.columnDateFormat");
   if (date < year.startsOn || date > year.endsOn) {
-    throw new InvalidInputError(`The column's date has to lie in the school year ${year.name}, ${year.startsOn} to ${year.endsOn}.`);
+    throw new InvalidInputError("exam.errors.gradebook.columnDateRange", { year: year.name, from: year.startsOn, to: year.endsOn });
   }
   return date;
 }
@@ -102,18 +104,18 @@ function columnDate(value, year) {
 /** A column's name, trimmed; empty means "named by its date". */
 function columnName(value, date) {
   if (value !== undefined && value !== null && typeof value !== "string") {
-    throw new InvalidInputError("A column's name is text.");
+    throw new InvalidInputError("exam.errors.gradebook.columnNameText");
   }
   const name = value?.trim() ? value.trim() : date;
-  if (name.length > 100) throw new InvalidInputError("A column's name is at most 100 characters.");
+  if (name.length > 100) throw new InvalidInputError("exam.errors.gradebook.columnNameLength");
   return name;
 }
 
 /** A column's maximum: null for a column in percent, or a number of points above 0. */
 function columnMax(value, kind) {
   if (value === undefined || value === null) return null;
-  if (kind === "plusminus") throw new InvalidInputError("A participation column has no maximum.");
-  if (!isNumber(value) || value <= 0) throw new InvalidInputError("The maximum has to be a number of points above 0.");
+  if (kind === "plusminus") throw new InvalidInputError("exam.errors.gradebook.participationMax");
+  if (!isNumber(value) || value <= 0) throw new InvalidInputError("exam.errors.gradebook.maxPositive");
   return value;
 }
 
@@ -132,7 +134,7 @@ function columnFromRow(row, results = 0) {
 
 function getColumnRow(db, id) {
   const row = db.prepare("SELECT * FROM assessment WHERE id = ?").get(id);
-  if (!row) throw new NotFoundError(`There is no column ${id}.`);
+  if (!row) throw new NotFoundError("exam.errors.gradebook.noColumn", { id });
   return row;
 }
 
@@ -179,7 +181,7 @@ export function createColumn(db, courseId, input) {
   const course = getCourse(db, courseId);
   const { kind } = input ?? {};
   if (!entryKinds.includes(kind)) {
-    throw new InvalidInputError(`A column is one of ${entryKinds.join(", ")}.`);
+    throw new InvalidInputError("exam.errors.gradebook.columnKind", { kinds: entryKinds.join(", ") });
   }
   const date = columnDate(input.date, course.year);
   const name = columnName(input.name, date);
@@ -205,16 +207,12 @@ export function updateColumn(db, id, input = {}) {
   const maxPoints = input.maxPoints === undefined ? row.max_points : columnMax(input.maxPoints, row.kind);
   const results = resultCount(db, id);
   if (results > 0 && (maxPoints === null) !== (row.max_points === null)) {
-    throw new InvalidInputError(
-      row.max_points === null
-        ? "This column holds results in percent; it cannot be given a maximum now."
-        : "This column holds results in points; it cannot lose its maximum now."
-    );
+    throw new InvalidInputError(row.max_points === null ? "exam.errors.gradebook.percentKeepsNoMax" : "exam.errors.gradebook.pointsKeepMax");
   }
   if (maxPoints !== null && maxPoints !== row.max_points) {
     const highest = db.prepare("SELECT MAX(points) AS p FROM manual_entry WHERE assessment_id = ?").get(id).p;
     if (highest !== null && highest > maxPoints) {
-      throw new InvalidInputError(`A result in this column has ${highest} points, more than a maximum of ${maxPoints}.`);
+      throw new InvalidInputError("exam.errors.gradebook.resultAboveMax", { highest, max: maxPoints });
     }
   }
   inTransaction(db, () => {
@@ -247,19 +245,19 @@ export function deleteColumn(db, id) {
 function normalizeResult(input, column) {
   if (column.kind === "plusminus") {
     const mark = typeof input?.mark === "string" ? input.mark.trim().replace("−", "-") : null;
-    if (mark !== "+" && mark !== "-") throw new InvalidInputError("A participation mark is + or -.");
+    if (mark !== "+" && mark !== "-") throw new InvalidInputError("exam.errors.gradebook.participationMark");
     return { value: mark === "+" ? 1 : 0, points: null };
   }
   if (column.max_points !== null) {
     const points = input?.points;
     if (!isNumber(points) || points < 0 || points > column.max_points) {
-      throw new InvalidInputError(`The points have to lie between 0 and the maximum of ${column.max_points}.`);
+      throw new InvalidInputError("exam.errors.gradebook.pointsRange", { max: column.max_points });
     }
     return { value: points / column.max_points, points };
   }
   const percent = input?.percent;
   if (!isNumber(percent) || percent < 0 || percent > 100) {
-    throw new InvalidInputError("This column takes a result in percent, from 0 to 100.");
+    throw new InvalidInputError("exam.errors.gradebook.percentRange");
   }
   return { value: percent / 100, points: null };
 }
@@ -393,7 +391,7 @@ function courseEntries(db, courseId, scale, username = null) {
 
 function normalizeSemester(semester) {
   if (!semesters.includes(semester)) {
-    throw new InvalidInputError(`A semester is ${semesters.join(" or ")}.`);
+    throw new InvalidInputError("exam.errors.gradebook.semester", { semesters: semesters.join(" or ") });
   }
   return semester;
 }
@@ -427,12 +425,12 @@ export function setSemesterGrade(db, courseId, username, semester, input = {}) {
   const comment = input.comment === undefined ? (stored?.comment ?? null) : input.comment;
   const commentVisible = input.commentVisible === undefined ? (stored?.commentVisible ?? false) : input.commentVisible;
   if (override !== null && !(Number.isInteger(override) && override >= 1 && override <= 5)) {
-    throw new InvalidInputError("An override is a grade from 1 to 5, or none.");
+    throw new InvalidInputError("exam.errors.gradebook.override");
   }
-  if (comment !== null && typeof comment !== "string") throw new InvalidInputError("A comment is text.");
+  if (comment !== null && typeof comment !== "string") throw new InvalidInputError("exam.errors.gradebook.commentText");
   const text = comment?.trim() ? comment.trim() : null;
-  if (text !== null && text.length > 2000) throw new InvalidInputError("A comment is at most 2000 characters.");
-  if (typeof commentVisible !== "boolean") throw new InvalidInputError("Whether the student sees the comment is yes or no.");
+  if (text !== null && text.length > 2000) throw new InvalidInputError("exam.errors.gradebook.commentLength");
+  if (typeof commentVisible !== "boolean") throw new InvalidInputError("exam.errors.gradebook.commentVisible");
 
   if (override === null && text === null) {
     db.prepare("DELETE FROM semester_grade WHERE course_id = ? AND username = ? AND semester = ?").run(
@@ -567,7 +565,7 @@ export function studentRecord(db, courseId, username) {
   const course = getCourse(db, courseId);
   const key = normalizeUsername(username);
   const student = rosterEntry(db, course, key);
-  if (!student) throw new NotFoundError(`${key} is not on the roster of this course's class.`);
+  if (!student) throw new NotFoundError("exam.errors.gradebook.notOnCourseRoster", { username: key });
   const scale = readScale(db);
   const entries = courseEntries(db, courseId, scale, key);
   const grades = courseGrades(db, courseId);

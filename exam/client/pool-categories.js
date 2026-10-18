@@ -12,7 +12,7 @@
  * draws what it answers.
  */
 
-import { defineExamElement, ExamApiError, ExamElement, examApi, h } from "./frame.js";
+import { defineExamElement, ExamApiError, ExamElement, examApi, h, t } from "./frame.js";
 import { poolAddress } from "./question-editor.js";
 
 /** The ids of `node` and everything below it. */
@@ -37,19 +37,19 @@ class PoolCategories extends ExamElement {
     return h(
       "div",
       { class: "sl-exam sl-exam-categories" },
-      h("p", {}, h("a", { href: poolAddress(null, this.params.course) }, "Back to the pool")),
+      h("p", {}, h("a", { href: poolAddress(null, this.params.course) }, t("exam.categories.backToPool"))),
       this.message,
-      h("h2", {}, "New category at the top"),
-      this.namesForm({ submit: "Create", onSave: (names) => this.act(() => examApi("/pool/categories", { method: "POST", body: { parentId: null, ...names } }), "Created.") }),
-      h("h2", {}, "Categories"),
-      tree.length === 0 ? h("p", { class: "sl-exam-quiet" }, "There is no category yet.") : h("ul", { class: "sl-exam-categories-tree" }, tree.map((node, index) => this.node(node, tree, index)))
+      h("h2", {}, t("exam.categories.newAtTop")),
+      this.namesForm({ submit: t("exam.categories.create"), onSave: (names) => this.act(() => examApi("/pool/categories", { method: "POST", body: { parentId: null, ...names } }), t("exam.categories.created")) }),
+      h("h2", {}, t("exam.categories.heading")),
+      tree.length === 0 ? h("p", { class: "sl-exam-quiet" }, t("exam.categories.none")) : h("ul", { class: "sl-exam-categories-tree" }, tree.map((node, index) => this.node(node, tree, index)))
     );
   }
 
   /** A German and an English name with a button; `onSave` gets `{ nameDe, nameEn }`. */
   namesForm({ nameDe = "", nameEn = "", submit, onSave }) {
-    const de = h("input", { type: "text", name: "nameDe", value: nameDe, placeholder: "German name", "aria-label": "German name", required: true, maxlength: "200" });
-    const en = h("input", { type: "text", name: "nameEn", value: nameEn, placeholder: "English name", "aria-label": "English name", required: true, maxlength: "200" });
+    const de = h("input", { type: "text", name: "nameDe", value: nameDe, placeholder: t("exam.categories.germanName"), "aria-label": t("exam.categories.germanName"), required: true, maxlength: "200" });
+    const en = h("input", { type: "text", name: "nameEn", value: nameEn, placeholder: t("exam.categories.englishName"), "aria-label": t("exam.categories.englishName"), required: true, maxlength: "200" });
     return h(
       "form",
       {
@@ -69,8 +69,8 @@ class PoolCategories extends ExamElement {
     const excluded = new Set(subtree(node));
     const target = h(
       "select",
-      { "aria-label": `Move ${node.nameDe} under` },
-      h("option", { value: "" }, "(the top)"),
+      { "aria-label": t("exam.categories.moveUnderLabel", { name: node.nameDe }) },
+      h("option", { value: "" }, t("exam.categories.top")),
       flatten(this.tree)
         .filter(({ node: candidate }) => !excluded.has(candidate.id))
         .map(({ node: candidate, depth }) =>
@@ -86,7 +86,7 @@ class PoolCategories extends ExamElement {
     };
     const button = (label, title, action, disabled = false) =>
       h("button", { type: "button", title, "aria-label": `${title}: ${node.nameDe}`, disabled, onClick: action }, label);
-    const held = node.questions === node.total ? `${node.questions}` : `${node.questions}, ${node.total} with below`;
+    const held = node.questions === node.total ? `${node.questions}` : t("exam.categories.held", { questions: node.questions, total: node.total });
     return h(
       "li",
       { "data-category": String(node.id) },
@@ -97,21 +97,21 @@ class PoolCategories extends ExamElement {
         h(
           "span",
           { class: "sl-exam-categories-tools" },
-          button("↑", "Move up", () => this.act(() => this.update(node, { move: "up" })), index === 0),
-          button("↓", "Move down", () => this.act(() => this.update(node, { move: "down" })), index === siblings.length - 1),
-          button("Rename", "Rename", () =>
-            open(this.namesForm({ nameDe: node.nameDe, nameEn: node.nameEn, submit: "Save", onSave: (names) => this.act(() => this.update(node, names), "Renamed.") }))
+          button("↑", t("exam.categories.moveUp"), () => this.act(() => this.update(node, { move: "up" })), index === 0),
+          button("↓", t("exam.categories.moveDown"), () => this.act(() => this.update(node, { move: "down" })), index === siblings.length - 1),
+          button(t("exam.categories.rename"), t("exam.categories.rename"), () =>
+            open(this.namesForm({ nameDe: node.nameDe, nameEn: node.nameEn, submit: t("exam.categories.save"), onSave: (names) => this.act(() => this.update(node, names), t("exam.categories.renamed")) }))
           ),
           target,
-          button("Move", "Move under the chosen category", () =>
-            this.act(() => this.update(node, { parentId: target.value === "" ? null : Number(target.value) }), "Moved.")
+          button(t("exam.categories.move"), t("exam.categories.moveTitle"), () =>
+            this.act(() => this.update(node, { parentId: target.value === "" ? null : Number(target.value) }), t("exam.categories.moved"))
           ),
-          button("+ Subcategory", "Add a subcategory", () =>
-            open(this.namesForm({ submit: "Create", onSave: (names) => this.act(() => examApi("/pool/categories", { method: "POST", body: { parentId: node.id, ...names } }), "Created.") }))
+          button(t("exam.categories.addSub"), t("exam.categories.addSubTitle"), () =>
+            open(this.namesForm({ submit: t("exam.categories.create"), onSave: (names) => this.act(() => examApi("/pool/categories", { method: "POST", body: { parentId: node.id, ...names } }), t("exam.categories.created")) }))
           ),
-          button("Delete", "Delete", () => {
-            if (!window.confirm(`Delete the category ${node.nameDe}?`)) return;
-            this.act(() => examApi(`/pool/categories/${node.id}`, { method: "DELETE" }), "Deleted.");
+          button(t("exam.categories.delete"), t("exam.categories.delete"), () => {
+            if (!window.confirm(t("exam.categories.confirmDelete", { name: node.nameDe }))) return;
+            this.act(() => examApi(`/pool/categories/${node.id}`, { method: "DELETE" }), t("exam.categories.deleted"));
           })
         )
       ),
@@ -133,7 +133,7 @@ class PoolCategories extends ExamElement {
       await this.reload();
     } catch (error) {
       this.message.classList.add("sl-embed-error");
-      this.message.textContent = error instanceof ExamApiError && error.status < 500 ? error.message : "That did not work. Please try again.";
+      this.message.textContent = error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.pool.actionFailed");
     }
   }
 }

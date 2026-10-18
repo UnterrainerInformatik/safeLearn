@@ -2,8 +2,7 @@
  * The teacher's live view of a sitting (`online-test`):
  *
  * - `live`: at the top whether the sitting is live, its window with the time
- *   until it opens or closes, and the server's time in the viewer's time
- *   zone; per participant not started, writing with the time left, or
+ *   until it opens or closes, and the server's time in Vienna; per participant not started, writing with the time left, or
  *   submitted; the share of their attempt they kept the page in focus as a
  *   bar, with how often and how long they left it; requests refused from
  *   another browser; and the button that releases an attempt to a new browser
@@ -21,13 +20,21 @@
  * is told so, and the view stops.
  */
 
-import { defineExamElement, ExamApiError, ExamElement, examApi, examMe, h } from "./frame.js";
+import { defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, t } from "./frame.js";
 import { displayClass, displayPerson } from "./classes.js";
 import { armedButton, displayWindow } from "./tests.js";
 
-const stateLabels = { scheduled: "Not open yet", open: "Live", over: "Over" };
+const stateLabels = {
+  scheduled: () => t("exam.live.stateScheduled"),
+  open: () => t("exam.live.stateOpen"),
+  over: () => t("exam.live.stateOver"),
+};
 
-const statusLabels = { "not started": "not started", writing: "writing", submitted: "submitted" };
+const statusLabels = {
+  "not started": () => t("exam.live.statusNotStarted"),
+  writing: () => t("exam.live.statusWriting"),
+  submitted: () => t("exam.live.statusSubmitted"),
+};
 
 /** "12:05" for a number of milliseconds. */
 function clock(ms) {
@@ -37,8 +44,9 @@ function clock(ms) {
 
 /** "left 3×, 47 s", or nothing for somebody who stayed. */
 function focusText(participant, awayMs) {
-  if (participant.focusCount === 0) return "never left";
-  return `left ${participant.focusCount}×, ${Math.round(awayMs / 1000)} s${participant.away ? " (away now)" : ""}`;
+  if (participant.focusCount === 0) return t("exam.live.neverLeft");
+  const left = t("exam.live.leftPage", { count: participant.focusCount, seconds: Math.round(awayMs / 1000) });
+  return participant.away ? `${left} ${t("exam.live.awayNow")}` : left;
 }
 
 /** The colour of a focus share: above 98 % good, from 70 % a warning, below that bad. */
@@ -56,8 +64,6 @@ function span(ms) {
   const seconds = String(total % 60).padStart(2, "0");
   return hours > 0 ? `${hours}:${String(minutes).padStart(2, "0")}:${seconds}` : `${minutes}:${seconds}`;
 }
-
-const localClock = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
 const pollMs = 5000;
 const streamRetryMs = 60000;
@@ -84,7 +90,7 @@ class LiveView extends ExamElement {
     this.windowShown = h("span", {});
     this.windowKey = null;
     this.remainingText = h("span", {});
-    this.windowLine = h("span", { class: "sl-exam-live-window" }, "Window ", this.windowShown, this.remainingText);
+    this.windowLine = h("span", { class: "sl-exam-live-window" }, `${t("exam.live.window")} `, this.windowShown, this.remainingText);
     this.serverClock = h("span", { class: "sl-exam-live-clock" });
     this.message = h("p", { class: "sl-exam-message", role: "status" });
     this.body = h("tbody", {});
@@ -101,16 +107,16 @@ class LiveView extends ExamElement {
       h(
         "p",
         { class: "sl-exam-quiet" },
-        "Server time ",
+        `${t("exam.live.serverTime")} `,
         this.serverClock,
         " · ",
-        h("a", { href: `/exam/sittings/${sitting.id}/screen`, target: "_blank", rel: "noopener", class: "sl-exam-live-screen-link" }, "Class screen (new window)")
+        h("a", { href: `/exam/sittings/${sitting.id}/screen`, target: "_blank", rel: "noopener", class: "sl-exam-live-screen-link" }, t("exam.live.classScreenLink"))
       ),
       h(
         "p",
         { class: "sl-exam-quiet" },
         h("a", { href: `/exam/tests/${test.id}` }, test.name),
-        ` · ${displayClass(course.className)} ${course.subject} · ${sitting.makeup ? "make-up sitting · " : ""}${Math.round(sitting.durationS / 60)} min per attempt`
+        ` · ${displayClass(course.className)} ${course.subject} · ${sitting.makeup ? `${t("exam.live.makeupSitting")} · ` : ""}${t("exam.tests.minutesPerAttempt", { minutes: Math.round(sitting.durationS / 60) })}`
       )
     );
     if (this.params.screen === "1") return this.screenView(snapshot);
@@ -122,7 +128,7 @@ class LiveView extends ExamElement {
       h(
         "table",
         { class: "sl-exam-table sl-exam-live-table" },
-        h("thead", {}, h("tr", {}, h("th", {}, "Student"), h("th", {}, "Status"), h("th", {}, "Time left"), h("th", {}, "In focus"), h("th", {}, "Other browsers"), h("th", {}, ""))),
+        h("thead", {}, h("tr", {}, h("th", {}, t("exam.live.columnStudent")), h("th", {}, t("exam.live.columnStatus")), h("th", {}, t("exam.live.columnTimeLeft")), h("th", {}, t("exam.live.columnInFocus")), h("th", {}, t("exam.live.columnOtherBrowsers")), h("th", {}, ""))),
         this.body
       ),
       this.message
@@ -144,7 +150,7 @@ class LiveView extends ExamElement {
       this.bigLabel,
       this.bigRemaining,
       h("p", { class: "sl-exam-screen-window" }, this.windowLine),
-      h("div", { class: "sl-exam-screen-clock-label" }, "Time"),
+      h("div", { class: "sl-exam-screen-clock-label" }, t("exam.live.time")),
       h("div", { class: "sl-exam-screen-clock" }, this.serverClock),
       h("div", { class: "sl-exam-screen-summary" }, this.summary),
       h("p", { class: "sl-exam-quiet sl-exam-screen-connection" }, this.state)
@@ -171,17 +177,22 @@ class LiveView extends ExamElement {
     const closes = Date.parse(this.sitting.closesAt);
     const state = now < opens ? "scheduled" : now < closes ? "open" : "over";
     this.dataset.sitting = state;
-    this.badge.textContent = stateLabels[state];
+    this.badge.textContent = stateLabels[state]();
     this.badge.dataset.state = state;
-    const remaining = state === "scheduled" ? `opens in ${span(opens - now)}` : state === "open" ? `closes in ${span(closes - now)}` : `closed ${span(now - closes)} ago`;
-    this.serverClock.textContent = localClock.format(new Date(now));
+    const remaining =
+      state === "scheduled"
+        ? t("exam.live.opensIn", { time: span(opens - now) })
+        : state === "open"
+          ? t("exam.live.closesIn", { time: span(closes - now) })
+          : t("exam.live.closedAgo", { time: span(now - closes) });
+    this.serverClock.textContent = format.clock(new Date(now));
     const key = `${this.sitting.opensAt} ${this.sitting.closesAt}`;
     if (key !== this.windowKey) {
       this.windowKey = key;
       this.windowShown.replaceChildren(displayWindow(this.sitting, this.periods));
     }
     if (this.bigRemaining) {
-      this.bigLabel.textContent = state === "scheduled" ? "Opens in" : state === "open" ? "Closes in" : "Closed";
+      this.bigLabel.textContent = state === "scheduled" ? t("exam.live.bigOpensIn") : state === "open" ? t("exam.live.bigClosesIn") : t("exam.live.bigClosed");
       this.bigRemaining.textContent = state === "over" ? "–" : span(state === "scheduled" ? opens - now : closes - now);
       return;
     }
@@ -203,14 +214,14 @@ class LiveView extends ExamElement {
     const participant = this.participants.get(username);
     const release =
       participant.status === "writing" && participant.attemptId !== null
-        ? h("button", { type: "button", class: "sl-exam-live-release", onClick: () => this.release(participant) }, "Release to another browser")
+        ? h("button", { type: "button", class: "sl-exam-live-release", onClick: () => this.release(participant) }, t("exam.live.release"))
         : null;
     const remove =
       this.admin && participant.attemptId !== null
         ? armedButton({
             class: "sl-exam-live-delete sl-exam-admin",
-            label: "Delete attempt",
-            armed: "Click again to delete it with its answers",
+            label: t("exam.live.deleteAttempt"),
+            armed: t("exam.live.deleteAttemptArmed"),
             action: () => this.deleteAttempt(participant),
           })
         : null;
@@ -218,10 +229,18 @@ class LiveView extends ExamElement {
       "tr",
       { "data-username": username, "data-status": participant.status },
       h("td", {}, displayPerson(participant)),
-      h("td", { class: "sl-exam-live-status" }, statusLabels[participant.status]),
+      h("td", { class: "sl-exam-live-status" }, statusLabels[participant.status]()),
       h("td", { class: "sl-exam-live-left" }, participant.remainingMs === null ? "" : clock(participant.remainingMs)),
       this.focusCell(participant),
-      h("td", { class: "sl-exam-live-refused" }, participant.refused === 0 ? "–" : `${participant.refused} refused${participant.bound === false ? ", released" : ""}`),
+      h(
+        "td",
+        { class: "sl-exam-live-refused" },
+        participant.refused === 0
+          ? "–"
+          : participant.bound === false
+            ? t("exam.live.refusedReleased", { count: participant.refused })
+            : t("exam.live.refused", { count: participant.refused })
+      ),
       h("td", {}, release, release && remove ? " " : null, remove)
     );
     this.rows.set(username, tr);
@@ -250,12 +269,12 @@ class LiveView extends ExamElement {
     const elapsed = end - Date.parse(participant.startedAt);
     const share = elapsed <= 0 ? 1 : Math.min(1, Math.max(0, 1 - awayMs / elapsed));
     const level = focusLevel(share);
-    const percent = `${Math.floor(share * 1000) / 10} %`;
+    const percent = format.percent(Math.floor(share * 1000) / 1000, 1);
     cell.dataset.level = level;
     cell.replaceChildren(
       h(
         "span",
-        { class: "sl-exam-live-bar", role: "meter", "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(Math.round(share * 100)), "aria-label": `In focus ${percent}` },
+        { class: "sl-exam-live-bar", role: "meter", "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(Math.round(share * 100)), "aria-label": t("exam.live.inFocusShare", { percent }) },
         h("span", { class: "sl-exam-live-bar-fill", style: `width: ${share * 100}%` })
       ),
       " ",
@@ -278,7 +297,7 @@ class LiveView extends ExamElement {
   summarize() {
     const counts = { "not started": 0, writing: 0, submitted: 0 };
     for (const participant of this.participants.values()) counts[participant.status] += 1;
-    this.summary.textContent = `${counts.writing} writing · ${counts.submitted} submitted · ${counts["not started"]} not started`;
+    this.summary.textContent = t("exam.live.summary", { writing: counts.writing, submitted: counts.submitted, notStarted: counts["not started"] });
   }
 
   /** Counts the time left down between changes. */
@@ -296,9 +315,9 @@ class LiveView extends ExamElement {
   async release(participant) {
     try {
       await examApi(`/attempts/${participant.attemptId}/release`, { method: "POST" });
-      this.message.textContent = `${displayPerson(participant)} can go on in another browser now.`;
+      this.message.textContent = t("exam.live.released", { name: displayPerson(participant) });
     } catch (error) {
-      this.message.textContent = error instanceof ExamApiError && error.status < 500 ? error.message : "The attempt could not be released.";
+      this.message.textContent = error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.live.releaseFailed");
     }
   }
 
@@ -306,9 +325,9 @@ class LiveView extends ExamElement {
   async deleteAttempt(participant) {
     try {
       await examApi(`/attempts/${participant.attemptId}`, { method: "DELETE" });
-      this.message.textContent = `The attempt of ${displayPerson(participant)} is deleted.`;
+      this.message.textContent = t("exam.live.attemptDeleted", { name: displayPerson(participant) });
     } catch (error) {
-      this.message.textContent = error instanceof ExamApiError && error.status < 500 ? error.message : "The attempt could not be deleted.";
+      this.message.textContent = error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.live.deleteFailed");
     }
   }
 
@@ -343,7 +362,7 @@ class LiveView extends ExamElement {
       this.failures = 0;
       this.stopPolling();
       this.dataset.mode = "stream";
-      this.state.textContent = "changes arrive as they happen";
+      this.state.textContent = t("exam.live.streaming");
     });
     source.addEventListener("snapshot", (event) => this.draw(JSON.parse(event.data)));
     source.addEventListener("change", (event) => {
@@ -365,7 +384,7 @@ class LiveView extends ExamElement {
   fallBack() {
     this.closeStream();
     this.dataset.mode = "polling";
-    this.state.textContent = "updating every 5 seconds";
+    this.state.textContent = t("exam.live.polling");
     if (!this.poller) {
       this.poller = setInterval(() => this.poll(), pollMs);
       this.poll();
@@ -389,7 +408,7 @@ class LiveView extends ExamElement {
   studentView() {
     this.stopAll();
     this.dataset.mode = "refused";
-    this.state.textContent = "The student view is active: the live view is not shown. Switch back to the teacher view and reload the page.";
+    this.state.textContent = t("exam.live.studentView");
     this.body.replaceChildren();
   }
 

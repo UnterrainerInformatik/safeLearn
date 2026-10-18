@@ -1,4 +1,5 @@
 import { fetchAccount, keycloakConfig, SessionEndedError } from "./middlewares/keycloak-middleware.js";
+import { languageOf, localeOf } from "./i18n/t.js";
 
 /**
  * The context one request decides every one of its directives against.
@@ -42,9 +43,10 @@ const namesReservedForRoles = new Set([
  * All three defaults narrow. The teacher view off applies the student-view
  * downgrade, the exam view off yields the practice variant of a question, and
  * answers stay hidden - so a failed lookup can only take content away from a
- * session, never hand it any.
+ * session, never hand it any. The language and the format (`ui-language`)
+ * grant nothing either way; theirs are English and de-AT.
  */
-const defaultPreferences = Object.freeze({ ve: 0, vt: 0, va: 0 });
+const defaultPreferences = Object.freeze({ ve: 0, vt: 0, va: 0, lang: languageOf(), loc: localeOf() });
 
 /**
  * How a role name is compared, wherever it comes from: the directive that names
@@ -95,7 +97,9 @@ function parsePreferences(rawConfig) {
     if (parsed === null || typeof parsed !== "object") {
       return { ...defaultPreferences };
     }
-    return { ...defaultPreferences, ...parsed };
+    // A language or format outside the allowed ones reads as not stored. The
+    // page shows what the server settled on here, so the menu marks the same.
+    return { ...defaultPreferences, ...parsed, lang: languageOf(parsed.lang), loc: localeOf(parsed.loc) };
   } catch (error) {
     console.error(`Error reading the stored view preferences: ${error}`);
     return { ...defaultPreferences };

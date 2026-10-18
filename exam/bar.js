@@ -15,8 +15,11 @@ import { currentYear, getClass, getCourse, getYear, listClasses, listCourses, li
 import { semesterToday } from "./gradebook.js";
 import { semesters } from "./grading.js";
 import { embedPlaceholder, wrapInPage } from "../obsidian.js";
+import { i18nOf } from "../i18n/server.js";
 
-const semesterLabels = { ws: "Winter semester", ss: "Whole year" };
+function semesterLabels(t) {
+  return { ws: t("exam.bar.winterSemester"), ss: t("exam.bar.wholeYear") };
+}
 
 function escapeHtml(text) {
   return String(text)
@@ -60,8 +63,8 @@ function option(value, label, selected) {
  * only once every position to its left has a value.
  */
 function position({ name, label, href, choices, chosen, enabled, create }) {
-  const title = href ? `<a href="${escapeHtml(href)}">${label}</a>` : `<span>${label}</span>`;
-  const select = `<select data-position="${name}" aria-label="${label}"${enabled ? "" : " disabled"}>
+  const title = href ? `<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>` : `<span>${escapeHtml(label)}</span>`;
+  const select = `<select data-position="${name}" aria-label="${escapeHtml(label)}"${enabled ? "" : " disabled"}>
       ${option("", "–", chosen === null)}
       ${choices.map((choice) => option(choice.value, choice.label, choice.value === chosen)).join("")}
     </select>`;
@@ -85,58 +88,58 @@ function contextQuery({ year, klass, course }) {
 
 /** A button at the bar's right end, marked while its page is the one shown. */
 function pageButton({ name, label, href, current }) {
-  return `<a class="sl-exam-bar-page" data-page="${name}" href="${escapeHtml(href)}"${current === name ? ' aria-current="page"' : ""}>${label}</a>`;
+  return `<a class="sl-exam-bar-page" data-page="${name}" href="${escapeHtml(href)}"${current === name ? ' aria-current="page"' : ""}>${escapeHtml(label)}</a>`;
 }
 
 /**
  * The bar's markup for `context`, as `barState` resolves it. `current` names
  * the page shown when it is one of the bar's buttons (`pool`, `tests`); the
- * bar's choices then stay on that page.
+ * bar's choices then stay on that page. `t` speaks the reader's language.
  */
-export function renderBar(db, context, current = null) {
+export function renderBar(db, context, current, t) {
   const { years, year, classes, klass, courses, course, semester } = barState(db, context);
   const shownSemester = semester ?? (course ? semesterToday(course.year) : null);
   const query = contextQuery({ year, klass, course });
-  return `<nav class="sl-exam-bar" aria-label="Exam module"
+  return `<nav class="sl-exam-bar" aria-label="${escapeHtml(t("app.topbar.examModule"))}"
       data-year="${year?.id ?? ""}" data-class="${klass?.id ?? ""}" data-course="${course?.id ?? ""}" data-current="${current ?? ""}">
     ${position({
       name: "year",
-      label: "Year",
+      label: t("exam.bar.year"),
       href: year ? `/exam/?year=${year.id}` : null,
-      choices: years.map((candidate) => ({ value: String(candidate.id), label: candidate.current ? `${candidate.name} (current)` : candidate.name })),
+      choices: years.map((candidate) => ({ value: String(candidate.id), label: candidate.current ? t("exam.bar.currentYear", { name: candidate.name }) : candidate.name })),
       chosen: year ? String(year.id) : null,
       enabled: years.length > 0,
-      create: { title: "New school year", offered: true },
+      create: { title: t("exam.bar.newYear"), offered: true },
     })}
     ${position({
       name: "class",
-      label: "Class",
+      label: t("exam.bar.class"),
       href: klass ? `/exam/classes/${klass.id}` : null,
       choices: classes.map((candidate) => ({ value: String(candidate.id), label: candidate.name.toUpperCase() })),
       chosen: klass ? String(klass.id) : null,
       enabled: year !== null,
-      create: { title: "New class in this school year", offered: year !== null },
+      create: { title: t("exam.bar.newClass"), offered: year !== null },
     })}
     ${position({
       name: "course",
-      label: "Course",
+      label: t("exam.bar.course"),
       href: course ? `/exam/courses/${course.id}` : null,
       choices: courses.map((candidate) => ({ value: String(candidate.id), label: candidate.subject })),
       chosen: course ? String(course.id) : null,
       enabled: klass !== null,
-      create: { title: "New course in this class", offered: klass !== null },
+      create: { title: t("exam.bar.newCourse"), offered: klass !== null },
     })}
     ${position({
       name: "gradebook",
-      label: "Grades",
+      label: t("exam.bar.grades"),
       href: course ? `/exam/courses/${course.id}/gradebook?semester=${shownSemester}` : null,
-      choices: course ? semesters.map((value) => ({ value, label: semesterLabels[value] })) : [],
+      choices: course ? semesters.map((value) => ({ value, label: semesterLabels(t)[value] })) : [],
       chosen: semester,
       enabled: course !== null,
     })}
     <span class="sl-exam-bar-pages">
-      ${pageButton({ name: "pool", label: "Question pool", href: `/exam/pool${query}`, current })}
-      ${pageButton({ name: "tests", label: "Online tests", href: `/exam/tests${query}`, current })}
+      ${pageButton({ name: "pool", label: t("exam.bar.pool"), href: `/exam/pool${query}`, current })}
+      ${pageButton({ name: "tests", label: t("exam.bar.tests"), href: `/exam/tests${query}`, current })}
     </span>
   </nav>`;
 }
@@ -145,13 +148,16 @@ export function renderBar(db, context, current = null) {
  * A teacher page of the module: the bar for `context`, the heading and one
  * element, in the instance's frame at the whole width. Only for routes behind
  * `teacherPage`. `current` marks the bar's button of this page, if it has one.
+ * `title` is the heading, or a function of the reader's `t` returning it.
  */
 export async function teacherShell({ db, startPage, req, title, context, kind, params, current = null }) {
+  const { t } = await i18nOf(req);
+  const heading = typeof title === "function" ? title(t) : title;
   const body = `
-    ${renderBar(db, context, current)}
-    <h1>${escapeHtml(title)}</h1>
-    ${embedPlaceholder(kind, params)}`;
-  return wrapInPage(body, startPage(), req, { title, wide: true });
+    ${renderBar(db, context, current, t)}
+    <h1>${escapeHtml(heading)}</h1>
+    ${embedPlaceholder(kind, params, t("app.embed.loading"))}`;
+  return wrapInPage(body, startPage(), req, { title: heading, wide: true });
 }
 
 /**

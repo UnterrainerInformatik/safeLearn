@@ -5,6 +5,9 @@ import { v4 as uuidv4 } from "uuid";
 import { JSDOM } from "jsdom";
 import { hasSomeRoles } from "./utils.js";
 import { getPermissionContext } from "./permission-context.js";
+import { i18nOf } from "./i18n/server.js";
+import { createFormat } from "./i18n/format.js";
+import { languageNames, languages, locales } from "./i18n/t.js";
 import * as lucideIcons from "lucide-static";
 
 const internalTags = {
@@ -1241,10 +1244,8 @@ export function embedPlaceholder(kind, params, loadingText = "Loading…") {
 async function defaultEmbed(kind, req) {
   if (!knownEmbedKinds.includes(kind)) return "";
   if (!(await hasSomeRoles(req, ["teacher"], true))) return "";
-  return (
-    `<div class="sl-embed-notice">Exam module element <code>${escapeHtmlAttribute(kind)}</code>: ` +
-    `only available on an instance with the exam database.</div>`
-  );
+  const { t } = await i18nOf(req);
+  return `<div class="sl-embed-notice">${t("app.embed.unavailable", { kind: `<code>${escapeHtmlAttribute(kind)}</code>` })}</div>`;
 }
 
 function parseEmbedParams(body) {
@@ -2882,15 +2883,33 @@ function getMainFontsSelection() {
   return getFontsSelection(mainFontsArray);
 }
 
+/**
+ * One choice of the settings menu as a group of buttons, the value in effect
+ * pressed (design.md, D6). `choices` are `[value, label]`; a click calls
+ * `setter` with the value, which writes it and reloads.
+ */
+function choiceGroup(label, setter, choices, chosen) {
+  const buttons = choices.map(([value, text], index) => {
+    const position = index === 0 ? "left" : index === choices.length - 1 ? "right" : "middle";
+    const pressed = value === chosen;
+    return `<button type="button" class="${pressed ? "sl-button-accent" : "sl-button"} button-group-${position}" aria-pressed="${pressed}" data-value="${escapeHtmlAttribute(value)}" onclick="${setter}('${escapeHtmlAttribute(value)}')">${escapeHtmlAttribute(text)}</button>`;
+  });
+  return `<div class="sl-menu-choice" role="group" aria-label="${escapeHtmlAttribute(label)}">
+      <span class="sl-menu-choice-label">${escapeHtmlAttribute(label)}</span>
+      <span>${buttons.join("")}</span>
+    </div>`;
+}
+
 async function getTopdownMenu(req) {
+  const { t, lang, loc } = await i18nOf(req);
   return `
   <div style="padding: 0px; margin: 0px;">
     <button class="sl-button-accent" style="margin-left: 0px;" onclick="window.location.href='/logout'">${lucideIcon(
       "LogOut"
-    )}<span style="margin-left: 6px; margin-right: 6px; position: relative; top: -2px;">logout</span></button>
+    )}<span style="margin-left: 6px; margin-right: 6px; position: relative; top: -2px;">${t("app.menu.logout")}</span></button>
     <button class="sl-button" onclick="toggleLightDark()">${lucideIcon(
       "SunMoon"
-    )}<span style="margin-left: 6px; margin-right: 6px; position: relative; top: -2px;">light/dark</span></button>
+    )}<span style="margin-left: 6px; margin-right: 6px; position: relative; top: -2px;">${t("app.menu.lightDark")}</span></button>
 
     <div style="padding: 0px; margin: 0px; margin-top: 10px; width: 95%; text-align: left; display: flex;">
       <span style="top: 1px; position: relative; cursor: pointer;" onclick="navFontChange('${
@@ -2933,12 +2952,12 @@ async function getTopdownMenu(req) {
       )}</button>
     </div>
     <div style="padding: 0px; margin: 0px; margin-top: 10px; cursor: pointer;" onclick="toggleStartWithLastPage()">
-      <input type="checkbox" id="startWithLastPageCheckbox">remember last visited page</input>
+      <input type="checkbox" id="startWithLastPageCheckbox">${t("app.menu.rememberLastPage")}</input>
     </div>
     <div class="flipswitch menu" style="display: inline-block; top: 16px; margin-left: 3px;">
       <input checked="" onchange="toggleViewAnswer()" id="answersFs" class="flipswitch-cb" name="flipswitch" type="checkbox">
       <label for="answersFs" class="flipswitch-label">
-          <div class="flipswitch-inner answers menu"></div>
+          <div class="flipswitch-inner answers menu" data-off="${escapeHtmlAttribute(t("app.switch.noAnswers"))}" data-on="${escapeHtmlAttribute(t("app.switch.answers"))}"></div>
           <div class="flipswitch-switch answers menu"></div>
       </label>
     </div>
@@ -2947,12 +2966,24 @@ async function getTopdownMenu(req) {
         ? `<div class="flipswitch menu" style="display: inline-block; top: 16px; margin-top: 12px; margin-left: 3px;">
         <input checked="" onchange="toggleViewExam()" id="examFs" class="flipswitch-cb" name="flipswitch" type="checkbox">
         <label for="examFs" class="flipswitch-label">
-            <div class="flipswitch-inner exam menu"></div>
+            <div class="flipswitch-inner exam menu" data-off="${escapeHtmlAttribute(t("app.switch.showPractice"))}" data-on="${escapeHtmlAttribute(t("app.switch.showExam"))}"></div>
             <div class="flipswitch-switch exam menu"></div>
         </label>
     </div>`
         : ""
     }
+    ${choiceGroup(
+      t("app.menu.language"),
+      "setLanguage",
+      languages.map((value) => [value, languageNames[value]]),
+      lang
+    )}
+    ${choiceGroup(
+      t("app.menu.format"),
+      "setLocale",
+      locales.map((value) => [value, createFormat(value).date("2026-10-20")]),
+      loc
+    )}
     <div style="padding: 0px; margin: 0px; margin-left: 0px; margin-top: 25px; margin-bottom: -10px; text-align: left; display: flex;">
       <button class="sl-button" style="height: 32px; margin: 0px;" onclick="openAsPresentation(true, false)">${lucideIcon(
         "Printer"
@@ -2970,6 +3001,7 @@ async function getTopdownMenu(req) {
 }
 
 async function getTopBar(startPage, req, title = null) {
+  const { t } = await i18nOf(req);
   return `
     <button class="sl-button topbar-burger" style="height: 32px; margin: 6px; margin-left: 0px;" onclick="toggleSidebar()">${lucideIcon(
       "Menu"
@@ -2990,7 +3022,7 @@ async function getTopBar(startPage, req, title = null) {
         // so a teacher in student view gets no button to a page they would not
         // be shown.
         embedClientScript !== null && (await hasSomeRoles(req, ["teacher"], true))
-          ? `<a class="sl-button sl-exam-button" href="/exam/" title="Classes, courses and gradebooks" aria-label="Exam module" style="height: 32px; margin: 6px;">${lucideIcon(
+          ? `<a class="sl-button sl-exam-button" href="/exam/" title="${escapeHtmlAttribute(t("app.topbar.examModuleTitle"))}" aria-label="${escapeHtmlAttribute(t("app.topbar.examModule"))}" style="height: 32px; margin: 6px;">${lucideIcon(
               "GraduationCap"
             )}</a>`
           : ""
@@ -3005,9 +3037,9 @@ async function getTopBar(startPage, req, title = null) {
         embedClientScript !== null && !(await hasSomeRoles(req, ["teacher"], true))
           ? `<a id="slExamsButton" class="sl-button sl-exam-button sl-exam-student-button${
               openTestsCheck?.(req) ? " sl-exam-open" : ""
-            }" href="/exam/my" title="My online tests and results" aria-label="Exams" style="height: 32px; margin: 6px;">${lucideIcon(
+            }" href="/exam/my" title="${escapeHtmlAttribute(t("app.topbar.examsTitle"))}" aria-label="${escapeHtmlAttribute(t("app.topbar.exams"))}" style="height: 32px; margin: 6px;">${lucideIcon(
               "Award"
-            )}<span class="sl-exam-button-label">Exams</span></a>`
+            )}<span class="sl-exam-button-label">${t("app.topbar.exams")}</span></a>`
           : ""
       }
       ${
@@ -3015,7 +3047,7 @@ async function getTopBar(startPage, req, title = null) {
           ? `<div class="flipswitch" style="display: inline-block; top: 8px;">
         <input checked="" onchange="toggleViewTeacher()" id="studentTeacherFs" class="flipswitch-cb" name="flipswitch" type="checkbox">
         <label for="studentTeacherFs" class="flipswitch-label">
-            <div class="flipswitch-inner"></div>
+            <div class="flipswitch-inner" data-off="${escapeHtmlAttribute(t("app.switch.student"))}" data-on="${escapeHtmlAttribute(t("app.switch.teacher"))}"></div>
             <div class="flipswitch-switch"></div>
         </label>
       </div>`
@@ -3032,9 +3064,10 @@ async function getTopBar(startPage, req, title = null) {
 }
 
 async function getSideBar(startPage, req) {
+  const { t } = await i18nOf(req);
   return `
     <div class="sidebar-menu">
-      <a href="${startPage}">Home</a>
+      <a href="${startPage}">${t("app.sidebar.home")}</a>
     </div>
     <!-- The search field, beside the tree rather than above the content,
          because it answers the same question the tree does: where is this.
@@ -3054,13 +3087,13 @@ async function getSideBar(startPage, req) {
          field has held before, and on a machine several readers share that list
          is other readers' queries. Arrow-down has to enter the result list and
          nothing else. -->
-    <div class="sidebar-title sidebar-title-search"><b>Search</b></div>
+    <div class="sidebar-title sidebar-title-search"><b>${t("app.sidebar.search")}</b></div>
     <div class="sidebar-search">
       <input
         id="searchField"
         class="sl-search-input nav-font"
         type="search"
-        placeholder="at least ${minimumQueryLength} characters"
+        placeholder="${escapeHtmlAttribute(t("app.sidebar.searchHint", { count: minimumQueryLength }))}"
         autocomplete="off"
         autocapitalize="off"
         spellcheck="false"
@@ -3071,9 +3104,11 @@ async function getSideBar(startPage, req) {
         data-minimum-length="${minimumQueryLength}"
         data-debounce-ms="${searchDebounceMs}"
         oninput="onSearchInput()">
-      <div id="searchResults" class="sidebar-menu sl-search-results" role="listbox" aria-label="Search results"></div>
+      <div id="searchResults" class="sidebar-menu sl-search-results" role="listbox" aria-label="${escapeHtmlAttribute(t("app.sidebar.searchResults"))}"
+        data-text-show-headings="${escapeHtmlAttribute(t("app.sidebar.showHeadings"))}"
+        data-text-untitled="${escapeHtmlAttribute(t("app.sidebar.untitled"))}"></div>
     </div>
-    <div class="sidebar-title sidebar-title-dirlist row" onclick="toggleDirList('sidebar-dirlist')"><b>Site</b><div class="sidebar-dirlist-chevron">${lucideIcon(
+    <div class="sidebar-title sidebar-title-dirlist row" onclick="toggleDirList('sidebar-dirlist')"><b>${t("app.sidebar.site")}</b><div class="sidebar-dirlist-chevron">${lucideIcon(
       "ChevronRight",
       null,
       "12px"
@@ -3081,7 +3116,7 @@ async function getSideBar(startPage, req) {
     <div class="sidebar-menu sidebar-dirlist">
       ${await getDirectoryListing(req)}
     </div>
-    <div class="sidebar-title sidebar-title-content"><b>Content</b></div>
+    <div class="sidebar-title sidebar-title-content"><b>${t("app.sidebar.content")}</b></div>
     <div class="sidebar-menu sidebar-anchors">
       ${await getContentListing()}
     </div>
@@ -3356,9 +3391,13 @@ function getAutoReloadScript() {
  */
 export async function wrapInPage(html, startPage, req, options = {}) {
   const title = options.title ?? null;
+  const { lang, loc } = await i18nOf(req);
+  // The document language is the interface's (design.md, D7); the format
+  // rides along for the exam module's client, which reads both before it
+  // draws anything.
   const pre = `
       <!DOCTYPE html>
-      <html lang="en">
+      <html lang="${lang}" data-sl-locale="${loc}">
       <head>
         <meta charset="UTF-8">
         <!-- Lay the page out at the device's own width rather than at an assumed
@@ -3419,9 +3458,10 @@ export async function wrapInPage(html, startPage, req, options = {}) {
 }
 
 export async function wrapAsDocument(html, req) {
+  const { lang, loc } = await i18nOf(req);
   const pre = `
       <!DOCTYPE html>
-      <html lang="en">
+      <html lang="${lang}" data-sl-locale="${loc}">
       <head>
         <meta charset="UTF-8">
         <!-- The same declaration, for the reason wrapInPage states. -->

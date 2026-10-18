@@ -13,16 +13,17 @@
  * elements only draw what it answers.
  */
 
-import { defineExamElement, ExamApiError, ExamElement, examApi, h, markRows, saveOnChange, stickyColumns } from "./frame.js";
+import { defineExamElement, ExamApiError, ExamElement, examApi, format, h, markRows, saveOnChange, stickyColumns, t } from "./frame.js";
+import "./date-input.js";
 
 export const categoryLabels = {
-  onlineTests: "Online tests",
-  manualTests: "Manual tests",
-  participation: "Participation (+/−)",
-  homework: "Homework",
+  onlineTests: t("exam.categories.onlineTests"),
+  manualTests: t("exam.categories.manualTests"),
+  participation: t("exam.categories.participation"),
+  homework: t("exam.categories.homework"),
 };
 
-const languageLabels = { de: "German", en: "English" };
+const languageLabels = { de: t("exam.classes.languageGerman"), en: t("exam.classes.languageEnglish") };
 
 /** A class name as people write it: `5ahif` → `5AHIF`. */
 export function displayClass(name) {
@@ -36,14 +37,14 @@ export function displayPerson(person) {
 }
 
 export function displayDate(iso) {
-  return iso ? new Date(iso).toLocaleDateString() : "";
+  return iso ? format.date(iso) : "";
 }
 
 /** Why an action failed, in a sentence for the teacher. */
 function reason(error) {
   return error instanceof ExamApiError && error.status < 500
     ? error.message
-    : "That did not work. Please try again.";
+    : t("exam.common.tryAgain");
 }
 
 /**
@@ -86,10 +87,10 @@ function conventionalTable(table) {
 /** What the directory's state means for the teacher, or null when it is ready. */
 function directoryNotice(state) {
   if (state === "unavailable") {
-    return "The directory is not available on this instance. Add students by their username.";
+    return t("exam.classes.directoryUnavailable");
   }
   if (state === "loading") {
-    return "The directory is still being loaded. Try again in a moment, or add students by their username.";
+    return t("exam.classes.directoryLoading");
   }
   return null;
 }
@@ -111,7 +112,7 @@ function nextYearSuggestion(years) {
 
 /** The module's pages that belong to no school year, so the home always offers them. */
 function moduleLinks() {
-  return h("p", { class: "sl-exam-quiet" }, h("a", { href: "/exam/scale" }, "Grading scale"), " · ", h("a", { href: "/exam/pool" }, "Question pool"));
+  return h("p", { class: "sl-exam-quiet" }, h("a", { href: "/exam/scale" }, t("exam.pages.scale")), " · ", h("a", { href: "/exam/pool" }, t("exam.bar.pool")));
 }
 
 class ClassesHome extends ExamElement {
@@ -127,7 +128,7 @@ class ClassesHome extends ExamElement {
       return h(
         "div",
         { class: "sl-exam" },
-        h("p", {}, "There is no school year yet. Create the first one with the + beside Year above."),
+        h("p", {}, t("exam.classes.noYear")),
         moduleLinks()
       );
     }
@@ -141,13 +142,13 @@ class ClassesHome extends ExamElement {
               await examApi(`/years/${selected.id}/current`, { method: "POST" });
               window.location.reload();
             }),
-        }, "Make current");
+        }, t("exam.classes.makeCurrent"));
     const table = classes.length
       ? conventionalTable(
           h(
             "table",
             { class: "sl-exam-table sl-exam-classes" },
-            h("thead", {}, h("tr", {}, h("th", {}, "Class"), h("th", {}, "Students"), h("th", {}, "Courses"))),
+            h("thead", {}, h("tr", {}, h("th", {}, t("exam.bar.class")), h("th", {}, t("exam.classes.students")), h("th", {}, t("exam.classes.courses")))),
             h(
               "tbody",
               {},
@@ -163,15 +164,19 @@ class ClassesHome extends ExamElement {
             )
           )
         )
-      : h("p", {}, "This school year has no classes yet. Create one with the + beside Class above.");
+      : h("p", {}, t("exam.classes.noClasses"));
     return h(
       "div",
       { class: "sl-exam" },
-      h("h2", {}, `School year ${selected.name}`, selected.current ? " (current)" : "", " ", makeCurrent),
+      h("h2", {}, selected.current ? t("exam.classes.currentYearHeading", { name: selected.name }) : t("exam.classes.yearHeading", { name: selected.name }), " ", makeCurrent),
       h(
         "p",
         { class: "sl-exam-quiet" },
-        `${displayDate(selected.startsOn)} – ${displayDate(selected.endsOn)}, summer semester from ${displayDate(selected.summerStartsOn)}`
+        t("exam.classes.yearDates", {
+          start: displayDate(selected.startsOn),
+          end: displayDate(selected.endsOn),
+          summer: displayDate(selected.summerStartsOn),
+        })
       ),
       line,
       table,
@@ -190,8 +195,9 @@ class YearNew extends ExamElement {
   render(years) {
     const suggestion = nextYearSuggestion(years);
     const line = messageLine();
+    // Dates in the reader's format (`locale-formats`); the form sends their ISO values.
     const field = (label, name, type, value) =>
-      h("label", {}, label, " ", h("input", { name, type, value, required: true }));
+      h("label", {}, label, " ", type === "date" ? h("sl-date-input", { name, value, required: true }) : h("input", { name, type, value, required: true }));
     const form = h(
       "form",
       {
@@ -199,17 +205,17 @@ class YearNew extends ExamElement {
         onsubmit: (event) => {
           event.preventDefault();
           const data = Object.fromEntries(new FormData(form));
-          act(form.querySelector("button"), line, async () => {
+          act(form.querySelector("button[type=submit]"), line, async () => {
             const year = await examApi("/years", { method: "POST", body: data });
             window.location.assign(`/exam/?year=${year.id}`);
           });
         },
       },
-      field("Name", "name", "text", suggestion.name),
-      field("Starts", "startsOn", "date", suggestion.startsOn),
-      field("Summer semester from", "summerStartsOn", "date", suggestion.summerStartsOn),
-      field("Ends", "endsOn", "date", suggestion.endsOn),
-      h("button", { type: "submit", class: "sl-exam-primary" }, "Create school year")
+      field(t("exam.classes.name"), "name", "text", suggestion.name),
+      field(t("exam.classes.starts"), "startsOn", "date", suggestion.startsOn),
+      field(t("exam.classes.summerFrom"), "summerStartsOn", "date", suggestion.summerStartsOn),
+      field(t("exam.classes.ends"), "endsOn", "date", suggestion.endsOn),
+      h("button", { type: "submit", class: "sl-exam-primary" }, t("exam.classes.createYear"))
     );
     return h("div", { class: "sl-exam" }, form, line);
   }
@@ -271,13 +277,13 @@ class ClassNew extends ExamElement {
         members.replaceChildren(
           waiting
             ? h("p", { class: "sl-exam-quiet" }, waiting)
-            : h("p", {}, `${answer.candidates.length} member(s) of ${displayClass(name)} in the directory. Tick those who attend this year.`),
-          answer.candidates?.length ? h("p", {}, h("button", { type: "button", onclick: () => list.tickAll(true) }, "Tick all"), " ", h("button", { type: "button", onclick: () => list.tickAll(false) }, "Untick all")) : null,
+            : h("p", {}, t("exam.classes.directoryMembers", { count: answer.candidates.length, name: displayClass(name) })),
+          answer.candidates?.length ? h("p", {}, h("button", { type: "button", onclick: () => list.tickAll(true) }, t("exam.classes.tickAll")), " ", h("button", { type: "button", onclick: () => list.tickAll(false) }, t("exam.classes.untickAll"))) : null,
           list
         );
       });
 
-    const extra = h("input", { placeholder: "username", "aria-label": "Add a student by username" });
+    const extra = h("input", { placeholder: t("exam.classes.usernamePlaceholder"), "aria-label": t("exam.classes.addByUsernameLabel") });
     const addExtra = () => {
       const username = extra.value.trim().toLowerCase();
       if (!username || list.has(username)) return;
@@ -297,12 +303,12 @@ class ClassNew extends ExamElement {
     return h(
       "div",
       { class: "sl-exam" },
-      h("p", {}, `School year ${year.name}.`),
+      h("p", {}, t("exam.classes.yearSentence", { name: year.name })),
       notice ? h("p", { class: "sl-exam-quiet" }, notice) : null,
-      h("p", {}, h("label", {}, "Class ", nameInput), names, " ", h("button", { type: "button", onclick: showMembers }, "Show members")),
+      h("p", {}, h("label", {}, t("exam.bar.class"), " ", nameInput), names, " ", h("button", { type: "button", onclick: showMembers }, t("exam.classes.showMembers"))),
       members,
-      h("p", {}, extra, " ", h("button", { type: "button", onclick: addExtra }, "Add by username")),
-      h("p", {}, h("button", { type: "button", class: "sl-exam-primary", onclick: create }, "Create class with the ticked students")),
+      h("p", {}, extra, " ", h("button", { type: "button", onclick: addExtra }, t("exam.classes.addByUsername"))),
+      h("p", {}, h("button", { type: "button", class: "sl-exam-primary", onclick: create }, t("exam.classes.createClass"))),
       line
     );
   }
@@ -319,7 +325,7 @@ class ClassView extends ExamElement {
 
   render({ klass, directory }) {
     const heading = document.querySelector("#markdown-content h1");
-    if (heading) heading.textContent = `Class ${displayClass(klass.name)} – ${klass.year.name}`;
+    if (heading) heading.textContent = t("exam.classes.classHeading", { name: displayClass(klass.name), year: klass.year.name });
     return h("div", { class: "sl-exam" }, this.rosterSection(klass), this.addSection(klass, directory), this.courseSection(klass));
   }
 
@@ -328,7 +334,7 @@ class ClassView extends ExamElement {
     const attending = klass.roster.filter((entry) => !entry.leftAt);
     const left = klass.roster.filter((entry) => entry.leftAt);
     const remove = (entry) => (event) => {
-      if (!window.confirm(`Take ${displayPerson(entry)} off the roster? What is recorded for them stays.`)) return;
+      if (!window.confirm(t("exam.classes.confirmRemove", { name: displayPerson(entry) }))) return;
       act(event.target, line, async () => {
         await examApi(`/classes/${klass.id}/roster/${encodeURIComponent(entry.username)}`, { method: "DELETE" });
         this.reload();
@@ -351,20 +357,20 @@ class ClassView extends ExamElement {
           { class: entry.leftAt ? "sl-exam-left" : null },
           h("td", {}, displayPerson(entry)),
           h("td", {}, entry.username),
-          h("td", {}, entry.leftAt ? `left ${displayDate(entry.leftAt)}` : `since ${displayDate(entry.joinedAt)}`),
-          h("td", {}, removable ? h("button", { type: "button", onclick: remove(entry) }, "Remove") : null)
+          h("td", {}, entry.leftAt ? t("exam.classes.leftOn", { date: displayDate(entry.leftAt) }) : t("exam.classes.since", { date: displayDate(entry.joinedAt) })),
+          h("td", {}, removable ? h("button", { type: "button", onclick: remove(entry) }, t("exam.classes.remove")) : null)
         )
       );
     return h(
       "section",
       {},
-      h("h2", {}, `Roster (${attending.length})`),
+      h("h2", {}, t("exam.classes.roster", { number: attending.length })),
       attending.length
         ? conventionalTable(h("table", { class: "sl-exam-table sl-exam-roster" }, h("tbody", {}, rows(attending, true))))
-        : h("p", {}, "Nobody is on this roster."),
-      left.length ? h("h3", {}, `Left the roster (${left.length})`) : null,
+        : h("p", {}, t("exam.classes.rosterEmpty")),
+      left.length ? h("h3", {}, t("exam.classes.leftRoster", { number: left.length })) : null,
       left.length ? conventionalTable(h("table", { class: "sl-exam-table sl-exam-roster" }, h("tbody", {}, rows(left, false)))) : null,
-      h("p", {}, h("button", { type: "button", onclick: refresh }, "Refresh names from the directory")),
+      h("p", {}, h("button", { type: "button", onclick: refresh }, t("exam.classes.refreshNames"))),
       line
     );
   }
@@ -378,18 +384,18 @@ class ClassView extends ExamElement {
         this.reload();
       });
     const personRow = (person) =>
-      h("li", {}, displayPerson(person), " ", h("span", { class: "sl-exam-quiet" }, person.username), " ", h("button", { type: "button", onclick: add(person.username) }, "Add"));
+      h("li", {}, displayPerson(person), " ", h("span", { class: "sl-exam-quiet" }, person.username), " ", h("button", { type: "button", onclick: add(person.username) }, t("exam.classes.add")));
 
     const notice = directoryNotice(directory.state);
     const missing = (directory.candidates ?? []).filter((person) => !onRoster.has(person.username));
     const unit = notice
       ? h("p", { class: "sl-exam-quiet" }, notice)
       : missing.length
-        ? h("details", {}, h("summary", {}, `${missing.length} member(s) of ${displayClass(klass.name)} in the directory are not on the roster`), h("ul", { class: "sl-exam-checklist" }, missing.map(personRow)))
-        : h("p", { class: "sl-exam-quiet" }, `Everyone in ${displayClass(klass.name)}'s directory unit is on the roster.`);
+        ? h("details", {}, h("summary", {}, t("exam.classes.missingMembers", { count: missing.length, name: displayClass(klass.name) })), h("ul", { class: "sl-exam-checklist" }, missing.map(personRow)))
+        : h("p", { class: "sl-exam-quiet" }, t("exam.classes.everyoneOnRoster", { name: displayClass(klass.name) }));
 
     const results = h("ul", { class: "sl-exam-checklist" });
-    const query = h("input", { type: "search", placeholder: "name or username", "aria-label": "Search the whole directory" });
+    const query = h("input", { type: "search", placeholder: t("exam.classes.searchPlaceholder"), "aria-label": t("exam.classes.searchLabel") });
     const search = (event) =>
       act(event.target, line, async () => {
         const answer = await examApi(`/directory/people?q=${encodeURIComponent(query.value)}`);
@@ -399,19 +405,19 @@ class ClassView extends ExamElement {
             ? [h("li", { class: "sl-exam-quiet" }, waiting)]
             : answer.people.length
               ? answer.people.filter((person) => !onRoster.has(person.username)).map(personRow)
-              : [h("li", { class: "sl-exam-quiet" }, "Nobody found.")])
+              : [h("li", { class: "sl-exam-quiet" }, t("exam.classes.nobodyFound"))])
         );
       });
-    const username = h("input", { placeholder: "username", "aria-label": "Add a student by username" });
+    const username = h("input", { placeholder: t("exam.classes.usernamePlaceholder"), "aria-label": t("exam.classes.addByUsernameLabel") });
 
     return h(
       "section",
       {},
-      h("h2", {}, "Add students"),
+      h("h2", {}, t("exam.classes.addStudents")),
       unit,
-      h("p", {}, query, " ", h("button", { type: "button", onclick: search }, "Search the directory")),
+      h("p", {}, query, " ", h("button", { type: "button", onclick: search }, t("exam.classes.searchDirectory"))),
       results,
-      h("p", {}, username, " ", h("button", { type: "button", onclick: (event) => add(username.value.trim())(event) }, "Add by username")),
+      h("p", {}, username, " ", h("button", { type: "button", onclick: (event) => add(username.value.trim())(event) }, t("exam.classes.addByUsername"))),
       line
     );
   }
@@ -420,10 +426,10 @@ class ClassView extends ExamElement {
     return h(
       "section",
       {},
-      h("h2", {}, "Courses"),
+      h("h2", {}, t("exam.classes.courses")),
       klass.courses.length
-        ? h("ul", {}, klass.courses.map((course) => h("li", {}, h("a", { href: `/exam/courses/${course.id}` }, course.subject), ` (${languageLabels[course.language]}) · `, h("a", { href: `/exam/courses/${course.id}/gradebook` }, "Gradebook"))))
-        : h("p", {}, "This class has no courses yet. Create one with the + beside Course above.")
+        ? h("ul", {}, klass.courses.map((course) => h("li", {}, h("a", { href: `/exam/courses/${course.id}` }, course.subject), ` (${languageLabels[course.language]}) · `, h("a", { href: `/exam/courses/${course.id}/gradebook` }, t("exam.pages.gradebook")))))
+        : h("p", {}, t("exam.classes.noCourses"))
     );
   }
 }
@@ -437,8 +443,8 @@ class CourseNew extends ExamElement {
 
   render(klass) {
     const line = messageLine();
-    const subject = h("input", { name: "subject", required: true, placeholder: "WMC", "aria-label": "Subject" });
-    const language = h("select", { name: "language", "aria-label": "Language" }, Object.entries(languageLabels).map(([value, label]) => h("option", { value }, label)));
+    const subject = h("input", { name: "subject", required: true, placeholder: "WMC", "aria-label": t("exam.classes.subject") });
+    const language = h("select", { name: "language", "aria-label": t("exam.classes.language") }, Object.entries(languageLabels).map(([value, label]) => h("option", { value }, label)));
     const form = h(
       "form",
       {
@@ -454,10 +460,10 @@ class CourseNew extends ExamElement {
           });
         },
       },
-      h("p", {}, `Class ${displayClass(klass.name)} – ${klass.year.name}`),
-      h("label", {}, "Subject ", subject),
-      h("label", {}, "Language ", language),
-      h("button", { type: "submit", class: "sl-exam-primary" }, "Create course")
+      h("p", {}, t("exam.classes.classHeading", { name: displayClass(klass.name), year: klass.year.name })),
+      h("label", {}, t("exam.classes.subject"), " ", subject),
+      h("label", {}, t("exam.classes.language"), " ", language),
+      h("button", { type: "submit", class: "sl-exam-primary" }, t("exam.classes.createCourse"))
     );
     return h("div", { class: "sl-exam" }, form, line);
   }
@@ -479,7 +485,7 @@ class CourseView extends ExamElement {
     const heading = document.querySelector("#markdown-content h1");
     if (heading) heading.textContent = `${course.subject} – ${displayClass(course.className)} – ${course.year.name}`;
     const put = (body) => examApi(`/courses/${course.id}`, { method: "PUT", body });
-    const language = h("select", { "aria-label": "Language" }, Object.entries(languageLabels).map(([value, label]) => h("option", { value, selected: value === course.language }, label)));
+    const language = h("select", { "aria-label": t("exam.classes.language") }, Object.entries(languageLabels).map(([value, label]) => h("option", { value, selected: value === course.language }, label)));
     saveOnChange(language, { save: (value) => put({ language: value }) });
 
     const sum = h("span", {});
@@ -492,7 +498,7 @@ class CourseView extends ExamElement {
     const weights = () => Object.fromEntries(Object.entries(inputs).map(([category, input]) => [category, Number(input.value)]));
     const total = () => Object.values(weights()).reduce((a, b) => a + b, 0);
     const updateSum = () => {
-      sum.textContent = total() === 100 ? "Together 100 %" : `Together ${total()} % – saved once they add up to 100 %`;
+      sum.textContent = total() === 100 ? t("exam.classes.weightsComplete") : t("exam.classes.weightsIncomplete", { sum: total() });
       sum.classList.toggle("sl-embed-error", total() !== 100);
     };
     Object.values(inputs).forEach((input) => input.addEventListener("input", updateSum));
@@ -505,34 +511,34 @@ class CourseView extends ExamElement {
     // One save for the four fields: their `change` events reach the table.
     saveOnChange(sheet, {
       value: () => JSON.stringify(weights()),
-      check: () => (total() === 100 ? null : `The weights add up to ${total()} %, not 100 %.`),
+      check: () => (total() === 100 ? null : t("exam.classes.weightsWrong", { sum: total() })),
       save: () => put({ weights: weights() }),
     });
 
-    const share = h("input", { type: "number", min: "0", max: "100", step: "1", class: "sl-exam-number", value: String(course.winterShare), "aria-label": "Winter semester's share of the year grade" });
+    const share = h("input", { type: "number", min: "0", max: "100", step: "1", class: "sl-exam-number", value: String(course.winterShare), "aria-label": t("exam.classes.winterShareLabel") });
     saveOnChange(share, {
-      check: (value) => (/^\d+$/.test(value) && Number(value) <= 100 ? null : "A whole percentage from 0 to 100."),
+      check: (value) => (/^\d+$/.test(value) && Number(value) <= 100 ? null : t("exam.classes.wholePercentage")),
       save: (value) => put({ winterShare: Number(value) }),
     });
 
     return h(
       "div",
       { class: "sl-exam" },
-      h("p", { class: "sl-exam-quiet" }, "Every field is saved as it changes."),
-      h("p", {}, h("label", {}, "Tests are presented in ", language)),
-      h("h2", {}, "Config sheet"),
-      h("p", { class: "sl-exam-quiet" }, "How much each category counts towards the semester grade. A category without entries is left out and the others are scaled up."),
+      h("p", { class: "sl-exam-quiet" }, t("exam.classes.savedAsChanged")),
+      h("p", {}, h("label", {}, t("exam.classes.presentedIn"), " ", language)),
+      h("h2", {}, t("exam.classes.configSheet")),
+      h("p", { class: "sl-exam-quiet" }, t("exam.classes.configExplanation")),
       conventionalTable(sheet),
       h("p", {}, sum),
-      h("h2", {}, "Year grade"),
+      h("h2", {}, t("exam.classes.yearGrade")),
       h(
         "p",
         {},
-        h("label", {}, "The winter semester counts ", share, " % towards the year grade"),
+        h("label", {}, t("exam.classes.winterCountsBefore"), " ", share, " ", t("exam.classes.winterCountsAfter")),
         h("br"),
-        h("span", { class: "sl-exam-quiet" }, "The summer semester's own results count the rest. An overridden winter semester counts as the middle of its grade's range.")
+        h("span", { class: "sl-exam-quiet" }, t("exam.classes.summerCountsRest"))
       ),
-      h("p", {}, h("a", { href: `/exam/courses/${course.id}/gradebook` }, "Open the gradebook"))
+      h("p", {}, h("a", { href: `/exam/courses/${course.id}/gradebook` }, t("exam.classes.openGradebook")))
     );
   }
 }

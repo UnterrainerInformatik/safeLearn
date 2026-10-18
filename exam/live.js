@@ -79,7 +79,7 @@ function participantFrom(row, attempt, refused, at) {
 
 function sittingRow(db, sittingId) {
   const sitting = db.prepare("SELECT * FROM sitting WHERE id = ?").get(sittingId);
-  if (!sitting) throw new NotFoundError("There is no such sitting.");
+  if (!sitting) throw new NotFoundError("exam.errors.tests.noSitting");
   return sitting;
 }
 

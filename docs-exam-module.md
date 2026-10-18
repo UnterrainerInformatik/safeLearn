@@ -49,6 +49,10 @@ A sitting is stored as two instants either way, so the database, the API and eve
 | WYSIWYG container | None; it runs without the module. |
 | Local `npm start` | Whatever your `.env` says; the harness sets none unless a check restarts with them. |
 
+## Language And Formats
+
+Every page, bar, button and message of the module follows the reader's interface language, and every date, time and number the reader's format (settings menu; see [Interface language and formats](docs-development.md#interface-language-and-formats)). Students' exam content is the exception: questions, answers and explanations in the writing view and the results come in the **course's** language, wrapped in an element with that `lang`, while the controls around them follow the student's own. Refusals of the API are answered in the reader's language too; the English text stays in the log. Dates are entered with the module's own `<sl-date-input>`, which shows `20.10.2026` or `20/10/2026` whatever the operating system is set to.
+
 ## The Data
 All state lives in one SQLite file, `data/exam.sqlite` relative to the working directory — `/app/data` in the image, the volume `deploy/docker-compose.yml` already mounts from `${DATA_DIR}` for the directory cache. It is opened with `node:sqlite`, which the image's Node 24 ships, so the module adds no dependency.
 

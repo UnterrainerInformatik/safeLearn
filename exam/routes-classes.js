@@ -40,7 +40,7 @@ import { directoryServiceConfigured, heldDirectoryPeople } from "../middlewares/
 /** A record id from the path; anything but a positive integer names nothing. */
 function idParam(value) {
   const id = /^[1-9]\d{0,9}$/.test(value) ? Number(value) : null;
-  if (id === null) throw new NotFoundError("There is no such record.");
+  if (id === null) throw new NotFoundError("exam.errors.noSuchRecord");
   return id;
 }
 
@@ -61,11 +61,11 @@ function directory() {
  * refused: no teacher is ever on a roster.
  */
 function resolveStudents(usernames, people) {
-  if (!Array.isArray(usernames)) throw new InvalidInputError("The roster is a list of usernames.");
+  if (!Array.isArray(usernames)) throw new InvalidInputError("exam.errors.classes.rosterUsernames");
   return usernames.map((username) => {
-    if (typeof username !== "string") throw new InvalidInputError("The roster is a list of usernames.");
+    if (typeof username !== "string") throw new InvalidInputError("exam.errors.classes.rosterUsernames");
     if (isKnownTeacher(people, username)) {
-      throw new InvalidInputError(`${username.trim().toLowerCase()} is a teacher, and a teacher is never on a roster.`);
+      throw new InvalidInputError("exam.errors.classes.teacherOnRoster", { username: username.trim().toLowerCase() });
     }
     const person = findPerson(people, username);
     return person ? asRosterPerson(person) : { username };
@@ -158,11 +158,11 @@ export function registerClassRoutes(router, { db, handle, startPage }) {
       })
     );
 
-  page("/classes/:id", "Class", (req) => {
+  page("/classes/:id", (t) => t("exam.pages.class"), (req) => {
     const classId = idParam(req.params.id);
     return { kind: "class", params: { class: String(classId) }, context: { classId } };
   });
-  page("/courses/:id", "Course", (req) => {
+  page("/courses/:id", (t) => t("exam.pages.course"), (req) => {
     const courseId = idParam(req.params.id);
     return { kind: "course", params: { course: String(courseId) }, context: { courseId } };
   });

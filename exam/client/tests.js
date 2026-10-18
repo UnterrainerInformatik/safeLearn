@@ -15,34 +15,32 @@
  * draw what it answers.
  */
 
-import { defineExamElement, ExamApiError, ExamElement, examApi, examMe, h, markRows } from "./frame.js";
+import { defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, markRows, t } from "./frame.js";
 import { displayClass, displayPerson } from "./classes.js";
-import { defaultPeriods, matchWindow, periodTimes, viennaLocal, windowFor } from "./periods.js";
+import { defaultPeriods, matchWindow, periodTimes, viennaInstant, viennaLocal, windowFor } from "./periods.js";
 
-const stateLabels = { scheduled: "scheduled", open: "open", over: "over" };
+const stateLabels = {
+  scheduled: () => t("exam.tests.stateScheduled"),
+  open: () => t("exam.tests.stateOpen"),
+  over: () => t("exam.tests.stateOver"),
+};
 
-const viennaTime = new Intl.DateTimeFormat("de-AT", { timeZone: "Europe/Vienna", dateStyle: "short", timeStyle: "short" });
-const viennaClock = new Intl.DateTimeFormat("de-AT", { timeZone: "Europe/Vienna", timeStyle: "short" });
-const viennaDay = new Intl.DateTimeFormat("de-AT", { timeZone: "Europe/Vienna", weekday: "short", day: "2-digit", month: "2-digit" });
-
-/** A timestamp as a teacher in Vienna reads it. */
+/** A timestamp as a teacher in Vienna reads it, in the reader's format. */
 export function displayTime(iso) {
-  return viennaTime.format(new Date(iso));
-}
-
-/** "Di 20.10.": the Vienna day of a timestamp. */
-function displayDay(iso) {
-  const parts = Object.fromEntries(viennaDay.formatToParts(new Date(iso)).map((part) => [part.type, part.value]));
-  return `${parts.weekday.replace(/\.$/, "")} ${parts.day}.${parts.month}.`;
+  return format.dateTime(iso);
 }
 
 /**
- * "lessons 3–4", or "lesson 3", with the clock times as its tooltip. Every
- * period the module shows is drawn here, so none lacks its times
- * (`school-periods`, design.md, D6).
+ * "lessons 3–4", or "lesson 3" ("3.–4. EH", "3. EH"), with the clock times as
+ * its tooltip. Every period the module shows is drawn here, so none lacks its
+ * times (`school-periods`, design.md, D6).
  */
 export function periodLabel(periods, from, to = from) {
-  return h("span", { class: "sl-exam-periods", title: periodTimes(periods, from, to) }, from === to ? `lesson ${from}` : `lessons ${from}–${to}`);
+  return h(
+    "span",
+    { class: "sl-exam-periods", title: periodTimes(periods, from, to) },
+    from === to ? t("exam.periods.lesson", { n: from }) : t("exam.periods.lessons", { from, to })
+  );
 }
 
 /**
@@ -52,9 +50,9 @@ export function periodLabel(periods, from, to = from) {
  */
 export function displayWindow({ opensAt, closesAt }, periods = []) {
   const match = matchWindow(periods, opensAt, closesAt);
-  if (match) return h("span", { class: "sl-exam-window" }, `${displayDay(opensAt)} · `, periodLabel(periods, match.from, match.to));
-  const sameDay = viennaTime.format(new Date(opensAt)).split(",")[0] === viennaTime.format(new Date(closesAt)).split(",")[0];
-  return h("span", { class: "sl-exam-window" }, `${displayTime(opensAt)} – ${sameDay ? viennaClock.format(new Date(closesAt)) : displayTime(closesAt)}`);
+  if (match) return h("span", { class: "sl-exam-window" }, `${format.weekdayDay(opensAt)} · `, periodLabel(periods, match.from, match.to));
+  const sameDay = viennaLocal(opensAt).date === viennaLocal(closesAt).date;
+  return h("span", { class: "sl-exam-window" }, `${displayTime(opensAt)} – ${sameDay ? format.time(closesAt) : displayTime(closesAt)}`);
 }
 
 /**
@@ -64,9 +62,9 @@ export function displayWindow({ opensAt, closesAt }, periods = []) {
 function sittingLinks(sitting) {
   return [
     " · ",
-    h("a", { href: `/exam/sittings/${sitting.id}/live` }, "live view"),
+    h("a", { href: `/exam/sittings/${sitting.id}/live` }, t("exam.tests.liveViewLink")),
     " · ",
-    h("a", { href: `/exam/sittings/${sitting.id}/screen`, target: "_blank", rel: "noopener", class: "sl-exam-screen-link" }, "class screen"),
+    h("a", { href: `/exam/sittings/${sitting.id}/screen`, target: "_blank", rel: "noopener", class: "sl-exam-screen-link" }, t("exam.tests.classScreenLink")),
   ];
 }
 
@@ -82,7 +80,7 @@ class TestList extends ExamElement {
 
   render(list) {
     if (list.groups.length === 0) {
-      return h("div", { class: "sl-exam" }, h("p", {}, list.year ? `${list.year.name} has no course yet.` : "There is no school year yet."));
+      return h("div", { class: "sl-exam" }, h("p", {}, list.year ? t("exam.tests.yearWithoutCourse", { year: list.year.name }) : t("exam.tests.noYear")));
     }
     return h(
       "div",
@@ -93,18 +91,18 @@ class TestList extends ExamElement {
 
   group(group, single) {
     const title = `${displayClass(group.className)} ${group.subject}`;
-    const assemble = h("a", { href: `/exam/pool?course=${group.courseId}` }, "assemble one in the question pool");
+    const assemble = h("a", { href: `/exam/pool?course=${group.courseId}` }, t("exam.tests.assembleInPool"));
     return h(
       "section",
       { class: "sl-exam-tests-course", "data-course": String(group.courseId) },
       single ? null : h("h2", {}, h("a", { href: `/exam/tests?course=${group.courseId}` }, title)),
       group.tests.length === 0
-        ? h("p", { class: "sl-exam-quiet" }, "No online test yet - ", assemble, ".")
+        ? h("p", { class: "sl-exam-quiet" }, t("exam.tests.noTestYet"), assemble, ".")
         : markRows(
             h(
               "table",
               { class: "sl-exam-table" },
-              h("thead", {}, h("tr", {}, h("th", {}, "Test"), h("th", {}, "Questions"), h("th", {}, "Sittings"), h("th", {}, "Submitted"))),
+              h("thead", {}, h("tr", {}, h("th", {}, t("exam.tests.columnTest")), h("th", {}, t("exam.tests.columnQuestions")), h("th", {}, t("exam.tests.columnSittings")), h("th", {}, t("exam.tests.columnSubmitted")))),
               h(
                 "tbody",
                 {},
@@ -118,7 +116,7 @@ class TestList extends ExamElement {
                       "td",
                       {},
                       test.sittings.length === 0
-                        ? h("span", { class: "sl-exam-quiet" }, "none yet")
+                        ? h("span", { class: "sl-exam-quiet" }, t("exam.tests.noneYet"))
                         : h(
                             "ul",
                             { class: "sl-exam-tests-sittings" },
@@ -126,9 +124,9 @@ class TestList extends ExamElement {
                               h(
                                 "li",
                                 { "data-state": sitting.state },
-                                sitting.makeup ? "Make-up " : null,
+                                sitting.makeup ? `${t("exam.tests.makeupPrefix")} ` : null,
                                 displayWindow(sitting, this.periods),
-                                ` · ${stateLabels[sitting.state]}`,
+                                ` · ${stateLabels[sitting.state]()}`,
                                 sitting.state !== "over" ? sittingLinks(sitting) : null
                               )
                             )
@@ -172,15 +170,13 @@ export function armedButton({ class: className, label, armed, action }) {
 
 /** Why a request was refused, in a sentence for the teacher. */
 function refusal(error) {
-  return error instanceof ExamApiError && error.status < 500 ? error.message : "That could not be saved. Please try again.";
+  return error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.frame.saveFailed");
 }
 
-
-/** A `datetime-local` value for an ISO timestamp, in the browser's time zone. */
+/** The value of a `time` date field for an ISO timestamp: its Vienna date and time. */
 function localInput(iso) {
-  const date = new Date(iso);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const { date, time } = viennaLocal(iso);
+  return `${date}T${time}`;
 }
 
 /** One test for its teacher. */
@@ -206,34 +202,34 @@ class TestDetail extends ExamElement {
         "p",
         { class: "sl-exam-quiet" },
         h("a", { href: `/exam/tests?course=${course.id}` }, `${displayClass(course.className)} ${course.subject}`),
-        ` (${course.yearName}) · ${en ? "English" : "Deutsch"} · ${test.questions.length} ${test.questions.length === 1 ? "question" : "questions"} · `,
-        test.started ? `written by ${test.attempts.started}, ${test.attempts.submitted} submitted` : "not written yet"
+        ` (${course.yearName}) · ${en ? "English" : "Deutsch"} · ${t("exam.tests.questionCount", { count: test.questions.length })} · `,
+        test.started ? t("exam.tests.writtenBy", { started: test.attempts.started, submitted: test.attempts.submitted }) : t("exam.tests.notWrittenYet")
       ),
       h(
         "p",
         {},
-        h("a", { href: `/exam/tests/${test.id}/preview`, target: "_blank", rel: "noopener", class: "sl-exam-test-preview" }, "Try this test as a student sees it"),
-        h("span", { class: "sl-exam-quiet" }, " (new window; nothing is saved or submitted)")
+        h("a", { href: `/exam/tests/${test.id}/preview`, target: "_blank", rel: "noopener", class: "sl-exam-test-preview" }, t("exam.tests.tryAsStudent")),
+        h("span", { class: "sl-exam-quiet" }, ` ${t("exam.tests.tryAsStudentNote")}`)
       ),
       h(
         "p",
         {},
-        h("a", { href: `/exam/tests/${test.id}/solution`, target: "_blank", rel: "noopener", class: "sl-exam-test-solution" }, "Solution on the board"),
-        h("span", { class: "sl-exam-quiet" }, " (presentation in a new window: correct answers and the share of the class that got each right, no names)")
+        h("a", { href: `/exam/tests/${test.id}/solution`, target: "_blank", rel: "noopener", class: "sl-exam-test-solution" }, t("exam.tests.boardSolution")),
+        h("span", { class: "sl-exam-quiet" }, ` ${t("exam.tests.boardSolutionNote")}`)
       ),
       this.renameForm(test),
       this.message,
       this.sittingsSection(test),
-      h("h2", {}, "Questions"),
+      h("h2", {}, t("exam.tests.questionsHeading")),
       test.started
         ? h(
             "p",
             { class: "sl-exam-quiet" },
             this.admin
-              ? "This test has been written. As an admin you can still remove a question: every submitted attempt is scored again without it."
-              : "This test has been written; its questions cannot change any more."
+              ? t("exam.tests.writtenAdminNote")
+              : t("exam.tests.writtenNote")
           )
-        : h("p", { class: "sl-exam-quiet" }, h("a", { href: `/exam/pool?course=${course.id}` }, "Add questions from the pool"), "."),
+        : h("p", { class: "sl-exam-quiet" }, h("a", { href: `/exam/pool?course=${course.id}` }, t("exam.tests.addFromPool")), "."),
       h(
         "ol",
         { class: "sl-exam-test-questions" },
@@ -250,7 +246,7 @@ class TestDetail extends ExamElement {
                 h(
                   "li",
                   { class: answer.correct ? "is-correct" : "" },
-                  h("span", { class: "sl-exam-pool-mark", "aria-label": answer.correct ? "correct" : "wrong" }, answer.correct ? "✓" : "✗"),
+                  h("span", { class: "sl-exam-pool-mark", "aria-label": answer.correct ? t("exam.tests.correct") : t("exam.tests.wrong") }, answer.correct ? "✓" : "✗"),
                   storedMarkup(en ? answer.textEn : answer.textDe, "sl-exam-pool-answer")
                 )
               )
@@ -258,12 +254,12 @@ class TestDetail extends ExamElement {
             test.questions.length === 1
               ? null
               : !test.started
-                ? h("button", { type: "button", class: "sl-exam-test-remove", onClick: () => this.removeQuestion(question.questionId) }, "Remove from the test")
+                ? h("button", { type: "button", class: "sl-exam-test-remove", onClick: () => this.removeQuestion(question.questionId) }, t("exam.tests.removeQuestion"))
                 : this.admin
                   ? armedButton({
                       class: "sl-exam-test-remove sl-exam-admin",
-                      label: "Remove from the test",
-                      armed: "Click again to remove it and score every attempt again",
+                      label: t("exam.tests.removeQuestion"),
+                      armed: t("exam.tests.removeQuestionArmed"),
                       action: () => this.removeWrittenQuestion(question.questionId),
                     })
                   : null
@@ -285,7 +281,7 @@ class TestDetail extends ExamElement {
     const names = new Map(this.roster.map((entry) => [entry.username, displayPerson(entry)]));
     const list =
       test.sittings.length === 0
-        ? h("p", { class: "sl-exam-quiet" }, "No sitting yet.")
+        ? h("p", { class: "sl-exam-quiet" }, t("exam.tests.noSittingYet"))
         : h(
             "ul",
             { class: "sl-exam-test-sittings" },
@@ -293,19 +289,19 @@ class TestDetail extends ExamElement {
               h(
                 "li",
                 { "data-sitting": String(sitting.id), "data-state": sitting.state },
-                h("strong", {}, sitting.makeup ? "Make-up: " : "Sitting: "),
+                h("strong", {}, `${sitting.makeup ? t("exam.tests.makeupLabel") : t("exam.tests.sittingLabel")} `),
                 displayWindow(sitting, this.periods),
-                `, ${Math.round(sitting.durationS / 60)} min per attempt · ${sitting.state} · `,
+                `, ${t("exam.tests.minutesPerAttempt", { minutes: Math.round(sitting.durationS / 60) })} · ${stateLabels[sitting.state]()} · `,
                 sitting.makeup || sitting.participants.length < this.roster.length
                   ? sitting.participants.map((username) => names.get(username) ?? username).join(", ")
-                  : "the whole class",
+                  : t("exam.tests.wholeClassLower"),
                 sitting.state !== "over" ? sittingLinks(sitting) : null,
                 sitting.state === "scheduled"
                   ? [
                       " ",
-                      h("button", { type: "button", class: "sl-exam-sitting-edit", onClick: () => this.editSitting(test, sitting) }, "Change"),
+                      h("button", { type: "button", class: "sl-exam-sitting-edit", onClick: () => this.editSitting(test, sitting) }, t("exam.tests.change")),
                       " ",
-                      h("button", { type: "button", class: "sl-exam-sitting-delete", onClick: () => this.deleteSitting(sitting) }, "Delete"),
+                      h("button", { type: "button", class: "sl-exam-sitting-delete", onClick: () => this.deleteSitting(sitting) }, t("exam.tests.delete")),
                     ]
                   : null
               )
@@ -316,7 +312,7 @@ class TestDetail extends ExamElement {
     return h(
       "section",
       { class: "sl-exam-test-sittings-section" },
-      h("h2", {}, "Sittings"),
+      h("h2", {}, t("exam.tests.sittingsHeading")),
       list,
       this.sittingForm
     );
@@ -363,7 +359,7 @@ class TestDetail extends ExamElement {
             drawWindowEditor();
           },
         },
-        byPeriods ? "Exact times instead" : "Lessons instead"
+        byPeriods ? t("exam.tests.exactTimesInstead") : t("exam.tests.lessonsInstead")
       );
       windowEditor.replaceChildren(...(byPeriods ? this.periodsEditor(windowState, (changed) => (windowState = changed)) : this.clockEditor(windowState)), h("p", {}, toggle));
     };
@@ -422,20 +418,18 @@ class TestDetail extends ExamElement {
           }
         },
       },
-      h("h3", {}, sitting ? "Change the sitting" : makeup ? "Schedule a make-up sitting" : "Schedule the sitting"),
+      h("h3", {}, sitting ? t("exam.tests.changeSitting") : makeup ? t("exam.tests.scheduleMakeup") : t("exam.tests.scheduleSitting")),
       periods.length > 0 ? windowEditor : this.clockEditor(windowState),
-      h("label", {}, "Minutes per attempt ", duration),
+      h("label", {}, `${t("exam.tests.minutesPerAttemptLabel")} `, duration),
       makeup
         ? h(
             "p",
             { class: "sl-exam-quiet" },
-            "A make-up sitting is a later chance to write this test, for students who missed the first sitting. ",
-            "Only the students you tick below can write it, and they get the same minutes per attempt as the first sitting. ",
-            "Anyone who has already submitted the test cannot write it again."
+            t("exam.tests.makeupExplanation")
           )
-        : h("label", {}, whole, " The whole class"),
+        : h("label", {}, whole, ` ${t("exam.tests.wholeClass")}`),
       people,
-      h("p", {}, h("button", { type: "submit", class: "sl-exam-primary" }, sitting ? "Save" : "Schedule"), sitting ? [" ", h("button", { type: "button", onClick: () => this.drawSittingForm(test, null) }, "Cancel")] : null),
+      h("p", {}, h("button", { type: "submit", class: "sl-exam-primary" }, sitting ? t("exam.tests.save") : t("exam.tests.schedule")), sitting ? [" ", h("button", { type: "button", onClick: () => this.drawSittingForm(test, null) }, t("exam.tests.cancel"))] : null),
       message
     );
     this.sittingForm.replaceChildren(form);
@@ -443,18 +437,19 @@ class TestDetail extends ExamElement {
 
   /**
    * The clock-time editor: the two fields of a sitting without periods, in
-   * the browser's time zone. Each writes its instant into `windowState`.
+   * Vienna time and the reader's format. Each writes its instant into
+   * `windowState` once it holds a valid date and time.
    */
   clockEditor(windowState) {
     const field = (name, label) => {
-      const input = h("input", { type: "datetime-local", name, required: true, value: localInput(windowState[name]) });
-      input.addEventListener("input", () => {
-        const time = new Date(input.value);
-        if (!Number.isNaN(time.getTime())) windowState[name] = time.toISOString();
+      const input = h("sl-date-input", { time: true, name, required: true, value: localInput(windowState[name]) });
+      input.addEventListener("change", () => {
+        const [date, time] = input.value.split("T");
+        if (date && time) windowState[name] = viennaInstant(date, time).toISOString();
       });
       return h("label", {}, label, input);
     };
-    return [field("opensAt", "Opens "), field("closesAt", "Closes ")];
+    return [field("opensAt", `${t("exam.tests.opens")} `), field("closesAt", `${t("exam.tests.closes")} `)];
   }
 
   /**
@@ -475,10 +470,10 @@ class TestDetail extends ExamElement {
       element.value = String(selected);
       return element;
     };
-    const date = h("input", { type: "date", name: "date", required: true, value: current.date });
+    const date = h("sl-date-input", { name: "date", required: true, value: current.date });
     const from = select("fromPeriod", periods, current.from);
     let to = select("toPeriod", periods.filter((period) => period.n >= current.from), current.to);
-    const toLabel = h("label", {}, "To lesson ", to);
+    const toLabel = h("label", {}, `${t("exam.tests.toLesson")} `, to);
     const times = h("span", { class: "sl-exam-sitting-times" });
     const update = () => {
       const fromN = Number(from.value);
@@ -493,12 +488,11 @@ class TestDetail extends ExamElement {
       if (/^\d{4}-\d{2}-\d{2}$/.test(date.value)) changed(windowFor(periods, date.value, fromN, toN));
     };
     for (const input of [date, from, to]) input.addEventListener("change", update);
-    date.addEventListener("input", update);
     times.replaceChildren(periodTimes(periods, current.from, current.to));
     return [
-      h("label", {}, "Date ", date),
+      h("label", {}, `${t("exam.tests.date")} `, date),
       " ",
-      h("label", {}, "From lesson ", from),
+      h("label", {}, `${t("exam.tests.fromLesson")} `, from),
       " ",
       toLabel,
       " ",
@@ -521,7 +515,7 @@ class TestDetail extends ExamElement {
   }
 
   renameForm(test) {
-    const name = h("input", { type: "text", name: "name", value: test.name, maxlength: "80", "aria-label": "Name of the test", required: true });
+    const name = h("input", { type: "text", name: "name", value: test.name, maxlength: "80", "aria-label": t("exam.tests.nameLabel"), required: true });
     return h(
       "form",
       {
@@ -532,7 +526,7 @@ class TestDetail extends ExamElement {
         },
       },
       name,
-      h("button", { type: "submit" }, "Rename")
+      h("button", { type: "submit" }, t("exam.tests.rename"))
     );
   }
 
@@ -573,10 +567,8 @@ class TestDetail extends ExamElement {
     const written = test.attempts.started;
     const button = armedButton({
       class: test.started ? "sl-exam-test-delete sl-exam-admin" : "sl-exam-test-delete",
-      label: "Delete this test",
-      armed: test.started
-        ? `Click again to delete it with its sittings and ${written} ${written === 1 ? "attempt" : "attempts"}`
-        : "Click again to delete it with its sittings",
+      label: t("exam.tests.deleteTest"),
+      armed: test.started ? t("exam.tests.deleteTestWrittenArmed", { count: written }) : t("exam.tests.deleteTestArmed"),
       action: async () => {
         try {
           await examApi(`/tests/${test.id}`, { method: "DELETE" });

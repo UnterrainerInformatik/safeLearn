@@ -14,7 +14,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 
-import { ConflictError, inTransaction, InvalidInputError, NotFoundError, now } from "./classes.js";
+import { ConflictError, englishText, inTransaction, InvalidInputError, NotFoundError, now, problemAt } from "./classes.js";
 import { categoryAndBelow, getQuestion, plainText } from "./pool.js";
 import { imagePath, questionTypes } from "./pool-import.js";
 import { cleanStoredHtml, trueFalseText } from "./stored-html.js";
@@ -32,7 +32,12 @@ const nameLimit = 200;
  */
 export class QuestionProblemsError extends Error {
   constructor(problems) {
-    super(problems.length === 1 ? problems[0].message : `This question cannot be saved: ${problems.length} problems.`);
+    const key = problems.length === 1 ? problems[0].key : "exam.errors.pool.cannotSave";
+    const params = problems.length === 1 ? problems[0].params : { count: problems.length };
+    super(problems.length === 1 ? problems[0].message : englishText(key, params));
+    // For the handler, which answers in the reader's language (`readableMessage`).
+    this.key = key;
+    this.params = params;
     this.problems = problems;
   }
 }
@@ -56,7 +61,7 @@ function trimmedName(value) {
 
 function questionRow(db, id) {
   const row = db.prepare("SELECT * FROM question WHERE id = ?").get(id);
-  if (!row) throw new NotFoundError("There is no such question.");
+  if (!row) throw new NotFoundError("exam.errors.pool.noQuestion");
   return row;
 }
 
@@ -71,14 +76,34 @@ function imageProblem(db, questionId, src) {
   if (own) {
     const image = db.prepare("SELECT question_id AS questionId FROM image WHERE id = ?").get(Number(own[1]));
     if (image && questionId !== null && image.questionId === questionId) return null;
-    return "embeds an image of another question";
+    return "otherQuestion";
   }
   const staged = uploadRoute.exec(src);
   if (staged) {
     if (db.prepare("SELECT 1 FROM image_upload WHERE token = ?").get(staged[1])) return null;
-    return "embeds an upload that is no longer there; upload the image again";
+    return "uploadGone";
   }
-  return src.startsWith("data:") ? "embeds an image that was not uploaded" : "embeds an image from outside the module";
+  return src.startsWith("data:") ? "notUploaded" : "outside";
+}
+
+/**
+ * The problem an image's reason (`imageProblem`) makes at `field`: in the
+ * question text when `answer` is null, else in that answer (1-based).
+ */
+function imageProblemAt(field, reason, answer) {
+  const keys = {
+    otherQuestion: ["exam.errors.pool.textImageOtherQuestion", "exam.errors.pool.answerImageOtherQuestion"],
+    uploadGone: ["exam.errors.pool.textImageUploadGone", "exam.errors.pool.answerImageUploadGone"],
+    notUploaded: ["exam.errors.pool.textImageNotUploaded", "exam.errors.pool.answerImageNotUploaded"],
+    outside: ["exam.errors.pool.textImageOutside", "exam.errors.pool.answerImageOutside"],
+  }[reason];
+  return answer === null ? problemAt(field, keys[0], {}, null) : problemAt(field, keys[1], { answer }, answer);
+}
+
+/** A problem saving reports at the text as a whole, whichever answer it is in. */
+function withoutAnswer(problem) {
+  problem.answer = null;
+  return problem;
 }
 
 /** Every image source a text names, before cleaning. */
@@ -103,37 +128,40 @@ function imageSources(html) {
  */
 export function questionProblems(db, input, questionId = null) {
   const problems = [];
-  const problem = (field, message, answer = null) => problems.push({ field, answer, message });
+  const problem = (field, key, params = {}, answer = null) => problems.push(problemAt(field, key, params, answer));
   const value = input ?? {};
 
-  if (!questionTypes.includes(value.type)) problem("type", "Choose the question's type.");
+  if (!questionTypes.includes(value.type)) problem("type", "exam.errors.pool.chooseType");
   const categoryId = value.categoryId;
   if (!Number.isInteger(categoryId) || !db.prepare("SELECT 1 FROM question_category WHERE id = ?").get(categoryId)) {
-    problem("categoryId", "Choose an existing category.");
+    problem("categoryId", "exam.errors.pool.chooseCategory");
   }
-  for (const [field, language] of [["nameDe", "German"], ["nameEn", "English"]]) {
+  for (const [field, missing, tooLong] of [
+    ["nameDe", "exam.errors.pool.titleMissingDe", "exam.errors.pool.titleTooLongDe"],
+    ["nameEn", "exam.errors.pool.titleMissingEn", "exam.errors.pool.titleTooLongEn"],
+  ]) {
     const name = trimmedName(value[field]);
-    if (name.length === 0) problem(field, `The ${language} title is missing.`);
-    else if (name.length > nameLimit) problem(field, `The ${language} title is longer than ${nameLimit} characters.`);
+    if (name.length === 0) problem(field, missing);
+    else if (name.length > nameLimit) problem(field, tooLong, { limit: nameLimit });
   }
-  for (const [field, language] of [["textDe", "German"], ["textEn", "English"]]) {
-    if (!present(value[field])) problem(field, `The ${language} question text is missing.`);
+  for (const [field, missing] of [["textDe", "exam.errors.pool.textMissingDe"], ["textEn", "exam.errors.pool.textMissingEn"]]) {
+    if (!present(value[field])) problem(field, missing);
   }
 
   const answers = Array.isArray(value.answers) ? value.answers : [];
   const correct = answers.filter((answer) => answer?.correct === true).length;
   if (value.type === "truefalse") {
-    if (answers.length !== 2) problem("answers", "A true/false question has exactly the two answers true and false.");
-    else if (correct !== 1) problem("answers", "Mark whether the statement is true or false.");
+    if (answers.length !== 2) problem("answers", "exam.errors.pool.trueFalseAnswers");
+    else if (correct !== 1) problem("answers", "exam.errors.pool.trueFalseMark");
   } else {
     answers.forEach((answer, index) => {
-      for (const [field, language] of [["textDe", "German"], ["textEn", "English"]]) {
-        if (!present(answer?.[field])) problem(field, `Answer ${index + 1} has no ${language} text.`, index + 1);
+      for (const [field, missing] of [["textDe", "exam.errors.pool.answerTextMissingDe"], ["textEn", "exam.errors.pool.answerTextMissingEn"]]) {
+        if (!present(answer?.[field])) problem(field, missing, { answer: index + 1 }, index + 1);
       }
     });
-    if (answers.length < 2) problem("answers", "A question needs at least two answers.");
-    if (value.type === "multichoice" && correct !== 1) problem("answers", "Exactly one answer may be correct in a single-choice question.");
-    if (value.type === "multichoiceset" && correct === 0) problem("answers", "At least one answer has to be correct.");
+    if (answers.length < 2) problem("answers", "exam.errors.pool.twoAnswers");
+    if (value.type === "multichoice" && correct !== 1) problem("answers", "exam.errors.pool.singleChoiceCorrect");
+    if (value.type === "multichoiceset" && correct === 0) problem("answers", "exam.errors.pool.oneCorrect");
   }
 
   const texts = [
@@ -144,7 +172,7 @@ export function questionProblems(db, input, questionId = null) {
   for (const [field, answer, html] of texts) {
     for (const src of imageSources(html)) {
       const reason = imageProblem(db, questionId, src);
-      if (reason) problem(field, `${answer === null ? "The question text" : `Answer ${answer}`} ${reason}.`, answer);
+      if (reason) problems.push(imageProblemAt(field, reason, answer));
     }
   }
   return problems;
@@ -163,9 +191,10 @@ function writeContent(db, questionId, input) {
      ON CONFLICT (question_id, sha256) DO UPDATE SET sha256 = excluded.sha256 RETURNING id`
   );
   const usedUploads = new Set();
-  const resolve = (src, where) => {
+  // `answer` is the answer's number, or null for the question text.
+  const resolve = (src, answer) => {
     const reason = imageProblem(db, questionId, src);
-    if (reason) throw new QuestionProblemsError([{ field: "text", answer: null, message: `${where} ${reason}.` }]);
+    if (reason) throw new QuestionProblemsError([withoutAnswer(imageProblemAt("text", reason, answer))]);
     const staged = uploadRoute.exec(src);
     if (!staged) return src;
     const upload = db.prepare("SELECT mime, sha256, data FROM image_upload WHERE token = ?").get(staged[1]);
@@ -173,14 +202,14 @@ function writeContent(db, questionId, input) {
     return imagePath(insertImage.get(questionId, upload.mime, upload.sha256, upload.data).id);
   };
 
-  const textDe = cleanStoredHtml(input.textDe, resolve, "The question text");
-  const textEn = cleanStoredHtml(input.textEn, resolve, "The question text");
+  const textDe = cleanStoredHtml(input.textDe, resolve, null);
+  const textEn = cleanStoredHtml(input.textEn, resolve, null);
   db.prepare("UPDATE question SET text_de = ?, text_en = ? WHERE id = ?").run(textDe, textEn, questionId);
 
   db.prepare("DELETE FROM answer WHERE question_id = ?").run(questionId);
   const insertAnswer = db.prepare("INSERT INTO answer (question_id, position, text_de, text_en, correct) VALUES (?, ?, ?, ?, ?)");
   input.answers.forEach((answer, index) => {
-    const where = `Answer ${index + 1}`;
+    const where = index + 1;
     // A true/false question's answers are the fixed words, true first.
     const word = index === 0 ? "true" : "false";
     const answerDe = input.type === "truefalse" ? `<p>${trueFalseText.de[word]}</p>` : cleanStoredHtml(answer.textDe, resolve, where);
@@ -272,7 +301,7 @@ export function saveQuestion(db, id, input = {}) {
       )
       .run(value.categoryId, value.type, value.nameDe, value.nameEn, position, now(), id, Number.isInteger(value.version) ? value.version : -1);
     if (changes === 0) {
-      throw new ConflictError("This question was changed in the meantime by someone else. Your input is still here; open the current version to compare.");
+      throw new ConflictError("exam.errors.pool.changedMeanwhile");
     }
     writeContent(db, id, value);
     return saved(db, id);
@@ -342,7 +371,7 @@ export function deleteQuestion(db, id) {
     const used =
       db.prepare("SELECT 1 FROM question_usage WHERE question_id = ? LIMIT 1").get(id) ||
       db.prepare("SELECT 1 FROM test_question WHERE question_id = ? LIMIT 1").get(id);
-    if (used) throw new ConflictError("This question was part of a test and cannot be deleted. Retire it instead.");
+    if (used) throw new ConflictError("exam.errors.pool.usedCannotDelete");
     db.prepare("DELETE FROM question WHERE id = ?").run(id);
     return { deleted: id };
   });
@@ -368,10 +397,10 @@ export function imageTypeOf(bytes) {
  */
 export function stageUpload(db, bytes, username, at = now()) {
   if (Buffer.isBuffer(bytes) && bytes.length > uploadLimitBytes) {
-    throw new InvalidInputError("An image may be at most 2 MB.");
+    throw new InvalidInputError("exam.errors.pool.imageTooLarge");
   }
   const mime = imageTypeOf(bytes);
-  if (mime === null) throw new InvalidInputError("This is not an image the pool keeps: only PNG, JPEG, GIF and WebP.");
+  if (mime === null) throw new InvalidInputError("exam.errors.pool.imageType");
   const token = randomBytes(16).toString("hex");
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   db.prepare("INSERT INTO image_upload (token, uploaded_by, uploaded_at, mime, sha256, data) VALUES (?, ?, ?, ?, ?, ?)").run(
@@ -401,7 +430,7 @@ export function purgeUploads(db, at = new Date()) {
 
 function categoryRow(db, id) {
   const row = db.prepare("SELECT * FROM question_category WHERE id = ?").get(id);
-  if (!row) throw new NotFoundError("There is no such category.");
+  if (!row) throw new NotFoundError("exam.errors.pool.noCategory");
   return row;
 }
 
@@ -409,15 +438,15 @@ function categoryRow(db, id) {
 function categoryNames({ nameDe, nameEn }) {
   const de = trimmedName(nameDe);
   const en = trimmedName(nameEn);
-  if (de.length === 0 || en.length === 0) throw new InvalidInputError("A category needs a German and an English name.");
-  if (de.length > nameLimit || en.length > nameLimit) throw new InvalidInputError(`A category's name is at most ${nameLimit} characters.`);
+  if (de.length === 0 || en.length === 0) throw new InvalidInputError("exam.errors.pool.categoryNames");
+  if (de.length > nameLimit || en.length > nameLimit) throw new InvalidInputError("exam.errors.pool.categoryNameLength", { limit: nameLimit });
   return { de, en };
 }
 
 /** A parent given by the client: null for the top, or an existing category's id. */
 function parentOf(db, parentId) {
   if (parentId === null || parentId === undefined) return null;
-  if (!Number.isInteger(parentId)) throw new InvalidInputError("A category's parent is given by its id.");
+  if (!Number.isInteger(parentId)) throw new InvalidInputError("exam.errors.pool.categoryParent");
   categoryRow(db, parentId);
   return parentId;
 }
@@ -434,7 +463,7 @@ function namedUniquely(name, fn) {
     return fn();
   } catch (error) {
     if (/UNIQUE constraint failed/.test(error?.message ?? "")) {
-      throw new ConflictError(`There is a category called "${name}" in that place already.`);
+      throw new ConflictError("exam.errors.pool.categoryExists", { name });
     }
     throw error;
   }
@@ -478,10 +507,10 @@ export function updateCategory(db, id, input = {}) {
     : categoryNames({ nameDe: input.nameDe ?? row.name_de, nameEn: input.nameEn ?? row.name_en });
   const parent = input.parentId === undefined ? row.parent_id : parentOf(db, input.parentId);
   if (parent !== null && categoryAndBelow(db, id).has(parent)) {
-    throw new InvalidInputError("A category cannot be moved under itself or under one of its own subcategories.");
+    throw new InvalidInputError("exam.errors.pool.categoryMoveInto");
   }
   if (input.move !== undefined && input.move !== "up" && input.move !== "down") {
-    throw new InvalidInputError('A category moves "up" or "down" among its siblings.');
+    throw new InvalidInputError("exam.errors.pool.categoryMoveDirection");
   }
   return namedUniquely(names.de, () =>
     inTransaction(db, () => {
@@ -519,10 +548,19 @@ export function deleteCategory(db, id) {
     const questions = db.prepare("SELECT COUNT(*) AS n FROM question WHERE category_id = ?").get(id).n;
     const children = db.prepare("SELECT COUNT(*) AS n FROM question_category WHERE parent_id = ?").get(id).n;
     if (questions > 0 || children > 0) {
-      const what = [questions > 0 ? `${questions} question${questions === 1 ? "" : "s"}` : null, children > 0 ? `${children} subcategor${children === 1 ? "y" : "ies"}` : null]
-        .filter(Boolean)
-        .join(" and ");
-      throw new ConflictError(`This category still holds ${what}; only an empty category can be deleted.`);
+      const key =
+        children === 0
+          ? "exam.errors.pool.categoryHoldsQuestions"
+          : questions === 0
+            ? "exam.errors.pool.categoryHoldsSubcategories"
+            : questions === 1
+              ? children === 1
+                ? "exam.errors.pool.categoryHoldsQuestionAndSubcategory"
+                : "exam.errors.pool.categoryHoldsQuestionAndSubcategories"
+              : children === 1
+                ? "exam.errors.pool.categoryHoldsQuestionsAndSubcategory"
+                : "exam.errors.pool.categoryHoldsQuestionsAndSubcategories";
+      throw new ConflictError(key, { count: children === 0 ? questions : questions === 0 ? children : questions, questions, children });
     }
     db.prepare("DELETE FROM question_category WHERE id = ?").run(id);
     return { deleted: id };

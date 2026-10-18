@@ -118,7 +118,7 @@ The gaps that remain because of this are recorded in [testing](docs-testing.md) 
 
 ## Adding something the browser has to fetch
 
-The server does not serve the application directory. It serves an allowlist of mounts in `app.js` — `/assets`, `/css`, `/md`, `/obsidian-page.js`, the four `logo-*.png` files, `/index.html` and the two mermaid `dist` directories — and nothing else. That is deliberate: `keycloak.json` carries the OIDC client secret and has to sit next to `app.js` in every deployment, because that is where the application reads it from. A file that is merely present must not become a URL.
+The server does not serve the application directory. It serves an allowlist of mounts in `app.js` — `/assets`, `/css`, `/md`, `/obsidian-page.js`, the four files under `/i18n/` the browser loads (`t.js`, `format.js`, `en.json`, `de.json`), the four `logo-*.png` files, `/index.html` and the two mermaid `dist` directories — and nothing else. That is deliberate: `keycloak.json` carries the OIDC client secret and has to sit next to `app.js` in every deployment, because that is where the application reads it from. A file that is merely present must not become a URL.
 
 So when you add a stylesheet, a script, a font or a browser-side module and reference it from a rendered page, **it will not be served until you give it its own mount**. What you see is not a 404: the catch-all at the bottom of `app.js` redirects anything unmatched to the start page, so the browser gets 200 and a page nobody asked for, and the console complains about a stylesheet that arrived as HTML.
 
@@ -129,6 +129,27 @@ app.use("/your-prefix", checkAuthenticated, express.static(path.join(__dirname, 
 ```
 
 Mount the narrowest thing that covers the reference rather than widening an existing mount, and keep the URL prefix the same as the one the page emits so nothing else has to change. `npm test` catches the omission for you: `test/checks/deployment-surface.js` walks every same-origin reference of a rendered page in all three views and fails on a reference that falls through to the start page.
+
+## Interface language and formats
+
+Every reader chooses, in the settings menu, a **language** for the interface (`en`, `de`) and, independently of it, a **format** for dates, times and numbers (`de-AT`, `en-GB`). Both are keys of the `config` preference block like `dm` — `lang` and `loc` — and the defaults are English and `de-AT`. `parsePreferences()` in `permission-context.js` turns a missing or unknown value into the default, so the server never sees anything else.
+
+Everything lives in `i18n/`:
+
+- `en.json`, `de.json` — the catalogs, BabelEdit's nested JSON with identical keys. `safeLearn.babel` is the BabelEdit project over both, English primary.
+- `t.js` — `createT(catalog, fallback, lang)` returns `t(key, params)`: the chosen language, then English, then (a defect the test suite keeps from shipping) the key in brackets.
+- `format.js` — `createFormat(loc, lang)`: `date`, `dateTime`, `time`, `clock`, `weekdayDay`, `number`, `percent` and the calendar names, all in `Europe/Vienna`, and the parsers `parseDate`, `readDate`, `parseTime`, `parseNumber`. A date-only value (`YYYY-MM-DD`) is formatted as a calendar day and never shifts.
+- `server.js` — the server's side: `i18nOf(req)` gives `{ t, format, lang, loc }` for the request's reader, built once per request from its preferences.
+
+`t.js` and `format.js` are free of DOM and Node code, and the browser loads the very same files from `/i18n/`. The page carries the reader's choice as `<html lang="…" data-sl-locale="…">`; the exam module's client (`exam/client/i18n.js`) reads it, fetches the catalog(s) in parallel with `/exam/api/me`, and `frame.js` exports `t` and `format` to every element module. `obsidian-page.js` loads no catalog: the few texts it shows come with the rendered page as `data-text-*` attributes.
+
+**Adding a text.** Pick a key by surface — `app.menu.*`, `app.sidebar.*`, `exam.<surface>.*`, `exam.errors.<module>.*` — English and descriptive, never the text itself. Add it to both catalogs (in BabelEdit, or by hand with the same key in both files), and write `t("the.key", { param })` in the code. A count is two keys, `name_one` and `name_other`, chosen by `t("name", { count })`. A refusal of the exam module is raised with its key, `throw new InvalidInputError("exam.errors.…", params)`, and the module's error handler answers in the reader's language; a problem at a field is `problemAt(field, key, params)`.
+
+**What the suite holds you to.** `test/i18n-catalog.test.js` fails when the two catalogs differ in their keys, when a key passed to `t("…")` (or written as an `"exam.errors.…"` literal) is in neither, when a catalog key is unused, and when a `t()` key is built at run time without being listed in its `computedKeys` with every key it can become. It also refuses any `toLocale…String()` or `Intl` date or number formatter outside `i18n/format.js`: every date and number goes through `format`, with the reader's locale, never the browser's. `test/i18n.test.js` holds `t()` and `format.js` to both formats.
+
+**Adding a language.** A catalog file with every key, its code in `languages` and its name in `languageNames` (`i18n/t.js`), the file in the `/i18n/` mount list of `app.js` (it is built from `languages`), and, for its weekday and month names, an entry in `weekdayLocales` (`i18n/format.js`). A new format is an entry in `locales`; `format.js` reads its date pattern from `Intl`.
+
+**Dates are entered with `<sl-date-input>`** (`exam/client/date-input.js`), never with a native `date` or `datetime-local` input, whose format follows the operating system. It shows and reads the reader's format, opens a month grid by keyboard, and is form-associated with an ISO `value` (`YYYY-MM-DD`, or `YYYY-MM-DDTHH:MM` Vienna time with `time`).
 
 ## Naming a font in a stylesheet
 

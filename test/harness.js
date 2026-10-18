@@ -151,6 +151,11 @@ export const preferenceBaseline = Object.freeze({
   vt: 1,
   va: 0,
   ve: 0,
+  // The interface language and format (`ui-language`), at their defaults: the
+  // accounts are shared, so a check that switches either writes it back with
+  // the rest of the block, and every other check finds the defaults.
+  lang: "en",
+  loc: "de-AT",
 });
 
 /**

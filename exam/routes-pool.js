@@ -14,7 +14,7 @@ import { contextFromQuery, teacherShell } from "./bar.js";
 /** A record id from the path or query; anything but a positive integer names nothing. */
 function idParam(value) {
   const id = typeof value === "string" && /^[1-9]\d{0,9}$/.test(value) ? Number(value) : null;
-  if (id === null) throw new NotFoundError("There is no such record.");
+  if (id === null) throw new NotFoundError("exam.errors.noSuchRecord");
   return id;
 }
 
@@ -54,7 +54,7 @@ export function registerPoolRoutes(router, { db, handle, startPage }) {
         res.status(403).json({ error: "Forbidden" });
         return;
       }
-      if (!image) throw new NotFoundError("There is no such image.");
+      if (!image) throw new NotFoundError("exam.errors.noSuchImage");
       res.set({ "Content-Type": image.mime, "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" });
       res.send(Buffer.from(image.data));
     })
@@ -72,7 +72,7 @@ export function registerPoolRoutes(router, { db, handle, startPage }) {
       if (typeof req.query.category === "string" && /^[1-9]\d{0,9}$/.test(req.query.category)) params.category = req.query.category;
       // Only the questions not reviewed yet, e.g. right after an import.
       if (req.query.unreviewed === "1") params.unreviewed = "1";
-      res.send(await teacherShell({ db, startPage, req, title: "Question pool", context, kind: "pool", params, current: "pool" }));
+      res.send(await teacherShell({ db, startPage, req, title: (t) => t("exam.pages.pool"), context, kind: "pool", params, current: "pool" }));
     })
   );
 }

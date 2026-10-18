@@ -348,7 +348,9 @@ function showSearchResults(results) {
       const toggle = document.createElement("span");
       toggle.className = "sl-search-expand";
       toggle.textContent = "❯";
-      toggle.title = "Show the headings the matches are under";
+      // The texts come with the list, rendered in the reader's language by the
+      // server, so this script loads no catalog (design.md, D3).
+      toggle.title = list.dataset.textShowHeadings;
       toggle.addEventListener("click", () =>
         setSearchEntryExpanded(entry, !searchEntryHeadings(entry).expanded)
       );
@@ -388,7 +390,7 @@ function showSearchResults(results) {
       anchor.href =
         `${result.path}?heading=${encodeURIComponent(heading.text)}` +
         `&occurrence=${encodeURIComponent(heading.occurrence)}`;
-      anchor.textContent = heading.text || "(untitled)";
+      anchor.textContent = heading.text || list.dataset.textUntitled;
       expanded.appendChild(anchor);
     }
     if (headings.length > 0) entry.appendChild(expanded);
@@ -1005,6 +1007,11 @@ function init() {
       vt: a.vt || 0,
       va: a.va || 0,
       ve: a.ve || 0,
+      // The interface language and the format (`ui-language`), carried as
+      // stored: the server validates and defaults them, and a key left out
+      // here would be dropped by the next save of any other preference.
+      lang: a.lang,
+      loc: a.loc,
     };
     applyAttributes();
     revealPage();
@@ -1143,6 +1150,25 @@ function toggleViewAnswer() {
 function toggleViewExam() {
   let v = attributes.ve === 0 ? 1 : 0;
   setParam("ve", v).then(() => {
+    setTimeout(() => {
+      location.reload();
+    }, 1000);
+  });
+}
+
+/**
+ * The language and the format of the interface. Both are rendered by the
+ * server, so the page reloads to show them, as light/dark does.
+ */
+function setLanguage(lang) {
+  setParam("lang", lang).then(() => {
+    setTimeout(() => {
+      location.reload();
+    }, 1000);
+  });
+}
+function setLocale(loc) {
+  setParam("loc", loc).then(() => {
     setTimeout(() => {
       location.reload();
     }, 1000);

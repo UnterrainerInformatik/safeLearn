@@ -14,7 +14,7 @@
  * Fires `input` when its content changes.
  */
 
-import { ExamApiError, h } from "./frame.js";
+import { ExamApiError, h, t } from "./frame.js";
 
 /** What a paste keeps: these elements, without any attribute. Everything else is unwrapped. */
 const pastedTags = new Set(["P", "BR", "B", "STRONG", "I", "EM", "CODE", "PRE", "UL", "OL", "LI"]);
@@ -111,14 +111,14 @@ class RichText extends HTMLElement {
       );
     this.toolbar = h(
       "div",
-      { class: "sl-rich-text-toolbar", role: "toolbar", "aria-label": "Formatting" },
-      button(h("b", {}, "B"), "Bold", () => document.execCommand("bold"), "bold"),
-      button(h("i", {}, "I"), "Italic", () => document.execCommand("italic"), "italic"),
-      button(h("code", {}, "</>"), "Inline code", () => this.toggleInlineCode(), "code"),
-      button("{ }", "Code block", () => this.toggleCodeBlock(), "codeblock"),
-      button("•", "Bulleted list", () => document.execCommand("insertUnorderedList"), "ul"),
-      button("1.", "Numbered list", () => document.execCommand("insertOrderedList"), "ol"),
-      button("🖼", "Image", () => this.fileInput.click(), "image")
+      { class: "sl-rich-text-toolbar", role: "toolbar", "aria-label": t("exam.richText.formatting") },
+      button(h("b", {}, "B"), t("exam.richText.bold"), () => document.execCommand("bold"), "bold"),
+      button(h("i", {}, "I"), t("exam.richText.italic"), () => document.execCommand("italic"), "italic"),
+      button(h("code", {}, "</>"), t("exam.richText.inlineCode"), () => this.toggleInlineCode(), "code"),
+      button("{ }", t("exam.richText.codeBlock"), () => this.toggleCodeBlock(), "codeblock"),
+      button("•", t("exam.richText.bulletedList"), () => document.execCommand("insertUnorderedList"), "ul"),
+      button("1.", t("exam.richText.numberedList"), () => document.execCommand("insertOrderedList"), "ol"),
+      button("🖼", t("exam.richText.image"), () => this.fileInput.click(), "image")
     );
     if (this.hasAttribute("aria-label")) this.area.setAttribute("aria-label", this.getAttribute("aria-label"));
     this.replaceChildren(this.toolbar, this.area, this.status, this.fileInput);
@@ -273,7 +273,7 @@ class RichText extends HTMLElement {
 
   /** Uploads `file` and inserts it at the caret; a refusal is shown under the field. */
   async insertImageFile(file) {
-    this.status.textContent = "Uploading the image…";
+    this.status.textContent = t("exam.richText.uploading");
     this.status.classList.remove("sl-embed-error");
     // Where the caret is now; the upload takes a moment.
     const range = this.range()?.cloneRange() ?? null;
@@ -291,7 +291,7 @@ class RichText extends HTMLElement {
     } catch (error) {
       this.status.classList.add("sl-embed-error");
       this.status.textContent =
-        error instanceof ExamApiError && error.status < 500 && error.message ? error.message : "The image could not be uploaded. Please try again.";
+        error instanceof ExamApiError && error.status < 500 && error.message ? error.message : t("exam.richText.uploadFailed");
     }
   }
 }

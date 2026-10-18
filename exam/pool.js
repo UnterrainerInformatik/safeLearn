@@ -92,7 +92,7 @@ function categoryPaths(db) {
  */
 export function listQuestions(db, { categoryId = null, query = "", includeRetired = false, onlyUnreviewed = false } = {}) {
   const inCategory = categoryId === null ? null : categoryAndBelow(db, categoryId);
-  if (inCategory !== null && inCategory.size === 0) throw new NotFoundError("There is no such category.");
+  if (inCategory !== null && inCategory.size === 0) throw new NotFoundError("exam.errors.pool.noCategory");
   const paths = categoryPaths(db);
   const needle = String(query ?? "").trim().toLowerCase();
   const answers = new Map();
@@ -147,7 +147,7 @@ export function getQuestion(db, id) {
        FROM question q LEFT JOIN question_import i ON i.id = q.import_id WHERE q.id = ?`
     )
     .get(id);
-  if (!row) throw new NotFoundError("There is no such question.");
+  if (!row) throw new NotFoundError("exam.errors.pool.noQuestion");
   const answers = db
     .prepare("SELECT position, text_de AS textDe, text_en AS textEn, correct FROM answer WHERE question_id = ? ORDER BY position")
     .all(id)
