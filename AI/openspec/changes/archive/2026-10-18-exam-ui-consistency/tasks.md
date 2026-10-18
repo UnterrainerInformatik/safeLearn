@@ -110,7 +110,7 @@
 ## 6. Wrap-up
 
 - [x] 6.1 Update `docs-exam-module.md` (category tree, keys, rename/delete, end/extend) and `AI/architecture.md` (component map: `tree-drag.js`, removed `pool-categories.js`, new routes; observations).
-- [ ] 6.2 Deploy to secureLectures (sync order: safeLearn first) and smoke-check with Gerald's teacher account: one drag in the tree, one rename, and one sitting extended in a trial test.
+- [x] 6.2 Deploy to secureLectures (sync order: safeLearn first) and smoke-check with Gerald's teacher account: one drag in the tree, one rename, and one sitting extended in a trial test. (Checked by Gerald 2026-10-18: drag, rename and extend work; after the follow-up fix, button sizes and scrolling at the edge too.)
 
 ## Notes for applying
 

@@ -68,7 +68,7 @@ Eigene Übersichtsseiten in der Web-App, die Lehrer über das Menü öffnen kön
 
 # Prüfungsmodul-UI (Design-Review 2026-10-18)
 
-Als Changes angelegt am 2026-10-18: alles außer den letzten beiden Einträgen in `exam-ui-consistency`, dazu `exam-my-hide-results-while-writing` und `exam-live-bound-browser`.
+Als Changes angelegt am 2026-10-18: `exam-ui-consistency` (archiviert 2026-10-18), `exam-my-hide-results-while-writing` und `exam-live-bound-browser`. Der Eintrag "Konsistenz im Kleinen: Datum und Schreibseite" ist der Rest, den `exam-ui-consistency` nicht abgedeckt hat.
 
 Leitlinien von Gerald für alle Einträge hier:
 - Aktionen sind Buttons, keine Links.
@@ -78,73 +78,7 @@ Leitlinien von Gerald für alle Einträge hier:
 
 Die Bestandsaufnahme mit Datei:Zeile stammt aus einem Audit über `exam/client/*.js`, `exam/bar.js` und `css/exam.css`.
 
-## Kategoriebaum per Drag-and-Drop statt eigener Kategorienseite
-Heute laufen Anlegen, Umbenennen, Verschieben und Löschen über eine eigene Seite, `/exam/pool/categories` (`client/pool-categories.js`), die vom Pool aus als Textlink "Edit categories" unter dem Baum erreichbar ist (`client/pool.js:139`). Jeder Knoten trägt dort sechs Bedienelemente: ↑, ↓, Rename, ein `<select>` mit allen Kategorien plus einen eigenen Move-Button, + Subcategory und Delete. Das Inline-Panel hat kein Cancel.
-
-Ziel ist, das direkt im Baum auf `/exam/pool` zu erledigen:
-- **Ziehen auf einen Knoten** macht die Kategorie zur Unterkategorie.
-- **Ziehen zwischen zwei Knoten** verschiebt sie auf dieselbe Ebene, angezeigt durch eine Linie zwischen den Elementen.
-- Eine Frage aus der Liste auf eine Kategorie zu ziehen verschiebt die Frage.
-- **Neu:** ein `+` am Knoten bzw. am Baumende öffnet ein kleines Namens-Popup (DE/EN) direkt in der Liste.
-- **Umbenennen** im selben Popup, per Doppelklick oder Stift-Icon am Knoten.
-- **Löschen** nur für leere Knoten, als Icon am Knoten mit Bestätigung.
-- Die Server-Ablehnungen (Unterbaum, Duplikat, nicht leer) erscheinen am Knoten, nicht oben auf der Seite.
-
-Danach entfällt die Kategorienseite. Tastaturbedienung (Ausschneiden/Einfügen o. ä.) wäre als Ersatz fürs Ziehen mitzudenken.
-
-## Textlinks, die Aktionen sind, werden Buttons
-Plain `<a>` statt Button, zum Teil als leise Zeile (`sl-exam-quiet`, Deckkraft .7):
-- im Pool: **Edit** in der Vorschau, **New question**, **Edit categories** und **Import questions**;
-- **Back to the pool**, viermal;
-- **Open the gradebook** (Kursseite) und **Enter results in the gradebook** (Schülerseite);
-- **Config sheet · Grading scale** über dem Notenbuch;
-- auf der Testseite: **Add questions from the pool**, **Try this test as a student sees it** und **Solution on the board**;
-- in der Testliste: **live view · class screen**;
-- **Class screen** in der Live-Ansicht;
-- **Download the format description** im Import.
-
-Umgekehrt ist der Fragenname in der Pool-Liste ein Button, der wie ein Link aussieht (`sl-exam-link`). Dazu kommt ein einheitlicher Button-Stil fürs Modul: `sl-button` aus `css/buttons.css` wird dort nie benutzt, und viele Klassen sind reine Hooks ohne CSS (`sl-exam-delete`, `sl-exam-pool-new`, `sl-exam-pool-edit`, `sl-exam-editor-add`, `sl-exam-test-remove`, `sl-exam-live-release`, `sl-exam-import-go` …). `sl-exam-primary` ist nur fett. Hauptaktionen, die heute nicht primär sind:
-- **Create test** im Pool;
-- **Import n questions**;
-- **Mark as reviewed**;
-- **Make current**.
-
-## Aktionen am Seitenende in die Struktur holen
-- **Delete this test** steht unter allen Fragen ganz am Ende (`client/tests.js:212`) und gehört in den Kopf neben **Rename**.
-- Die Meldungen der Testseite erscheinen unter dem Umbenennen-Formular, weit weg von Sittings und Delete. Sie gehören an die Aktion.
-- Die **Kurse** stehen als Linkliste am Ende der Klassenseite, Anlegen geht nur übers `+` in der Leiste. Gewünscht ist die Liste mit einem `+ Course` darin.
-- Die **Modul-Links** "Grading scale · Question pool" stehen als leise Zeile ganz unten auf `/exam/` ("Online tests" fehlt dort). Sie gehören in die Leiste oder als Buttons an den Kopf; die Notenskala ist sonst nur übers Notenbuch zu erreichen.
-- **New question** ist versteckt, bis eine Kategorie gewählt ist (`client/pool.js:144`). Besser wäre es immer sichtbar, oder als `+` an der Kategorie im Baum.
-- **Import n questions** steht unter den Vorschautabellen und gehört über die Vorschau.
-- Die **Online-Tests-Liste** hat keinen Button **New test**; heute führt nur ein Satz in den Pool, und die Zusammenstellung erscheint erst mit einem Kurs in der Leiste.
-- Die Auswahl im Pool ist unsichtbar: Ein Klick auf die Zeile wählt die Frage aus, aber es gibt keine Checkbox. Eine Checkbox pro Zeile würde das zeigen.
-- Der Kommentar im Notenbuch steht nur im Tooltip (` ✎` mit `title`).
-
-## Bestätigungen vereinheitlichen
-Heute gibt es vier Muster:
-- `window.confirm` beim Austragen aus dem Roster, beim Löschen von Spalte, Kategorie und Frage;
-- Zweimal-Klick bei Delete this test und Submit;
-- eine Bestätigung in der Seite bei Take back (Import);
-- **keine Bestätigung** bei **Delete** eines geplanten Sittings, bei **Remove from the test** und bei **Release to another browser**.
-
-Ein Muster fürs ganze Modul; der Zweimal-Klick passt zu "keine Browser-Dialoge". Das Sitting-Delete ohne Rückfrage zuerst. **Release to another browser** braucht ausdrücklich keine Bestätigung (Gerald, 2026-10-18), siehe "Live-Ansicht: bound to browser".
-
-## Fehlende Aktionen
-- Schuljahr, Klasse und Kurs lassen sich anlegen, aber nirgends umbenennen oder löschen.
-- Die Live-Ansicht kann ein Sitting weder beenden noch verlängern.
-- Die Schülerseite im Kurs hat keinen Weg zum vorigen/nächsten Schüler und oben keinen Rückweg zum Notenbuch.
-- Die Leerzustände "Nobody is on this course's roster." und "There is no school year yet." führen nirgends hin; sie sollten den Button zur nächsten Aktion tragen.
-
-## Konsistenz im Kleinen
-- **Speichern:** Die Notenskala hat einen expliziten **Save**, alles andere speichert beim Ändern. Auf der Schülerseite fehlt der Hinweis "saved as it changes".
-- **Labels:**
-  - "Whole year" in der Leiste, "Whole year (summer semester)" im Notenbuch;
-  - Leistenposition "Grades", Seite "Gradebook";
-  - "One correct" gegenüber "One correct answer";
-  - Title Case in den Notenbuch-Spaltenköpfen, sonst Sentence case;
-  - "Deutsch"/"English" nebeneinander;
-  - "true (Richtig)" und "false (Falsch)" im Editor;
-  - "the Claude" im Import-Text.
+## Konsistenz im Kleinen: Datum und Schreibseite (Rest aus dem Design-Review)
 - **Datum:** de-AT im Pool und Import, Browser-Locale in Klassen und Notenbuch.
 - **Schreibseite:** Sie ist DE/EN lokalisiert, ihre Ergebnisanzeige und "Time is up" in der Vorschau sind aber nur Englisch.
 
