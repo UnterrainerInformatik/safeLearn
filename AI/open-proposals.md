@@ -68,7 +68,7 @@ Eigene Übersichtsseiten in der Web-App, die Lehrer über das Menü öffnen kön
 
 # Prüfungsmodul-UI (Design-Review 2026-10-18)
 
-Als Changes angelegt am 2026-10-18: `exam-ui-consistency` (archiviert 2026-10-18), `exam-my-hide-results-while-writing` und `exam-live-bound-browser`. Der Eintrag "Konsistenz im Kleinen: Datum und Schreibseite" ist der Rest, den `exam-ui-consistency` nicht abgedeckt hat.
+Als Changes angelegt am 2026-10-18: `exam-ui-consistency` (archiviert 2026-10-18), `exam-my-hide-results-while-writing` (archiviert 2026-10-19) und `exam-live-bound-browser`. Der Eintrag "Konsistenz im Kleinen: Datum und Schreibseite" ist der Rest, den `exam-ui-consistency` nicht abgedeckt hat.
 
 Leitlinien von Gerald für alle Einträge hier:
 - Aktionen sind Buttons, keine Links.
@@ -81,11 +81,6 @@ Die Bestandsaufnahme mit Datei:Zeile stammt aus einem Audit über `exam/client/*
 ## Konsistenz im Kleinen: Datum und Schreibseite (Rest aus dem Design-Review)
 - **Datum:** de-AT im Pool und Import, Browser-Locale in Klassen und Notenbuch.
 - **Schreibseite:** Sie ist DE/EN lokalisiert, ihre Ergebnisanzeige und "Time is up" in der Vorschau sind aber nur Englisch.
-
-## Schüler-Seite "Exams" (`/exam/my`): Ergebnisse während des Schreibens (Change `exam-my-hide-results-while-writing`)
-Seit 2026-10-18 zeigt die Seite offene Tests und Ergebnisse untereinander. Läuft ein Versuch, steht die Schreibansicht oben und die Ergebnisse darunter.
-
-**Entschieden (Gerald, 2026-10-18):** Während eines laufenden Versuchs werden die Ergebnisse ausgeblendet. Bis zur Abgabe sind sie uninteressant und lenken nur ab. Nach der Abgabe erscheinen sie wieder.
 
 ## Live-Ansicht: "bound to browser" statt "Release to another browser" (Change `exam-live-bound-browser`)
 In der Live-Ansicht (`client/live.js`) gibt es pro Schüler, der gerade schreibt, den Button **Release to another browser**. Er hebt die Bindung des Versuchs an den Browser auf, in dem er gestartet wurde, damit der Schüler auf einem anderen Gerät weiterschreiben kann. Das versteht man ohne Erklärung nicht.
