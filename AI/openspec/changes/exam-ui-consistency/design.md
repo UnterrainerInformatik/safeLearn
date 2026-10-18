@@ -1,11 +1,11 @@
 ## Context
 
-See proposal.md for the motivation. The module's client is a set of custom elements under `exam/client/` built with `h()` from `frame.js`. Their texts come from `i18n/en.json` and `i18n/de.json` (BabelEdit, same keys in both). The state found on 2026-10-18 (line numbers after the i18n change `b9f7faf`):
+See proposal.md for the motivation. The module's client is a set of custom elements under `exam/client/` built with `h()` from `frame.js`. Their texts come from `i18n/en.json` and `i18n/de.json` (BabelEdit, same keys in both). The state found on 2026-10-18 (line numbers re-checked against `5ea0e50`):
 
 - **Links that are actions:**
   - `client/pool.js:133` (Edit categories), `:134` (Import questions), `:138` (New question, an `<a>` without `href`, hidden until a category is chosen) and `:459` (Edit);
   - `client/tests.js:65`/`:67` (live view, class screen), `:94` (assemble in pool), `:211` (try as student), `:217` (board solution) and `:232` (add from pool);
-  - `client/live.js:113` (class screen);
+  - `client/live.js:142` (class screen);
   - `client/classes.js:115` (the home's quiet module links) and `:541` (Open the gradebook);
   - `client/gradebook.js:203`/`:205` (Config sheet, Grading scale) and `:602` (Enter results);
   - `client/pool-import.js:95` and `:100`;
@@ -17,7 +17,7 @@ See proposal.md for the motivation. The module's client is a set of custom eleme
   - `window.confirm` at `client/classes.js:337` (roster), `client/gradebook.js:334` (column), `client/pool-categories.js:113` (category) and `client/question-editor.js:375` (question);
   - `armedButton` in `client/tests.js:158` for deleting a test, removing a question from a written test (admin) and deleting an attempt in the live view;
   - an in-page confirmation for Take back in `client/pool-import.js:307`;
-  - none for deleting a scheduled sitting (`client/tests.js:304`), for removing a question from an unwritten test (`client/tests.js:257`) or for Release (`client/live.js:217`).
+  - none for deleting a scheduled sitting (`client/tests.js:304`), for removing a question from an unwritten test (`client/tests.js:257`) or for Unbind browser (`client/live.js:246`).
 - **Category maintenance:** a page of its own, `client/pool-categories.js` behind `/exam/pool/categories` (`exam/routes-pool-edit.js:127`). The API is `PUT /api/exam/pool/categories/:id` with names, `parentId` (appends at the end of the new parent) or `move: "up"|"down"` (`exam/pool-edit.js:501` ff.). A question changes category only through the full save `PUT /pool/questions/:id` with its `version`.
 - **Records:** the API has no rename or delete for years, classes and courses (`exam/routes-classes.js:91-144`). Sittings can be changed and deleted only before they open (`requireNotOpened`, `exam/tests.js:464`).
 - **Bar:** the bar has page buttons for the pool and tests (`exam/bar.js:141-142`), but none for the scale.
@@ -136,7 +136,7 @@ The ✎ becomes a button in the override cell (`gradebook.js:380-382`) that togg
 | `exam.import.chooseFile`, `exam.import.cannotImport_*`, `exam.import.formatExplained` | "Claude" without the article |
 | `exam.errors.gradebook.nobodyOnRoster` | reworded to say that no student was named |
 
-The test head's hard-coded `en ? "English" : "Deutsch"` (`client/tests.js:206`) uses `exam.classes.languageEnglish`/`languageGerman`.
+The test head's hard-coded `en ? "English" : "Deutsch"` (`client/tests.js:205`) uses `exam.classes.languageEnglish`/`languageGerman`.
 
 ## Risks / Trade-offs
 

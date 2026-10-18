@@ -175,6 +175,86 @@ export function elementFor(kind) {
   return elements.get(kind);
 }
 
+// ------------------------------------------------------------ the buttons
+//
+// Every action of the module is one of these (`exam-ui-conventions`): one
+// look (`.sl-exam-action` in css/exam.css), at most one primary per section,
+// and one way of asking before something is destroyed.
+
+/** The classes of a module button of `kind` (`primary`, `default`, `danger`). */
+function actionClass(kind, extra) {
+  return ["sl-exam-action", kind && kind !== "default" ? `sl-exam-action-${kind}` : null, extra].filter(Boolean).join(" ");
+}
+
+/**
+ * A button that acts: `button({ label, kind, action })`. `kind` is `primary`,
+ * `default` or `danger`; `type` is `submit` for a form's own button. Further
+ * properties go to the element as with `h()`.
+ */
+export function button({ label, kind = "default", action, class: className, type = "button", ...props }) {
+  return h("button", { ...props, type, class: actionClass(kind, className), onClick: action }, label);
+}
+
+/**
+ * A way to another page that is an action, such as Back to the pool or Class
+ * screen: an `a` drawn exactly like a button, so middle-click and "open in a
+ * new tab" keep working. `newWindow` opens it in a window of its own.
+ */
+export function linkButton({ label, href, kind = "default", newWindow = false, class: className, ...props }) {
+  return h(
+    "a",
+    { ...props, href, class: actionClass(kind, className), target: newWindow ? "_blank" : undefined, rel: newWindow ? "noopener" : undefined },
+    label
+  );
+}
+
+/** How long an armed confirmation button waits for its second click. */
+const ARMED_MS = 5000;
+
+/**
+ * A button that acts only on a second click, its label telling what the
+ * second one does - the module's one way of asking twice, never a browser
+ * dialog. It falls back to its first state when it loses the focus, on Escape,
+ * on a click anywhere else, and after five seconds; the armed label is
+ * announced (`aria-live`). `kind` defaults to `danger`; `action` gets the
+ * second click's event.
+ */
+export function confirmButton({ class: className, label, armed, action, kind = "danger", ...props }) {
+  const element = h("button", { ...props, type: "button", class: actionClass(kind, className), "aria-live": "polite" }, label);
+  // A button named by `aria-label` (an icon) is renamed while armed, too.
+  const named = element.getAttribute("aria-label");
+  let timer;
+  const elsewhere = (event) => {
+    if (!element.contains(event.target)) disarm();
+  };
+  const disarm = () => {
+    clearTimeout(timer);
+    document.removeEventListener("pointerdown", elsewhere, true);
+    if (element.dataset.armed !== "1") return;
+    delete element.dataset.armed;
+    element.textContent = label;
+    if (named !== null) element.setAttribute("aria-label", named);
+  };
+  element.addEventListener("click", (event) => {
+    if (element.dataset.armed !== "1") {
+      element.dataset.armed = "1";
+      element.textContent = armed;
+      if (named !== null) element.setAttribute("aria-label", armed);
+      timer = setTimeout(disarm, ARMED_MS);
+      document.addEventListener("pointerdown", elsewhere, true);
+      return;
+    }
+    disarm();
+    action(event);
+  });
+  element.addEventListener("blur", disarm);
+  element.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") disarm();
+  });
+  element.disarm = disarm;
+  return element;
+}
+
 // ------------------------------------------------------- table conventions
 //
 // What every module table shares (`gradebook-sheet`): a marked row as a

@@ -1,19 +1,19 @@
 ## 0. Preconditions
 
-- [ ] 0.1 Confirm `exam-online-tests` is archived (its `exam-navigation` and `online-test` deltas are in the main specs). If not, stop and raise it with Gerald.
-- [ ] 0.2 Re-check the file:line references in design.md, Context, against HEAD and fix them in design.md where the code has moved.
+- [x] 0.1 (Checked 2026-10-18: archived as `2026-10-18-exam-online-tests`, and `exam-navigation`/`online-test` are in the main specs.) Confirm `exam-online-tests` is archived (its `exam-navigation` and `online-test` deltas are in the main specs). If not, stop and raise it with Gerald.
+- [x] 0.2 (Checked against `5ea0e50`: `live.js` 113→142 and 217→246, `tests.js` 206→205; the rest still matches.) Re-check the file:line references in design.md, Context, against HEAD and fix them in design.md where the code has moved.
 
 ## 1. Phase 1: Button and confirmation components
 
-- [ ] 1.1 Add `button()`, `linkButton()` and `confirmButton()` to `exam/client/frame.js` (design D1). `confirmButton` takes over `armedButton` from `client/tests.js` and adds disarming on blur, Escape and after 5 s, plus `aria-live` on the label. Re-export `armedButton` as an alias until 2.x has replaced every call.
-- [ ] 1.2 Add `.sl-exam-action`, `.sl-exam-action-primary` and `.sl-exam-action-danger` to `css/exam.css` in light and dark mode, modelled on `.sl-button`/`.sl-button-accent`. Restyle `.sl-exam-primary` as an alias of the primary action, and drop the `sl-exam-link` look.
-- [ ] 1.3 Replace every `window.confirm` with `confirmButton`: roster removal (`client/classes.js`), gradebook column (`client/gradebook.js`) and question delete (`client/question-editor.js`). The category delete goes with phase 3. Add the armed labels to `i18n/en.json` and `i18n/de.json`.
-- [ ] 1.4 Confirm by two clicks where nothing confirms today: deleting a scheduled sitting first, then removing a question from an unwritten test (`client/tests.js`). Replace the import's in-page Take back confirmation with `confirmButton` (`client/pool-import.js`). Leave Release untouched; it belongs to `exam-live-bound-browser`.
-- [ ] 1.5 Harness checks in `test/exam.test.js`:
+- [x] 1.1 Add `button()`, `linkButton()` and `confirmButton()` to `exam/client/frame.js` (design D1). `confirmButton` takes over `armedButton` from `client/tests.js` and adds disarming on blur, Escape and after 5 s, plus `aria-live` on the label. Re-export `armedButton` as an alias until 2.x has replaced every call. (Applied: every call was replaced at once, so no alias was needed.)
+- [x] 1.2 Add `.sl-exam-action`, `.sl-exam-action-primary` and `.sl-exam-action-danger` to `css/exam.css` in light and dark mode, modelled on `.sl-button`/`.sl-button-accent`. Restyle `.sl-exam-primary` as an alias of the primary action, and drop the `sl-exam-link` look.
+- [x] 1.3 Replace every `window.confirm` with `confirmButton`: roster removal (`client/classes.js`), gradebook column (`client/gradebook.js`) and question delete (`client/question-editor.js`). The category delete goes with phase 3. Add the armed labels to `i18n/en.json` and `i18n/de.json`.
+- [x] 1.4 Confirm by two clicks where nothing confirms today: deleting a scheduled sitting first, then removing a question from an unwritten test (`client/tests.js`). Replace the import's in-page Take back confirmation with `confirmButton` (`client/pool-import.js`). Leave Release untouched; it belongs to `exam-live-bound-browser`.
+- [x] 1.5 Harness checks in `test/exam.test.js`:
   - one click on a sitting's Delete deletes nothing and changes the label, and a second click deletes;
   - clicking elsewhere disarms;
   - no `dialog` event fires while deleting a gradebook column and a roster entry.
-- [ ] 1.6 Run `npm test`, record the result here, and commit phase 1.
+- [x] 1.6 Run `npm test`, record the result here, and commit phase 1. Result 2026-10-18: `test/exam.test.js` 100/100; `npm test` 685/686, the failure the reload-backoff check of `deployment-surface`, which fails the same way on unchanged HEAD (`5ea0e50`, stashed working tree), so it is not caused by this phase.
 
 ## 2. Phase 2: Links become buttons, actions move into their structure
 
@@ -100,7 +100,7 @@
 ## 5. Phase 5: Consistency
 
 - [ ] 5.1 Grading scale (`client/gradebook.js`, around `:677`): save as it changes while the scale is valid, with saving/saved/refused marking as on the sheet, and the explicit Save removed. Add "Every field is saved as it changes." to the student page.
-- [ ] 5.2 Apply the wording table of design D12 in `i18n/en.json` and `i18n/de.json`, keeping the keys identical. Use the catalog's language names in the test head (`client/tests.js:206`). Run `test/i18n-catalog.test.js`.
+- [ ] 5.2 Apply the wording table of design D12 in `i18n/en.json` and `i18n/de.json`, keeping the keys identical. Use the catalog's language names in the test head (`client/tests.js:205`). Run `test/i18n-catalog.test.js`.
 - [ ] 5.3 Harness checks in `test/exam.test.js`:
   - the bar and the gradebook heading show the same name for the whole year in en and de;
   - an English test head of a German course says "German";
@@ -111,3 +111,10 @@
 
 - [ ] 6.1 Update `docs-exam-module.md` (category tree, keys, rename/delete, end/extend) and `AI/architecture.md` (component map: `tree-drag.js`, removed `pool-categories.js`, new routes; observations).
 - [ ] 6.2 Deploy to secureLectures (sync order: safeLearn first) and smoke-check with Gerald's teacher account: one drag in the tree, one rename, and one sitting extended in a trial test.
+
+## Notes for applying
+
+- Design D9 assumes deadlines are derived. They are not: `startAttempt` stores `attempt.deadline` = min(start + duration, window end). End must therefore also set every running attempt's deadline to now before `finalizeDue`. Extend must set each running attempt's deadline to min(started_at + sitting.duration_s, new closes_at).
+- `armedButton` is also used by the live view's admin delete (`exam/client/live.js`). The live view redraws a row on every change event, which disarms a button armed in it.
+- `categoryTree` (`exam/pool.js`) counts only non-retired questions. The delete icon (3.5) needs a count that includes retired ones.
+- The scale page (`exam/routes-gradebook.js`, `page("/scale", …)`) passes no `current`; 2.5 needs `current: "scale"` through `teacherShell`.

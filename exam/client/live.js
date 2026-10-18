@@ -22,9 +22,9 @@
  * is told so, and the view stops.
  */
 
-import { defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, t } from "./frame.js";
+import { confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, t } from "./frame.js";
 import { displayClass, displayPerson } from "./classes.js";
-import { armedButton, displayWindow } from "./tests.js";
+import { displayWindow } from "./tests.js";
 
 const stateLabels = {
   scheduled: () => t("exam.live.stateScheduled"),
@@ -247,7 +247,7 @@ class LiveView extends ExamElement {
         : null;
     const remove =
       this.admin && participant.attemptId !== null
-        ? armedButton({
+        ? confirmButton({
             class: "sl-exam-live-delete sl-exam-admin",
             label: t("exam.live.deleteAttempt"),
             armed: t("exam.live.deleteAttemptArmed"),

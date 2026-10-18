@@ -15,7 +15,7 @@
  * draw what it answers.
  */
 
-import { defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, markRows, t } from "./frame.js";
+import { confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, markRows, t } from "./frame.js";
 import { displayClass, displayPerson } from "./classes.js";
 import { defaultPeriods, matchWindow, periodTimes, viennaInstant, viennaLocal, windowFor } from "./periods.js";
 
@@ -151,23 +151,6 @@ function storedMarkup(html, className) {
   return container;
 }
 
-/**
- * A button that acts only on a second click, its label telling what the second
- * one does - the module's way of asking twice, without a browser dialog.
- */
-export function armedButton({ class: className, label, armed, action }) {
-  const button = h("button", { type: "button", class: className }, label);
-  button.addEventListener("click", () => {
-    if (button.dataset.armed !== "1") {
-      button.dataset.armed = "1";
-      button.textContent = armed;
-      return;
-    }
-    action();
-  });
-  return button;
-}
-
 /** Why a request was refused, in a sentence for the teacher. */
 function refusal(error) {
   return error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.frame.saveFailed");
@@ -254,9 +237,14 @@ class TestDetail extends ExamElement {
             test.questions.length === 1
               ? null
               : !test.started
-                ? h("button", { type: "button", class: "sl-exam-test-remove", onClick: () => this.removeQuestion(question.questionId) }, t("exam.tests.removeQuestion"))
+                ? confirmButton({
+                    class: "sl-exam-test-remove",
+                    label: t("exam.tests.removeQuestion"),
+                    armed: t("exam.tests.removeQuestionUnwrittenArmed"),
+                    action: () => this.removeQuestion(question.questionId),
+                  })
                 : this.admin
-                  ? armedButton({
+                  ? confirmButton({
                       class: "sl-exam-test-remove sl-exam-admin",
                       label: t("exam.tests.removeQuestion"),
                       armed: t("exam.tests.removeQuestionArmed"),
@@ -301,7 +289,12 @@ class TestDetail extends ExamElement {
                       " ",
                       h("button", { type: "button", class: "sl-exam-sitting-edit", onClick: () => this.editSitting(test, sitting) }, t("exam.tests.change")),
                       " ",
-                      h("button", { type: "button", class: "sl-exam-sitting-delete", onClick: () => this.deleteSitting(sitting) }, t("exam.tests.delete")),
+                      confirmButton({
+                        class: "sl-exam-sitting-delete",
+                        label: t("exam.tests.delete"),
+                        armed: t("exam.tests.deleteSittingArmed"),
+                        action: () => this.deleteSitting(sitting),
+                      }),
                     ]
                   : null
               )
@@ -565,7 +558,7 @@ class TestDetail extends ExamElement {
    */
   deleteButton(test) {
     const written = test.attempts.started;
-    const button = armedButton({
+    const button = confirmButton({
       class: test.started ? "sl-exam-test-delete sl-exam-admin" : "sl-exam-test-delete",
       label: t("exam.tests.deleteTest"),
       armed: test.started ? t("exam.tests.deleteTestWrittenArmed", { count: written }) : t("exam.tests.deleteTestArmed"),

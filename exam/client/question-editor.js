@@ -19,7 +19,7 @@
  * draws what it answers.
  */
 
-import { defineExamElement, ExamApiError, ExamElement, examApi, h, t } from "./frame.js";
+import { confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, h, t } from "./frame.js";
 import { displayClass } from "./classes.js";
 import "./rich-text.js";
 
@@ -142,7 +142,12 @@ class QuestionEditor extends ExamElement {
   lifecycleButtons(stored) {
     this.retire = h("button", { type: "button", "data-action": "retire", hidden: stored.retired, onClick: () => this.setRetired(true) }, t("exam.editor.retire"));
     this.revive = h("button", { type: "button", "data-action": "revive", hidden: !stored.retired, onClick: () => this.setRetired(false) }, t("exam.editor.revive"));
-    const remove = h("button", { type: "button", "data-action": "delete", onClick: () => this.remove() }, t("exam.categories.delete"));
+    const remove = confirmButton({
+      "data-action": "delete",
+      label: t("exam.categories.delete"),
+      armed: t("exam.editor.deleteArmed"),
+      action: () => this.remove(),
+    });
     return h("span", { class: "sl-exam-editor-lifecycle" }, this.retire, this.revive, remove);
   }
 
@@ -372,7 +377,6 @@ class QuestionEditor extends ExamElement {
   }
 
   async remove() {
-    if (!window.confirm(t("exam.editor.confirmDelete", { name: this.stored.nameDe }))) return;
     this.message.replaceChildren();
     try {
       await examApi(`/pool/questions/${this.stored.id}`, { method: "DELETE" });

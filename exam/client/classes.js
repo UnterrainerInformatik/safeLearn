@@ -13,7 +13,7 @@
  * elements only draw what it answers.
  */
 
-import { defineExamElement, ExamApiError, ExamElement, examApi, format, h, markRows, saveOnChange, stickyColumns, t } from "./frame.js";
+import { confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, format, h, markRows, saveOnChange, stickyColumns, t } from "./frame.js";
 import "./date-input.js";
 
 export const categoryLabels = {
@@ -334,7 +334,6 @@ class ClassView extends ExamElement {
     const attending = klass.roster.filter((entry) => !entry.leftAt);
     const left = klass.roster.filter((entry) => entry.leftAt);
     const remove = (entry) => (event) => {
-      if (!window.confirm(t("exam.classes.confirmRemove", { name: displayPerson(entry) }))) return;
       act(event.target, line, async () => {
         await examApi(`/classes/${klass.id}/roster/${encodeURIComponent(entry.username)}`, { method: "DELETE" });
         this.reload();
@@ -358,7 +357,14 @@ class ClassView extends ExamElement {
           h("td", {}, displayPerson(entry)),
           h("td", {}, entry.username),
           h("td", {}, entry.leftAt ? t("exam.classes.leftOn", { date: displayDate(entry.leftAt) }) : t("exam.classes.since", { date: displayDate(entry.joinedAt) })),
-          h("td", {}, removable ? h("button", { type: "button", onclick: remove(entry) }, t("exam.classes.remove")) : null)
+          h("td", {}, removable
+            ? confirmButton({
+                class: "sl-exam-roster-remove",
+                label: t("exam.classes.remove"),
+                armed: t("exam.classes.removeArmed", { name: displayPerson(entry) }),
+                action: remove(entry),
+              })
+            : null)
         )
       );
     return h(

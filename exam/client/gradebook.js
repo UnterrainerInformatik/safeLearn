@@ -16,7 +16,7 @@
 import { parseNumber as parseTyped } from "../../i18n/format.js";
 import { viennaLocal } from "./periods.js";
 import { act, displayClass, displayPerson, messageLine } from "./classes.js";
-import { defineExamElement, ExamElement, examApi, format, h, markRows, saveOnChange, stickyColumns, t } from "./frame.js";
+import { confirmButton, defineExamElement, ExamElement, examApi, format, h, markRows, saveOnChange, stickyColumns, t } from "./frame.js";
 
 const categories = ["onlineTests", "manualTests", "participation", "homework"];
 
@@ -331,7 +331,6 @@ class GradebookView extends ExamElement {
             }
           );
     const remove = (event) => {
-      if (column.results > 0 && !window.confirm(t("exam.gradebook.deleteColumnConfirm", { name: column.name, count: column.results }))) return;
       act(event.target, this.line, async () => {
         await examApi(`/assessments/${column.id}`, { method: "DELETE" });
         await this.reload();
@@ -343,7 +342,14 @@ class GradebookView extends ExamElement {
       name,
       date,
       max,
-      h("button", { type: "button", class: "sl-exam-delete", title: t("exam.gradebook.deleteColumn"), "aria-label": t("exam.gradebook.deleteNamedColumn", { name: column.name }), onclick: remove }, "×")
+      confirmButton({
+        class: "sl-exam-delete",
+        title: t("exam.gradebook.deleteColumn"),
+        "aria-label": t("exam.gradebook.deleteNamedColumn", { name: column.name }),
+        label: "×",
+        armed: column.results > 0 ? t("exam.gradebook.deleteColumnArmed", { count: column.results }) : t("exam.gradebook.deleteEmptyColumnArmed"),
+        action: remove,
+      })
     );
   }
 

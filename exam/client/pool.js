@@ -376,7 +376,7 @@ class PoolView extends ExamElement {
             h(
               "td",
               {},
-              h("button", { type: "button", class: "sl-exam-link" }, question.nameDe),
+              h("button", { type: "button", class: "sl-exam-pool-name" }, question.nameDe),
               question.unreviewed ? h("span", { class: "sl-exam-pool-badge" }, t("exam.pool.badge")) : null,
               h("div", { class: "sl-exam-quiet" }, question.excerptDe),
               h(

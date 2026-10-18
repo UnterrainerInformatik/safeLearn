@@ -91,8 +91,141 @@
   display: none;
 }
 
-.sl-exam-primary {
-  font-weight: bold;
+/* The module's buttons (`button()`, `linkButton()` and `confirmButton()` in
+   exam/client/frame.js): one look for every action, modelled on `.sl-button`
+   - same radius, border and padding - with a primary and a danger variant.
+   A `linkButton` is an `a` drawn exactly the same. `.sl-exam-primary` is the
+   older name of the primary action. `.sl-exam-button` is the top bar's module
+   button and has nothing to do with these. */
+
+.sl-exam-action,
+.sl-exam-primary,
+#markdown-content a.sl-exam-action,
+#markdown-content.dark-mode a.sl-exam-action {
+  appearance: none;
+  display: inline-block;
+  box-sizing: border-box;
+  margin: 2px 0;
+  padding: 5px 12px;
+  border: 1px solid rgba(27, 31, 35, 0.15);
+  border-radius: 6px;
+  box-shadow: rgba(27, 31, 35, 0.04) 0 1px 0, rgba(255, 255, 255, 0.25) 0 1px 0 inset;
+  background-color: #fafbfc;
+  color: #24292e;
+  font: inherit;
+  font-weight: 500;
+  line-height: 20px;
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  vertical-align: middle;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background-color 0.2s cubic-bezier(0.3, 0, 0.5, 1);
+}
+
+.sl-exam-action:hover,
+.sl-exam-primary:hover,
+#markdown-content a.sl-exam-action:hover {
+  background-color: #f3f4f6;
+  text-decoration: none;
+}
+
+.sl-exam-action:active,
+.sl-exam-primary:active {
+  background-color: #edeff2;
+  transition: none;
+}
+
+.sl-exam-action:focus-visible,
+.sl-exam-primary:focus-visible {
+  outline: 2px solid #0969da;
+  outline-offset: 1px;
+}
+
+.sl-exam-action:disabled,
+.sl-exam-primary:disabled {
+  color: #959da5;
+  background-color: #fafbfc;
+  cursor: default;
+}
+
+.sl-exam-action-primary,
+.sl-exam-primary,
+#markdown-content a.sl-exam-action-primary {
+  background-color: #e7f0f9;
+  border-color: rgba(9, 105, 218, 0.45);
+  font-weight: 600;
+}
+
+.sl-exam-action-primary:hover,
+.sl-exam-primary:hover,
+#markdown-content a.sl-exam-action-primary:hover {
+  background-color: #d6e6f6;
+}
+
+.sl-exam-action-danger,
+#markdown-content a.sl-exam-action-danger {
+  color: #b42318;
+  border-color: rgba(180, 35, 24, 0.35);
+}
+
+/* A confirmation button between its two clicks. */
+.sl-exam-action[data-armed="1"] {
+  color: #fff;
+  background-color: #b42318;
+  border-color: #b42318;
+}
+
+#markdown-content.dark-mode .sl-exam-action,
+#markdown-content.dark-mode .sl-exam-primary,
+#markdown-content.dark-mode a.sl-exam-action {
+  color: #e6edf3;
+  background-color: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.25);
+  box-shadow: none;
+}
+
+#markdown-content.dark-mode .sl-exam-action:hover,
+#markdown-content.dark-mode .sl-exam-primary:hover,
+#markdown-content.dark-mode a.sl-exam-action:hover {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+#markdown-content.dark-mode .sl-exam-action:disabled,
+#markdown-content.dark-mode .sl-exam-primary:disabled {
+  color: rgba(230, 237, 243, 0.45);
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+#markdown-content.dark-mode .sl-exam-action:focus-visible,
+#markdown-content.dark-mode .sl-exam-primary:focus-visible {
+  outline-color: #58a6ff;
+}
+
+#markdown-content.dark-mode .sl-exam-action-primary,
+#markdown-content.dark-mode .sl-exam-primary,
+#markdown-content.dark-mode a.sl-exam-action-primary {
+  background-color: rgba(56, 139, 253, 0.22);
+  border-color: rgba(88, 166, 255, 0.6);
+}
+
+#markdown-content.dark-mode .sl-exam-action-primary:hover,
+#markdown-content.dark-mode .sl-exam-primary:hover,
+#markdown-content.dark-mode a.sl-exam-action-primary:hover {
+  background-color: rgba(56, 139, 253, 0.32);
+}
+
+#markdown-content.dark-mode .sl-exam-action-danger,
+#markdown-content.dark-mode a.sl-exam-action-danger {
+  color: #ff7b72;
+  border-color: rgba(255, 123, 114, 0.45);
+}
+
+#markdown-content.dark-mode .sl-exam-action[data-armed="1"] {
+  color: #fff;
+  background-color: #b42318;
+  border-color: #f85149;
 }
 
 .sl-exam .sl-embed-error {
@@ -546,7 +679,7 @@ a.sl-exam-button.sl-exam-open:hover,
 }
 
 .sl-exam-pool-category,
-.sl-exam-link {
+.sl-exam-pool-name {
   font: inherit;
   color: inherit;
   background: none;
@@ -557,9 +690,11 @@ a.sl-exam-button.sl-exam-open:hover,
   border-radius: 4px;
 }
 
-.sl-exam-link {
-  text-decoration: underline;
+/* The question's name in its row: plain text that takes the focus, since
+   the whole row is what a click acts on. */
+.sl-exam-pool-name {
   padding: 0;
+  font-weight: 600;
 }
 
 .sl-exam-pool-category.is-chosen {

@@ -15,7 +15,7 @@
  * draws what it answers.
  */
 
-import { defineExamElement, ExamApiError, ExamElement, examApi, format, h, t } from "./frame.js";
+import { confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, format, h, t } from "./frame.js";
 
 const typeLabels = {
   multichoiceset: t("exam.pool.type.multichoiceset"),
@@ -304,21 +304,16 @@ class PoolImport extends ExamElement {
     );
   }
 
-  /** "Take back", confirmed in the page: the module asks no browser dialog. */
+  /** "Take back", confirmed by a second click on the same button. */
   takeBack(record) {
     const cell = h("span", { class: "sl-exam-import-take-back" });
-    const ask = () =>
-      cell.replaceChildren(
-        h("button", { type: "button", onClick: confirm }, t("exam.import.takeBack"))
-      );
-    const confirm = () =>
-      cell.replaceChildren(
-        `${t("exam.import.confirmTakeBack", { count: record.questions })} `,
-        h("button", { type: "button", onClick: () => this.takeBackNow(record, cell) }, t("exam.import.yesTakeBack")),
-        " ",
-        h("button", { type: "button", onClick: ask }, t("exam.import.cancel"))
-      );
-    ask();
+    cell.append(
+      confirmButton({
+        label: t("exam.import.takeBack"),
+        armed: t("exam.import.takeBackArmed", { count: record.questions }),
+        action: () => this.takeBackNow(record, cell),
+      })
+    );
     return cell;
   }
 

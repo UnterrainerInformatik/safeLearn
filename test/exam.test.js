@@ -436,6 +436,40 @@ describe("classes and courses", () => {
     assert.equal(afterwards.json.roster.filter((e) => !e.leftAt).length, candidates.length, "nothing a refused request asked for happened");
     assert.equal(afterwards.json.courses.length, 1);
   });
+
+  test("taking a student off the roster asks by a second click on the same button, never by a browser dialog", async () => {
+    const page = teacher.page;
+    const dialogs = [];
+    const onDialog = (dialog) => {
+      dialogs.push(dialog.type());
+      dialog.dismiss().catch(() => {});
+    };
+    page.on("dialog", onDialog);
+    try {
+      const username = candidates[0].username;
+      await page.goto(`${applicationUrl}/exam/classes/${klass.id}`, { waitUntil: "domcontentloaded" });
+      const row = await page.waitForFunction(
+        (name) => [...document.querySelectorAll(".sl-exam-roster tr")].find((tr) => tr.children[1]?.textContent === name && tr.querySelector(".sl-exam-roster-remove")),
+        { timeout: 20000 },
+        username
+      );
+      const button = await row.asElement().$(".sl-exam-roster-remove");
+      await button.click();
+      assert.match(await button.evaluate((b) => b.textContent), /^Click again to take .* off the roster/, "the label says what the second click does");
+      const attending = async () => (await fetchAs(teacher, `/exam/api/classes/${klass.id}`)).json.roster.find((e) => e.username === username && !e.leftAt);
+      assert.ok(await attending(), "one click takes nobody off");
+      await button.click();
+      await page.waitForFunction(
+        (name) => [...document.querySelectorAll(".sl-exam-roster tr")].some((tr) => tr.children[1]?.textContent === name && tr.classList.contains("sl-exam-left")),
+        { timeout: 10000 },
+        username
+      );
+      assert.equal(await attending(), undefined, "the second click does");
+      assert.deepEqual(dialogs, [], "no browser dialog");
+    } finally {
+      page.off("dialog", onDialog);
+    }
+  });
 });
 
 describe("the gradebook", () => {
@@ -734,6 +768,32 @@ describe("the gradebook", () => {
     assert.ok(added, "the column exists");
     assert.deepEqual([added.kind, added.maxPoints], ["test", 20]);
     assert.deepEqual(columns.map((c) => c.category), ["manualTests", "manualTests", "participation", "homework"], "grouped by category in the config sheet's order");
+  });
+
+  test("the sheet: deleting a column asks by a second click on its ×, never by a browser dialog", async () => {
+    const column = await addColumn({ kind: "test", name: "To be deleted", date: year.startsOn, maxPoints: 10 });
+    assert.equal((await putResult(column, other, { points: 5 })).status, 200);
+    const dialogs = [];
+    const onDialog = (dialog) => {
+      dialogs.push(dialog.type());
+      dialog.dismiss().catch(() => {});
+    };
+    teacher.page.on("dialog", onDialog);
+    try {
+      await openSheet();
+      const button = `th[data-column="${column.id}"] .sl-exam-delete`;
+      await teacher.page.waitForSelector(button, { timeout: 20000 });
+      await teacher.page.click(button);
+      assert.equal(await teacher.page.$eval(button, (b) => b.textContent), "Click again to delete it and its 1 result");
+      const exists = async () => (await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=ws`)).json.columns.some((c) => c.id === column.id);
+      assert.equal(await exists(), true, "one click deletes nothing");
+      await teacher.page.click(button);
+      await teacher.page.waitForFunction((selector) => !document.querySelector(selector), { timeout: 10000 }, `th[data-column="${column.id}"]`);
+      assert.equal(await exists(), false, "the second click deletes");
+      assert.deepEqual(dialogs, [], "no browser dialog");
+    } finally {
+      teacher.page.off("dialog", onDialog);
+    }
   });
 
   test("the sheet: a typed result is stored as it changes, emptying removes it, a refused value leaves the stored one", async () => {
@@ -1410,6 +1470,40 @@ describe("online tests: assembly", () => {
     const kept = (await fetchAs(teacher, `/exam/api/tests/${created.id}`)).json;
     assert.deepEqual([kept.started, kept.questions.map((q) => q.questionId)], [true, [questions[0].id]]);
     assert.equal((await fetchAs(teacher, `/exam/api/tests/${created.id}`, { method: "PUT", body: { name: "Renamed" } })).json.name, "Renamed", "renaming stays possible");
+  });
+
+  test("a scheduled sitting is deleted only by a second click on its Delete, and a click elsewhere disarms it", async () => {
+    const created = (await fetchAs(teacher, `/exam/api/courses/${course.id}/tests`, { method: "POST", body: { name: "Sitting to delete", questionIds: [questions[0].id] } })).json;
+    const sitting = await fetchAs(teacher, `/exam/api/tests/${created.id}/sittings`, {
+      method: "POST",
+      body: { opensAt: new Date(Date.now() + 24 * 3600000).toISOString(), closesAt: new Date(Date.now() + 25 * 3600000).toISOString(), durationMinutes: 15 },
+    });
+    assert.equal(sitting.status, 200, JSON.stringify(sitting.json));
+    const page = teacher.page;
+    const button = `li[data-sitting="${sitting.json.id}"] .sl-exam-sitting-delete`;
+    const label = () => page.$eval(button, (b) => b.textContent);
+    const sittings = async () => (await fetchAs(teacher, `/exam/api/tests/${created.id}`)).json.sittings.length;
+    try {
+      await page.goto(`${applicationUrl}/exam/tests/${created.id}`, { waitUntil: "domcontentloaded" });
+      await page.waitForSelector(button, { timeout: 20000 });
+      assert.equal(await label(), "Delete");
+      await page.click(button);
+      assert.equal(await label(), "Click again to delete this sitting", "the first click only arms it");
+      assert.equal(await sittings(), 1, "and deletes nothing");
+
+      await page.click("#markdown-content h1");
+      assert.equal(await label(), "Delete", "a click elsewhere disarms it");
+      await page.click(button);
+      await page.keyboard.press("Escape");
+      assert.equal(await label(), "Delete", "so does Escape");
+
+      await page.click(button);
+      await page.click(button);
+      await page.waitForFunction((selector) => !document.querySelector(selector), { timeout: 10000 }, button);
+      assert.equal(await sittings(), 0, "the second click deletes");
+    } finally {
+      await fetchAs(teacher, `/exam/api/tests/${created.id}`, { method: "DELETE" });
+    }
   });
 });
 
@@ -2876,7 +2970,7 @@ ${answers("en")}
     const row = `.sl-exam-import-past tr[data-import="${imported.json.id}"]`;
     await teacher.page.waitForSelector(`${row} button`, { timeout: 20000 });
     await teacher.page.click(`${row} button`);
-    assert.match(await teacher.page.$eval(`${row} .sl-exam-import-take-back`, (el) => el.textContent), /^Delete its 2 questions/, "confirmed in the page");
+    assert.match(await teacher.page.$eval(`${row} .sl-exam-import-take-back button`, (el) => el.textContent), /^Click again to delete its 2 questions/, "asks by a second click");
     await teacher.page.click(`${row} .sl-exam-import-take-back button`);
     await teacher.page.waitForFunction((selector) => !document.querySelector(selector) && document.querySelector(".sl-exam-import"), { timeout: 10000 }, row);
     assert.deepEqual((await fetchAs(teacher, "/exam/api/pool/questions?q=Zur%C3%BCck")).json, [], "its questions are gone");
