@@ -15,7 +15,7 @@
 import { getSitting } from "./tests.js";
 import { listen, liveParticipant, liveSnapshot } from "./live.js";
 import { NotFoundError } from "./classes.js";
-import { actsAsTeacher, identityOf, requireTeacher, teacherPage } from "./gate.js";
+import { requireTeacher, sessionNow, teacherPage } from "./gate.js";
 import { teacherShell } from "./bar.js";
 import { openEventStream } from "../event-stream.js";
 import { embedPlaceholder } from "../obsidian.js";
@@ -32,47 +32,6 @@ function idParam(value) {
 }
 
 const heartbeatMs = 25000;
-
-/**
- * What the session behind a long-lived request is now: `teacher` while it is
- * still there and still acts as a teacher after the student-view downgrade,
- * `refused` otherwise, and `renew` when its access token is about to expire.
- *
- * The session is read from its store as a copy, never through `req.session`,
- * which this request would write back over newer changes when it ends; the
- * permission context is built anew from that copy, so a switch to the
- * student view made by another request counts. Renewing the tokens is left to
- * an ordinary request: the stream asks the client to reconnect instead.
- */
-function sessionNow(req) {
-  return new Promise((resolve) => {
-    if (!req.sessionStore || !req.sessionID) {
-      resolve("refused");
-      return;
-    }
-    req.sessionStore.get(req.sessionID, (error, stored) => {
-      const user = stored?.passport?.user;
-      if (error || !user) {
-        resolve("refused");
-        return;
-      }
-      const probe = { user, session: stored };
-      if (!identityOf(probe) || identityOf(probe) !== identityOf(req)) {
-        resolve("refused");
-        return;
-      }
-      const exp = user.accessTokenDecoded?.exp;
-      if (typeof exp !== "number" || exp - Date.now() / 1000 <= 60) {
-        resolve("renew");
-        return;
-      }
-      actsAsTeacher(probe).then(
-        (teacher) => resolve(teacher ? "teacher" : "refused"),
-        () => resolve("refused")
-      );
-    });
-  });
-}
 
 export function registerLiveRoutes(router, { db, handle, startPage }) {
   router.get(
@@ -106,7 +65,7 @@ export function registerLiveRoutes(router, { db, handle, startPage }) {
       const checked = (deliver) => {
         queue = queue.then(async () => {
           if (stream.closed) return;
-          const now = await sessionNow(req);
+          const now = await sessionNow(req, { teacher: true });
           if (now === "refused") {
             stream.send("refused", { reason: "The session no longer acts as a teacher." });
             stream.close();

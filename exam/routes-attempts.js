@@ -13,9 +13,11 @@
  * memory and does not survive a restart.
  */
 
-import { checkDevice, openTestsOf, ownAttempt, recordFocus, resultView, saveAnswer, startAttempt, submitAttempt, writingView } from "./attempts.js";
+import { checkDevice, nextOpenTestsChange, openTestsOf, ownAttempt, recordFocus, resultView, saveAnswer, startAttempt, submitAttempt, writingView } from "./attempts.js";
 import { NotFoundError } from "./classes.js";
-import { identityOf, requireStudent } from "./gate.js";
+import { identityOf, requireStudent, sessionNow } from "./gate.js";
+import { listenTests } from "./live.js";
+import { openEventStream } from "../event-stream.js";
 import { embedPlaceholder, wrapInPage } from "../obsidian.js";
 
 /** A record id from the path; anything but a positive integer names nothing. */
@@ -59,6 +61,8 @@ function requireIdentity(req, res, next) {
   else res.status(403).json({ error: "Forbidden" });
 }
 
+const heartbeatMs = 25000;
+
 export function registerAttemptRoutes(router, { db, handle, startPage }) {
   /**
    * The asker's attempt from the path, finalized if due, and - while it is
@@ -80,6 +84,67 @@ export function registerAttemptRoutes(router, { db, handle, startPage }) {
     handle(async (req, res) => {
       const testId = req.query.test === undefined ? null : idParam(String(req.query.test));
       res.json({ tests: openTestsOf(db, identityOf(req), { testId }) });
+    })
+  );
+
+  // The same list as a stream, so a student's page shows a test the moment it
+  // opens: sent at once, then again whenever it changes - a sitting written
+  // by a teacher, an attempt of the asker's, or a window opening or closing,
+  // for which a timer waits. Like the live view's stream it re-checks the
+  // session before each event and with each heartbeat; it never carries
+  // anything the list itself does not.
+  router.get(
+    "/api/my/events",
+    requireIdentity,
+    handle(async (req, res) => {
+      const username = identityOf(req);
+      let stop = () => {};
+      let heartbeat = null;
+      let timer = null;
+      const stream = openEventStream(req, res, {
+        headers: { "X-Accel-Buffering": "no" },
+        onClose: () => {
+          stop();
+          clearInterval(heartbeat);
+          clearTimeout(timer);
+        },
+      });
+      // What a change is: another set of tests, or one started or ended -
+      // never the time left of a running attempt, which every save moves.
+      let sent = null;
+      const push = () => {
+        const tests = openTestsOf(db, username);
+        const key = JSON.stringify(tests.map((test) => [test.testId, test.closesAt, test.attempt?.attemptId ?? null]));
+        if (key !== sent) {
+          sent = key;
+          stream.send("tests", { tests });
+        }
+        clearTimeout(timer);
+        const next = nextOpenTestsChange(db, username);
+        // Capped, so a timer never overflows; past the cap it simply runs again.
+        if (next !== null) timer = setTimeout(() => checked(push), Math.min(Math.max(0, Date.parse(next) - Date.now()) + 250, 2 ** 31 - 1));
+      };
+      let queue = Promise.resolve();
+      const checked = (deliver) => {
+        queue = queue.then(async () => {
+          if (stream.closed) return;
+          const now = await sessionNow(req);
+          if (now !== "ok") {
+            stream.send(now, {});
+            stream.close();
+            return;
+          }
+          try {
+            deliver();
+          } catch (error) {
+            console.error(`[exam] the open-tests stream of ${username} failed:`, error);
+            stream.close();
+          }
+        });
+      };
+      checked(push);
+      stop = listenTests(username, () => checked(push));
+      heartbeat = setInterval(() => checked(() => stream.comment("heartbeat")), heartbeatMs);
     })
   );
 

@@ -76,3 +76,49 @@ export function requireStudent(req, res, next) {
     })
     .catch(next);
 }
+
+/**
+ * What the session behind a long-lived request is now: `ok` while it is still
+ * there with the same identity - and, with `teacher`, still acts as a teacher
+ * after the student-view downgrade - `refused` otherwise, and `renew` when its
+ * access token is about to expire. Used by the module's event streams.
+ *
+ * The session is read from its store as a copy, never through `req.session`,
+ * which this request would write back over newer changes when it ends; the
+ * permission context is built anew from that copy, so a switch to the
+ * student view made by another request counts. Renewing the tokens is left to
+ * an ordinary request: the stream asks the client to reconnect instead.
+ */
+export function sessionNow(req, { teacher = false } = {}) {
+  return new Promise((resolve) => {
+    if (!req.sessionStore || !req.sessionID) {
+      resolve("refused");
+      return;
+    }
+    req.sessionStore.get(req.sessionID, (error, stored) => {
+      const user = stored?.passport?.user;
+      if (error || !user) {
+        resolve("refused");
+        return;
+      }
+      const probe = { user, session: stored };
+      if (!identityOf(probe) || identityOf(probe) !== identityOf(req)) {
+        resolve("refused");
+        return;
+      }
+      const exp = user.accessTokenDecoded?.exp;
+      if (typeof exp !== "number" || exp - Date.now() / 1000 <= 60) {
+        resolve("renew");
+        return;
+      }
+      if (!teacher) {
+        resolve("ok");
+        return;
+      }
+      actsAsTeacher(probe).then(
+        (acting) => resolve(acting ? "ok" : "refused"),
+        () => resolve("refused")
+      );
+    });
+  });
+}

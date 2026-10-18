@@ -51,9 +51,49 @@ function refusal(error) {
   return error instanceof ExamApiError && error.status < 500 ? error.message : "That could not be saved. Please try again.";
 }
 
+/** How long a stream the browser gave up on waits before it is tried again. */
+const streamRetryMs = 30000;
+
 class WriteTest extends ExamElement {
   disconnectedCallback() {
     this.stop?.();
+    this.closeStream();
+  }
+
+  /**
+   * While the list of open tests is shown, the server's stream of it
+   * (`/api/my/events`) redraws it the moment a test opens, closes or is
+   * written elsewhere, and tells the top bar's Exams button - which it keeps
+   * doing while a test is written, without redrawing the writing page.
+   */
+  watch() {
+    if (this.source) return;
+    const source = new EventSource("/exam/api/my/events");
+    this.source = source;
+    source.addEventListener("tests", (event) => {
+      const { tests } = JSON.parse(event.data);
+      window.dispatchEvent(new CustomEvent("sl-exam-open-tests", { detail: { count: tests.length } }));
+      if (!this.listing) return;
+      const shown = this.params.test === undefined ? tests : tests.filter((test) => String(test.testId) === this.params.test);
+      const key = JSON.stringify(shown.map((test) => [test.testId, test.closesAt]));
+      if (key !== this.shownKey) this.show(this.openTests(shown));
+    });
+    source.addEventListener("renew", () => {
+      this.closeStream();
+      this.watch();
+    });
+    source.addEventListener("refused", () => this.closeStream());
+    source.addEventListener("error", () => {
+      if (this.source !== source || source.readyState !== EventSource.CLOSED) return;
+      this.closeStream();
+      this.retry = setTimeout(() => this.isConnected && this.watch(), streamRetryMs);
+    });
+  }
+
+  closeStream() {
+    clearTimeout(this.retry);
+    this.source?.close();
+    this.source = null;
   }
 
   async load() {
@@ -83,6 +123,9 @@ class WriteTest extends ExamElement {
   }
 
   openTests(tests) {
+    this.listing = true;
+    this.shownKey = JSON.stringify(tests.map((test) => [test.testId, test.closesAt]));
+    this.watch();
     if (tests.length === 0) {
       return h("div", { class: "sl-exam sl-exam-attempt" }, h("p", { class: "sl-exam-quiet" }, "No online test is open for you right now."));
     }
@@ -114,6 +157,7 @@ class WriteTest extends ExamElement {
   // ------------------------------------------------------------ writing
 
   writingPage(writing) {
+    this.listing = false;
     if (writing.submitted) return this.resultPage(writing);
     this.stop?.();
     this.preview = writing.preview === true;

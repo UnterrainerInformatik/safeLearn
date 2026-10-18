@@ -8,6 +8,7 @@
 
 import { createSitting, createTest, deleteSitting, deleteTest, getTest, listTests, updateSitting, updateTest } from "./tests.js";
 import { correctShares, previewView, releaseAttempt } from "./attempts.js";
+import { notifySittings } from "./live.js";
 import { embedPlaceholder, wrapInPage, wrapInReveal } from "../obsidian.js";
 import { NotFoundError } from "./classes.js";
 import { requireTeacher, teacherPage } from "./gate.js";
@@ -81,10 +82,15 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
   api("post", "/courses/:id/tests", (req) => createTest(db, idParam(req.params.id), req.body ?? {}));
   api("get", "/tests/:id", (req) => getTest(db, idParam(req.params.id)));
   api("put", "/tests/:id", (req) => updateTest(db, idParam(req.params.id), req.body ?? {}));
-  api("delete", "/tests/:id", (req) => deleteTest(db, idParam(req.params.id)));
-  api("post", "/tests/:id/sittings", (req) => createSitting(db, idParam(req.params.id), req.body ?? {}));
-  api("put", "/sittings/:id", (req) => updateSitting(db, idParam(req.params.id), req.body ?? {}));
-  api("delete", "/sittings/:id", (req) => deleteSitting(db, idParam(req.params.id)));
+  // Each write of a sitting tells the students' streams of open tests.
+  const announced = (answer) => {
+    notifySittings();
+    return answer;
+  };
+  api("delete", "/tests/:id", (req) => announced(deleteTest(db, idParam(req.params.id))));
+  api("post", "/tests/:id/sittings", (req) => announced(createSitting(db, idParam(req.params.id), req.body ?? {})));
+  api("put", "/sittings/:id", (req) => announced(updateSitting(db, idParam(req.params.id), req.body ?? {})));
+  api("delete", "/sittings/:id", (req) => announced(deleteSitting(db, idParam(req.params.id))));
   api("post", "/attempts/:id/release", (req) => releaseAttempt(db, idParam(req.params.id)));
   api("get", "/tests/:id/preview", (req) => previewView(db, idParam(req.params.id)));
 

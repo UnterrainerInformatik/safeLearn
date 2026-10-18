@@ -692,7 +692,8 @@ document.addEventListener("DOMContentLoaded", initSearchField);
  * Keeps a student's Exams button violet exactly while a test is open for them:
  * the page is drawn with the colour of its moment, and a test opened or closed
  * while the page stays open is picked up by asking again every 30 s - only
- * while the page is visible, and once more as it becomes visible.
+ * while the page is visible, and once more as it becomes visible - or at once
+ * on a page whose list of open tests streams them.
  */
 function initExamsButton() {
   const button = document.getElementById("slExamsButton");
@@ -710,6 +711,8 @@ function initExamsButton() {
   };
   setInterval(refresh, 30000);
   document.addEventListener("visibilitychange", refresh);
+  // A page showing the open tests streams them, and says so at once.
+  window.addEventListener("sl-exam-open-tests", (event) => button.classList.toggle("sl-exam-open", event.detail.count > 0));
 }
 
 document.addEventListener("DOMContentLoaded", initExamsButton);

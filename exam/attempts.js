@@ -210,6 +210,26 @@ export function openTestsOf(db, username, { at = now(), testId = null } = {}) {
   });
 }
 
+/**
+ * The next moment after `at` at which the open tests of `username` change by
+ * time alone: a sitting of theirs opening or closing, or a running attempt
+ * of theirs reaching its deadline. Null when nothing lies ahead.
+ */
+export function nextOpenTestsChange(db, username, at = now()) {
+  const row = db
+    .prepare(
+      `SELECT MIN(t) AS next FROM (
+         SELECT s.opens_at AS t FROM sitting s JOIN sitting_participant p ON p.sitting_id = s.id WHERE p.username = ? AND s.opens_at > ?
+         UNION ALL
+         SELECT s.closes_at FROM sitting s JOIN sitting_participant p ON p.sitting_id = s.id WHERE p.username = ? AND s.closes_at > ?
+         UNION ALL
+         SELECT deadline FROM attempt WHERE username = ? AND submitted_at IS NULL AND deadline > ?
+       )`
+    )
+    .get(username, at, username, at, username, at);
+  return row?.next ?? null;
+}
+
 // ------------------------------------------------------------ starting
 
 /**

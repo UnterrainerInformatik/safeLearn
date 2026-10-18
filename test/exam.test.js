@@ -1554,6 +1554,35 @@ describe("online tests: writing", () => {
     assert.equal(!!(await student.page.$("#slExamsButton.sl-exam-open")), stillOpen, "and the button is violet only while another test is still open");
   });
 
+  test("a student's open tests appear and go without a reload: a sitting created, one whose window opens later, a test deleted", async () => {
+    const page = student.page;
+    await page.goto(`${applicationUrl}/exam/my`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("sl-exam-test .sl-exam-attempt", { timeout: 20000 });
+    const shown = (id) => page.$(`.sl-exam-attempt-open[data-test="${id}"]`);
+
+    const now = await openTest("Streamed now");
+    await page.waitForSelector(`.sl-exam-attempt-open[data-test="${now.id}"]`, { timeout: 5000 });
+    await page.waitForSelector("#slExamsButton.sl-exam-open", { timeout: 5000 });
+
+    const created = await fetchAs(teacher, `/exam/api/courses/${course.id}/tests`, { method: "POST", body: { name: "Streamed later", questionIds: questions.map((q) => q.id) } });
+    const sitting = await fetchAs(teacher, `/exam/api/tests/${created.json.id}/sittings`, {
+      method: "POST",
+      body: { opensAt: new Date(Date.now() + 3000).toISOString(), closesAt: new Date(Date.now() + 50 * 60000).toISOString(), durationMinutes: 15 },
+    });
+    assert.equal(sitting.status, 200, JSON.stringify(sitting.json));
+    assert.equal(await shown(created.json.id), null, "not before its window opens");
+    await page.waitForSelector(`.sl-exam-attempt-open[data-test="${created.json.id}"]`, { timeout: 10000 });
+
+    for (const id of [now.id, created.json.id]) {
+      assert.equal((await fetchAs(teacher, `/exam/api/tests/${id}`, { method: "DELETE" })).status, 200);
+    }
+    await page.waitForFunction(
+      (ids) => ids.every((id) => !document.querySelector(`.sl-exam-attempt-open[data-test="${id}"]`)),
+      { timeout: 5000 },
+      [now.id, created.json.id]
+    );
+  });
+
   test("a teacher tries a test in a window of its own, and nothing is saved, submitted or graded", async () => {
     const test = await openTest("Preview");
     await teacher.page.goto(`${applicationUrl}/exam/tests/${test.id}`, { waitUntil: "domcontentloaded" });
@@ -1968,7 +1997,9 @@ describe("online tests: the live view", () => {
     try {
       // The next change of the sitting is checked against the session first.
       await fetchAs(student, `/exam/api/tests/${written.id}/attempt`, { method: "POST" });
-      await teacher.page.waitForFunction(() => document.querySelector("sl-exam-live")?.dataset.mode === "refused", { timeout: 10000 });
+      // Polled on an interval: the live view's tab is in the background now,
+      // where the default requestAnimationFrame polling never runs again.
+      await teacher.page.waitForFunction(() => document.querySelector("sl-exam-live")?.dataset.mode === "refused", { timeout: 10000, polling: 250 });
       assert.match(await teacher.page.$eval("sl-exam-live .sl-exam-live-state", (el) => el.textContent), /student view is active/);
       assert.equal(await teacher.page.$$eval("sl-exam-live tbody tr", (rows) => rows.length), 0, "nothing of the sitting is left on the page");
     } finally {

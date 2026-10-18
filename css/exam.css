@@ -178,6 +178,12 @@ a.sl-exam-button.sl-exam-open:hover,
   color: #ffffff;
 }
 
+/* The module's button stands left of the student/teacher switch, with room
+   between the two. */
+.topbar-menu .sl-exam-button + .flipswitch {
+  margin-left: 12px;
+}
+
 /* A student's button names its page beside the icon while there is room. */
 .sl-exam-button-label {
   margin-left: 6px;

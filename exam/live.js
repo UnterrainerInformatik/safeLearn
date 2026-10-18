@@ -21,6 +21,28 @@ emitter.setMaxListeners(0);
 /** Tells every live view of `sittingId` that `type` happened to `username`'s attempt. */
 export function notify(sittingId, type, username, data = {}) {
   emitter.emit(`sitting:${sittingId}`, { type, username, ...data });
+  emitter.emit("tests", { username });
+}
+
+/**
+ * Tells every student's stream of open tests that a sitting was created,
+ * changed or deleted - `username` null, since it may concern anyone on it.
+ */
+export function notifySittings() {
+  emitter.emit("tests", { username: null });
+}
+
+/**
+ * Calls `listener()` whenever the open tests of `username` may have changed:
+ * a sitting written, or one of their own attempts. Answers the function that
+ * stops it.
+ */
+export function listenTests(username, listener) {
+  const heard = (event) => {
+    if (event.username === null || event.username === username) listener();
+  };
+  emitter.on("tests", heard);
+  return () => emitter.off("tests", heard);
 }
 
 /** Calls `listener(event)` for every change of `sittingId`; answers the function that stops it. */
