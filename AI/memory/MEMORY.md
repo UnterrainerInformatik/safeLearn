@@ -37,3 +37,4 @@ Echter Ablageort: `/mnt/data/source/HTL/safeLearn/AI/memory/`
 - [Keycloak-Bot-Account](keycloak-bot-account.md) — `bot@unterrainer.info`, nur lesend; Passwort in `.env.sh` auf babylon5, Schreibrechte gibt Gerald temporär
 - [Reihenfolge der vier Changes](change-order-2026-10.md) — remove-convert-route → attachment-access-control → exam-module (bis P4, vor 05.02.2027) → publishing-without-keycloak
 - [Wackelige Content-Checks](flaky-content-checks.md) — Reload-Backoff (`deployment-surface`) und 390px-Viewport (`legibility`) scheitern zeitabhängig, auch auf unverändertem HEAD; erst nochmal laufen lassen
+- [i18n im BabelEdit-Format](i18n-babeledit-json.md) — Übersetzungen als ein JSON-File pro Sprache mit gleichen Keys, damit BabelEdit sie pflegen und erweitern kann

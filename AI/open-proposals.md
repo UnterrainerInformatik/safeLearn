@@ -145,9 +145,11 @@ Ein Muster fürs ganze Modul; der Zweimal-Klick passt zu "keine Browser-Dialoge"
 - **Schreibseite:** Sie ist DE/EN lokalisiert, ihre Ergebnisanzeige und "Time is up" in der Vorschau sind aber nur Englisch.
 
 ## Schüler-Seite "Exams" (`/exam/my`): Ergebnisse während des Schreibens
-Seit 2026-10-18 zeigt die Seite offene Tests und Ergebnisse untereinander. Läuft ein Versuch, steht die Schreibansicht oben und die Ergebnisse darunter. Zu entscheiden ist, ob die Ergebnisse während eines laufenden Versuchs ausgeblendet werden sollen, damit nichts ablenkt.
+Seit 2026-10-18 zeigt die Seite offene Tests und Ergebnisse untereinander. Läuft ein Versuch, steht die Schreibansicht oben und die Ergebnisse darunter.
 
-## Sittings nach Unterrichtseinheit statt nach Uhrzeit planen
+**Entschieden (Gerald, 2026-10-18):** Während eines laufenden Versuchs werden die Ergebnisse ausgeblendet. Bis zur Abgabe sind sie uninteressant und lenken nur ab. Nach der Abgabe erscheinen sie wieder.
+
+## Sittings nach Unterrichtseinheit statt nach Uhrzeit planen (Change `exam-school-periods` angelegt 2026-10-18)
 Heute plant man ein Sitting mit zwei `datetime-local`-Feldern **Opens** und **Closes** plus **Minutes per attempt** (`client/tests.js`, Formular des Sittings). Künftig soll das über die Unterrichtseinheiten der Schule gehen.
 
 **Konfiguration:** Die Einheiten gelten für die ganze Schule und kommen aus einer Env-Variable des Deployments, z. B. `SCHOOL_PERIODS="0=07:05-07:55,1=08:00-08:50,…"`. Name und Format sind noch offen.
@@ -211,6 +213,7 @@ Die Oberfläche des Prüfungsmoduls ist heute englisch. Gerald will sie pro Benu
 - Ein Umbau von rund 4.000 Zeilen funktionierender und getesteter Oberfläche löst die Mehrsprachigkeit aber nicht besser. Er kostet Wochen, und das vor dem harten Termin 05.02.2027.
 - Gute Gründe für ein Framework wären erst Drag-and-Drop-Baum, Popups und mehr Zustand in der UI. Selbst die gehen mit Custom Elements gut.
 - Für i18n reicht ein eigenes `t()` mit JSON-Katalogen, ohne Bibliothek.
+- **Entschieden (Gerald, 2026-10-18):** Die Übersetzungen liegen als JSON nach dem System von BabelEdit, also eine JSON-Datei pro Sprache (etwa `en.json`, `de.json`) mit denselben Schlüsseln. So lassen sie sich später mit BabelEdit pflegen und um weitere Sprachen erweitern. Das genaue Dateilayout (verschachtelte oder flache Schlüssel, Ablageort) wird im Change festgelegt und muss sich in BabelEdit öffnen lassen.
 - Für die Datumswahl gibt es zwei Wege: eine kleine eigene Monatsansicht als Custom Element (geschätzt 150–250 Zeilen, Tastatur und ARIA mitgedacht) oder eine schmale Bibliothek mit Locale-Unterstützung und ohne Abhängigkeiten. Bei Bibliotheken vorher den Wartungsstand prüfen: flatpickr ist bekannt, aber seit Jahren ohne Release, als Alternative wäre etwa vanilla-calendar-pro zu prüfen. Tendenz: eigene Ansicht, weil sie nur die Locale-Formate von `Intl` braucht und mit der Einheitenwahl zusammen entsteht.
 
 **Reihenfolge:** sinnvoll nach oder zusammen mit "Sittings nach Unterrichtseinheit", weil beide das Sitting-Formular neu bauen. Und vor der Button- und Label-Vereinheitlichung aus dem Design-Review, damit die Texte nur einmal angefasst werden.
