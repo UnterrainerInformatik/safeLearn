@@ -1517,7 +1517,7 @@ describe("online tests: writing", () => {
 
       await choose(page, correct[1][0]);
       await page.click(".sl-exam-attempt-submit");
-      assert.match(await page.$eval(".sl-exam-attempt-submit", (el) => el.textContent), /Wirklich abgeben/, "submitting asks once more");
+      assert.match(await page.$eval(".sl-exam-attempt-submit", (el) => el.textContent), /Really submit/, "submitting asks once more, in the student's language");
       await page.click(".sl-exam-attempt-submit");
       await page.waitForSelector(".sl-exam-attempt-result", { timeout: 10000 });
       const result = await page.$eval(".sl-exam-attempt-result", (el) => el.textContent);
@@ -2884,6 +2884,10 @@ describe("the school's periods", () => {
       },
       date
     );
+    // From an early pair first: what the form proposes depends on the time
+    // of day, and the to period must start out below the from period chosen next.
+    await page.select(".sl-exam-sitting-form select[name=fromPeriod]", "2");
+    await page.select(".sl-exam-sitting-form select[name=toPeriod]", "2");
     await page.select(".sl-exam-sitting-form select[name=fromPeriod]", "5");
     assert.deepEqual(
       await page.$eval(".sl-exam-sitting-form select[name=toPeriod]", (select) => ({ first: select.options[0].value, value: select.value })),
@@ -3117,6 +3121,14 @@ describe("the interface in the reader's language and format", () => {
       shown: field.querySelector(".sl-date-input-text").value,
     }));
 
+  /** Focuses the text field at `selector` with its whole text selected, so typing replaces it. */
+  async function replaceText(selector) {
+    await teacher.page.$eval(selector, (input) => {
+      input.focus();
+      input.select();
+    });
+  }
+
   /** Waits until `condition()` holds, polling for up to ten seconds. */
   async function waitFor(condition, what) {
     const until = Date.now() + 10000;
@@ -3206,7 +3218,7 @@ describe("the interface in the reader's language and format", () => {
     const field = `.sl-exam-column-head[data-column="${column.id}"] sl-date-input`;
     const typed = `${field} .sl-date-input-text`;
 
-    await teacher.page.click(typed, { clickCount: 3 });
+    await replaceText(typed);
     await teacher.page.keyboard.type("21.10.2026");
     await teacher.page.keyboard.press("Tab");
     await waitFor(() => storedDate() === "2026-10-21", "the typed date is saved");
@@ -3228,7 +3240,7 @@ describe("the interface in the reader's language and format", () => {
     await waitFor(() => storedDate() === "2026-10-29", "Enter takes the focused day and it is saved");
     await waitFor(async () => (await columnDate().catch(() => null))?.shown === "29.10.2026", "the sheet shows the picked date");
 
-    await teacher.page.click(typed, { clickCount: 3 });
+    await replaceText(typed);
     await teacher.page.keyboard.type("32.10.2026");
     await teacher.page.keyboard.press("Tab");
     const refused = await teacher.page.$eval(field, (element) => ({
@@ -3258,6 +3270,11 @@ describe("the interface in the reader's language and format", () => {
       body: { opensAt: new Date(Date.now() - 60000).toISOString(), closesAt: new Date(Date.now() + 50 * 60000).toISOString(), durationMinutes: 15 },
     });
     assert.equal(sitting.status, 200, JSON.stringify(sitting.json));
+    // A running attempt left by an earlier check would be resumed in place of
+    // the list, so it is submitted first.
+    for (const open of (await fetchAs(student, "/exam/api/my/tests")).json.tests) {
+      if (open.attempt) await fetchAs(student, `/exam/api/attempts/${open.attempt.attemptId}/submit`, { method: "POST" });
+    }
     const page = student.page;
     await page.goto(`${applicationUrl}/exam/my`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(`.sl-exam-attempt-open[data-test="${created.json.id}"] button`, { timeout: 20000 });

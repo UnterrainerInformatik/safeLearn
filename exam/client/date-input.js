@@ -134,8 +134,13 @@ class DateInput extends HTMLElement {
       });
     }
     this.toggle.addEventListener("click", () => (this.popup.hidden ? this.open() : this.close(true)));
-    this.addEventListener("focusout", (event) => {
-      if (!this.popup.hidden && !this.contains(event.relatedTarget)) this.close(false);
+    // Closed once the focus has left the element. Checked a turn later: a
+    // redrawn grid drops its focused day, and the focus lands on the new one
+    // only after this event.
+    this.addEventListener("focusout", () => {
+      setTimeout(() => {
+        if (!this.popup.hidden && !this.contains(document.activeElement)) this.close(false);
+      });
     });
 
     this.value = this.getAttribute("value") ?? "";
