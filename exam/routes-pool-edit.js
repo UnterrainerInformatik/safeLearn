@@ -12,6 +12,7 @@ import {
   createQuestion,
   deleteCategory,
   deleteQuestion,
+  moveQuestion,
   readUpload,
   retireQuestion,
   reviveQuestion,
@@ -65,6 +66,7 @@ export function registerPoolEditRoutes(router, { db, handle, startPage }) {
   api("put", "/pool/questions/:id", (req) => saveQuestion(db, idParam(req.params.id), req.body ?? {}));
   api("post", "/pool/questions/:id/retire", (req) => retireQuestion(db, idParam(req.params.id)));
   api("post", "/pool/questions/:id/revive", (req) => reviveQuestion(db, idParam(req.params.id)));
+  api("post", "/pool/questions/:id/category", (req) => moveQuestion(db, idParam(req.params.id), req.body ?? {}));
   api("delete", "/pool/questions/:id", (req) => deleteQuestion(db, idParam(req.params.id)));
   api("post", "/pool/categories", (req) => createCategory(db, req.body ?? {}));
   api("put", "/pool/categories/:id", (req) => updateCategory(db, idParam(req.params.id), req.body ?? {}));
@@ -118,13 +120,14 @@ export function registerPoolEditRoutes(router, { db, handle, startPage }) {
     })
   );
 
+  // The categories are maintained in the pool's own tree now; the former
+  // page's address leads there, keeping the bar's course.
   router.get(
     "/pool/categories",
     teacherPage,
     handle(async (req, res) => {
-      const context = contextFromQuery(req.query);
-      const params = context.courseId === null ? {} : { course: String(context.courseId) };
-      res.send(await teacherShell({ db, startPage, req, title: (t) => t("exam.pages.categories"), context, kind: "pool-categories", params, current: "pool" }));
+      const { courseId } = contextFromQuery(req.query);
+      res.redirect(301, `/exam/pool${courseId === null ? "" : `?course=${courseId}`}`);
     })
   );
 }

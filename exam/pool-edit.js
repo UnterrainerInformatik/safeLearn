@@ -497,8 +497,11 @@ export function createCategory(db, { parentId = null, nameDe, nameEn } = {}) {
 
 /**
  * Changes a category (design D10): renames it in both languages, moves it
- * under another parent - to the end of its new siblings, never under itself or
- * below it - or one place up or down among its siblings (`move`).
+ * under another parent - never under itself or below it - or one place up or
+ * down among its siblings (`move`). A move to another parent lands at the end
+ * of its new siblings, unless `before` places it: the id of the sibling to
+ * stand before, or null for the end (exam-ui-consistency design D4). Placing
+ * renumbers the siblings.
  */
 export function updateCategory(db, id, input = {}) {
   const row = categoryRow(db, id);
@@ -512,6 +515,7 @@ export function updateCategory(db, id, input = {}) {
   if (input.move !== undefined && input.move !== "up" && input.move !== "down") {
     throw new InvalidInputError("exam.errors.pool.categoryMoveDirection");
   }
+  const before = input.before === undefined || input.before === null ? input.before : siblingToStandBefore(db, input.before, parent, id);
   return namedUniquely(names.de, () =>
     inTransaction(db, () => {
       const moved = parent !== row.parent_id;
@@ -522,7 +526,8 @@ export function updateCategory(db, id, input = {}) {
         moved ? endOfSiblings(db, parent) : row.position,
         id
       );
-      if (input.move !== undefined && !moved) {
+      if (before !== undefined) placeAmongSiblings(db, id, parent, before);
+      if (input.move !== undefined && !moved && before === undefined) {
         const up = input.move === "up";
         const neighbour = db
           .prepare(
@@ -539,6 +544,41 @@ export function updateCategory(db, id, input = {}) {
       return categoryView(db, id);
     })
   );
+}
+
+/** The sibling a category is placed before: a category under `parent` other than itself. */
+function siblingToStandBefore(db, before, parent, id) {
+  if (!Number.isInteger(before) || before === id) throw new InvalidInputError("exam.errors.pool.categoryBefore");
+  const row = db.prepare("SELECT parent_id FROM question_category WHERE id = ?").get(before);
+  if (!row || row.parent_id !== parent) throw new InvalidInputError("exam.errors.pool.categoryBefore");
+  return before;
+}
+
+/** Puts `id` before `before` (null: at the end) among the categories under `parent`, numbered 1, 2, … */
+function placeAmongSiblings(db, id, parent, before) {
+  const others = db
+    .prepare("SELECT id FROM question_category WHERE COALESCE(parent_id, 0) = COALESCE(?, 0) AND id != ? ORDER BY position, id")
+    .all(parent, id)
+    .map((row) => row.id);
+  const at = before === null ? others.length : others.indexOf(before);
+  others.splice(at, 0, id);
+  const number = db.prepare("UPDATE question_category SET position = ? WHERE id = ?");
+  others.forEach((sibling, index) => number.run(index + 1, sibling));
+}
+
+/**
+ * Moves a question to another category, at its end, without its content
+ * (design D4). The version goes up, so an editor open on the question meanwhile
+ * gets the concurrent-edit refusal instead of moving it back.
+ */
+export function moveQuestion(db, id, { categoryId } = {}) {
+  const row = questionRow(db, id);
+  if (!Number.isInteger(categoryId)) throw new InvalidInputError("exam.errors.pool.questionCategory");
+  categoryRow(db, categoryId);
+  if (row.category_id !== categoryId) {
+    db.prepare("UPDATE question SET category_id = ?, position = ?, version = version + 1, updated_at = ? WHERE id = ?").run(categoryId, endOfCategory(db, categoryId), now(), id);
+  }
+  return getQuestion(db, id);
 }
 
 /** Deletes a category that holds no question - retired ones included - and no subcategory. */

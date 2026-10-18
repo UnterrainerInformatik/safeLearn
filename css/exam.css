@@ -1303,10 +1303,7 @@ body.sl-exam-screen-page {
 
 .sl-exam-editor select,
 .sl-exam-editor input[type="text"],
-.sl-exam-editor button,
-.sl-exam-categories input,
-.sl-exam-categories select,
-.sl-exam-categories button {
+.sl-exam-editor button {
   font: inherit;
 }
 
@@ -1485,46 +1482,189 @@ sl-rich-text {
   font-size: 0.85em;
 }
 
-/* The category page. */
+/* The pool's category tree (`pool-tree.js`): a row per category with its
+   fold, its name and its tools, the name popup below a row, and while
+   dragging a ghost at the pointer, a highlight for "into" and a line for
+   "before" or "after". */
 
-.sl-exam-categories-tree,
-.sl-exam-categories-tree ul {
-  list-style: none;
-  padding-left: 0;
-}
-
-.sl-exam-categories-tree ul {
-  padding-left: 1.5em;
-}
-
-.sl-exam-categories-line {
+.sl-exam-tree-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
   align-items: center;
-  padding: 3px 0;
-  border-bottom: 1px solid rgba(27, 31, 35, 0.08);
+  gap: 2px;
+  border-radius: 4px;
+  touch-action: pan-y;
 }
 
-#markdown-content.dark-mode .sl-exam-categories-line {
-  border-bottom-color: rgba(255, 255, 255, 0.1);
+.sl-exam-tree-fold {
+  flex: 0 0 1em;
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
 }
 
-.sl-exam-categories-name {
-  flex: 1 1 14em;
+.sl-exam-tree-row .sl-exam-pool-category {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
-.sl-exam-categories-tools {
+.sl-exam-tree-tools {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 1px;
+  visibility: hidden;
+}
+
+.sl-exam-tree-row:hover .sl-exam-tree-tools,
+.sl-exam-tree-row:focus-within .sl-exam-tree-tools,
+li[role="treeitem"]:focus > .sl-exam-tree-row .sl-exam-tree-tools {
+  visibility: visible;
+}
+
+/* A touch screen has no hover: the tools stay visible there. */
+@media (hover: none) {
+  .sl-exam-tree-tools {
+    visibility: visible;
+  }
+}
+
+.sl-exam-tree-tool,
+#markdown-content a.sl-exam-tree-tool {
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: 1.4;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.sl-exam-tree-tool:hover,
+#markdown-content a.sl-exam-tree-tool:hover {
+  border-color: rgba(27, 31, 35, 0.3);
+}
+
+#markdown-content.dark-mode .sl-exam-tree-tool:hover {
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+/* The bin between its two clicks says so in full. */
+.sl-exam-tree-tool.sl-exam-action[data-armed="1"] {
+  white-space: normal;
+}
+
+li[role="treeitem"]:focus {
+  outline: none;
+}
+
+li[role="treeitem"]:focus > .sl-exam-tree-row {
+  outline: 2px solid #0969da;
+  outline-offset: -2px;
+}
+
+#markdown-content.dark-mode li[role="treeitem"]:focus > .sl-exam-tree-row {
+  outline-color: #58a6ff;
+}
+
+li[role="treeitem"].is-cut > .sl-exam-tree-row,
+tr.is-cut {
+  opacity: 0.55;
+  outline: 1px dashed currentColor;
+}
+
+.sl-exam-tree-message {
+  margin: 2px 0 4px 1.2em;
+  font-size: 0.9em;
+}
+
+.sl-exam-tree-end {
+  margin: 6px 0;
+}
+
+.sl-exam-tree-keys {
+  font-size: 0.85em;
+}
+
+.sl-exam-tree-popup {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 4px;
+  margin: 4px 0 6px 1.2em;
+  padding: 8px;
+  border: 1px solid rgba(27, 31, 35, 0.25);
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(27, 31, 35, 0.15);
 }
 
-.sl-exam-categories-names {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 0.4em 0;
+.sl-exam-tree-popup input {
+  font: inherit;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+#markdown-content.dark-mode .sl-exam-tree-popup {
+  border-color: rgba(255, 255, 255, 0.3);
+  background: #1e1e1e;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+.sl-exam-tree-row.is-dragged,
+tr.is-dragged {
+  opacity: 0.5;
+}
+
+.sl-exam-tree-row.is-drop-into {
+  background: rgba(9, 105, 218, 0.15);
+  outline: 2px solid #0969da;
+  outline-offset: -2px;
+}
+
+.sl-exam-tree-row.is-drop-before {
+  box-shadow: inset 0 3px 0 #0969da;
+}
+
+.sl-exam-tree-row.is-drop-after {
+  box-shadow: inset 0 -3px 0 #0969da;
+}
+
+#markdown-content.dark-mode .sl-exam-tree-row.is-drop-into {
+  background: rgba(88, 166, 255, 0.2);
+  outline-color: #58a6ff;
+}
+
+#markdown-content.dark-mode .sl-exam-tree-row.is-drop-before {
+  box-shadow: inset 0 3px 0 #58a6ff;
+}
+
+#markdown-content.dark-mode .sl-exam-tree-row.is-drop-after {
+  box-shadow: inset 0 -3px 0 #58a6ff;
+}
+
+/* The ghost lives on the body, outside the content and its theme. */
+.sl-exam-drag-ghost {
+  position: fixed;
+  z-index: 10000;
+  max-width: 16em;
+  padding: 2px 8px;
+  overflow: hidden;
+  border: 1px solid rgba(27, 31, 35, 0.3);
+  border-radius: 4px;
+  background: #fff;
+  color: #24292e;
+  box-shadow: 0 2px 6px rgba(27, 31, 35, 0.25);
+  font-size: 0.9em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+.sl-exam-drag-ghost.is-dark {
+  border-color: rgba(255, 255, 255, 0.35);
+  background: #2d2d2d;
+  color: #e6edf3;
 }
 
 /* Questions imported from a file and not reviewed yet (`question-import`): an

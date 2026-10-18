@@ -8,9 +8,10 @@
  *   question's row also chooses it for a test - or unchooses it - and the
  *   chosen rows are coloured; they become a new test for that course, or are
  *   added to one of its tests that has not been written yet (`online-test`).
- *   It leads into the editor (`question-editor`): "Edit" on the preview, "New
- *   question" with a category chosen, and the category page; retired
- *   questions are listed, marked, only when asked for.
+ *   It leads into the editor (`question-editor`): "Edit" on the preview, and
+ *   "New question" always, in the chosen category if there is one; retired
+ *   questions are listed, marked, only when asked for. The tree is also where
+ *   categories are maintained and questions moved (`pool-tree.js`).
  * - Questions imported from a file (`question-import`) and not reviewed yet
  *   carry an amber stripe and a badge in their rows, a filter shows only them
  *   (on from the start with `data-sl-unreviewed`, as after an import), and
@@ -28,6 +29,7 @@
 
 import { defineExamElement, ExamApiError, ExamElement, examApi, format, h, linkButton, markRows, t } from "./frame.js";
 import { displayClass } from "./classes.js";
+import { CategoryTree } from "./pool-tree.js";
 
 const typeLabels = {
   multichoiceset: t("exam.pool.type.multichoiceset"),
@@ -87,53 +89,20 @@ class PoolView extends ExamElement {
       }, 250);
     });
 
-    const node = (category) =>
-      h(
-        "li",
-        {},
-        h(
-          "button",
-          {
-            type: "button",
-            class: category.id === this.categoryId ? "sl-exam-pool-category is-chosen" : "sl-exam-pool-category",
-            "data-category": String(category.id),
-            onClick: (event) => this.chooseCategory(category.id, event.currentTarget),
-          },
-          category.nameDe,
-          h("span", { class: "sl-exam-quiet" }, ` (${category.total})`)
-        ),
-        category.children.length > 0 ? h("ul", {}, category.children.map(node)) : null
-      );
-
-    this.tree = h(
-      "nav",
-      { class: "sl-exam-pool-tree", "aria-label": t("exam.pool.categories") },
-      h(
-        "ul",
-        {},
-        h(
-          "li",
-          {},
-          h(
-            "button",
-            {
-              type: "button",
-              class: this.categoryId === null ? "sl-exam-pool-category is-chosen" : "sl-exam-pool-category",
-              "data-category": "",
-              onClick: (event) => this.chooseCategory(null, event.currentTarget),
-            },
-            t("exam.pool.allCategories")
-          )
-        ),
-        tree.map(node)
-      )
-    );
+    this.categoryTree = new CategoryTree({
+      tree,
+      chosenId: this.categoryId,
+      onChoose: (id) => this.chooseCategory(id),
+      onChanged: () => this.refreshList(),
+      newQuestionAddress: (id) => this.newQuestionAddress(id),
+    });
+    this.tree = this.categoryTree.element;
 
     const courseQuery = this.params.course ? `?course=${this.params.course}` : "";
-    const categories = linkButton({ label: t("exam.pool.editCategories"), href: `/exam/pool/categories${courseQuery}`, class: "sl-exam-pool-categories-link" });
     const importing = linkButton({ label: t("exam.pool.importQuestions"), href: `/exam/pool/import${courseQuery}`, class: "sl-exam-pool-import-link" });
     if (tree.length === 0) {
-      return h("div", { class: "sl-exam" }, h("p", {}, t("exam.pool.empty")), h("p", { class: "sl-exam-actions" }, categories, importing));
+      // The first category is made in the tree, or comes with an import.
+      return h("div", { class: "sl-exam" }, h("p", {}, t("exam.pool.empty")), h("p", { class: "sl-exam-actions" }, importing), this.tree);
     }
     // Always offered: without a chosen category the editor asks for one.
     this.newQuestion = linkButton({ label: t("exam.pool.newQuestion"), href: "/exam/pool/questions/new", class: "sl-exam-pool-new" });
@@ -157,10 +126,19 @@ class PoolView extends ExamElement {
     this.unreviewedFilter = h("label", { class: "sl-exam-pool-unreviewed-filter", hidden: true }, this.unreviewedBox, this.unreviewedLabel);
     this.refreshList();
     this.countUnreviewed();
-    return h(
+    const pool = h(
       "div",
-      { class: "sl-exam sl-exam-pool" },
-      h("div", { class: "sl-exam-pool-side" }, h("p", { class: "sl-exam-pool-tree-tools sl-exam-actions" }, categories, importing), this.tree),
+      {
+        class: "sl-exam sl-exam-pool",
+        // Ctrl+X on a question's row cuts it for Ctrl+V on a category (design D5).
+        onKeydown: (event) => {
+          const row = event.target.closest?.("tr[data-question]");
+          if (!row || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "x") return;
+          event.preventDefault();
+          this.categoryTree.cutItem({ kind: "question", id: Number(row.dataset.question), label: row.querySelector(".sl-exam-pool-name")?.textContent ?? "", element: row });
+        },
+      },
+      h("div", { class: "sl-exam-pool-side" }, h("p", { class: "sl-exam-pool-tree-tools sl-exam-actions" }, importing), this.tree),
       h(
         "div",
         { class: "sl-exam-pool-main" },
@@ -177,6 +155,8 @@ class PoolView extends ExamElement {
       ),
       this.preview
     );
+    this.categoryTree.enableDrag(pool);
+    return pool;
   }
 
   /**
@@ -287,20 +267,25 @@ class PoolView extends ExamElement {
     this.unreviewedFilter.hidden = questions.length === 0 && !this.onlyUnreviewed;
   }
 
-  chooseCategory(categoryId, button) {
+  /** Follows the tree's choice: the list and New question for the chosen category. */
+  chooseCategory(categoryId) {
     this.categoryId = categoryId;
-    for (const chosen of this.tree.querySelectorAll(".is-chosen")) chosen.classList.remove("is-chosen");
-    button.classList.add("is-chosen");
     this.updateNewQuestion();
     this.refreshList();
   }
 
+  /** The editor's address for a new question in category `categoryId` (null: none chosen). */
+  newQuestionAddress(categoryId) {
+    const query = new URLSearchParams();
+    if (categoryId !== null) query.set("category", String(categoryId));
+    if (this.params.course) query.set("course", this.params.course);
+    const text = query.toString();
+    return `/exam/pool/questions/new${text ? `?${text}` : ""}`;
+  }
+
   /** "New question" creates the question in the chosen category, if one is chosen. */
   updateNewQuestion() {
-    const query = new URLSearchParams();
-    if (this.categoryId !== null) query.set("category", String(this.categoryId));
-    if (this.params.course) query.set("course", this.params.course);
-    this.newQuestion.href = `/exam/pool/questions/new?${query}`;
+    this.newQuestion.href = this.newQuestionAddress(this.categoryId);
   }
 
   /** The editor of a question, returning to the browser with its category chosen. */

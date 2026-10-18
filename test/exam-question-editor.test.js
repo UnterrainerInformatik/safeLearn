@@ -27,6 +27,7 @@ import {
   deleteCategory,
   deleteQuestion,
   imageTypeOf,
+  moveQuestion,
   purgeUploads,
   QuestionProblemsError,
   questionProblems,
@@ -582,6 +583,57 @@ describe("the category tree", () => {
     assert.throws(() => updateCategory(db, http.id, { parentId: http.children[1].id }), InvalidInputError);
     assert.throws(() => updateCategory(db, http.id, { parentId: http.id }), InvalidInputError);
     assert.deepEqual(names(categoryTree(db)), before);
+  });
+
+  test("placed before a sibling, at the end, and into another parent before one of its children; the siblings are numbered anew", () => {
+    const { db } = seeded();
+    const [http] = categoryTree(db);
+    const [basics, caching] = http.children;
+    const rest = createCategory(db, { parentId: http.id, nameDe: "REST", nameEn: "REST" });
+    updateCategory(db, rest.id, { parentId: http.id, before: basics.id });
+    assert.deepEqual(names(categoryTree(db))[0][1].map(([name]) => name), ["REST", "Grundlagen", "Caching"], "before a sibling");
+    updateCategory(db, rest.id, { parentId: http.id, before: null });
+    assert.deepEqual(names(categoryTree(db))[0][1].map(([name]) => name), ["Grundlagen", "Caching", "REST"], "at the end");
+    const positions = db.prepare("SELECT position FROM question_category WHERE parent_id = ? ORDER BY position").all(http.id).map((row) => row.position);
+    assert.deepEqual(positions, [1, 2, 3], "numbered 1, 2, 3");
+    const security = createCategory(db, { nameDe: "Sicherheit", nameEn: "Security" });
+    updateCategory(db, caching.id, { parentId: null, before: security.id });
+    assert.deepEqual(names(categoryTree(db)).map(([name]) => name), ["HTTP", "Caching", "Sicherheit"], "between two top-level categories");
+    assert.throws(() => updateCategory(db, caching.id, { parentId: null, before: basics.id }), InvalidInputError, "the sibling must stand under the new parent");
+    assert.throws(() => updateCategory(db, caching.id, { parentId: null, before: caching.id }), InvalidInputError, "nor be itself");
+  });
+
+  test("placing refuses its own subtree and a duplicate name, and leaves the tree as it was", () => {
+    const { db } = seeded();
+    const [http] = categoryTree(db);
+    const [basics, caching] = http.children;
+    const before = names(categoryTree(db));
+    const order = () => db.prepare("SELECT id, parent_id, position FROM question_category ORDER BY id").all();
+    const stored = order();
+    assert.throws(() => updateCategory(db, http.id, { parentId: caching.id, before: null }), InvalidInputError);
+    createCategory(db, { nameDe: "Grundlagen", nameEn: "Basics at the top" });
+    assert.throws(() => updateCategory(db, basics.id, { parentId: null, before: null }), (error) => error instanceof ConflictError && /"Grundlagen"/.test(error.message));
+    assert.deepEqual(names(categoryTree(db)).slice(0, 1), before);
+    assert.deepEqual(order().slice(0, stored.length), stored, "positions untouched");
+  });
+
+  test("a question moved to another category keeps its content and usage, bumps its version, and an editor's stale save is refused", () => {
+    const { db, ids, course: wmc } = seeded();
+    const [http] = categoryTree(db);
+    const target = http.children[0];
+    const id = ids["Wahr de"];
+    const stale = editable(db, id);
+    createTest(db, wmc.id, { name: "Used", questionIds: [id] });
+    const before = getQuestion(db, id);
+    assert.notEqual(before.categoryId, target.id);
+    const moved = moveQuestion(db, id, { categoryId: target.id });
+    assert.equal(moved.categoryId, target.id);
+    assert.equal(moved.version, before.version + 1);
+    assert.deepEqual([moved.nameDe, moved.textDe, moved.answers, moved.usage], [before.nameDe, before.textDe, before.answers, before.usage]);
+    assert.ok(listQuestions(db, { categoryId: target.id }).some((q) => q.id === id), "listed in the new category");
+    assert.throws(() => saveQuestion(db, id, stale), ConflictError, "the editor opened before the move cannot move it back");
+    assert.throws(() => moveQuestion(db, id, { categoryId: 999999 }));
+    assert.throws(() => moveQuestion(db, id, {}), InvalidInputError);
   });
 
   test("only an empty category is deleted; retired questions and subcategories count", () => {

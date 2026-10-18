@@ -26,17 +26,21 @@ export function plainText(html) {
 /**
  * The tree, as nested nodes in their stored order: each with both names, its
  * children, and how many questions it holds - `questions` directly, `total`
- * with every category below it. Retired questions are not counted.
+ * with every category below it. Retired questions are not counted there;
+ * `empty` says whether it holds nothing at all, retired questions included,
+ * which is when it can be deleted.
  */
 export function categoryTree(db) {
   const rows = db
     .prepare(
       `SELECT c.id, c.parent_id AS parentId, c.name_de AS nameDe, c.name_en AS nameEn,
-         (SELECT COUNT(*) FROM question q WHERE q.category_id = c.id AND q.retired = 0) AS questions
+         (SELECT COUNT(*) FROM question q WHERE q.category_id = c.id AND q.retired = 0) AS questions,
+         NOT EXISTS (SELECT 1 FROM question q WHERE q.category_id = c.id)
+           AND NOT EXISTS (SELECT 1 FROM question_category k WHERE k.parent_id = c.id) AS empty
        FROM question_category c ORDER BY c.position, c.id`
     )
     .all();
-  const nodes = new Map(rows.map((row) => [row.id, { ...row, children: [] }]));
+  const nodes = new Map(rows.map((row) => [row.id, { ...row, empty: row.empty === 1, children: [] }]));
   const roots = [];
   for (const node of nodes.values()) {
     if (node.parentId === null) roots.push(node);

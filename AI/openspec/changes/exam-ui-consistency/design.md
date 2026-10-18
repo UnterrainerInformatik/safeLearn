@@ -156,3 +156,4 @@ No data migration. Deploy each phase to secureLectures after `npm test` passes, 
 - A course is deletable only while nothing hangs on it: no columns (an empty column blocks too), results, grades or tests.
 - Renaming a class changes only the module's record, meant for fixing typos; a name the directory does not know yields no roster proposals.
 - New question without a chosen category opens the editor with an empty category choice; it saves only once one is chosen.
+- Each tree node carries both: `+` opens the name popup for a subcategory (D7), and a separate "New question here" icon opens the editor with that category (2026-10-18, chosen when phase 3 began).

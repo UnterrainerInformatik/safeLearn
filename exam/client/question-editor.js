@@ -67,7 +67,7 @@ class QuestionEditor extends ExamElement {
     const initialCategory = stored ? stored.categoryId : Number(this.params.category) || null;
     this.backAddress = () => poolAddress(Number(this.category.value) || initialCategory, this.params.course);
     if (this.categories.length === 0) {
-      return h("div", { class: "sl-exam" }, h("p", {}, `${t("exam.categories.none")} `), linkButton({ label: t("exam.editor.createCategoryFirst"), href: "/exam/pool/categories" }));
+      return h("div", { class: "sl-exam" }, h("p", {}, `${t("exam.categories.none")} `), linkButton({ label: t("exam.editor.createCategoryFirst"), href: poolAddress(null, this.params.course) }));
     }
 
     this.type = h(

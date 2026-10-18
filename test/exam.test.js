@@ -1300,7 +1300,7 @@ describe("the question pool", () => {
         }
         window.scrollTo(0, document.documentElement.scrollHeight);
         await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-        return [".sl-exam-pool-categories-link", ".sl-exam-pool-import-link"].map((selector) => {
+        return [".sl-exam-pool-import-link"].map((selector) => {
           const link = document.querySelector(selector);
           // A link wrapped over two lines has a gap in its bounding box; hit its first line.
           const line = link.getClientRects()[0];
@@ -1308,7 +1308,7 @@ describe("the question pool", () => {
           return link.getBoundingClientRect().bottom <= window.innerHeight && hit === link;
         });
       });
-      assert.deepEqual(reachable, [true, true], "Edit categories and Import questions stay visible and clickable");
+      assert.deepEqual(reachable, [true], "Import questions stays visible and clickable");
     } finally {
       await teacher.page.setViewport(viewport);
     }
@@ -2701,9 +2701,235 @@ describe("the question editor", () => {
     assert.deepEqual([listed.category.de.at(-1), listed.uses], ["HTTP und REST", 1]);
     assert.equal((await fetchAs(teacher, `/exam/api/pool/categories/${child.id}`, { method: "DELETE" })).status, 200, "empty now, it goes");
 
-    await teacher.page.goto(`${applicationUrl}/exam/pool/categories`, { waitUntil: "domcontentloaded" });
-    await teacher.page.waitForSelector(`.sl-exam-categories-tree li[data-category="${parent.id}"]`, { timeout: 20000 });
     await fetchAs(teacher, `/exam/api/tests/${test.id}`, { method: "DELETE" });
+  });
+
+  // ------------------------------------------- the category tree in the pool
+
+  /** The pool's tree as `[nameDe, [children…]]` for the categories named `names` and below. */
+  async function treeOf(names) {
+    const shape = (nodes) => nodes.map((node) => [node.nameDe, shape(node.children)]);
+    const all = (await fetchAs(teacher, "/exam/api/pool/categories")).json;
+    return shape(all.filter((node) => names.includes(node.nameDe)));
+  }
+
+  /** Three fresh top-level categories for one check, in this order. */
+  async function threeCategories(prefix) {
+    const made = [];
+    for (const name of ["A", "B", "C"]) {
+      const created = await fetchAs(teacher, "/exam/api/pool/categories", { method: "POST", body: { parentId: null, nameDe: `${prefix} ${name}`, nameEn: `${prefix} ${name} (en)` } });
+      assert.equal(created.status, 200, JSON.stringify(created.json));
+      made.push(created.json);
+    }
+    return made;
+  }
+
+  const rowOf = (id) => `.sl-exam-pool-tree li[data-category="${id}"] > .sl-exam-tree-row`;
+  const nameOf = (id) => `${rowOf(id)} .sl-exam-pool-category`;
+
+  /** Where on `selector` to point: `share` of its height down, a little in from its left. */
+  const pointAt = (selector, share = 0.5) =>
+    teacher.page.$eval(
+      selector,
+      (element, share) => {
+        element.scrollIntoView({ block: "center" });
+        const box = element.getBoundingClientRect();
+        return { x: box.left + Math.min(box.width / 2, 60), y: box.top + box.height * share };
+      },
+      share
+    );
+
+  /** Drags `from` onto `to` (`share` of its height down) with the mouse, or with a finger after a long press. */
+  async function drag(from, to, share = 0.5, { touch = false } = {}) {
+    const page = teacher.page;
+    const start = await pointAt(from);
+    let finger = null;
+    let pressed = false;
+    const moveTo = (x, y) => (touch ? finger.move(x, y) : page.mouse.move(x, y));
+    try {
+      if (touch) {
+        finger = await page.touchscreen.touchStart(start.x, start.y);
+        await new Promise((resolve) => setTimeout(resolve, 450));
+      } else {
+        await page.mouse.move(start.x, start.y);
+        await page.mouse.down();
+        pressed = true;
+        await page.mouse.move(start.x + 10, start.y + 10, { steps: 3 });
+      }
+      await page.waitForSelector(".sl-exam-drag-ghost", { timeout: 5000 });
+      const end = await pointAt(to, share);
+      for (let step = 1; step <= 6; step++) await moveTo(start.x + ((end.x - start.x) * step) / 6, start.y + ((end.y - start.y) * step) / 6);
+      await moveTo(end.x, end.y);
+    } finally {
+      // Released also when the drag failed, so no button stays pressed for the next check.
+      if (touch) await finger?.end();
+      else if (pressed) await page.mouse.up();
+    }
+  }
+
+  async function openPoolTree() {
+    await teacher.page.goto(`${applicationUrl}/exam/pool`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(".sl-exam-pool-tree li[role=treeitem]", { timeout: 20000 });
+  }
+
+  /** Waits until the pool's tree, drawn anew, shows `selector`. */
+  const shown = (selector) => teacher.page.waitForSelector(selector, { timeout: 10000 });
+
+  test("tree: a category dragged onto another becomes its last subcategory, and between two stands there - by mouse and by touch", async () => {
+    const [a, b, c] = await threeCategories("Ziehen");
+    const names = [a.nameDe, b.nameDe, c.nameDe];
+    await openPoolTree();
+    await drag(nameOf(c.id), rowOf(a.id));
+    await shown(`.sl-exam-pool-tree li[data-category="${a.id}"] li[data-category="${c.id}"]`);
+    assert.deepEqual(await treeOf(names), [[a.nameDe, [[c.nameDe, []]]], [b.nameDe, []]], "onto A: C is A's subcategory");
+
+    await drag(nameOf(c.id), rowOf(b.id), 0.1);
+    await shown(`.sl-exam-pool-tree > ul > li[data-category="${c.id}"]`);
+    assert.deepEqual(await treeOf(names), [[a.nameDe, []], [c.nameDe, []], [b.nameDe, []]], "onto B's upper edge: C stands between A and B");
+
+    await drag(nameOf(a.id), rowOf(b.id), 0.5, { touch: true });
+    await shown(`.sl-exam-pool-tree li[data-category="${b.id}"] li[data-category="${a.id}"]`);
+    assert.deepEqual(await treeOf(names), [[c.nameDe, []], [b.nameDe, [[a.nameDe, []]]]], "a long press and a drag with a finger");
+  });
+
+  test("tree: a question dragged from the list onto a category moves there, and the list is drawn anew", async () => {
+    const [target] = await threeCategories("Frage-Ziel");
+    const question = await newQuestion({ nameDe: "Gezogen", nameEn: "Dragged" });
+    // Opened on its category, so the list is not drawn anew under the drag.
+    await teacher.page.goto(`${applicationUrl}/exam/pool?category=${categoryId}`, { waitUntil: "domcontentloaded" });
+    const row = `.sl-exam-pool-questions tr[data-question="${question.id}"]`;
+    await teacher.page.waitForSelector(row, { timeout: 20000 });
+    await drag(`${row} .sl-exam-pool-name`, rowOf(target.id));
+    await teacher.page.waitForFunction((selector) => !document.querySelector(selector), { timeout: 10000 }, row);
+    assert.equal((await fetchAs(teacher, `/exam/api/pool/questions/${question.id}`)).json.categoryId, target.id);
+  });
+
+  test("tree: a refused drop leaves the order as it was and says why at the dragged category", async () => {
+    const [a, b] = await threeCategories("Verweigert");
+    const child = (await fetchAs(teacher, "/exam/api/pool/categories", { method: "POST", body: { parentId: a.id, nameDe: "Verweigert Kind", nameEn: "Refused child" } })).json;
+    const names = [a.nameDe, b.nameDe];
+    const before = await treeOf(names);
+    await openPoolTree();
+    await drag(nameOf(a.id), rowOf(child.id));
+    await shown(`.sl-exam-pool-tree li[data-category="${a.id}"] > .sl-exam-tree-message`);
+    assert.match(await teacher.page.$eval(`.sl-exam-pool-tree li[data-category="${a.id}"] > .sl-exam-tree-message`, (el) => el.textContent), /under itself/);
+    assert.deepEqual(await treeOf(names), before);
+  });
+
+  test("tree: cut and paste and Alt+↑ by keyboard", async () => {
+    const [a, b, c] = await threeCategories("Tasten");
+    const question = await newQuestion({ nameDe: "Ausgeschnitten", nameEn: "Cut" });
+    const names = [a.nameDe, b.nameDe, c.nameDe];
+    const page = teacher.page;
+    await openPoolTree();
+    const focus = (id) => page.$eval(`.sl-exam-pool-tree li[data-category="${id}"]`, (li) => li.focus());
+    await focus(c.id);
+    await page.keyboard.down("Control");
+    await page.keyboard.press("x");
+    await page.keyboard.up("Control");
+    await focus(a.id);
+    await page.keyboard.down("Control");
+    await page.keyboard.press("v");
+    await page.keyboard.up("Control");
+    await shown(`.sl-exam-pool-tree li[data-category="${a.id}"] li[data-category="${c.id}"]`);
+    assert.deepEqual(await treeOf(names), [[a.nameDe, [[c.nameDe, []]]], [b.nameDe, []]], "C is A's last subcategory");
+
+    await focus(b.id);
+    await page.keyboard.down("Alt");
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.up("Alt");
+    await page.waitForFunction(
+      (ids) => {
+        const order = [...document.querySelectorAll(".sl-exam-pool-tree > ul > li")].map((li) => li.dataset.category);
+        return order.indexOf(ids.b) < order.indexOf(ids.a);
+      },
+      { timeout: 10000 },
+      { a: String(a.id), b: String(b.id) }
+    );
+    assert.deepEqual(await treeOf(names), [[b.nameDe, []], [a.nameDe, [[c.nameDe, []]]]], "B moved up before A");
+    assert.equal(await page.evaluate(() => document.activeElement?.dataset.category), String(b.id), "the focus stays on B");
+
+    // A question: cut in the list, pasted on a category. Opened on its
+    // category, so the list is not drawn anew under the focus.
+    await page.goto(`${applicationUrl}/exam/pool?category=${categoryId}`, { waitUntil: "domcontentloaded" });
+    const row = `.sl-exam-pool-questions tr[data-question="${question.id}"]`;
+    await page.waitForSelector(row, { timeout: 20000 });
+    await page.focus(`${row} .sl-exam-pool-name`);
+    await page.keyboard.down("Control");
+    await page.keyboard.press("x");
+    await page.keyboard.up("Control");
+    await focus(b.id);
+    await page.keyboard.down("Control");
+    await page.keyboard.press("v");
+    await page.keyboard.up("Control");
+    await page.waitForFunction((selector) => !document.querySelector(selector), { timeout: 10000 }, row);
+    assert.equal((await fetchAs(teacher, `/exam/api/pool/questions/${question.id}`)).json.categoryId, b.id);
+    assert.ok(await page.$eval(".sl-exam-tree-keys", (el) => /Ctrl\+X/.test(el.textContent)), "the keys are listed under the tree");
+  });
+
+  test("tree: the popup creates a subcategory, renames by a double click, refuses a duplicate in place, and cancels", async () => {
+    const [a, b] = await threeCategories("Popup");
+    const page = teacher.page;
+    await openPoolTree();
+    await page.click(`${rowOf(a.id)} .sl-exam-tree-add`);
+    await page.waitForSelector(".sl-exam-tree-popup[role=dialog] input[name=nameDe]", { timeout: 5000 });
+    await page.type(".sl-exam-tree-popup input[name=nameDe]", "Popup Neu");
+    await page.type(".sl-exam-tree-popup input[name=nameEn]", "Popup new");
+    await page.keyboard.press("Enter");
+    await shown(`.sl-exam-pool-tree li[data-category="${a.id}"] li[role=treeitem]`);
+    const created = (await treeOf([a.nameDe]))[0][1];
+    assert.deepEqual(created, [["Popup Neu", []]], "the subcategory is A's last");
+
+    await page.click(nameOf(b.id), { count: 2 });
+    await page.waitForSelector(".sl-exam-tree-popup input[name=nameDe]", { timeout: 5000 });
+    assert.equal(await page.$eval(".sl-exam-tree-popup input[name=nameDe]", (input) => input.value), b.nameDe, "filled with its names");
+    await page.$eval(".sl-exam-tree-popup input[name=nameDe]", (input) => {
+      input.value = "";
+    });
+    await page.type(".sl-exam-tree-popup input[name=nameDe]", a.nameDe);
+    await page.click(".sl-exam-tree-popup button[type=submit]");
+    await page.waitForFunction(() => document.querySelector(".sl-exam-tree-popup .sl-exam-message")?.textContent, { timeout: 10000 });
+    assert.match(await page.$eval(".sl-exam-tree-popup .sl-exam-message", (el) => el.textContent), /already/, "a sibling's name is refused in the popup, which stays open");
+    await page.$eval(".sl-exam-tree-popup input[name=nameDe]", (input) => {
+      input.value = "";
+    });
+    await page.type(".sl-exam-tree-popup input[name=nameDe]", "Popup B2");
+    await page.click(".sl-exam-tree-popup button[type=submit]");
+    await page.waitForFunction((selector) => document.querySelector(selector)?.textContent.startsWith("Popup B2"), { timeout: 10000 }, nameOf(b.id));
+
+    await page.click(`${rowOf(b.id)} .sl-exam-tree-rename`);
+    await page.waitForSelector(".sl-exam-tree-popup", { timeout: 5000 });
+    await page.type(".sl-exam-tree-popup input[name=nameDe]", "nicht gespeichert");
+    await page.click(".sl-exam-tree-popup .sl-exam-tree-cancel");
+    assert.equal(await page.$(".sl-exam-tree-popup"), null, "Cancel closes it");
+    assert.equal((await treeOf(["Popup B2"])).length, 1, "and nothing changed");
+  });
+
+  test("tree: only an empty category offers its bin, and deleting it takes a second click", async () => {
+    const [a, b] = await threeCategories("Leer");
+    await fetchAs(teacher, "/exam/api/pool/categories", { method: "POST", body: { parentId: a.id, nameDe: "Leer Kind", nameEn: "Empty child" } });
+    const page = teacher.page;
+    await openPoolTree();
+    assert.equal(await page.$(`${rowOf(a.id)} .sl-exam-tree-delete`), null, "A holds a subcategory: no bin");
+    assert.equal(await page.$(`${rowOf(categoryId)} .sl-exam-tree-delete`), null, "a category with questions: no bin");
+    const bin = `${rowOf(b.id)} .sl-exam-tree-delete`;
+    await page.click(bin);
+    assert.match(await page.$eval(bin, (button) => button.textContent), /^Click again/);
+    await page.click(bin);
+    await page.waitForFunction((selector) => !document.querySelector(selector), { timeout: 10000 }, rowOf(b.id));
+    assert.deepEqual(await treeOf([b.nameDe]), [], "B is gone");
+  });
+
+  test("tree: the former categories page lands on the pool, keeping the course", async () => {
+    const year = (await fetchAs(teacher, "/exam/api/years")).json.current;
+    const klass = (await fetchAs(teacher, `/exam/api/years/${year.id}/classes`)).json.find((c) => c.courses > 0);
+    const courseId = (await fetchAs(teacher, `/exam/api/classes/${klass.id}`)).json.courses[0].id;
+    const answer = await teacher.page.goto(`${applicationUrl}/exam/pool/categories?course=${courseId}`, { waitUntil: "domcontentloaded" });
+    assert.equal(answer.request().redirectChain()[0]?.response()?.status(), 301, "a permanent redirect");
+    assert.equal(`${new URL(teacher.page.url()).pathname}${new URL(teacher.page.url()).search}`, `/exam/pool?course=${courseId}`);
+    await teacher.page.goto(`${applicationUrl}/exam/pool/categories`, { waitUntil: "domcontentloaded" });
+    assert.equal(new URL(teacher.page.url()).pathname, "/exam/pool");
+    await teacher.page.waitForSelector(".sl-exam-pool-tree", { timeout: 20000 });
   });
 
   test("an unwritten test takes up an edit only on request, with the same questions in the same order", async () => {
@@ -3358,7 +3584,6 @@ describe("the module's actions", () => {
 
   /** The action texts of design.md, Context, that were links before. */
   const actionKeys = [
-    "exam.pool.editCategories",
     "exam.pool.importQuestions",
     "exam.pool.newQuestion",
     "exam.pool.edit",

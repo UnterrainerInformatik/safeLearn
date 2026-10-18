@@ -45,24 +45,24 @@
 
 ## 3. Phase 3: The category tree in the pool
 
-- [ ] 3.1 Server (`exam/pool-edit.js`, `exam/routes-pool-edit.js`):
+- [x] 3.1 Server (`exam/pool-edit.js`, `exam/routes-pool-edit.js`):
   - `PUT /pool/categories/:id` accepts `{ parentId, before }` and renumbers the siblings in one transaction (design D4);
   - `POST /pool/questions/:id/category { categoryId }` bumps `version`.
   - Unit tests in `test/exam-question-editor.test.js`: placement before a sibling, at the end, into another parent, refused into own subtree, duplicate name, a question move bumping the version and a stale editor save refused afterwards.
-- [ ] 3.2 Add `exam/client/tree-drag.js`, a pointer-event drag controller (design D3). It handles mouse and touch (300 ms press), "into"/"before"/"after" zones with a highlight and a line, and auto-scrolling.
-- [ ] 3.3 In the pool's tree (`client/pool.js`):
+- [x] 3.2 Add `exam/client/tree-drag.js`, a pointer-event drag controller (design D3). It handles mouse and touch (300 ms press), "into"/"before"/"after" zones with a highlight and a line, and auto-scrolling.
+- [x] 3.3 In the pool's tree (`client/pool.js`):
   - make categories and question rows drag sources, and categories drop targets;
   - on a refusal, redraw the unchanged tree and show the reason at the dragged node.
-- [ ] 3.4 Name popup (design D7) for `+` (subcategory, and at the tree's end for a top-level category) and for renaming via double click and the pencil icon. It has Cancel, Enter and Escape, and shows refusals inside the popup.
-- [ ] 3.5 Delete icon only on empty categories, as `confirmButton`.
-- [ ] 3.6 Keyboard (design D5):
+- [x] 3.4 Name popup (design D7) for `+` (subcategory, and at the tree's end for a top-level category) and for renaming via double click and the pencil icon. It has Cancel, Enter and Escape, and shows refusals inside the popup.
+- [x] 3.5 Delete icon only on empty categories, as `confirmButton`.
+- [x] 3.6 Keyboard (design D5):
   - ARIA tree with roving tabindex;
   - Ctrl+X and Ctrl+V for categories and question rows;
   - Alt+↑/↓ among siblings;
   - F2 to rename and Insert/`+` for a new subcategory;
   - a key legend under the tree.
-- [ ] 3.7 Remove `client/pool-categories.js` and its element. `/exam/pool/categories` redirects with 301 to `/exam/pool`, keeping `?course=`. Point `client/question-editor.js:68` at the pool.
-- [ ] 3.8 Harness checks in `test/exam.test.js`:
+- [x] 3.7 Remove `client/pool-categories.js` and its element. `/exam/pool/categories` redirects with 301 to `/exam/pool`, keeping `?course=`. Point `client/question-editor.js:68` at the pool.
+- [x] 3.8 Harness checks in `test/exam.test.js`:
   - drag a category onto another and between two (mouse, and touch via `page.touchscreen`);
   - drag a question onto a category;
   - a refused drop leaves the order unchanged and shows the reason at the node;
@@ -71,7 +71,7 @@
   - create, rename and cancel in the popup;
   - delete offered only on empty categories;
   - the old address lands on `/exam/pool`.
-- [ ] 3.9 Run `npm test`, record the result here, and commit phase 3.
+- [x] 3.9 Run `npm test`, record the result here, and commit phase 3. Result 2026-10-18: `npm test` 701/703, `test/exam.test.js` 114/114; the two failures were the known timing checks (`legibility` 497px on a content page, `deployment-surface` reload backoff with the same gap pattern as on unchanged HEAD).
 
 ## 4. Phase 4: Missing actions
 
@@ -118,3 +118,4 @@
 - `armedButton` is also used by the live view's admin delete (`exam/client/live.js`). The live view redraws a row on every change event, which disarms a button armed in it.
 - `categoryTree` (`exam/pool.js`) counts only non-retired questions. The delete icon (3.5) needs a count that includes retired ones.
 - The scale page (`exam/routes-gradebook.js`, `page("/scale", …)`) passes no `current`; 2.5 needs `current: "scale"` through `teacherShell`.
+- Phase 3 (applied 2026-10-18): the tree lives in `exam/client/pool-tree.js` beside `pool.js`, which only mounts it; `categoryTree` answers `empty` (nothing held, retired questions included) for the bin. Each node carries 📝 (new question in it) beside `+`, as decided in design.md. A refused question move is told in the tree's status line; the spec asks for the node only for categories.

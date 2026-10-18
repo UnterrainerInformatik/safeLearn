@@ -77,34 +77,16 @@
       "year": "Year"
     },
     "categories": {
-      "addSub": "+ Subcategory",
-      "addSubTitle": "Add a subcategory",
       "backToPool": "Back to the pool",
-      "confirmDelete": "Delete the category {name}?",
-      "create": "Create",
-      "created": "Created.",
       "delete": "Delete",
-      "deleted": "Deleted.",
       "englishName": "English name",
       "germanName": "German name",
-      "heading": "Categories",
-      "held": "{questions}, {total} with below",
       "homework": "Homework",
       "manualTests": "Manual tests",
-      "move": "Move",
-      "moveDown": "Move down",
-      "moveTitle": "Move under the chosen category",
-      "moveUnderLabel": "Move {name} under",
-      "moveUp": "Move up",
-      "moved": "Moved.",
-      "newAtTop": "New category at the top",
       "none": "There is no category yet.",
       "onlineTests": "Online tests",
       "participation": "Participation (+/−)",
-      "rename": "Rename",
-      "renamed": "Renamed.",
-      "save": "Save",
-      "top": "(the top)"
+      "save": "Save"
     },
     "classes": {
       "add": "Add",
@@ -364,6 +346,7 @@
         "answerTextMissingDe": "Answer {answer} has no German text.",
         "answerTextMissingEn": "Answer {answer} has no English text.",
         "cannotSave": "This question cannot be saved: {count} problems.",
+        "categoryBefore": "A category is placed before a category under the same parent.",
         "categoryExists": "There is a category called \"{name}\" in that place already.",
         "categoryHoldsQuestionAndSubcategories": "This category still holds {questions} question and {children} subcategories; only an empty category can be deleted.",
         "categoryHoldsQuestionAndSubcategory": "This category still holds {questions} question and {children} subcategory; only an empty category can be deleted.",
@@ -386,6 +369,7 @@
         "noCategory": "There is no such category.",
         "noQuestion": "There is no such question.",
         "oneCorrect": "At least one answer has to be correct.",
+        "questionCategory": "A question is moved to a category, named by its id.",
         "singleChoiceCorrect": "Exactly one answer may be correct in a single-choice question.",
         "textImageNotUploaded": "The question text embeds an image that was not uploaded.",
         "textImageOtherQuestion": "The question text embeds an image of another question.",
@@ -613,7 +597,6 @@
       "title": "Exams"
     },
     "pages": {
-      "categories": "Question categories",
       "class": "Class",
       "course": "Course",
       "editQuestion": "Edit: {name}",
@@ -653,7 +636,6 @@
       "correct": "correct",
       "createTest": "Create test",
       "edit": "Edit",
-      "editCategories": "Edit categories",
       "empty": "The question pool is empty. Create a category to start, or import questions: ",
       "importQuestions": "Import questions",
       "imported": "Imported,",
@@ -765,6 +747,23 @@
       "writtenNote": "This test has been written; its questions cannot change any more.",
       "wrong": "wrong",
       "yearWithoutCourse": "{year} has no course yet."
+    },
+    "tree": {
+      "addSubcategory": "New subcategory under {name}",
+      "cancel": "Cancel",
+      "cut": "{name} is cut: paste it on a category with Ctrl+V, or press Escape.",
+      "delete": "Delete {name}",
+      "deleteArmed": "Click again to delete {name}",
+      "english": "English",
+      "german": "German",
+      "keys": "Drag a category onto a category or between two, and a question onto a category. Keys: ↑ ↓ move, ← → fold, Enter chooses, Ctrl+X cuts a category or question, Ctrl+V pastes it into the focused category, Alt+↑ ↓ reorders, F2 renames, Insert or + adds a subcategory, Delete deletes an empty one.",
+      "newAtTop": "New category at the top",
+      "newQuestion": "New question in {name}",
+      "newTopCategory": "+ Category",
+      "newUnder": "New category under {name}",
+      "ok": "OK",
+      "rename": "Rename {name}",
+      "renameTitle": "Rename {name}"
     }
   }
 }

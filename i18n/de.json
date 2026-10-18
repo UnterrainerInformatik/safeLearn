@@ -77,34 +77,16 @@
       "year": "Schuljahr"
     },
     "categories": {
-      "addSub": "+ Unterkategorie",
-      "addSubTitle": "Eine Unterkategorie hinzufügen",
       "backToPool": "Zurück zum Fragenpool",
-      "confirmDelete": "Die Kategorie {name} löschen?",
-      "create": "Anlegen",
-      "created": "Angelegt.",
       "delete": "Löschen",
-      "deleted": "Gelöscht.",
       "englishName": "Englischer Name",
       "germanName": "Deutscher Name",
-      "heading": "Kategorien",
-      "held": "{questions}, {total} mit Unterkategorien",
       "homework": "Hausübungen",
       "manualTests": "Schriftliche Tests",
-      "move": "Verschieben",
-      "moveDown": "Nach unten",
-      "moveTitle": "Unter die gewählte Kategorie verschieben",
-      "moveUnderLabel": "{name} verschieben unter",
-      "moveUp": "Nach oben",
-      "moved": "Verschoben.",
-      "newAtTop": "Neue Kategorie auf oberster Ebene",
       "none": "Es gibt noch keine Kategorie.",
       "onlineTests": "Online-Tests",
       "participation": "Mitarbeit (+/−)",
-      "rename": "Umbenennen",
-      "renamed": "Umbenannt.",
-      "save": "Speichern",
-      "top": "(oberste Ebene)"
+      "save": "Speichern"
     },
     "classes": {
       "add": "Hinzufügen",
@@ -364,6 +346,7 @@
         "answerTextMissingDe": "Antwort {answer} hat keinen deutschen Text.",
         "answerTextMissingEn": "Antwort {answer} hat keinen englischen Text.",
         "cannotSave": "Diese Frage kann nicht gespeichert werden: {count} Probleme.",
+        "categoryBefore": "Eine Kategorie wird vor eine Kategorie unter derselben Oberkategorie gestellt.",
         "categoryExists": "An dieser Stelle gibt es bereits eine Kategorie „{name}“.",
         "categoryHoldsQuestionAndSubcategories": "Diese Kategorie enthält noch {questions} Frage und {children} Unterkategorien; nur eine leere Kategorie kann gelöscht werden.",
         "categoryHoldsQuestionAndSubcategory": "Diese Kategorie enthält noch {questions} Frage und {children} Unterkategorie; nur eine leere Kategorie kann gelöscht werden.",
@@ -386,6 +369,7 @@
         "noCategory": "Diese Kategorie gibt es nicht.",
         "noQuestion": "Diese Frage gibt es nicht.",
         "oneCorrect": "Mindestens eine Antwort muss richtig sein.",
+        "questionCategory": "Eine Frage wird in eine Kategorie verschoben, die mit ihrer ID angegeben wird.",
         "singleChoiceCorrect": "Bei einer Einfachauswahl-Frage darf genau eine Antwort richtig sein.",
         "textImageNotUploaded": "Der Fragetext enthält ein Bild, das nicht hochgeladen wurde.",
         "textImageOtherQuestion": "Der Fragetext enthält ein Bild einer anderen Frage.",
@@ -613,7 +597,6 @@
       "title": "Tests"
     },
     "pages": {
-      "categories": "Fragenkategorien",
       "class": "Klasse",
       "course": "Kurs",
       "editQuestion": "Bearbeiten: {name}",
@@ -653,7 +636,6 @@
       "correct": "richtig",
       "createTest": "Test anlegen",
       "edit": "Bearbeiten",
-      "editCategories": "Kategorien bearbeiten",
       "empty": "Der Fragenpool ist leer. Zum Start eine Kategorie anlegen oder Fragen importieren: ",
       "importQuestions": "Fragen importieren",
       "imported": "Importiert,",
@@ -765,6 +747,23 @@
       "writtenNote": "Dieser Test wurde schon geschrieben; seine Fragen können sich nicht mehr ändern.",
       "wrong": "falsch",
       "yearWithoutCourse": "{year} hat noch keinen Kurs."
+    },
+    "tree": {
+      "addSubcategory": "Neue Unterkategorie unter {name}",
+      "cancel": "Abbrechen",
+      "cut": "{name} ist ausgeschnitten: mit Strg+V auf einer Kategorie einfügen, oder Escape.",
+      "delete": "{name} löschen",
+      "deleteArmed": "Noch einmal klicken, um {name} zu löschen",
+      "english": "Englisch",
+      "german": "Deutsch",
+      "keys": "Eine Kategorie auf eine Kategorie oder zwischen zwei ziehen, eine Frage auf eine Kategorie. Tasten: ↑ ↓ bewegen, ← → klappen, Enter wählt, Strg+X schneidet eine Kategorie oder Frage aus, Strg+V fügt sie in die markierte Kategorie ein, Alt+↑ ↓ ordnet um, F2 benennt um, Einfg oder + legt eine Unterkategorie an, Entf löscht eine leere.",
+      "newAtTop": "Neue Kategorie ganz oben",
+      "newQuestion": "Neue Frage in {name}",
+      "newTopCategory": "+ Kategorie",
+      "newUnder": "Neue Kategorie unter {name}",
+      "ok": "OK",
+      "rename": "{name} umbenennen",
+      "renameTitle": "{name} umbenennen"
     }
   }
 }
