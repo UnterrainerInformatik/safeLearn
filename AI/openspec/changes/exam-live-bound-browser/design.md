@@ -49,6 +49,6 @@ The cell shows the short label with the full string in `title`. Next to it an ic
 
 Deploy as usual (safeLearn, then secureLectures). The migration runs at start with its backup. Rollback: the previous image ignores the extra columns; no data has to be removed.
 
-## Open Questions
+## Decisions confirmed by Gerald (2026-10-18)
 
-- **Show refused browsers' strings?** (open in the backlog entry.) Proposed default, built into spec and tasks: record the string with each refusal and show the latest one in "Other browsers", because it tells the teacher which device somebody tried with. If Gerald prefers not to show it, tasks 2.3 and 3.3 drop the display part; recording can stay or go with the same decision.
+- **Refused browsers' strings are recorded and shown:** the string is stored with each refusal and the latest one is shown in "Other browsers", because it tells the teacher which device somebody tried with.

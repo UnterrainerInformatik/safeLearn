@@ -21,14 +21,24 @@ At its right end, apart from the four positions, the bar SHALL carry two buttons
 
 ### Requirement: A student reaches their own tests and results from every page
 
-While the module is active, the instance's top bar SHALL carry, on every page, two buttons for a session not acting as a teacher: **Tests**, which opens the student's own page of open online tests, and **Results**, which opens the student's own results. A teacher in student view SHALL get both, as a student would, and SHALL not get the button to the module's home. A session acting as a teacher SHALL get neither. Without the module neither button exists.
+While the module is active, the instance's top bar SHALL carry, on every page, one **Exams** button for a session not acting as a teacher. It SHALL open the student's own page `/exam/my`, which shows the open online tests above the student's results. The button SHALL be marked (violet) while a test is open for the session, and the page SHALL keep that mark current while it is visible. The former addresses `/exam/my/tests` and `/exam/results` SHALL redirect to `/exam/my`. A teacher in student view SHALL get the button, as a student would, and SHALL not get the button to the module's home. A session acting as a teacher SHALL not get it. Without the module the button does not exist.
 
 #### Scenario: A student on a lecture page
 
 - **WHEN** a student opens any content page of an instance with the module active
-- **THEN** the top bar leads to `/exam/my/tests` and to `/exam/results`
+- **THEN** the top bar carries the Exams button, which leads to `/exam/my`
+
+#### Scenario: A test is open
+
+- **WHEN** a sitting of a test is open for the student's session
+- **THEN** the Exams button is marked violet
+
+#### Scenario: An old address
+
+- **WHEN** a student opens `/exam/results` or `/exam/my/tests`
+- **THEN** they are redirected to `/exam/my`
 
 #### Scenario: A teacher
 
 - **WHEN** a teacher in teacher view opens the same page
-- **THEN** the top bar carries the button to the module's home and neither of the student's buttons
+- **THEN** the top bar carries the button to the module's home and not the Exams button

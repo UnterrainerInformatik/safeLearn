@@ -150,6 +150,9 @@ The test head's hard-coded `en ? "English" : "Deutsch"` (`client/tests.js:206`) 
 
 No data migration. Deploy each phase to secureLectures after `npm test` passes, following the usual sync order (safeLearn first). Rollback means reverting the phase's commit, since the new endpoints only add capabilities and the removed category page is replaced by a redirect.
 
-## Open Questions
+## Decisions confirmed by Gerald (2026-10-18)
 
-- Should a course with only empty gradebook columns, with no results and no tests, be deletable? It is assumed not, because a column is configuration someone made. This can be relaxed later without changing the approach.
+- Extending a sitting moves only its window; the writing duration stays. Extra time for single students is out of scope.
+- A course is deletable only while nothing hangs on it: no columns (an empty column blocks too), results, grades or tests.
+- Renaming a class changes only the module's record, meant for fixing typos; a name the directory does not know yields no roster proposals.
+- New question without a chosen category opens the editor with an empty category choice; it saves only once one is chosen.

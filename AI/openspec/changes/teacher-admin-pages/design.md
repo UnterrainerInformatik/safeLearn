@@ -74,5 +74,5 @@ No data, no configuration. Deploy as usual (safeLearn, then the sync into secure
 
 ## Open Questions
 
-- A **Refresh directory now** button on the directory page would need a write route that starts a fetch, which today only start-up and the TTL do. Left out; can be added later without changing these pages' read-only requirements beyond a new one.
+- ~~A **Refresh directory now** button~~: decided against (Gerald, 2026-10-18). The directory page stays read-only.
 - Whether a third page (for example the realm's admin-event summary) belongs into the same section can be decided when one is asked for; the section takes more buttons without change.
