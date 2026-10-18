@@ -3563,17 +3563,16 @@ describe("online tests: an admin's corrections", () => {
       db.close();
     }
   });
+
 });
 
-// The interface in the reader's language and format (`ui-language`,
-// `locale-formats`). The demo accounts are shared, so every check here writes
-// the preferences it depends on and the block puts both back to the baseline
-// (English, de-AT) when it ends, whatever happened.
 // The module's actions (`exam-ui-conventions`): buttons in one style, standing
 // at the structure they act on, with their messages beside them.
 describe("the module's actions", () => {
   let teacher;
+  let student;
   let course;
+  let gbClass;
   let questions;
 
   const catalogs = {
@@ -3612,9 +3611,11 @@ describe("the module's actions", () => {
 
   before(async () => {
     teacher = await sharedSession("teacher");
+    student = await sharedSession("student");
     await setPreferences(teacher, {});
+    await setPreferences(student, {});
     const year = (await fetchAs(teacher, "/exam/api/years")).json.current;
-    const gbClass = (await fetchAs(teacher, `/exam/api/years/${year.id}/classes`)).json.find((c) => c.name === "9xgb");
+    gbClass = (await fetchAs(teacher, `/exam/api/years/${year.id}/classes`)).json.find((c) => c.name === "9xgb");
     course = (await fetchAs(teacher, `/exam/api/classes/${gbClass.id}`)).json.courses.find((c) => c.subject === "GB");
     questions = (await fetchAs(teacher, "/exam/api/pool/questions")).json;
   });
@@ -3801,8 +3802,166 @@ describe("the module's actions", () => {
       await grade({ comment: null });
     }
   });
+
+  function database(fn) {
+    const { db } = openDatabase(run.databasePath);
+    try {
+      return fn(db);
+    } finally {
+      db.close();
+    }
+  }
+
+  // ------------------------------------------- missing actions (phase 4)
+
+  /** A test of the pool's questions with a sitting open since `openedAgo` minutes, closing in `closesIn`. */
+  async function openSitting(name, { openedAgo = 1, closesIn = 50, minutes = 15 } = {}) {
+    const created = (await fetchAs(teacher, `/exam/api/courses/${course.id}/tests`, { method: "POST", body: { name, questionIds: questions.map((q) => q.id) } })).json;
+    const sitting = await fetchAs(teacher, `/exam/api/tests/${created.id}/sittings`, {
+      method: "POST",
+      body: { opensAt: new Date(Date.now() - openedAgo * 60000).toISOString(), closesAt: new Date(Date.now() + closesIn * 60000).toISOString(), durationMinutes: minutes },
+    });
+    assert.equal(sitting.status, 200, JSON.stringify(sitting.json));
+    return { test: created, sitting: sitting.json };
+  }
+
+  /** The live view of `sitting` on the teacher's page, streaming. */
+  async function openLive(sitting) {
+    await teacher.page.goto(`${applicationUrl}/exam/sittings/${sitting.id}/live`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForFunction(() => document.querySelector("sl-exam-live")?.dataset.mode === "stream", { timeout: 20000 });
+  }
+
+  /** A countdown's "m:ss" or "h:mm:ss" in seconds. */
+  const seconds = (text) => text.split(":").map(Number).reduce((sum, part) => sum * 60 + part, 0);
+
+  test("a course created for the check is renamed and deleted at its head, and the bar follows", async () => {
+    const created = (await fetchAs(teacher, `/exam/api/classes/${gbClass.id}/courses`, { method: "POST", body: { subject: "ZZx" } })).json;
+    const page = teacher.page;
+    await page.goto(`${applicationUrl}/exam/courses/${created.id}`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".sl-exam-course-actions .sl-exam-record-rename", { timeout: 20000 });
+    await page.click(".sl-exam-course-actions .sl-exam-record-rename");
+    await page.$eval(".sl-exam-course-actions input", (input) => {
+      input.value = "";
+    });
+    await page.type(".sl-exam-course-actions input", "ZZ");
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), page.keyboard.press("Enter")]);
+    await page.waitForFunction(() => document.querySelector("#markdown-content h1")?.textContent.startsWith("ZZ –"), { timeout: 20000 });
+    assert.equal(await page.$eval('.sl-exam-bar select[data-position="course"]', (select) => select.selectedOptions[0].textContent), "ZZ", "the bar shows the new name");
+
+    await page.waitForSelector(".sl-exam-course-actions .sl-exam-record-delete", { timeout: 20000 });
+    await page.click(".sl-exam-course-actions .sl-exam-record-delete");
+    assert.match(await page.$eval(".sl-exam-course-actions .sl-exam-record-delete", (b) => b.textContent), /^Click again to delete ZZ/);
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), page.click(".sl-exam-course-actions .sl-exam-record-delete")]);
+    assert.equal(new URL(page.url()).pathname, `/exam/classes/${gbClass.id}`, "the class page opens");
+    assert.equal((await fetchAs(teacher, `/exam/api/courses/${created.id}`)).status, 404, "the course is gone");
+  });
+
+  test("deleting a course with a result is refused, with the reason at the button", async () => {
+    const created = (await fetchAs(teacher, `/exam/api/classes/${gbClass.id}/courses`, { method: "POST", body: { subject: "ZR" } })).json;
+    const column = (await fetchAs(teacher, `/exam/api/courses/${created.id}/assessments`, { method: "POST", body: { kind: "test", name: "Kept", date: "2026-10-20", maxPoints: 10 } })).json;
+    assert.equal((await fetchAs(teacher, `/exam/api/assessments/${column.id}/results/gb-other-student`, { method: "PUT", body: { points: 4 } })).status, 200);
+    const page = teacher.page;
+    try {
+      await page.goto(`${applicationUrl}/exam/courses/${created.id}`, { waitUntil: "domcontentloaded" });
+      const remove = ".sl-exam-course-actions .sl-exam-record-delete";
+      await page.waitForSelector(remove, { timeout: 20000 });
+      await page.click(remove);
+      await page.click(remove);
+      await page.waitForFunction(() => document.querySelector(".sl-exam-course-actions .sl-exam-message")?.textContent, { timeout: 10000 });
+      assert.match(await page.$eval(".sl-exam-course-actions .sl-exam-message", (el) => el.textContent), /gradebook columns 1, results 1/);
+      assert.equal((await fetchAs(teacher, `/exam/api/courses/${created.id}`)).status, 200, "nothing changed");
+    } finally {
+      await fetchAs(teacher, `/exam/api/assessments/${column.id}`, { method: "DELETE" });
+      await fetchAs(teacher, `/exam/api/courses/${created.id}`, { method: "DELETE" });
+    }
+  });
+
+  test("End now in the live view submits the attempt of a student who is writing", async () => {
+    const { test, sitting } = await openSitting("Ended early");
+    const started = await fetchAs(student, `/exam/api/tests/${test.id}/attempt`, { method: "POST" });
+    assert.equal(started.status, 200, JSON.stringify(started.json));
+    const row = `sl-exam-live tr[data-username="${student.username.toLowerCase()}"]`;
+    await openLive(sitting);
+    await teacher.page.waitForSelector(`${row}[data-status="writing"]`, { timeout: 20000 });
+    await teacher.page.waitForSelector(".sl-exam-live-end", { visible: true, timeout: 10000 });
+    await teacher.page.click(".sl-exam-live-end");
+    assert.match(await teacher.page.$eval(".sl-exam-live-end", (b) => b.textContent), /^Click again to end/);
+    await teacher.page.click(".sl-exam-live-end");
+    await teacher.page.waitForSelector(`${row}[data-status="submitted"]`, { timeout: 15000 });
+    assert.ok(database((db) => db.prepare("SELECT submitted_at FROM attempt WHERE id = ?").get(started.json.attempt).submitted_at), "submitted on the server");
+  });
+
+  test("Extend in the live view gives a student cut short by the window the longer time", async () => {
+    const { test, sitting } = await openSitting("Extended", { openedAgo: 10, closesIn: 3, minutes: 10 });
+    assert.equal((await fetchAs(student, `/exam/api/tests/${test.id}/attempt`, { method: "POST" })).status, 200);
+    const left = async () => {
+      await student.page.goto(`${applicationUrl}/exam/my`, { waitUntil: "domcontentloaded" });
+      await student.page.waitForSelector(".sl-exam-countdown", { timeout: 20000 });
+      await student.page.waitForFunction(() => /\d:\d\d/.test(document.querySelector(".sl-exam-countdown").textContent), { timeout: 10000 });
+      return seconds(await student.page.$eval(".sl-exam-countdown", (el) => el.textContent));
+    };
+    try {
+      const before = await left();
+      assert.ok(before <= 3 * 60, `cut short by the window: ${before} s`);
+      await openLive(sitting);
+      await teacher.page.waitForSelector(".sl-exam-live-extend", { visible: true, timeout: 10000 });
+      await teacher.page.$eval(".sl-exam-live-extend-minutes", (input) => {
+        input.value = "10";
+      });
+      await teacher.page.click(".sl-exam-live-extend");
+      const until = Date.now() + 10000;
+      while ((await fetchAs(teacher, `/exam/api/tests/${test.id}`)).json.sittings[0].closesAt === sitting.closesAt) {
+        assert.ok(Date.now() < until, "the extension is stored");
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      assert.equal(await teacher.page.$eval(".sl-exam-live-window-message", (el) => el.textContent), "", "no refusal");
+      const after = await left();
+      assert.ok(after > before + 5 * 60, `the attempt page shows the longer time: ${before} s, then ${after} s`);
+    } finally {
+      const attempt = database((db) => db.prepare("SELECT id FROM attempt WHERE test_id = ?").get(test.id).id);
+      await fetchAs(student, `/exam/api/attempts/${attempt}/submit`, { method: "POST" });
+    }
+  });
+
+  test("the student page leads to the next and previous student, keeping the semester, and back to the sheet", async () => {
+    const page = teacher.page;
+    const overview = (await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=ws`)).json;
+    const [first, second] = overview.students.map((row) => row.username);
+    await page.goto(`${applicationUrl}/exam/courses/${course.id}/students/${first}?semester=ws`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".sl-exam-student-back", { timeout: 20000 });
+    assert.equal(await page.$(".sl-exam-student-previous"), null, "the first has no previous");
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), page.click(".sl-exam-student-next")]);
+    assert.equal(`${new URL(page.url()).pathname}${new URL(page.url()).search}`, `/exam/courses/${course.id}/students/${second}?semester=ws`);
+    await page.waitForSelector(".sl-exam-student-previous", { timeout: 20000 });
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), page.click(".sl-exam-student-previous")]);
+    assert.equal(new URL(page.url()).pathname, `/exam/courses/${course.id}/students/${first}`);
+    await page.waitForSelector(".sl-exam-student-back", { timeout: 20000 });
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), page.click(".sl-exam-student-back")]);
+    assert.equal(`${new URL(page.url()).pathname}${new URL(page.url()).search}`, `/exam/courses/${course.id}/gradebook?semester=ws`);
+  });
+
+  test("an empty roster's gradebook leads to the class's roster", async () => {
+    const year = (await fetchAs(teacher, "/exam/api/years")).json.current;
+    const klass = (await fetchAs(teacher, `/exam/api/years/${year.id}/classes`, { method: "POST", body: { name: "9xempty", students: [] } })).json;
+    const empty = (await fetchAs(teacher, `/exam/api/classes/${klass.id}/courses`, { method: "POST", body: { subject: "LEER" } })).json;
+    const page = teacher.page;
+    try {
+      await page.goto(`${applicationUrl}/exam/courses/${empty.id}/gradebook`, { waitUntil: "domcontentloaded" });
+      await page.waitForSelector(".sl-exam-to-roster", { timeout: 20000 });
+      await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), page.click(".sl-exam-to-roster")]);
+      assert.equal(new URL(page.url()).pathname, `/exam/classes/${klass.id}`);
+    } finally {
+      assert.equal((await fetchAs(teacher, `/exam/api/courses/${empty.id}`, { method: "DELETE" })).status, 200);
+      assert.equal((await fetchAs(teacher, `/exam/api/classes/${klass.id}`, { method: "DELETE" })).status, 200, "a class without courses goes");
+    }
+  });
+
 });
 
+// The interface in the reader's language and format (`ui-language`,
+// `locale-formats`). The demo accounts are shared, so every check here writes
+// the preferences it depends on and the block puts both back to the baseline
+// (English, de-AT) when it ends, whatever happened.
 describe("the interface in the reader's language and format", () => {
   let student;
   let teacher;

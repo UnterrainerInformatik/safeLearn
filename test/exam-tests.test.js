@@ -22,7 +22,7 @@ import { entryCategory, proposal } from "../exam/grading.js";
 import { getQuestion, listQuestions } from "../exam/pool.js";
 import { NotFoundError } from "../exam/classes.js";
 import { importPool } from "../exam/pool-import.js";
-import { createSitting, createTest, deleteSitting, deleteTest, getTest, listTests, removeWrittenQuestion, updateSitting, updateTest, viennaDate } from "../exam/tests.js";
+import { createSitting, createTest, deleteSitting, deleteTest, endSitting, extendSitting, getTest, listTests, removeWrittenQuestion, updateSitting, updateTest, viennaDate } from "../exam/tests.js";
 import {
   checkDevice,
   correctShares,
@@ -582,6 +582,52 @@ describe("attempts", () => {
 });
 
 // ------------------------------------------------------- admin corrections
+
+describe("ending and extending an open sitting", () => {
+  test("ending submits every running attempt at once, with its saved answers", () => {
+    const { db, test, sitting } = running({ duration: 15, window: 50 });
+    const anna = startAttempt(db, "anna", test.id).attemptId;
+    const ben = startAttempt(db, "ben", test.id).attemptId;
+    const tokens = correctTokens(db, anna);
+    saveAnswer(db, attemptRow(db, anna), 1, tokens[1]);
+    submitAttempt(db, attemptRow(db, ben));
+    const at = new Date().toISOString();
+    const ended = endSitting(db, sitting.id, at);
+    assert.equal(ended.closesAt, at);
+    assert.equal(ended.state, "over");
+    const row = attemptRow(db, anna);
+    assert.ok(row.submitted_at, "the running attempt is submitted");
+    assert.equal(row.deadline, at);
+    assert.equal(row.score, 1, "with the answer it had saved");
+  });
+
+  test("extending moves the deadlines the window cut short, and not those that run their full duration", () => {
+    const { db, test, sitting } = running({ duration: 10, window: 50 });
+    const early = startAttempt(db, "anna", test.id, new Date().toISOString()).attemptId;
+    // Started four minutes before the window closes: its deadline is the window's end.
+    const lateStart = new Date(Date.parse(sitting.closesAt) - 4 * 60000).toISOString();
+    const late = startAttempt(db, "ben", test.id, lateStart).attemptId;
+    const before = attemptRow(db, early).deadline;
+    assert.equal(attemptRow(db, late).deadline, sitting.closesAt);
+    const extended = extendSitting(db, sitting.id, { minutes: 10 });
+    assert.equal(Date.parse(extended.closesAt) - Date.parse(sitting.closesAt), 10 * 60000);
+    assert.equal(attemptRow(db, early).deadline, before, "the full duration stays");
+    assert.equal(Date.parse(attemptRow(db, late).deadline), Date.parse(lateStart) + 10 * 60000, "start plus the duration now");
+    assert.equal(db.prepare("SELECT duration_s FROM sitting WHERE id = ?").get(sitting.id).duration_s, 600, "the duration is unchanged");
+    for (const minutes of [4, 121, 7.5, "10"]) assert.throws(() => extendSitting(db, sitting.id, { minutes }), InvalidInputError, String(minutes));
+  });
+
+  test("both are refused before the sitting opens and after it closed", () => {
+    const seed = seeded();
+    const test = createTest(seed.db, seed.course.id, { name: "T", questionIds: seed.ids });
+    const later = createSitting(seed.db, test.id, { opensAt: inMinutes(60), closesAt: inMinutes(120), durationMinutes: 15 });
+    assert.throws(() => endSitting(seed.db, later.id), ConflictError);
+    assert.throws(() => extendSitting(seed.db, later.id, { minutes: 10 }), ConflictError);
+    seed.db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ? WHERE id = ?").run(inMinutes(-60), inMinutes(-1), later.id);
+    assert.throws(() => endSitting(seed.db, later.id), ConflictError);
+    assert.throws(() => extendSitting(seed.db, later.id, { minutes: 10 }), ConflictError);
+  });
+});
 
 describe("an admin's corrections of a written test", () => {
   /** Anna answers every question correctly and submits; Ben starts and stays. */

@@ -16,7 +16,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, test } from "node:test";
 
-import { createClass, createCourse, createYear, InvalidInputError, NotFoundError, removeFromRoster, updateCourse } from "../exam/classes.js";
+import { addToRoster, createClass, createCourse, createYear, InvalidInputError, NotFoundError, removeFromRoster, updateCourse } from "../exam/classes.js";
 import { migrate, openDatabase, readMigrations } from "../exam/db.js";
 import {
   courseColumns,
@@ -496,6 +496,31 @@ describe("proposals, overrides and the course overview", () => {
     assert.equal(semesterToday(year, "2027-02-15"), "ss");
   });
 });
+
+describe("a student's neighbours in the sheet", () => {
+  test("previous and next follow the sheet's order, attending first, and are missing at either end", () => {
+    const { db, klass, course } = gradebookFixture();
+    addToRoster(db, klass.id, { username: "cleo", givenName: "Cleo", familyName: "Wolf" });
+    addToRoster(db, klass.id, { username: "dana", givenName: "Dana", familyName: "Zach" });
+    removeFromRoster(db, klass.id, "ben");
+    const order = overviewOrder(db, course.id);
+    const neighbours = (username) => {
+      const record = studentRecord(db, course.id, username);
+      return [record.previous?.username ?? null, record.next?.username ?? null];
+    };
+    assert.deepEqual(order.map((username) => neighbours(username)), order.map((_, index) => [order[index - 1] ?? null, order[index + 1] ?? null]));
+    assert.equal(order.at(-1), "ben", "who left comes last, as on the sheet");
+    assert.deepEqual(neighbours(order[0])[0], null, "the first has no previous");
+    assert.deepEqual(neighbours("ben")[1], null, "the last no next");
+    assert.equal(studentRecord(db, course.id, order[0]).next.givenName, studentRecord(db, course.id, order[1]).student.givenName, "with their names");
+  });
+});
+
+/** The sheet's order of usernames: those attending, then those who left. */
+function overviewOrder(db, courseId) {
+  const overview = courseOverview(db, courseId, "ws");
+  return [...overview.students, ...overview.left].map((row) => row.username);
+}
 
 describe("the year grade", () => {
   /** Anna at 0.80 in the winter and 0.70 in the summer, both in manual tests. */

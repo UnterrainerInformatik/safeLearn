@@ -17,6 +17,7 @@
 
 import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, linkButton, markRows, t } from "./frame.js";
 import { displayClass, displayPerson } from "./classes.js";
+import { openCreatorOf } from "./bar.js";
 import { defaultPeriods, matchWindow, periodTimes, viennaInstant, viennaLocal, windowFor } from "./periods.js";
 
 const stateLabels = {
@@ -80,7 +81,12 @@ class TestList extends ExamElement {
 
   render(list) {
     if (list.groups.length === 0) {
-      return h("div", { class: "sl-exam" }, h("p", {}, list.year ? t("exam.tests.yearWithoutCourse", { year: list.year.name }) : t("exam.tests.noYear")));
+      return h(
+        "div",
+        { class: "sl-exam" },
+        h("p", {}, list.year ? t("exam.tests.yearWithoutCourse", { year: list.year.name }) : t("exam.tests.noYear")),
+        list.year ? null : h("p", {}, button({ label: t("exam.classes.createYear"), kind: "primary", class: "sl-exam-year-create", action: () => openCreatorOf("year") }))
+      );
     }
     return h(
       "div",

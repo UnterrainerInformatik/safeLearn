@@ -129,10 +129,12 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
   });
   page("/courses/:id/students/:username", (t) => t("exam.pages.student"), (req) => {
     const courseId = idParam(req.params.id);
+    // The semester the teacher came from, kept on the way to the neighbours and back.
+    const semester = semesters.includes(req.query.semester) ? req.query.semester : null;
     return {
       kind: "gradebook-student",
-      params: { course: String(courseId), student: String(req.params.username).toLowerCase() },
-      context: { courseId },
+      params: { course: String(courseId), student: String(req.params.username).toLowerCase(), ...(semester ? { semester } : {}) },
+      context: semester ? { courseId, semester } : { courseId },
     };
   });
   // One of the bar's buttons: the scale belongs to no course, but keeps what the bar has chosen.

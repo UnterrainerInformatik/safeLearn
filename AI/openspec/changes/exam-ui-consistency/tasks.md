@@ -75,27 +75,27 @@
 
 ## 4. Phase 4: Missing actions
 
-- [ ] 4.1 Server (`exam/classes.js`, `exam/routes-classes.js`), as in design D8:
+- [x] 4.1 Server (`exam/classes.js`, `exam/routes-classes.js`), as in design D8:
   - rename and delete for years, classes and courses (`PUT`/`DELETE`, and `subject` on `PUT /courses/:id`);
   - refusals as i18n keys with counts.
   - Unit tests in `test/exam-classes.test.js`: duplicate names refused, the current year and a year with classes refused, a class with courses refused, a course with columns, entries, grades or tests refused, and deleting a class removes its roster.
-- [ ] 4.2 Client: Rename (inline field with Save/Cancel) and Delete (`confirmButton`) in the heads of the year on `/exam/`, the class page and the course config sheet. The bar redraws after a rename or delete.
-- [ ] 4.3 Server (`exam/tests.js`, `exam/routes-tests.js`), as in design D9:
+- [x] 4.2 Client: Rename (inline field with Save/Cancel) and Delete (`confirmButton`) in the heads of the year on `/exam/`, the class page and the course config sheet. The bar redraws after a rename or delete.
+- [x] 4.3 Server (`exam/tests.js`, `exam/routes-tests.js`), as in design D9:
   - `POST /sittings/:id/end` and `POST /sittings/:id/extend { minutes }` (5–120), only while open, announced like other sitting changes.
   - Unit tests in `test/exam-tests.test.js`: end submits running attempts at once; extend moves deadlines capped by the window but not those capped by the duration; both refused before opening and after closing.
-- [ ] 4.4 Live view (`client/live.js`): End now (`confirmButton`) and Extend (minutes field + button) in the head.
-- [ ] 4.5 Student page (design D10): `previous`/`next` from `GET /courses/:id/students/:username` (`exam/gradebook.js`), and a head with ←, Back to the gradebook and →, keeping the semester. Unit test in `test/exam-gradebook.test.js` for the order and the ends.
-- [ ] 4.6 Empty states carry their next action:
-  - "There is no school year yet." gets a Create school year button on `/exam/` and on `/exam/tests`;
+- [x] 4.4 Live view (`client/live.js`): End now (`confirmButton`) and Extend (minutes field + button) in the head.
+- [x] 4.5 Student page (design D10): `previous`/`next` from `GET /courses/:id/students/:username` (`exam/gradebook.js`), and a head with ←, Back to the gradebook and →, keeping the semester. Unit test in `test/exam-gradebook.test.js` for the order and the ends.
+- [x] 4.6 Empty states carry their next action:
+  - "There is no school year yet." gets a Create school year button on `/exam/` and on `/exam/tests`; (it opens the bar's dialog; the harness cannot see it, since its instance always has a year);
   - "Nobody is on this course's roster." gets a button to the class's roster.
-- [ ] 4.7 Harness checks in `test/exam.test.js`:
+- [x] 4.7 Harness checks in `test/exam.test.js`:
   - rename and delete a course created for the check;
   - delete refused for a course with a result, with the reason at the button;
   - end a running sitting with a student writing, so the student is shown as submitted;
   - extend a sitting, so the attempt page shows the longer remaining time;
   - next and previous on the student page, and back to the sheet;
   - the empty-roster button leads to the class page.
-- [ ] 4.8 Run `npm test`, record the result here, and commit phase 4.
+- [x] 4.8 Run `npm test`, record the result here, and commit phase 4. Result 2026-10-18: `npm test` 715/717, `test/exam.test.js` all green; the two failures were the known timing checks (`legibility` 497px on a content page, `deployment-surface` reload backoff).
 
 ## 5. Phase 5: Consistency
 
@@ -119,3 +119,4 @@
 - `categoryTree` (`exam/pool.js`) counts only non-retired questions. The delete icon (3.5) needs a count that includes retired ones.
 - The scale page (`exam/routes-gradebook.js`, `page("/scale", …)`) passes no `current`; 2.5 needs `current: "scale"` through `teacherShell`.
 - Phase 3 (applied 2026-10-18): the tree lives in `exam/client/pool-tree.js` beside `pool.js`, which only mounts it; `categoryTree` answers `empty` (nothing held, retired questions included) for the bin. Each node carries 📝 (new question in it) beside `+`, as decided in design.md. A refused question move is told in the tree's status line; the spec asks for the node only for categories.
+- Phase 4 (applied 2026-10-18): the student page takes `?semester=` and keeps it on the way to the neighbours and back; the sheet's student links carry it. A window change (end, extend) is announced on the live channel without a participant, and the live view then fetches a fresh snapshot, since every deadline may have moved. A course's refusal counts columns, results, grades and online tests (tests include question usage left behind by a deleted test).

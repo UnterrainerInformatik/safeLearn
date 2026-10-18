@@ -560,7 +560,11 @@ export function courseOverview(db, courseId, semester) {
   };
 }
 
-/** One student's record in a course, for teachers: every result, and both semesters. */
+/**
+ * One student's record in a course, for teachers: every result, both
+ * semesters, and the students before and after them in the sheet (null at
+ * either end).
+ */
 export function studentRecord(db, courseId, username) {
   const course = getCourse(db, courseId);
   const key = normalizeUsername(username);
@@ -569,10 +573,17 @@ export function studentRecord(db, courseId, username) {
   const scale = readScale(db);
   const entries = courseEntries(db, courseId, scale, key);
   const grades = courseGrades(db, courseId);
+  // The neighbours in the sheet's order: those attending, then those who left (design D10).
+  const roster = rosterOf(db, course.classId);
+  const order = [...roster.filter((entry) => !entry.leftAt), ...roster.filter((entry) => entry.leftAt)];
+  const at = order.findIndex((entry) => entry.username === key);
+  const neighbour = (entry) => (entry ? { username: entry.username, givenName: entry.givenName, familyName: entry.familyName } : null);
   return {
     course,
     student,
     scale,
+    previous: neighbour(order[at - 1]),
+    next: neighbour(order[at + 1]),
     entries: entries.map((entry) => ({ ...entry, semester: semesterOf(entry.date, course.year) })),
     semesters: Object.fromEntries(
       semesters.map((semester) => [semester, teacherSemester(entries, grades, key, semester, course, scale)])

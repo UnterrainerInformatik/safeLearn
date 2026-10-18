@@ -12,6 +12,9 @@ import {
   createCourse,
   createYear,
   currentYear,
+  deleteClass,
+  deleteCourse,
+  deleteYear,
   getClass,
   getCourse,
   InvalidInputError,
@@ -21,6 +24,8 @@ import {
   normalizeClassName,
   refreshNames,
   removeFromRoster,
+  renameClass,
+  renameYear,
   setCurrentYear,
   updateCourse,
   weightCategories,
@@ -91,6 +96,8 @@ export function registerClassRoutes(router, { db, handle, startPage }) {
   api("get", "/years", () => ({ years: listYears(db), current: currentYear(db) }));
   api("post", "/years", (req) => createYear(db, req.body ?? {}));
   api("post", "/years/:id/current", (req) => setCurrentYear(db, idParam(req.params.id)));
+  api("put", "/years/:id", (req) => renameYear(db, idParam(req.params.id), req.body ?? {}));
+  api("delete", "/years/:id", (req) => deleteYear(db, idParam(req.params.id)));
 
   // ----------------------------------------------------------------- classes
 
@@ -102,6 +109,8 @@ export function registerClassRoutes(router, { db, handle, startPage }) {
     return createClass(db, yearId, { name: req.body?.name, students });
   });
   api("get", "/classes/:id", (req) => getClass(db, idParam(req.params.id)));
+  api("put", "/classes/:id", (req) => renameClass(db, idParam(req.params.id), req.body ?? {}));
+  api("delete", "/classes/:id", (req) => deleteClass(db, idParam(req.params.id)));
 
   // The checklist for a class's name, before or after the class exists. Each
   // candidate says whether the class's roster already has them.
@@ -142,6 +151,7 @@ export function registerClassRoutes(router, { db, handle, startPage }) {
   api("post", "/classes/:id/courses", (req) => createCourse(db, idParam(req.params.id), req.body ?? {}));
   api("get", "/courses/:id", (req) => ({ ...getCourse(db, idParam(req.params.id)), categories: weightCategories }));
   api("put", "/courses/:id", (req) => updateCourse(db, idParam(req.params.id), req.body ?? {}));
+  api("delete", "/courses/:id", (req) => deleteCourse(db, idParam(req.params.id)));
 
   // ------------------------------------------------------------------- pages
 

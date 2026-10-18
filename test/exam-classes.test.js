@@ -23,15 +23,21 @@ import {
   createYear,
   currentYear,
   defaultWeights,
+  deleteClass,
+  deleteCourse,
+  deleteYear,
   getClass,
   InvalidInputError,
   listClasses,
   NotFoundError,
   refreshNames,
   removeFromRoster,
+  renameClass,
+  renameYear,
   setCurrentYear,
   updateCourse,
 } from "../exam/classes.js";
+import { createColumn, setResult, setSemesterGrade } from "../exam/gradebook.js";
 import { openDatabase } from "../exam/db.js";
 import { classCandidates, directoryClassNames, isKnownTeacher, searchPeople } from "../exam/roster-source.js";
 
@@ -287,6 +293,85 @@ describe("courses", () => {
       assert.throws(() => updateCourse(db, course.id, { weights: bad }), InvalidInputError, JSON.stringify(bad));
     }
     assert.deepEqual(updateCourse(db, course.id, { language: "en" }).weights, weights, "a language change keeps them");
+  });
+});
+
+describe("renaming and deleting years, classes and courses", () => {
+  test("a rename follows the rules of creation, and a duplicate is refused with the stored name kept", () => {
+    const db = freshDatabase();
+    const year = createYear(db, year2026);
+    const later = createYear(db, year2027);
+    assert.throws(() => renameYear(db, later.id, { name: "2026/27" }), ConflictError);
+    assert.throws(() => renameYear(db, later.id, { name: "2027/29" }), InvalidInputError);
+    assert.equal(renameYear(db, later.id, { name: "2028/29" }).name, "2028/29");
+
+    const a = createClass(db, year.id, { name: "4ahif" });
+    createClass(db, year.id, { name: "4bhif" });
+    assert.throws(() => renameClass(db, a.id, { name: "4BHIF" }), ConflictError);
+    assert.equal(getClass(db, a.id).name, "4ahif", "kept");
+    assert.equal(renameClass(db, a.id, { name: "4CHIF" }).name, "4chif");
+
+    const wmc = createCourse(db, a.id, { subject: "WMx" });
+    createCourse(db, a.id, { subject: "POSE" });
+    assert.throws(() => updateCourse(db, wmc.id, { subject: "pose" }), ConflictError, "the same subject, however capitalized");
+    assert.throws(() => updateCourse(db, wmc.id, { subject: " " }), InvalidInputError);
+    const renamed = updateCourse(db, wmc.id, { subject: "WMC" });
+    assert.deepEqual([renamed.subject, renamed.language, renamed.weights], ["WMC", "de", defaultWeights], "nothing else changes");
+  });
+
+  test("the current year and a year with classes are not deleted; an empty one is", () => {
+    const db = freshDatabase();
+    const year = createYear(db, year2026);
+    const later = createYear(db, year2027);
+    assert.throws(() => deleteYear(db, year.id), (error) => error instanceof ConflictError && /current/.test(error.message));
+    createClass(db, later.id, { name: "1ahif" });
+    assert.throws(() => deleteYear(db, later.id), (error) => error instanceof ConflictError && /1 class\b/.test(error.message));
+    const empty = createYear(db, { name: "2028/29", startsOn: "2028-09-04", summerStartsOn: "2029-02-12", endsOn: "2029-06-29" });
+    deleteYear(db, empty.id);
+    assert.throws(() => renameYear(db, empty.id, { name: "2030/31" }), NotFoundError);
+  });
+
+  test("a class with courses is not deleted; deleting one removes its roster and keeps its students", () => {
+    const db = freshDatabase();
+    const year = createYear(db, year2026);
+    const klass = createClass(db, year.id, { name: "4bhif", students: [{ username: "anna" }, { username: "ben" }] });
+    const course = createCourse(db, klass.id, { subject: "WMC" });
+    assert.throws(() => deleteClass(db, klass.id), (error) => error instanceof ConflictError && /1 course\b/.test(error.message));
+    deleteCourse(db, course.id);
+    deleteClass(db, klass.id);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM roster_entry WHERE class_id = ?").get(klass.id).n, 0, "the roster went with it");
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM student WHERE username IN ('anna', 'ben')").get().n, 2, "the students stay");
+    assert.throws(() => getClass(db, klass.id), NotFoundError);
+  });
+
+  test("a course with a column, a result, a grade or a test is not deleted, and the refusal counts each", () => {
+    const db = freshDatabase();
+    const year = createYear(db, year2026);
+    const klass = createClass(db, year.id, { name: "4bhif", students: [{ username: "anna" }] });
+    const blocked = (course, pattern) =>
+      assert.throws(() => deleteCourse(db, course.id), (error) => error instanceof ConflictError && pattern.test(error.message), String(pattern));
+
+    const withColumn = createCourse(db, klass.id, { subject: "A" });
+    createColumn(db, withColumn.id, { kind: "test", name: "Empty", date: "2026-10-01", maxPoints: 10 });
+    blocked(withColumn, /columns 1, results 0, grades 0, online tests 0/);
+
+    const withResult = createCourse(db, klass.id, { subject: "B" });
+    const column = createColumn(db, withResult.id, { kind: "test", name: "1st", date: "2026-10-01", maxPoints: 10 });
+    setResult(db, column.id, "anna", { points: 5 });
+    blocked(withResult, /columns 1, results 1/);
+
+    const withGrade = createCourse(db, klass.id, { subject: "C" });
+    setSemesterGrade(db, withGrade.id, "anna", "ws", { override: 2 });
+    blocked(withGrade, /grades 1/);
+
+    const withTest = createCourse(db, klass.id, { subject: "D" });
+    const at = new Date().toISOString();
+    db.prepare("INSERT INTO test (course_id, name, created_at, updated_at) VALUES (?, 'T', ?, ?)").run(withTest.id, at, at);
+    blocked(withTest, /online tests 1/);
+
+    const empty = createCourse(db, klass.id, { subject: "E" });
+    deleteCourse(db, empty.id);
+    assert.deepEqual(getClass(db, klass.id).courses.map((c) => c.subject), ["A", "B", "C", "D"]);
   });
 });
 

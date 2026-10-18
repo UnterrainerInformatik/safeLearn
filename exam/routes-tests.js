@@ -8,9 +8,9 @@
  * one, deleting an attempt - is an admin's alone.
  */
 
-import { createSitting, createTest, deleteSitting, deleteTest, getTest, listTests, removeWrittenQuestion, updateSitting, updateTest } from "./tests.js";
+import { createSitting, createTest, deleteSitting, deleteTest, endSitting, extendSitting, getTest, listTests, removeWrittenQuestion, updateSitting, updateTest } from "./tests.js";
 import { correctShares, deleteAttempt, previewView, releaseAttempt, scoreAttempt } from "./attempts.js";
-import { notifySittings } from "./live.js";
+import { notify, notifySittings } from "./live.js";
 import { embedPlaceholder, wrapInPage, wrapInReveal } from "../obsidian.js";
 import { i18nOf } from "../i18n/server.js";
 import { NotFoundError } from "./classes.js";
@@ -94,6 +94,13 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
   api("post", "/tests/:id/sittings", (req) => announced(createSitting(db, idParam(req.params.id), req.body ?? {})));
   api("put", "/sittings/:id", (req) => announced(updateSitting(db, idParam(req.params.id), req.body ?? {})));
   api("delete", "/sittings/:id", (req) => announced(deleteSitting(db, idParam(req.params.id))));
+  // Ending and extending also reach the sitting's live view.
+  const announcedLive = (sitting) => {
+    notify(sitting.id, "window", null);
+    return announced(sitting);
+  };
+  api("post", "/sittings/:id/end", (req) => announcedLive(endSitting(db, idParam(req.params.id))));
+  api("post", "/sittings/:id/extend", (req) => announcedLive(extendSitting(db, idParam(req.params.id), req.body ?? {})));
   api("post", "/attempts/:id/release", (req) => releaseAttempt(db, idParam(req.params.id)));
   api("get", "/tests/:id/preview", (req) => previewView(db, idParam(req.params.id)));
   const adminApi = (method, path, fn) =>

@@ -22,7 +22,7 @@
  * is told so, and the view stops.
  */
 
-import { confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, linkButton, t } from "./frame.js";
+import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, linkButton, t } from "./frame.js";
 import { displayClass, displayPerson } from "./classes.js";
 import { displayWindow } from "./tests.js";
 
@@ -122,6 +122,7 @@ class LiveView extends ExamElement {
     this.windowLine = h("span", { class: "sl-exam-live-window" }, `${t("exam.live.window")} `, this.windowShown, this.remainingText);
     this.serverClock = h("span", { class: "sl-exam-live-clock" });
     this.message = h("p", { class: "sl-exam-message", role: "status" });
+    this.windowActions = this.windowControls(snapshot.sitting);
     this.body = h("tbody", {});
     this.summary = h("p", { class: "sl-exam-live-summary" });
     this.draw(snapshot);
@@ -139,7 +140,8 @@ class LiveView extends ExamElement {
         `${t("exam.live.serverTime")} `,
         this.serverClock
       ),
-      h("p", { class: "sl-exam-actions" }, linkButton({ label: t("exam.live.classScreenLink"), href: `/exam/sittings/${sitting.id}/screen`, newWindow: true, class: "sl-exam-live-screen-link" })),
+      h("p", { class: "sl-exam-actions" }, linkButton({ label: t("exam.live.classScreenLink"), href: `/exam/sittings/${sitting.id}/screen`, newWindow: true, class: "sl-exam-live-screen-link" }), this.windowActions),
+      this.windowMessage,
       h(
         "p",
         { class: "sl-exam-quiet" },
@@ -214,6 +216,7 @@ class LiveView extends ExamElement {
           ? t("exam.live.closesIn", { time: span(closes - now) })
           : t("exam.live.closedAgo", { time: span(now - closes) });
     this.serverClock.textContent = format.clock(new Date(now));
+    if (this.windowActions) this.windowActions.hidden = state !== "open";
     const key = `${this.sitting.opensAt} ${this.sitting.closesAt}`;
     if (key !== this.windowKey) {
       this.windowKey = key;
@@ -225,6 +228,36 @@ class LiveView extends ExamElement {
       return;
     }
     this.remainingText.textContent = ` · ${remaining}`;
+  }
+
+  /**
+   * End now and Extend, while the sitting is open (`exam-record-maintenance`):
+   * ending asks by a second click and submits every running attempt; extending
+   * moves the window's end by the minutes given. Either is told beside them.
+   */
+  windowControls(sitting) {
+    this.windowMessage = h("p", { class: "sl-exam-message sl-exam-live-window-message", role: "status" });
+    const send = async (path, body) => {
+      this.windowMessage.textContent = "";
+      try {
+        await examApi(`/sittings/${sitting.id}/${path}`, { method: "POST", body });
+        await this.poll();
+      } catch (error) {
+        this.windowMessage.textContent = error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.frame.saveFailed");
+      }
+    };
+    const minutes = h("input", { type: "number", min: "5", max: "120", step: "1", value: "5", class: "sl-exam-number sl-exam-live-extend-minutes", "aria-label": t("exam.live.extendMinutes") });
+    return h(
+      "span",
+      { class: "sl-exam-actions sl-exam-live-window-actions", hidden: true },
+      h(
+        "span",
+        { class: "sl-exam-actions" },
+        minutes,
+        button({ label: t("exam.live.extend"), class: "sl-exam-live-extend", action: () => send("extend", { minutes: Number(minutes.value) }) })
+      ),
+      confirmButton({ class: "sl-exam-live-end", label: t("exam.live.endNow"), armed: t("exam.live.endNowArmed"), action: () => send("end") })
+    );
   }
 
   /** Draws a whole snapshot. */
@@ -425,7 +458,9 @@ class LiveView extends ExamElement {
       const change = JSON.parse(event.data);
       this.syncClock(change.serverTime);
       if (change.sitting) this.sitting = change.sitting;
-      this.update(change.participant);
+      // The window itself changed (ended, extended): every deadline may have moved.
+      if (change.participant) this.update(change.participant);
+      else this.poll();
     });
     source.addEventListener("renew", () => this.connect());
     source.addEventListener("refused", () => this.studentView());

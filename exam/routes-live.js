@@ -87,7 +87,8 @@ export function registerLiveRoutes(router, { db, handle, startPage }) {
             type: event.type,
             serverTime: at,
             sitting: liveSnapshot(db, sittingId, at).sitting,
-            participant: liveParticipant(db, sittingId, event.username, at),
+            // A change of the window itself (ended, extended) concerns no one participant.
+            participant: event.username === null ? null : liveParticipant(db, sittingId, event.username, at),
           });
         })
       );

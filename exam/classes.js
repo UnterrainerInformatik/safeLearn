@@ -150,12 +150,18 @@ export function currentYear(db) {
  * current year once there is any; a later one is created in advance and made
  * current by `setCurrentYear`.
  */
-export function createYear(db, { name, startsOn, summerStartsOn, endsOn } = {}) {
+/** A school year's name as stored, `2026/27`, refused unless the two years follow each other. */
+function yearName(name) {
   const trimmed = typeof name === "string" ? name.trim() : "";
   const match = /^(\d{4})\/(\d{2})$/.exec(trimmed);
   if (!match || (Number(match[1]) + 1) % 100 !== Number(match[2])) {
     throw new InvalidInputError("exam.errors.classes.yearName");
   }
+  return trimmed;
+}
+
+export function createYear(db, { name, startsOn, summerStartsOn, endsOn } = {}) {
+  const trimmed = yearName(name);
   validDate(startsOn, "exam.errors.classes.yearStartFormat");
   validDate(summerStartsOn, "exam.errors.classes.summerStartFormat");
   validDate(endsOn, "exam.errors.classes.yearEndFormat");
@@ -186,6 +192,32 @@ export function setCurrentYear(db, id) {
     db.prepare("UPDATE school_year SET is_current = 1 WHERE id = ?").run(id);
   });
   return getYear(db, id);
+}
+
+/**
+ * Renames a school year, by the same rules as on creation (exam-ui-consistency
+ * design D8). Nothing else of the year changes.
+ */
+export function renameYear(db, id, { name } = {}) {
+  getYear(db, id);
+  const trimmed = yearName(name);
+  try {
+    db.prepare("UPDATE school_year SET name = ? WHERE id = ?").run(trimmed, id);
+  } catch (error) {
+    if (isUniqueViolation(error)) throw new ConflictError("exam.errors.classes.yearExists", { name: trimmed });
+    throw error;
+  }
+  return getYear(db, id);
+}
+
+/** Deletes a school year that is not the current one and has no classes. */
+export function deleteYear(db, id) {
+  const year = getYear(db, id);
+  if (year.current) throw new ConflictError("exam.errors.classes.yearIsCurrent", { name: year.name });
+  const classes = db.prepare("SELECT COUNT(*) AS n FROM class WHERE school_year_id = ?").get(id).n;
+  if (classes > 0) throw new ConflictError("exam.errors.classes.yearHasClasses", { name: year.name, count: classes });
+  db.prepare("DELETE FROM school_year WHERE id = ?").run(id);
+  return { deleted: id };
 }
 
 // --------------------------------------------------------------------- classes
@@ -321,6 +353,35 @@ export function createClass(db, yearId, { name, students = [] } = {}) {
     }
     throw error;
   }
+}
+
+/**
+ * Renames a class - the module's record only, meant for a typo (design D8).
+ * The roster proposals look the directory up by the new name from then on.
+ */
+export function renameClass(db, id, { name } = {}) {
+  const klass = getClass(db, id);
+  const normalized = normalizeClassName(name);
+  try {
+    db.prepare("UPDATE class SET name = ? WHERE id = ?").run(normalized, id);
+  } catch (error) {
+    if (isUniqueViolation(error)) throw new ConflictError("exam.errors.classes.classExists", { name: normalized.toUpperCase() });
+    throw error;
+  }
+  return klass.name === normalized ? klass : getClass(db, id);
+}
+
+/** Deletes a class that has no courses, with its roster; the students' records stay. */
+export function deleteClass(db, id) {
+  const klass = getClass(db, id);
+  if (klass.courses.length > 0) {
+    throw new ConflictError("exam.errors.classes.classHasCourses", { name: klass.name.toUpperCase(), count: klass.courses.length });
+  }
+  inTransaction(db, () => {
+    db.prepare("DELETE FROM roster_entry WHERE class_id = ?").run(id);
+    db.prepare("DELETE FROM class WHERE id = ?").run(id);
+  });
+  return { deleted: id, yearId: klass.year.id };
 }
 
 /**
@@ -513,18 +574,44 @@ export function createCourse(db, classId, { subject, language = "de", weights = 
  * every semester of the course; proposals are computed on read, so they follow
  * at once, and overrides are not touched.
  */
-export function updateCourse(db, id, { language, weights, winterShare } = {}) {
+export function updateCourse(db, id, { subject, language, weights, winterShare } = {}) {
   const course = getCourse(db, id);
   const next = {
+    subject: subject === undefined ? course.subject : normalizeSubject(subject),
     language: language === undefined ? course.language : normalizeLanguage(language),
     weights: weights === undefined ? course.weights : normalizeWeights(weights),
     winterShare: winterShare === undefined ? course.winterShare : normalizeWinterShare(winterShare),
   };
-  db.prepare("UPDATE course SET language = ?, weights = ?, winter_share = ? WHERE id = ?").run(
-    next.language,
-    JSON.stringify(next.weights),
-    next.winterShare,
-    id
-  );
+  try {
+    db.prepare("UPDATE course SET subject = ?, language = ?, weights = ?, winter_share = ? WHERE id = ?").run(
+      next.subject,
+      next.language,
+      JSON.stringify(next.weights),
+      next.winterShare,
+      id
+    );
+  } catch (error) {
+    if (isUniqueViolation(error)) throw new ConflictError("exam.errors.classes.courseExists", { subject: next.subject });
+    throw error;
+  }
   return getCourse(db, id);
+}
+
+/**
+ * Deletes a course nothing depends on: no gradebook column (an empty one
+ * counts), no result, no semester grade and no online test (design D8). The
+ * refusal names each by its count.
+ */
+export function deleteCourse(db, id) {
+  const course = getCourse(db, id);
+  const count = (sql) => db.prepare(sql).get(id).n;
+  const held = {
+    columns: count("SELECT COUNT(*) AS n FROM assessment WHERE course_id = ?"),
+    entries: count("SELECT COUNT(*) AS n FROM manual_entry e JOIN assessment a ON a.id = e.assessment_id WHERE a.course_id = ?"),
+    grades: count("SELECT COUNT(*) AS n FROM semester_grade WHERE course_id = ?"),
+    tests: count("SELECT COUNT(*) AS n FROM test WHERE course_id = ?") + count("SELECT COUNT(*) AS n FROM question_usage WHERE course_id = ?"),
+  };
+  if (Object.values(held).some((n) => n > 0)) throw new ConflictError("exam.errors.classes.courseInUse", { subject: course.subject, ...held });
+  db.prepare("DELETE FROM course WHERE id = ?").run(id);
+  return { deleted: id, classId: course.classId };
 }

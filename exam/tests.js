@@ -28,6 +28,7 @@ import {
   rosterOf,
 } from "./classes.js";
 import { viennaLocal } from "./client/periods.js";
+import { finalizeDue } from "./attempts.js";
 
 /** The calendar date in Vienna of an ISO timestamp, as `YYYY-MM-DD`. */
 export function viennaDate(iso) {
@@ -491,6 +492,52 @@ export function updateSitting(db, id, input = {}) {
     refreshUsageDate(db, row.test_id);
     return getSitting(db, id);
   });
+}
+
+/** Refuses anything but a sitting that is open now. */
+function requireOpen(row, at) {
+  if (sittingState({ opensAt: row.opens_at, closesAt: row.closes_at }, at) !== "open") throw new ConflictError("exam.errors.tests.sittingNotOpen");
+}
+
+/**
+ * Ends an open sitting now (exam-ui-consistency design D9): its window closes,
+ * and every running attempt is submitted with its saved answers, exactly as
+ * at its deadline. The rule that the duration is shorter than the window is
+ * one of scheduling and does not apply.
+ */
+export function endSitting(db, id, at = now()) {
+  const row = sittingRow(db, id);
+  requireOpen(row, at);
+  inTransaction(db, () => {
+    db.prepare("UPDATE sitting SET closes_at = ? WHERE id = ?").run(at, id);
+    // An attempt's deadline is stored, the earlier of its start plus the duration and the window's end.
+    db.prepare("UPDATE attempt SET deadline = ? WHERE sitting_id = ? AND submitted_at IS NULL AND deadline > ?").run(at, id, at);
+  });
+  finalizeDue(db, at);
+  return getSitting(db, id);
+}
+
+/**
+ * Extends an open sitting's window by 5 to 120 minutes. A running attempt's
+ * deadline is the earlier of its start plus the duration and the new end, so
+ * one cut short by the window gains time and one that runs its full duration
+ * does not. The duration stays.
+ */
+export function extendSitting(db, id, { minutes } = {}, at = now()) {
+  const row = sittingRow(db, id);
+  requireOpen(row, at);
+  if (!Number.isInteger(minutes) || minutes < 5 || minutes > 120) throw new InvalidInputError("exam.errors.tests.extendMinutes");
+  const closes = new Date(Date.parse(row.closes_at) + minutes * 60000).toISOString();
+  inTransaction(db, () => {
+    db.prepare("UPDATE sitting SET closes_at = ? WHERE id = ?").run(closes, id);
+    const running = db.prepare("SELECT id, started_at FROM attempt WHERE sitting_id = ? AND submitted_at IS NULL").all(id);
+    const set = db.prepare("UPDATE attempt SET deadline = ? WHERE id = ?");
+    for (const attempt of running) {
+      const full = new Date(Date.parse(attempt.started_at) + row.duration_s * 1000).toISOString();
+      set.run(full < closes ? full : closes, attempt.id);
+    }
+  });
+  return getSitting(db, id);
 }
 
 /** Deletes a sitting that has not opened yet. A first sitting goes only after its make-ups. */

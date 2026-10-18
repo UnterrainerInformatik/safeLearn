@@ -212,7 +212,7 @@ class GradebookView extends ExamElement {
       ),
       overview.students.length
         ? this.sheet(overview, groups, overview.students, true)
-        : h("p", {}, t("exam.gradebook.emptyRoster")),
+        : h("p", {}, t("exam.gradebook.emptyRoster"), " ", linkButton({ label: t("exam.gradebook.toRoster"), href: `/exam/classes/${course.classId}`, class: "sl-exam-to-roster" })),
       overview.left.length ? [h("h4", {}, t("exam.gradebook.leftHeading", { count: overview.left.length })), this.sheet(overview, groups, overview.left, false)] : null,
       this.line
     );
@@ -387,7 +387,7 @@ class GradebookView extends ExamElement {
     }
 
     const leadingCells = [
-      h("td", {}, h("a", { href: `/exam/courses/${course.id}/students/${encodeURIComponent(row.username)}` }, displayPerson(row))),
+      h("td", {}, h("a", { href: `/exam/courses/${course.id}/students/${encodeURIComponent(row.username)}?semester=${semester}` }, displayPerson(row))),
       winterCell,
       proposalCell,
       overrideCell,
@@ -578,8 +578,26 @@ class GradebookStudent extends ExamElement {
     return h(
       "div",
       { class: "sl-exam" },
+      this.neighbours(record),
       student.leftAt ? h("p", { class: "sl-exam-quiet" }, t("exam.gradebook.leftOn", { date: displayDate(student.leftAt) })) : null,
       ["ws", "ss"].map((semester) => this.semesterSection(record, semester))
+    );
+  }
+
+  /**
+   * The way back to the sheet and to the students before and after in its
+   * order, keeping the semester the teacher came from (`gradebook-sheet`).
+   */
+  neighbours({ course, previous, next }) {
+    const semester = this.params.semester;
+    const query = semester ? `?semester=${semester}` : "";
+    const studentAddress = (neighbour) => `/exam/courses/${course.id}/students/${encodeURIComponent(neighbour.username)}${query}`;
+    return h(
+      "p",
+      { class: "sl-exam-actions sl-exam-student-neighbours" },
+      previous ? linkButton({ label: `← ${displayPerson(previous)}`, href: studentAddress(previous), class: "sl-exam-student-previous", title: t("exam.gradebook.previousStudent") }) : null,
+      linkButton({ label: t("exam.gradebook.backToSheet"), href: `/exam/courses/${course.id}/gradebook${query}`, class: "sl-exam-student-back" }),
+      next ? linkButton({ label: `${displayPerson(next)} →`, href: studentAddress(next), class: "sl-exam-student-next", title: t("exam.gradebook.nextStudent") }) : null
     );
   }
 

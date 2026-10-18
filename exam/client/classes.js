@@ -75,6 +75,57 @@ export async function act(button, line, action) {
 }
 
 /**
+ * Rename and Delete in a record's head (`exam-record-maintenance`): Rename
+ * opens an inline field with Save and Cancel, Delete asks by a second click.
+ * A refusal of either is told right beside the buttons. `rename(name)` and
+ * `remove()` send the request and go where the page then belongs - a reload,
+ * so the bar shows the new state too.
+ */
+export function recordActions({ name, label, rename, remove, armed, className = "" }) {
+  const line = messageLine();
+  const field = h("input", { type: "text", value: name, "aria-label": label, required: true, maxlength: "80" });
+  const buttons = h(
+    "span",
+    { class: "sl-exam-actions" },
+    button({ label: t("exam.records.rename"), class: "sl-exam-record-rename", action: () => editing(true) }),
+    confirmButton({
+      class: "sl-exam-record-delete",
+      label: t("exam.records.delete"),
+      armed,
+      action: (event) => act(event.target, line, remove),
+    })
+  );
+  const form = h(
+    "form",
+    {
+      class: "sl-exam-actions sl-exam-record-form",
+      hidden: true,
+      onSubmit: (event) => {
+        event.preventDefault();
+        act(form.querySelector("button[type=submit]"), line, () => rename(field.value));
+      },
+      onKeydown: (event) => {
+        if (event.key === "Escape") editing(false);
+      },
+    },
+    field,
+    button({ label: t("exam.records.save"), kind: "primary", type: "submit" }),
+    button({ label: t("exam.records.cancel"), class: "sl-exam-record-cancel", action: () => editing(false) })
+  );
+  const editing = (on) => {
+    form.hidden = !on;
+    buttons.hidden = on;
+    line.report("");
+    if (on) {
+      field.value = name;
+      field.focus();
+      field.select();
+    }
+  };
+  return h("div", { class: `sl-exam-record-actions ${className}` }, buttons, form, line);
+}
+
+/**
  * A table in its own sideways-scrolling wrapper, its rows marked on click and
  * its first column - the one naming the row - kept in place.
  */
@@ -124,7 +175,8 @@ class ClassesHome extends ExamElement {
       return h(
         "div",
         { class: "sl-exam" },
-        h("p", {}, t("exam.classes.noYear"))
+        h("p", {}, t("exam.classes.noYear")),
+        h("p", {}, button({ label: t("exam.classes.createYear"), kind: "primary", class: "sl-exam-year-create", action: () => openCreatorOf("year") }))
       );
     }
     const line = messageLine();
@@ -161,10 +213,25 @@ class ClassesHome extends ExamElement {
           )
         )
       : h("p", {}, t("exam.classes.noClasses"));
+    const yearActions = recordActions({
+      name: selected.name,
+      label: t("exam.records.yearName"),
+      armed: t("exam.records.deleteYearArmed", { name: selected.name }),
+      className: "sl-exam-year-actions",
+      rename: async (name) => {
+        await examApi(`/years/${selected.id}`, { method: "PUT", body: { name } });
+        window.location.reload();
+      },
+      remove: async () => {
+        await examApi(`/years/${selected.id}`, { method: "DELETE" });
+        window.location.assign("/exam/");
+      },
+    });
     return h(
       "div",
       { class: "sl-exam" },
       h("h2", {}, selected.current ? t("exam.classes.currentYearHeading", { name: selected.name }) : t("exam.classes.yearHeading", { name: selected.name }), " ", makeCurrent),
+      yearActions,
       h(
         "p",
         { class: "sl-exam-quiet" },
@@ -321,7 +388,21 @@ class ClassView extends ExamElement {
   render({ klass, directory }) {
     const heading = document.querySelector("#markdown-content h1");
     if (heading) heading.textContent = t("exam.classes.classHeading", { name: displayClass(klass.name), year: klass.year.name });
-    return h("div", { class: "sl-exam" }, this.rosterSection(klass), this.addSection(klass, directory), this.courseSection(klass));
+    const head = recordActions({
+      name: displayClass(klass.name),
+      label: t("exam.records.className"),
+      armed: t("exam.records.deleteClassArmed", { name: displayClass(klass.name) }),
+      className: "sl-exam-class-actions",
+      rename: async (name) => {
+        await examApi(`/classes/${klass.id}`, { method: "PUT", body: { name } });
+        window.location.reload();
+      },
+      remove: async () => {
+        await examApi(`/classes/${klass.id}`, { method: "DELETE" });
+        window.location.assign(`/exam/?year=${klass.year.id}`);
+      },
+    });
+    return h("div", { class: "sl-exam" }, head, this.rosterSection(klass), this.addSection(klass, directory), this.courseSection(klass));
   }
 
   rosterSection(klass) {
@@ -526,6 +607,20 @@ class CourseView extends ExamElement {
       "div",
       { class: "sl-exam" },
       h("p", { class: "sl-exam-actions" }, linkButton({ label: t("exam.classes.openGradebook"), href: `/exam/courses/${course.id}/gradebook`, class: "sl-exam-course-gradebook" })),
+      recordActions({
+        name: course.subject,
+        label: t("exam.classes.subject"),
+        armed: t("exam.records.deleteCourseArmed", { name: course.subject }),
+        className: "sl-exam-course-actions",
+        rename: async (subject) => {
+          await examApi(`/courses/${course.id}`, { method: "PUT", body: { subject } });
+          window.location.reload();
+        },
+        remove: async () => {
+          await examApi(`/courses/${course.id}`, { method: "DELETE" });
+          window.location.assign(`/exam/classes/${course.classId}`);
+        },
+      }),
       h("p", { class: "sl-exam-quiet" }, t("exam.classes.savedAsChanged")),
       h("p", {}, h("label", {}, t("exam.classes.presentedIn"), " ", language)),
       h("h2", {}, t("exam.classes.configSheet")),
