@@ -149,28 +149,6 @@ Seit 2026-10-18 zeigt die Seite offene Tests und Ergebnisse untereinander. Läuf
 
 **Entschieden (Gerald, 2026-10-18):** Während eines laufenden Versuchs werden die Ergebnisse ausgeblendet. Bis zur Abgabe sind sie uninteressant und lenken nur ab. Nach der Abgabe erscheinen sie wieder.
 
-## Mehrsprachigkeit der Oberfläche: Sprache und Locale pro Benutzer (Change `ui-language-locale` angelegt 2026-10-18)
-Die Oberfläche des Prüfungsmoduls ist heute englisch. Gerald will sie pro Benutzer im Settings-Untermenü (Zahnrad oben rechts) umschalten können, auf **Englisch** oder **Deutsch**.
-
-**Sprache und Locale getrennt.** Die Sprache bestimmt die Texte, die Locale die Formate von Datum, Uhrzeit und Zahlen. Gerald selbst will Englisch mit deutscher Locale. Das geht heute nicht: Chrome nimmt das Format von `<input type="date">` und `datetime-local` aus dem System bzw. der Browsersprache, nicht von der Seite. Ein `lang`-Attribut ändert daran nichts.
-
-**Was das verlangt:**
-- **Zwei Präferenzen** als Keycloak-User-Attribute, wie `dm` und `vt`, z. B. `lang` (`en`/`de`) und `loc` (`en-GB`/`de-AT`). Der Server braucht sie beim Rendern, weil Seitentitel, Seitenkörper der Routen (`/exam/my`: "Exams", "Open online tests" …), Top-Bar-Labels und Modulleiste (`exam/bar.js`) serverseitig entstehen. Der Client bekommt sie über `/exam/api/me` oder ein Attribut am Frame.
-- **Texte auslagern:** ein Katalog pro Sprache und ein `t(key, params)` in Client und Server. Betroffen sind rund 4.000 Zeilen in `exam/client/*.js` und die Server-Routen. **Entschieden 2026-10-18:** Die Einstellung gibt es für alle Benutzer, nicht nur im Prüfungsmodul. Damit wird auch der Rest der App-Oberfläche übersetzt, etwa "Home", der Suchhinweis "… at least 3 characters", "Site" und "Content" in der Seitenleiste und das Settings-Menü selbst. Der Markdown-Inhalt der Seiten bleibt, wie er geschrieben ist.
-- **Formate über `Intl` mit expliziter Locale** statt `toLocaleDateString()` ohne Argument. Heute gibt es etwa 15 Stellen, gemischt aus Browser-Locale und hartem `de-AT`; das ist auch ein Punkt aus "Konsistenz im Kleinen".
-- **Eigene Datums- und Zeitwahl** statt der nativen Inputs, damit die Locale greift: Notenbuch-Spalten, Schuljahresdaten, Sittings. Mit "Sittings nach Unterrichtseinheit" schrumpft die Zeitwahl bei gesetzter Variable auf Datum plus Einheit. Ein Uhrzeitfeld braucht es dann nur noch im Fallback.
-- **Schreibansicht der Schüler (entschieden 2026-10-18):** Inhalte für Schüler, also Fragen und Antworten, kommen immer in der Kurssprache. Die Bedienung folgt der Spracheinstellung des Benutzers.
-
-**Technik — Empfehlung: kein Vue, eine schlanke eigene Lösung.**
-- Das Modul ist ohne Build-Schritt gebaut: Custom Elements, ein `h()`-Helfer (`exam/client/frame.js`) und ES-Module. Vue ginge auch ohne Build (`vue.esm-browser`).
-- Ein Umbau von rund 4.000 Zeilen funktionierender und getesteter Oberfläche löst die Mehrsprachigkeit aber nicht besser. Er kostet Wochen, und das vor dem harten Termin 05.02.2027.
-- Gute Gründe für ein Framework wären erst Drag-and-Drop-Baum, Popups und mehr Zustand in der UI. Selbst die gehen mit Custom Elements gut.
-- Für i18n reicht ein eigenes `t()` mit JSON-Katalogen, ohne Bibliothek.
-- **Entschieden (Gerald, 2026-10-18):** Die Übersetzungen liegen als JSON nach dem System von BabelEdit, also eine JSON-Datei pro Sprache (etwa `en.json`, `de.json`) mit denselben Schlüsseln. So lassen sie sich später mit BabelEdit pflegen und um weitere Sprachen erweitern. Das genaue Dateilayout (verschachtelte oder flache Schlüssel, Ablageort) wird im Change festgelegt und muss sich in BabelEdit öffnen lassen.
-- Für die Datumswahl gibt es zwei Wege: eine kleine eigene Monatsansicht als Custom Element (geschätzt 150–250 Zeilen, Tastatur und ARIA mitgedacht) oder eine schmale Bibliothek mit Locale-Unterstützung und ohne Abhängigkeiten. Bei Bibliotheken vorher den Wartungsstand prüfen: flatpickr ist bekannt, aber seit Jahren ohne Release, als Alternative wäre etwa vanilla-calendar-pro zu prüfen. Tendenz: eigene Ansicht, weil sie nur die Locale-Formate von `Intl` braucht und mit der Einheitenwahl zusammen entsteht.
-
-**Reihenfolge:** sinnvoll nach oder zusammen mit "Sittings nach Unterrichtseinheit", weil beide das Sitting-Formular neu bauen. Und vor der Button- und Label-Vereinheitlichung aus dem Design-Review, damit die Texte nur einmal angefasst werden.
-
 ## Live-Ansicht: "bound to browser" statt "Release to another browser"
 In der Live-Ansicht (`client/live.js`) gibt es pro Schüler, der gerade schreibt, den Button **Release to another browser**. Er hebt die Bindung des Versuchs an den Browser auf, in dem er gestartet wurde, damit der Schüler auf einem anderen Gerät weiterschreiben kann. Das versteht man ohne Erklärung nicht.
 
