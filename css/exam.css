@@ -96,7 +96,23 @@
    - same radius, border and padding - with a primary and a danger variant.
    A `linkButton` is an `a` drawn exactly the same. `.sl-exam-primary` is the
    older name of the primary action. `.sl-exam-button` is the top bar's module
-   button and has nothing to do with these. */
+   button and has nothing to do with these.
+
+   Their size is the element's text size, taken at `.sl-exam` rather than
+   where a button stands, so one in a heading or a quiet line is as large as
+   any other: `--sl-exam-text` is registered as a length, which makes `1em`
+   resolve where it is set. A browser without `@property` falls back to the
+   text size around the button. */
+
+@property --sl-exam-text {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 16px;
+}
+
+.sl-exam {
+  --sl-exam-text: 1em;
+}
 
 .sl-exam-action,
 .sl-exam-primary,
@@ -113,6 +129,7 @@
   background-color: #fafbfc;
   color: #24292e;
   font: inherit;
+  font-size: var(--sl-exam-text, 1em);
   font-weight: 500;
   line-height: 20px;
   text-align: center;
@@ -832,9 +849,10 @@ a.sl-exam-button.sl-exam-open:hover,
   max-width: 24em;
 }
 
+/* Plain controls only: `font` also resets the line height a module button keeps. */
 .sl-exam-pool-assembly select,
-.sl-exam-pool-assembly button,
-.sl-exam-test button {
+.sl-exam-pool-assembly button:not(.sl-exam-action, .sl-exam-primary),
+.sl-exam-test button:not(.sl-exam-action, .sl-exam-primary) {
   font: inherit;
 }
 
@@ -1310,7 +1328,7 @@ body.sl-exam-screen-page {
 
 .sl-exam-editor select,
 .sl-exam-editor input[type="text"],
-.sl-exam-editor button {
+.sl-exam-editor button:not(.sl-exam-action, .sl-exam-primary) {
   font: inherit;
 }
 

@@ -2806,6 +2806,46 @@ describe("the question editor", () => {
     assert.equal((await fetchAs(teacher, `/exam/api/pool/questions/${question.id}`)).json.categoryId, target.id);
   });
 
+  test("tree: a drag held at the lower edge scrolls on, in the pool's column and on a narrow screen", async () => {
+    const made = [];
+    for (let index = 0; index < 40; index++) {
+      made.push((await fetchAs(teacher, "/exam/api/pool/categories", { method: "POST", body: { parentId: null, nameDe: `Rollen ${String(index).padStart(2, "0")}`, nameEn: `Scroll ${index}` } })).json);
+    }
+    const page = teacher.page;
+    const before = page.viewport();
+    /** How far the tree and the page have scrolled together. */
+    const scrolled = () => page.evaluate(() => document.querySelector(".sl-exam-pool-tree").scrollTop + (document.scrollingElement?.scrollTop ?? 0));
+    try {
+      for (const viewport of [{ width: 1280, height: 700 }, { width: 900, height: 700 }]) {
+        await page.setViewport(viewport);
+        await openPoolTree();
+        await page.evaluate(() => window.scrollTo(0, 0));
+        // The tree's first category, in view at the top; the drag is cancelled, so it stays where it is.
+        const start = await page.$eval('.sl-exam-pool-tree li[data-category]:not([data-category=""]) > .sl-exam-tree-row .sl-exam-pool-category', (element) => {
+          const box = element.getBoundingClientRect();
+          return { x: box.left + 10, y: box.top + box.height / 2 };
+        });
+        const at = await scrolled();
+        await page.mouse.move(start.x, start.y);
+        await page.mouse.down();
+        try {
+          await page.mouse.move(start.x + 10, start.y + 10, { steps: 3 });
+          await page.waitForSelector(".sl-exam-drag-ghost", { timeout: 5000 });
+          // Held at the window's lower edge, below the tree's column.
+          await page.mouse.move(start.x, viewport.height - 4, { steps: 6 });
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          assert.ok((await scrolled()) > at + 50, `${viewport.width}px: held at the edge, the tree scrolls on (${at} → ${await scrolled()})`);
+          await page.keyboard.press("Escape");
+        } finally {
+          await page.mouse.up();
+        }
+      }
+    } finally {
+      await page.setViewport(before ?? { width: 1280, height: 800 });
+      for (const category of made) await fetchAs(teacher, `/exam/api/pool/categories/${category.id}`, { method: "DELETE" });
+    }
+  });
+
   test("tree: a refused drop leaves the order as it was and says why at the dragged category", async () => {
     const [a, b] = await threeCategories("Verweigert");
     const child = (await fetchAs(teacher, "/exam/api/pool/categories", { method: "POST", body: { parentId: a.id, nameDe: "Verweigert Kind", nameEn: "Refused child" } })).json;
@@ -3664,6 +3704,61 @@ describe("the module's actions", () => {
       assert.equal(await teacher.page.$$eval(".sl-exam-pool-questions tbody a", (links) => links.length), 0, "a question's name in the list is no link");
     } finally {
       await setPreferences(teacher, {});
+      await fetchAs(teacher, `/exam/api/tests/${created.id}`, { method: "DELETE" });
+    }
+  });
+
+  test("every module button has the same font size and height, wherever it stands", async () => {
+    const created = (await fetchAs(teacher, `/exam/api/courses/${course.id}/tests`, { method: "POST", body: { name: "Button sizes", questionIds: questions.map((q) => q.id) } })).json;
+    const sitting = (
+      await fetchAs(teacher, `/exam/api/tests/${created.id}/sittings`, {
+        method: "POST",
+        body: { opensAt: new Date(Date.now() + 24 * 3600000).toISOString(), closesAt: new Date(Date.now() + 25 * 3600000).toISOString(), durationMinutes: 15 },
+      })
+    ).json;
+    const pages = [
+      ["/exam/", ".sl-exam-actions"],
+      [`/exam/classes/${gbClass.id}`, ".sl-exam-actions"],
+      [`/exam/pool?course=${course.id}`, ".sl-exam-pool-questions tbody tr"],
+      [`/exam/pool/questions/${questions[0].id}`, ".sl-exam-editor-back"],
+      ["/exam/pool/import", ".sl-exam-import-format"],
+      [`/exam/tests?course=${course.id}`, ".sl-exam-tests-new"],
+      [`/exam/tests/${created.id}`, ".sl-exam-test-actions"],
+      [`/exam/sittings/${sitting.id}/live`, ".sl-exam-live-screen-link"],
+      [`/exam/courses/${course.id}`, ".sl-exam-course-gradebook"],
+      [`/exam/courses/${course.id}/gradebook?semester=ws`, ".sl-exam-gradebook-actions"],
+      [`/exam/courses/${course.id}/students/gb-other-student`, ".sl-exam-enter-results"],
+    ];
+    const measured = [];
+    try {
+      for (const [reference, drawn] of pages) {
+        await teacher.page.goto(`${applicationUrl}${reference}`, { waitUntil: "domcontentloaded" });
+        await teacher.page.waitForSelector(drawn, { timeout: 20000 });
+        if (reference.startsWith("/exam/pool?")) {
+          await teacher.page.click(".sl-exam-pool-questions tbody tr");
+          await teacher.page.waitForSelector(".sl-exam-pool-edit", { timeout: 10000 });
+        }
+        // The tree's icon tools (the bin among them) are compact on purpose, like ✎ and + beside them.
+        const buttons = await teacher.page.$$eval(".sl-exam :is(.sl-exam-action, .sl-exam-primary):not(.sl-exam-tree-tool)", (elements) =>
+          elements
+            .filter((element) => element.offsetParent !== null)
+            .map((element) => ({
+              text: (element.getAttribute("aria-label") ?? element.textContent).trim().slice(0, 30),
+              fontSize: getComputedStyle(element).fontSize,
+              height: Math.round(element.getBoundingClientRect().height),
+            }))
+        );
+        measured.push(...buttons.map((button) => ({ ...button, page: reference })));
+      }
+      const tally = (key) => measured.reduce((counts, button) => ({ ...counts, [button[key]]: (counts[button[key]] ?? 0) + 1 }), {});
+      const odd = (key) => {
+        const counts = tally(key);
+        const usual = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+        return measured.filter((button) => String(button[key]) !== usual).map((button) => `${button.page} "${button.text}" ${button[key]}`);
+      };
+      console.log("button sizes", JSON.stringify({ fontSize: tally("fontSize"), height: tally("height") }));
+      assert.deepEqual({ fontSize: odd("fontSize"), height: odd("height") }, { fontSize: [], height: [] }, "every button has the usual font size and height");
+    } finally {
       await fetchAs(teacher, `/exam/api/tests/${created.id}`, { method: "DELETE" });
     }
   });

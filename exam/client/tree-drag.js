@@ -9,7 +9,10 @@
  * - `targetAt(x, y, item)` names the element under the pointer and its zone
  *   (`into`, `before`, `after`); the element is marked `is-drop-<zone>`, which
  *   the styles draw as a highlight or a line.
- * - Near the top or bottom edge of `scroller` the tree scrolls by itself.
+ * - Near the top or bottom edge of `scroller`, or beyond it above or below
+ *   the tree's column, the tree scrolls by itself, faster the farther in;
+ *   once it can go no farther - or when it does not scroll at all, as on a
+ *   narrow screen - the page scrolls near the window's edges.
  * - Escape cancels; a drop calls `drop(item, element, zone)`.
  *
  * The click a drag ends with is swallowed, so dropping never also chooses.
@@ -17,8 +20,8 @@
 
 const MOVE_PX = 6;
 const PRESS_MS = 300;
-const EDGE_PX = 32;
-const SCROLL_STEP = 8;
+const EDGE_PX = 40;
+const MAX_STEP = 20;
 
 /**
  * Makes the items under `root` draggable. `sourceOf(element)` answers the item
@@ -43,16 +46,37 @@ export function enableTreeDrag(root, { sourceOf, targetAt, drop, scroller }) {
     }
   };
 
+  /** The step towards an edge band of `top`..`bottom` for the pointer at `y`: negative up, positive down, 0 outside the bands. */
+  const stepAt = (y, top, bottom) => {
+    const depth = y < top + EDGE_PX ? y - (top + EDGE_PX) : y > bottom - EDGE_PX ? y - (bottom - EDGE_PX) : 0;
+    return Math.sign(depth) * Math.min(MAX_STEP, Math.ceil((Math.abs(depth) / EDGE_PX) * MAX_STEP));
+  };
+
+  /** Whether `element` can still scroll by `step`. */
+  const canScroll = (element, step) =>
+    step < 0 ? element.scrollTop > 0 : element.scrollTop + element.clientHeight < element.scrollHeight - 1;
+
   const autoScroll = () => {
     if (!drag) return;
+    let moved = false;
     if (scroller) {
       const box = scroller.getBoundingClientRect();
-      const step = drag.y < box.top + EDGE_PX ? -SCROLL_STEP : drag.y > box.bottom - EDGE_PX ? SCROLL_STEP : 0;
-      if (step !== 0 && drag.y >= box.top - EDGE_PX && drag.y <= box.bottom + EDGE_PX) {
+      const over = drag.x >= box.left - EDGE_PX && drag.x <= box.right + EDGE_PX;
+      const step = over ? stepAt(drag.y, box.top, box.bottom) : 0;
+      if (step !== 0 && canScroll(scroller, step)) {
         scroller.scrollTop += step;
-        locate();
+        moved = true;
       }
     }
+    const page = document.scrollingElement;
+    if (!moved && page) {
+      const step = stepAt(drag.y, 0, window.innerHeight);
+      if (step !== 0 && canScroll(page, step)) {
+        page.scrollTop += step;
+        moved = true;
+      }
+    }
+    if (moved) locate();
     drag.frame = requestAnimationFrame(autoScroll);
   };
 
