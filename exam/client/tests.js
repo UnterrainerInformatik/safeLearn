@@ -15,7 +15,7 @@
  * draw what it answers.
  */
 
-import { confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, markRows, t } from "./frame.js";
+import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, linkButton, markRows, t } from "./frame.js";
 import { displayClass, displayPerson } from "./classes.js";
 import { defaultPeriods, matchWindow, periodTimes, viennaInstant, viennaLocal, windowFor } from "./periods.js";
 
@@ -56,15 +56,15 @@ export function displayWindow({ opensAt, closesAt }, periods = []) {
 }
 
 /**
- * The links of a sitting that has not ended: its live view, and the view for
+ * The buttons of a sitting that has not ended: its live view, and the view for
  * the class, which opens in a window of its own for the projector.
  */
 function sittingLinks(sitting) {
   return [
-    " · ",
-    h("a", { href: `/exam/sittings/${sitting.id}/live` }, t("exam.tests.liveViewLink")),
-    " · ",
-    h("a", { href: `/exam/sittings/${sitting.id}/screen`, target: "_blank", rel: "noopener", class: "sl-exam-screen-link" }, t("exam.tests.classScreenLink")),
+    " ",
+    linkButton({ label: t("exam.tests.liveViewLink"), href: `/exam/sittings/${sitting.id}/live`, class: "sl-exam-live-link" }),
+    " ",
+    linkButton({ label: t("exam.tests.classScreenLink"), href: `/exam/sittings/${sitting.id}/screen`, newWindow: true, class: "sl-exam-screen-link" }),
   ];
 }
 
@@ -91,13 +91,15 @@ class TestList extends ExamElement {
 
   group(group, single) {
     const title = `${displayClass(group.className)} ${group.subject}`;
-    const assemble = h("a", { href: `/exam/pool?course=${group.courseId}` }, t("exam.tests.assembleInPool"));
+    // A new test is assembled in the pool, with this course chosen in the bar.
+    const newTest = linkButton({ label: t("exam.tests.newTest"), href: `/exam/pool?course=${group.courseId}`, kind: "primary", class: "sl-exam-tests-new" });
     return h(
       "section",
       { class: "sl-exam-tests-course", "data-course": String(group.courseId) },
       single ? null : h("h2", {}, h("a", { href: `/exam/tests?course=${group.courseId}` }, title)),
+      h("p", { class: "sl-exam-actions" }, newTest),
       group.tests.length === 0
-        ? h("p", { class: "sl-exam-quiet" }, t("exam.tests.noTestYet"), assemble, ".")
+        ? h("p", { class: "sl-exam-quiet" }, t("exam.tests.noTestYet"))
         : markRows(
             h(
               "table",
@@ -176,6 +178,7 @@ class TestDetail extends ExamElement {
   render(test) {
     this.test = test;
     this.message = h("p", { class: "sl-exam-message", role: "status" });
+    this.sittingLines = new Map();
     const course = test.course;
     const en = course.language === "en";
     return h(
@@ -190,16 +193,12 @@ class TestDetail extends ExamElement {
       ),
       h(
         "p",
-        {},
-        h("a", { href: `/exam/tests/${test.id}/preview`, target: "_blank", rel: "noopener", class: "sl-exam-test-preview" }, t("exam.tests.tryAsStudent")),
-        h("span", { class: "sl-exam-quiet" }, ` ${t("exam.tests.tryAsStudentNote")}`)
+        { class: "sl-exam-actions sl-exam-test-actions" },
+        linkButton({ label: t("exam.tests.tryAsStudent"), href: `/exam/tests/${test.id}/preview`, newWindow: true, title: t("exam.tests.tryAsStudentNote"), class: "sl-exam-test-preview" }),
+        linkButton({ label: t("exam.tests.boardSolution"), href: `/exam/tests/${test.id}/solution`, newWindow: true, title: t("exam.tests.boardSolutionNote"), class: "sl-exam-test-solution" }),
+        test.started ? null : linkButton({ label: t("exam.tests.addFromPool"), href: `/exam/pool?course=${course.id}`, class: "sl-exam-test-add" })
       ),
-      h(
-        "p",
-        {},
-        h("a", { href: `/exam/tests/${test.id}/solution`, target: "_blank", rel: "noopener", class: "sl-exam-test-solution" }, t("exam.tests.boardSolution")),
-        h("span", { class: "sl-exam-quiet" }, ` ${t("exam.tests.boardSolutionNote")}`)
-      ),
+      h("p", { class: "sl-exam-quiet" }, `${t("exam.tests.tryAsStudentNote")} ${t("exam.tests.boardSolutionNote")}`),
       this.renameForm(test),
       this.message,
       this.sittingsSection(test),
@@ -212,7 +211,7 @@ class TestDetail extends ExamElement {
               ? t("exam.tests.writtenAdminNote")
               : t("exam.tests.writtenNote")
           )
-        : h("p", { class: "sl-exam-quiet" }, h("a", { href: `/exam/pool?course=${course.id}` }, t("exam.tests.addFromPool")), "."),
+        : null,
       h(
         "ol",
         { class: "sl-exam-test-questions" },
@@ -253,8 +252,7 @@ class TestDetail extends ExamElement {
                   : null
           )
         )
-      ),
-      test.started && !this.admin ? null : this.deleteButton(test)
+      )
     );
   }
 
@@ -287,7 +285,7 @@ class TestDetail extends ExamElement {
                 sitting.state === "scheduled"
                   ? [
                       " ",
-                      h("button", { type: "button", class: "sl-exam-sitting-edit", onClick: () => this.editSitting(test, sitting) }, t("exam.tests.change")),
+                      h("button", { type: "button", class: "sl-exam-action sl-exam-sitting-edit", onClick: () => this.editSitting(test, sitting) }, t("exam.tests.change")),
                       " ",
                       confirmButton({
                         class: "sl-exam-sitting-delete",
@@ -296,7 +294,8 @@ class TestDetail extends ExamElement {
                         action: () => this.deleteSitting(sitting),
                       }),
                     ]
-                  : null
+                  : null,
+                this.sittingLine(sitting)
               )
             )
           );
@@ -407,7 +406,8 @@ class TestDetail extends ExamElement {
             await examApi(sitting ? `/sittings/${sitting.id}` : `/tests/${test.id}/sittings`, { method: sitting ? "PUT" : "POST", body });
             this.reload();
           } catch (error) {
-            message.textContent = refusal(error);
+            // A refused change is told at its sitting, a refused new one at the form.
+            (sitting ? this.sittingLine(sitting) : message).textContent = refusal(error);
           }
         },
       },
@@ -422,7 +422,7 @@ class TestDetail extends ExamElement {
           )
         : h("label", {}, whole, ` ${t("exam.tests.wholeClass")}`),
       people,
-      h("p", {}, h("button", { type: "submit", class: "sl-exam-primary" }, sitting ? t("exam.tests.save") : t("exam.tests.schedule")), sitting ? [" ", h("button", { type: "button", onClick: () => this.drawSittingForm(test, null) }, t("exam.tests.cancel"))] : null),
+      h("p", {}, h("button", { type: "submit", class: "sl-exam-primary" }, sitting ? t("exam.tests.save") : t("exam.tests.schedule")), sitting ? [" ", h("button", { type: "button", class: "sl-exam-action", onClick: () => this.drawSittingForm(test, null) }, t("exam.tests.cancel"))] : null),
       message
     );
     this.sittingForm.replaceChildren(form);
@@ -503,8 +503,14 @@ class TestDetail extends ExamElement {
       await examApi(`/sittings/${sitting.id}`, { method: "DELETE" });
       this.reload();
     } catch (error) {
-      this.message.textContent = refusal(error);
+      this.sittingLine(sitting).textContent = refusal(error);
     }
+  }
+
+  /** The message line of one sitting, where what is done to it is answered. */
+  sittingLine(sitting) {
+    if (!this.sittingLines.has(sitting.id)) this.sittingLines.set(sitting.id, h("p", { class: "sl-exam-message sl-exam-sitting-message", role: "status" }));
+    return this.sittingLines.get(sitting.id);
   }
 
   renameForm(test) {
@@ -519,7 +525,10 @@ class TestDetail extends ExamElement {
         },
       },
       name,
-      h("button", { type: "submit" }, t("exam.tests.rename"))
+      " ",
+      h("button", { type: "submit", class: "sl-exam-action" }, t("exam.tests.rename")),
+      " ",
+      test.started && !this.admin ? null : this.deleteButton(test)
     );
   }
 
@@ -571,7 +580,7 @@ class TestDetail extends ExamElement {
         }
       },
     });
-    return h("p", {}, button);
+    return button;
   }
 }
 

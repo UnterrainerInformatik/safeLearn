@@ -1069,6 +1069,7 @@ describe("the module bar", () => {
       const served = await html(teacher, reference);
       assert.match(served, /class="sl-exam-bar-page" data-page="pool"/, `${reference} carries the pool's button`);
       assert.match(served, /class="sl-exam-bar-page" data-page="tests"/, `${reference} carries the tests' button`);
+      assert.match(served, /class="sl-exam-bar-page" data-page="scale"/, `${reference} carries the scale's button`);
     }
 
     const buttons = () =>
@@ -1081,12 +1082,14 @@ describe("the module bar", () => {
     assert.deepEqual(await buttons(), {
       pool: { href: `/exam/pool?year=${year.id}`, current: null },
       tests: { href: `/exam/tests?year=${year.id}`, current: null },
+      scale: { href: `/exam/scale?year=${year.id}`, current: null },
     });
 
     await open(`/exam/courses/${course.id}/gradebook?semester=ws`);
     assert.deepEqual(await buttons(), {
       pool: { href: `/exam/pool?course=${course.id}`, current: null },
       tests: { href: `/exam/tests?course=${course.id}`, current: null },
+      scale: { href: `/exam/scale?course=${course.id}`, current: null },
     });
     const chosen = async () => {
       const seen = await bar(teacher.page);
@@ -1104,7 +1107,7 @@ describe("the module bar", () => {
     await teacher.page.waitForSelector(".sl-exam-bar");
     assert.equal(new URL(teacher.page.url()).pathname, "/exam/tests");
     assert.deepEqual(await chosen(), expected, "the tests' bar keeps year, class and course");
-    assert.deepEqual(Object.values(await buttons()).map((b) => b.current), [null, "page"], "the tests' button is marked");
+    assert.deepEqual(Object.values(await buttons()).map((b) => b.current), [null, "page", null], "the tests' button is marked");
     await teacher.page.waitForSelector(`.sl-exam-tests-course[data-course="${course.id}"]`, { timeout: 20000 });
 
     // Choosing another class on the tests page stays there; with no course
@@ -1284,7 +1287,7 @@ describe("the question pool", () => {
     assert.match(await teacher.page.$eval(".sl-exam-pool-text", (el) => el.textContent), /en picture/);
   });
 
-  test("a long category tree keeps the links below it reachable at the bottom of the page", async () => {
+  test("a long category tree keeps the buttons above it reachable at the bottom of the page", async () => {
     const viewport = teacher.page.viewport();
     await teacher.page.setViewport({ width: 1280, height: 600 });
     try {
@@ -1311,9 +1314,15 @@ describe("the question pool", () => {
     }
   });
 
-  test("the home page leads a teacher to the pool", async () => {
+  test("the home page leads a teacher to the pool through the bar, with no line of links at its end", async () => {
     await teacher.page.goto(`${applicationUrl}/exam/`, { waitUntil: "domcontentloaded" });
-    await teacher.page.waitForSelector('a[href="/exam/pool"]', { timeout: 20000 });
+    await teacher.page.waitForSelector('.sl-exam-bar-page[data-page="pool"]', { timeout: 20000 });
+    await teacher.page.waitForSelector("sl-exam-classes-home .sl-exam", { timeout: 20000 });
+    assert.equal(
+      await teacher.page.evaluate(() => document.querySelectorAll('sl-exam-classes-home a[href^="/exam/pool"], sl-exam-classes-home a[href^="/exam/scale"]').length),
+      0,
+      "the start page carries no links to the pool or the scale"
+    );
   });
 
   test("no student, and no teacher in student view, reaches the pool, its preview or its images", async () => {
@@ -1376,15 +1385,16 @@ describe("online tests: assembly", () => {
     await teacher.page.goto(`${applicationUrl}/exam/pool?course=${course.id}`, { waitUntil: "domcontentloaded" });
     await teacher.page.waitForSelector(".sl-exam-pool-questions tbody tr", { timeout: 20000 });
     assert.match(await teacher.page.$eval(".sl-exam-pool-assembly h2", (el) => el.textContent), /9XGB GB/);
-    assert.equal(await teacher.page.$$eval(".sl-exam-pool-questions input[type=checkbox]", (inputs) => inputs.length), 0, "no tick boxes");
+    assert.equal(await teacher.page.$$eval(".sl-exam-pool-questions tbody input[type=checkbox]", (inputs) => inputs.length), questions.length, "one box per row");
     const chosen = () => teacher.page.$$eval(".sl-exam-pool-questions tr.is-chosen", (rows) => rows.map((row) => Number(row.dataset.question)));
-    // A click anywhere on a row chooses it, a second one unchooses it.
-    await teacher.page.click(`tr[data-question="${questions[0].id}"] td:nth-child(2)`);
-    assert.deepEqual(await chosen(), [questions[0].id]);
+    // A click anywhere on a row chooses it, a second one unchooses it; the
+    // first column is the row's box.
     await teacher.page.click(`tr[data-question="${questions[0].id}"] td:nth-child(3)`);
+    assert.deepEqual(await chosen(), [questions[0].id]);
+    await teacher.page.click(`tr[data-question="${questions[0].id}"] td:nth-child(4)`);
     assert.deepEqual(await chosen(), [], "unchosen again");
     await teacher.page.waitForSelector(".sl-exam-pool-question", { timeout: 10000 });
-    for (const question of questions) await teacher.page.click(`tr[data-question="${question.id}"] td:nth-child(1) .sl-exam-pool-kind`);
+    for (const question of questions) await teacher.page.click(`tr[data-question="${question.id}"] td:nth-child(2) .sl-exam-pool-kind`);
     assert.deepEqual((await chosen()).sort(), questions.map((q) => q.id).sort());
     assert.match(await teacher.page.$eval(".sl-exam-pool-count", (el) => el.textContent), /2 questions chosen/);
     await teacher.page.type(".sl-exam-pool-create input[name=name]", "HTTP basics");
@@ -1405,7 +1415,7 @@ describe("online tests: assembly", () => {
     assert.deepEqual(shown.usage.map((u) => [u.testId, u.subject, u.className]), [[testId, "GB", "9xgb"]]);
     await teacher.page.goto(`${applicationUrl}/exam/pool?course=${course.id}`, { waitUntil: "domcontentloaded" });
     await teacher.page.waitForSelector(`tr[data-question="${questions[0].id}"]`, { timeout: 20000 });
-    assert.equal(await teacher.page.$eval(`tr[data-question="${questions[0].id}"] td:nth-child(2)`, (td) => td.textContent), "1×", "the browser shows the usage");
+    assert.equal(await teacher.page.$eval(`tr[data-question="${questions[0].id}"] td:nth-child(3)`, (td) => td.textContent), "1×", "the browser shows the usage");
 
     const listed = (await fetchAs(teacher, `/exam/api/tests?course=${course.id}`)).json.groups[0].tests;
     assert.deepEqual(listed.map((t) => [t.id, t.name, t.questions]), [[testId, "HTTP basics", 2]]);
@@ -3333,6 +3343,241 @@ describe("online tests: an admin's corrections", () => {
 // `locale-formats`). The demo accounts are shared, so every check here writes
 // the preferences it depends on and the block puts both back to the baseline
 // (English, de-AT) when it ends, whatever happened.
+// The module's actions (`exam-ui-conventions`): buttons in one style, standing
+// at the structure they act on, with their messages beside them.
+describe("the module's actions", () => {
+  let teacher;
+  let course;
+  let questions;
+
+  const catalogs = {
+    en: JSON.parse(readFileSync(path.join(import.meta.dirname, "..", "i18n", "en.json"), "utf8")),
+    de: JSON.parse(readFileSync(path.join(import.meta.dirname, "..", "i18n", "de.json"), "utf8")),
+  };
+  const text = (lang, key) => key.split(".").reduce((node, segment) => node[segment], catalogs[lang]);
+
+  /** The action texts of design.md, Context, that were links before. */
+  const actionKeys = [
+    "exam.pool.editCategories",
+    "exam.pool.importQuestions",
+    "exam.pool.newQuestion",
+    "exam.pool.edit",
+    "exam.categories.backToPool",
+    "exam.tests.liveViewLink",
+    "exam.tests.classScreenLink",
+    "exam.tests.addFromPool",
+    "exam.tests.tryAsStudent",
+    "exam.tests.boardSolution",
+    "exam.tests.newTest",
+    "exam.live.classScreenLink",
+    "exam.classes.openGradebook",
+    "exam.gradebook.configSheet",
+    "exam.gradebook.gradingScale",
+    "exam.gradebook.enterResults",
+    "exam.import.downloadFormat",
+  ];
+
+  /** The texts of plain links - not drawn as module buttons - inside `.sl-exam` that name an action. */
+  const actionLinks = (lang) =>
+    teacher.page.evaluate(
+      (texts) =>
+        [...document.querySelectorAll(".sl-exam a:not(.sl-exam-action)")].map((a) => a.textContent.trim()).filter((shown) => texts.includes(shown)),
+      actionKeys.map((key) => text(lang, key))
+    );
+
+  before(async () => {
+    teacher = await sharedSession("teacher");
+    await setPreferences(teacher, {});
+    const year = (await fetchAs(teacher, "/exam/api/years")).json.current;
+    const gbClass = (await fetchAs(teacher, `/exam/api/years/${year.id}/classes`)).json.find((c) => c.name === "9xgb");
+    course = (await fetchAs(teacher, `/exam/api/classes/${gbClass.id}`)).json.courses.find((c) => c.subject === "GB");
+    questions = (await fetchAs(teacher, "/exam/api/pool/questions")).json;
+  });
+
+  after(async () => {
+    await setPreferences(teacher, {}).catch(() => {});
+  });
+
+  test("no plain link names an action, in English or in German", async () => {
+    const created = (await fetchAs(teacher, `/exam/api/courses/${course.id}/tests`, { method: "POST", body: { name: "Buttons only", questionIds: questions.map((q) => q.id) } })).json;
+    const sitting = (
+      await fetchAs(teacher, `/exam/api/tests/${created.id}/sittings`, {
+        method: "POST",
+        body: { opensAt: new Date(Date.now() + 24 * 3600000).toISOString(), closesAt: new Date(Date.now() + 25 * 3600000).toISOString(), durationMinutes: 15 },
+      })
+    ).json;
+    const pages = [
+      [`/exam/pool?course=${course.id}`, ".sl-exam-pool-questions tbody tr"],
+      [`/exam/pool/questions/${questions[0].id}`, ".sl-exam-editor-back"],
+      ["/exam/pool/import", ".sl-exam-import-format"],
+      [`/exam/tests?course=${course.id}`, ".sl-exam-tests-new"],
+      [`/exam/tests/${created.id}`, ".sl-exam-test-actions"],
+      [`/exam/sittings/${sitting.id}/live`, ".sl-exam-live-screen-link"],
+      [`/exam/courses/${course.id}`, ".sl-exam-course-gradebook"],
+      [`/exam/courses/${course.id}/gradebook?semester=ws`, ".sl-exam-gradebook-actions"],
+      [`/exam/courses/${course.id}/students/gb-other-student`, ".sl-exam-enter-results"],
+    ];
+    try {
+      for (const lang of ["en", "de"]) {
+        await setPreferences(teacher, lang === "en" ? {} : { lang: "de" });
+        for (const [reference, drawn] of pages) {
+          await teacher.page.goto(`${applicationUrl}${reference}`, { waitUntil: "domcontentloaded" });
+          await teacher.page.waitForSelector(drawn, { timeout: 20000 });
+          if (reference.startsWith("/exam/pool?")) {
+            await teacher.page.click(".sl-exam-pool-questions tbody tr");
+            await teacher.page.waitForSelector(".sl-exam-pool-edit", { timeout: 10000 });
+          }
+          assert.deepEqual(await actionLinks(lang), [], `${reference} (${lang}) draws its actions as buttons`);
+        }
+      }
+      await setPreferences(teacher, {});
+      await teacher.page.goto(`${applicationUrl}/exam/pool`, { waitUntil: "domcontentloaded" });
+      await teacher.page.waitForSelector(".sl-exam-pool-questions tbody tr", { timeout: 20000 });
+      assert.equal(await teacher.page.$$eval(".sl-exam-pool-questions tbody a", (links) => links.length), 0, "a question's name in the list is no link");
+    } finally {
+      await setPreferences(teacher, {});
+      await fetchAs(teacher, `/exam/api/tests/${created.id}`, { method: "DELETE" });
+    }
+  });
+
+  test("a test's head carries its actions, Delete this test beside Rename above the questions, and a refused sitting change is told at that sitting", async () => {
+    const created = (await fetchAs(teacher, `/exam/api/courses/${course.id}/tests`, { method: "POST", body: { name: "Head", questionIds: questions.map((q) => q.id) } })).json;
+    const sitting = (
+      await fetchAs(teacher, `/exam/api/tests/${created.id}/sittings`, {
+        method: "POST",
+        body: { opensAt: new Date(Date.now() + 24 * 3600000).toISOString(), closesAt: new Date(Date.now() + 25 * 3600000).toISOString(), durationMinutes: 15 },
+      })
+    ).json;
+    const page = teacher.page;
+    try {
+      await page.goto(`${applicationUrl}/exam/tests/${created.id}`, { waitUntil: "domcontentloaded" });
+      await page.waitForSelector(".sl-exam-test-delete", { timeout: 20000 });
+      const order = await page.evaluate(() => {
+        const remove = document.querySelector(".sl-exam-test-delete");
+        const questions = document.querySelector(".sl-exam-test-questions");
+        return {
+          beforeQuestions: Boolean(remove.compareDocumentPosition(questions) & Node.DOCUMENT_POSITION_FOLLOWING),
+          besideRename: remove.closest(".sl-exam-test-rename") !== null,
+          head: [...document.querySelectorAll(".sl-exam-test-actions .sl-exam-action")].map((el) => el.className.match(/sl-exam-test-\w+/)[0]),
+        };
+      });
+      assert.deepEqual(order, { beforeQuestions: true, besideRename: true, head: ["sl-exam-test-preview", "sl-exam-test-solution", "sl-exam-test-add"] });
+
+      // A window shorter than the attempt is refused; the reason stands at the sitting.
+      const li = `li[data-sitting="${sitting.id}"]`;
+      await page.click(`${li} .sl-exam-sitting-edit`);
+      await page.waitForSelector(".sl-exam-sitting-form input[name=durationMinutes]", { timeout: 10000 });
+      await page.$eval(".sl-exam-sitting-form input[name=durationMinutes]", (input) => {
+        input.value = "500";
+      });
+      await page.click(".sl-exam-sitting-form button[type=submit]");
+      await page.waitForFunction((selector) => document.querySelector(`${selector} .sl-exam-sitting-message`)?.textContent, { timeout: 10000 }, li);
+      assert.equal(await page.$eval(".sl-exam-test > .sl-exam-message", (el) => el.textContent), "", "not under the rename form");
+    } finally {
+      await fetchAs(teacher, `/exam/api/tests/${created.id}`, { method: "DELETE" });
+    }
+  });
+
+  test("the bar's Grading scale opens the scale, marked as the current page", async () => {
+    await teacher.page.goto(`${applicationUrl}/exam/courses/${course.id}`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector('.sl-exam-bar-page[data-page="scale"]', { timeout: 20000 });
+    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), teacher.page.click('.sl-exam-bar-page[data-page="scale"]')]);
+    assert.equal(new URL(teacher.page.url()).pathname, "/exam/scale");
+    assert.equal(await teacher.page.$eval('.sl-exam-bar-page[data-page="scale"]', (a) => a.getAttribute("aria-current")), "page");
+  });
+
+  test("with a course in the bar, every pool row's box follows the row's choice", async () => {
+    const page = teacher.page;
+    await page.goto(`${applicationUrl}/exam/pool?course=${course.id}`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".sl-exam-pool-questions tbody tr .sl-exam-pool-box", { timeout: 20000 });
+    const state = () => page.$$eval(".sl-exam-pool-questions tbody tr", (rows) => rows.map((row) => [row.getAttribute("aria-selected"), row.querySelector(".sl-exam-pool-box").checked]));
+    assert.ok((await state()).every(([selected, checked]) => selected === "false" && checked === false));
+    await page.click(".sl-exam-pool-questions tbody tr:first-child td:nth-child(2)");
+    assert.deepEqual((await state())[0], ["true", true], "a click on the row ticks its box");
+    await page.click(".sl-exam-pool-questions tbody tr:first-child .sl-exam-pool-box");
+    assert.deepEqual((await state())[0], ["false", false], "a click on the box unchooses the row");
+    await page.goto(`${applicationUrl}/exam/pool`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".sl-exam-pool-questions tbody tr", { timeout: 20000 });
+    assert.equal(await page.$$eval(".sl-exam-pool-box", (boxes) => boxes.length), 0, "without a course, no boxes");
+  });
+
+  test("New question is offered with all categories shown, and the editor then asks for a category", async () => {
+    const page = teacher.page;
+    await page.goto(`${applicationUrl}/exam/pool`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".sl-exam-pool-new", { timeout: 20000 });
+    assert.equal(await page.$eval(".sl-exam-pool-new", (a) => a.hidden || a.offsetParent === null), false, "New question is shown without a chosen category");
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), page.click(".sl-exam-pool-new")]);
+    await page.waitForSelector(".sl-exam-editor select[name=categoryId]", { timeout: 20000 });
+    assert.deepEqual(
+      await page.$eval(".sl-exam-editor select[name=categoryId]", (select) => [select.value, select.required, select.validity.valid]),
+      ["", true, false],
+      "no category is chosen, and the form is not sent without one"
+    );
+  });
+
+  test("a checked import offers Import above its preview", async () => {
+    const page = teacher.page;
+    await page.goto(`${applicationUrl}/exam/pool/import`, { waitUntil: "domcontentloaded" });
+    const input = await page.waitForSelector(".sl-exam-import input[type=file]", { timeout: 20000 });
+    const file = path.join(mkdtempSync(path.join(os.tmpdir(), "sl-import-")), "order.md");
+    writeFileSync(
+      file,
+      [
+        "---",
+        "format: safelearn-questions/1",
+        "---",
+        "",
+        "# Import-Checks / Reihenfolge",
+        "en: Import checks / Order",
+        "",
+        "## Oben",
+        "en: Above",
+        "type: multichoiceset",
+        "",
+        "### de",
+        "",
+        "Wo steht der Knopf? (1 richtige Antwort)",
+        "",
+        "- [x] `oben`",
+        "- [ ] `unten`",
+        "",
+        "### en",
+        "",
+        "Where is the button? (1 correct answer)",
+        "",
+        "- [x] `above`",
+        "- [ ] `below`",
+        "",
+      ].join("\n")
+    );
+    await input.uploadFile(file);
+    await page.waitForSelector(".sl-exam-import-go, .sl-exam-import-problem-list", { timeout: 20000 });
+    const problems = await page.$$eval(".sl-exam-import-problem-list li", (items) => items.map((li) => li.textContent));
+    assert.deepEqual(problems, [], "the file is accepted");
+    assert.ok(
+      await page.$eval(".sl-exam-import-go", (button) => Boolean(button.compareDocumentPosition(document.querySelector(".sl-exam-import-preview table")) & Node.DOCUMENT_POSITION_FOLLOWING)),
+      "Import stands above the preview table"
+    );
+  });
+
+  test("a comment's text shows in the sheet when its mark is tapped", async () => {
+    const grade = (body) => fetchAs(teacher, `/exam/api/courses/${course.id}/grades/gb-other-student/ws`, { method: "PUT", body });
+    assert.equal((await grade({ comment: "came late twice", commentVisible: false })).status, 200);
+    try {
+      await teacher.page.goto(`${applicationUrl}/exam/courses/${course.id}/gradebook?semester=ws`, { waitUntil: "domcontentloaded" });
+      const mark = 'tr[data-student="gb-other-student"] .sl-exam-comment-toggle';
+      await teacher.page.waitForSelector(mark, { timeout: 20000 });
+      assert.equal(await teacher.page.$('tr[data-comment-of="gb-other-student"]'), null);
+      await teacher.page.tap(mark);
+      assert.equal(await teacher.page.$eval('tr[data-comment-of="gb-other-student"]', (tr) => tr.offsetParent !== null && tr.textContent), "came late twice");
+      await teacher.page.tap(mark);
+      assert.equal(await teacher.page.$('tr[data-comment-of="gb-other-student"]'), null, "and another tap hides it");
+    } finally {
+      await grade({ comment: null });
+    }
+  });
+});
+
 describe("the interface in the reader's language and format", () => {
   let student;
   let teacher;

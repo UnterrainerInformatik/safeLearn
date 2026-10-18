@@ -13,7 +13,8 @@
  * elements only draw what it answers.
  */
 
-import { confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, format, h, markRows, saveOnChange, stickyColumns, t } from "./frame.js";
+import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, format, h, linkButton, markRows, saveOnChange, stickyColumns, t } from "./frame.js";
+import { openCreatorOf } from "./bar.js";
 import "./date-input.js";
 
 export const categoryLabels = {
@@ -110,11 +111,6 @@ function nextYearSuggestion(years) {
 
 // ------------------------------------------------------------------ the home
 
-/** The module's pages that belong to no school year, so the home always offers them. */
-function moduleLinks() {
-  return h("p", { class: "sl-exam-quiet" }, h("a", { href: "/exam/scale" }, t("exam.pages.scale")), " · ", h("a", { href: "/exam/pool" }, t("exam.bar.pool")));
-}
-
 class ClassesHome extends ExamElement {
   async load() {
     const { years, current } = await examApi("/years");
@@ -128,8 +124,7 @@ class ClassesHome extends ExamElement {
       return h(
         "div",
         { class: "sl-exam" },
-        h("p", {}, t("exam.classes.noYear")),
-        moduleLinks()
+        h("p", {}, t("exam.classes.noYear"))
       );
     }
     const line = messageLine();
@@ -137,6 +132,7 @@ class ClassesHome extends ExamElement {
       ? null
       : h("button", {
           type: "button",
+          class: "sl-exam-action sl-exam-action-primary",
           onclick: (event) =>
             act(event.target, line, async () => {
               await examApi(`/years/${selected.id}/current`, { method: "POST" });
@@ -179,8 +175,7 @@ class ClassesHome extends ExamElement {
         })
       ),
       line,
-      table,
-      moduleLinks()
+      table
     );
   }
 }
@@ -278,7 +273,7 @@ class ClassNew extends ExamElement {
           waiting
             ? h("p", { class: "sl-exam-quiet" }, waiting)
             : h("p", {}, t("exam.classes.directoryMembers", { count: answer.candidates.length, name: displayClass(name) })),
-          answer.candidates?.length ? h("p", {}, h("button", { type: "button", onclick: () => list.tickAll(true) }, t("exam.classes.tickAll")), " ", h("button", { type: "button", onclick: () => list.tickAll(false) }, t("exam.classes.untickAll"))) : null,
+          answer.candidates?.length ? h("p", {}, h("button", { type: "button", class: "sl-exam-action", onclick: () => list.tickAll(true) }, t("exam.classes.tickAll")), " ", h("button", { type: "button", class: "sl-exam-action", onclick: () => list.tickAll(false) }, t("exam.classes.untickAll"))) : null,
           list
         );
       });
@@ -305,9 +300,9 @@ class ClassNew extends ExamElement {
       { class: "sl-exam" },
       h("p", {}, t("exam.classes.yearSentence", { name: year.name })),
       notice ? h("p", { class: "sl-exam-quiet" }, notice) : null,
-      h("p", {}, h("label", {}, t("exam.bar.class"), " ", nameInput), names, " ", h("button", { type: "button", onclick: showMembers }, t("exam.classes.showMembers"))),
+      h("p", {}, h("label", {}, t("exam.bar.class"), " ", nameInput), names, " ", h("button", { type: "button", class: "sl-exam-action", onclick: showMembers }, t("exam.classes.showMembers"))),
       members,
-      h("p", {}, extra, " ", h("button", { type: "button", onclick: addExtra }, t("exam.classes.addByUsername"))),
+      h("p", {}, extra, " ", h("button", { type: "button", class: "sl-exam-action", onclick: addExtra }, t("exam.classes.addByUsername"))),
       h("p", {}, h("button", { type: "button", class: "sl-exam-primary", onclick: create }, t("exam.classes.createClass"))),
       line
     );
@@ -376,7 +371,7 @@ class ClassView extends ExamElement {
         : h("p", {}, t("exam.classes.rosterEmpty")),
       left.length ? h("h3", {}, t("exam.classes.leftRoster", { number: left.length })) : null,
       left.length ? conventionalTable(h("table", { class: "sl-exam-table sl-exam-roster" }, h("tbody", {}, rows(left, false)))) : null,
-      h("p", {}, h("button", { type: "button", onclick: refresh }, t("exam.classes.refreshNames"))),
+      h("p", {}, h("button", { type: "button", class: "sl-exam-action", onclick: refresh }, t("exam.classes.refreshNames"))),
       line
     );
   }
@@ -390,7 +385,7 @@ class ClassView extends ExamElement {
         this.reload();
       });
     const personRow = (person) =>
-      h("li", {}, displayPerson(person), " ", h("span", { class: "sl-exam-quiet" }, person.username), " ", h("button", { type: "button", onclick: add(person.username) }, t("exam.classes.add")));
+      h("li", {}, displayPerson(person), " ", h("span", { class: "sl-exam-quiet" }, person.username), " ", h("button", { type: "button", class: "sl-exam-action", onclick: add(person.username) }, t("exam.classes.add")));
 
     const notice = directoryNotice(directory.state);
     const missing = (directory.candidates ?? []).filter((person) => !onRoster.has(person.username));
@@ -421,9 +416,9 @@ class ClassView extends ExamElement {
       {},
       h("h2", {}, t("exam.classes.addStudents")),
       unit,
-      h("p", {}, query, " ", h("button", { type: "button", onclick: search }, t("exam.classes.searchDirectory"))),
+      h("p", {}, query, " ", h("button", { type: "button", class: "sl-exam-action", onclick: search }, t("exam.classes.searchDirectory"))),
       results,
-      h("p", {}, username, " ", h("button", { type: "button", onclick: (event) => add(username.value.trim())(event) }, t("exam.classes.addByUsername"))),
+      h("p", {}, username, " ", h("button", { type: "button", class: "sl-exam-action", onclick: (event) => add(username.value.trim())(event) }, t("exam.classes.addByUsername"))),
       line
     );
   }
@@ -431,8 +426,8 @@ class ClassView extends ExamElement {
   courseSection(klass) {
     return h(
       "section",
-      {},
-      h("h2", {}, t("exam.classes.courses")),
+      { class: "sl-exam-class-courses" },
+      h("h2", {}, t("exam.classes.courses"), " ", button({ label: t("exam.classes.addCourse"), class: "sl-exam-course-add", action: () => openCreatorOf("course") })),
       klass.courses.length
         ? h("ul", {}, klass.courses.map((course) => h("li", {}, h("a", { href: `/exam/courses/${course.id}` }, course.subject), ` (${languageLabels[course.language]}) · `, h("a", { href: `/exam/courses/${course.id}/gradebook` }, t("exam.pages.gradebook")))))
         : h("p", {}, t("exam.classes.noCourses"))
@@ -530,6 +525,7 @@ class CourseView extends ExamElement {
     return h(
       "div",
       { class: "sl-exam" },
+      h("p", { class: "sl-exam-actions" }, linkButton({ label: t("exam.classes.openGradebook"), href: `/exam/courses/${course.id}/gradebook`, class: "sl-exam-course-gradebook" })),
       h("p", { class: "sl-exam-quiet" }, t("exam.classes.savedAsChanged")),
       h("p", {}, h("label", {}, t("exam.classes.presentedIn"), " ", language)),
       h("h2", {}, t("exam.classes.configSheet")),
@@ -543,8 +539,7 @@ class CourseView extends ExamElement {
         h("label", {}, t("exam.classes.winterCountsBefore"), " ", share, " ", t("exam.classes.winterCountsAfter")),
         h("br"),
         h("span", { class: "sl-exam-quiet" }, t("exam.classes.summerCountsRest"))
-      ),
-      h("p", {}, h("a", { href: `/exam/courses/${course.id}/gradebook` }, t("exam.classes.openGradebook")))
+      )
     );
   }
 }

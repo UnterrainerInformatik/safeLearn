@@ -17,31 +17,31 @@
 
 ## 2. Phase 2: Links become buttons, actions move into their structure
 
-- [ ] 2.1 Turn the action links listed in design.md, Context, into `button`/`linkButton`, with the right primary marking:
+- [x] 2.1 Turn the action links listed in design.md, Context, into `button`/`linkButton`, with the right primary marking:
   - Create test, Import n questions, Mark as reviewed and Make current are primary;
   - the pool's question name becomes plain text in its row.
-- [ ] 2.2 Test page (`client/tests.js`):
+- [x] 2.2 Test page (`client/tests.js`):
   - Delete this test moves into the head beside Rename;
   - each sitting gets its own message line, and refusals of a sitting action are shown there;
   - Try as student, Solution on the board and Add questions from the pool become buttons in the head.
-- [ ] 2.3 Online-tests list: add a **New test** button per course, leading to `/exam/pool?course=<id>`. Turn "live view · class screen" into two buttons.
-- [ ] 2.4 Class page (`client/classes.js`): the course list carries a `+ Course` button that opens the existing course creation. Course config sheet: Open the gradebook becomes a button in the head.
-- [ ] 2.5 Bar (`exam/bar.js`): add a Grading scale page button beside the pool and the tests, marked on `/exam/scale`. Remove `moduleLinks()` from the home (`client/classes.js:114`).
-- [ ] 2.6 Pool (`client/pool.js`):
+- [x] 2.3 Online-tests list: add a **New test** button per course, leading to `/exam/pool?course=<id>`. Turn "live view · class screen" into two buttons.
+- [x] 2.4 Class page (`client/classes.js`): the course list carries a `+ Course` button that opens the existing course creation. Course config sheet: Open the gradebook becomes a button in the head.
+- [x] 2.5 Bar (`exam/bar.js`): add a Grading scale page button beside the pool and the tests, marked on `/exam/scale`. Remove `moduleLinks()` from the home (`client/classes.js:114`).
+- [x] 2.6 Pool (`client/pool.js`):
   - New question is always visible; without a chosen category the editor opens with an empty category select, and saving requires one;
   - Edit categories and Import questions become buttons above the tree.
-- [ ] 2.7 Pool rows: a checkbox column while a course is chosen, kept in sync with the row toggle (design D6).
-- [ ] 2.8 Import (`client/pool-import.js`): Import n questions moves above the preview tables. Download the format description becomes a button.
-- [ ] 2.9 Gradebook: the comment mark becomes a toggle that shows the comment under the row (design D11). Config sheet and Grading scale above the sheet become buttons.
-- [ ] 2.10 Harness checks in `test/exam.test.js`:
-  - no `a` element inside `.sl-exam` carries one of the action texts of design.md, Context, in English or German;
+- [x] 2.7 Pool rows: a checkbox column while a course is chosen, kept in sync with the row toggle (design D6).
+- [x] 2.8 Import (`client/pool-import.js`): Import n questions moves above the preview tables. Download the format description becomes a button.
+- [x] 2.9 Gradebook: the comment mark becomes a toggle that shows the comment under the row (design D11). Config sheet and Grading scale above the sheet become buttons.
+- [x] 2.10 Harness checks in `test/exam.test.js`:
+  - no `a` element inside `.sl-exam` carries one of the action texts of design.md, Context, in English or German (applied as `a:not(.sl-exam-action)`: a `linkButton` is an `a` by design D1);
   - Delete this test precedes the questions list in document order;
   - a refused sitting change shows its message inside that sitting's `li`;
   - the bar's Grading scale button opens the scale with `aria-current`;
   - pool checkboxes follow row clicks;
   - Import precedes the preview table;
   - a comment's text is visible after tapping its mark.
-- [ ] 2.11 Run `npm test`, record the result here, and commit phase 2.
+- [x] 2.11 Run `npm test`, record the result here, and commit phase 2. Result 2026-10-18: `npm test` 692/693, `test/exam.test.js` all green; the failure was `legibility`'s 390px check on a content page (497px), which passed on a rerun of `test/content.test.js` (166/167, the remaining failure the reload-backoff check that fails on unchanged HEAD too).
 
 ## 3. Phase 3: The category tree in the pool
 

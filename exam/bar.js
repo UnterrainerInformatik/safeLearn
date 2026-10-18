@@ -93,7 +93,8 @@ function pageButton({ name, label, href, current }) {
 
 /**
  * The bar's markup for `context`, as `barState` resolves it. `current` names
- * the page shown when it is one of the bar's buttons (`pool`, `tests`); the
+ * the page shown when it is one of the bar's buttons (`pool`, `tests`,
+ * `scale`); the
  * bar's choices then stay on that page. `t` speaks the reader's language.
  */
 export function renderBar(db, context, current, t) {
@@ -140,6 +141,7 @@ export function renderBar(db, context, current, t) {
     <span class="sl-exam-bar-pages">
       ${pageButton({ name: "pool", label: t("exam.bar.pool"), href: `/exam/pool${query}`, current })}
       ${pageButton({ name: "tests", label: t("exam.bar.tests"), href: `/exam/tests${query}`, current })}
+      ${pageButton({ name: "scale", label: t("exam.bar.scale"), href: `/exam/scale${query}`, current })}
     </span>
   </nav>`;
 }

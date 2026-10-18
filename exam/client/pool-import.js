@@ -15,7 +15,7 @@
  * draws what it answers.
  */
 
-import { confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, format, h, t } from "./frame.js";
+import { confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, format, h, linkButton, t } from "./frame.js";
 
 const typeLabels = {
   multichoiceset: t("exam.pool.type.multichoiceset"),
@@ -92,12 +92,12 @@ class PoolImport extends ExamElement {
     return h(
       "div",
       { class: "sl-exam sl-exam-import" },
-      h("p", {}, h("a", { href: `/exam/pool${course}` }, t("exam.categories.backToPool"))),
+      h("p", {}, linkButton({ label: t("exam.categories.backToPool"), href: `/exam/pool${course}` })),
       h("h2", {}, t("exam.import.formatHeading")),
       h(
         "p",
         {},
-        h("a", { href: "/exam/pool/import/format", download: "safelearn-question-format.md", class: "sl-exam-import-format" }, t("exam.import.downloadFormat")),
+        linkButton({ label: t("exam.import.downloadFormat"), href: "/exam/pool/import/format", download: "safelearn-question-format.md", class: "sl-exam-import-format" }),
         t("exam.import.formatExplained")
       ),
       h("h2", {}, t("exam.import.fileHeading")),
@@ -140,6 +140,7 @@ class PoolImport extends ExamElement {
       "button",
       {
         type: "button",
+        class: "sl-exam-action",
         onClick: async () => {
           try {
             await navigator.clipboard.writeText(lines.join("\n"));
@@ -169,7 +170,7 @@ class PoolImport extends ExamElement {
       "button",
       {
         type: "button",
-        class: "sl-exam-import-go",
+        class: "sl-exam-action sl-exam-action-primary sl-exam-import-go",
         onClick: async () => {
           button.disabled = true;
           message.textContent = t("exam.import.importing");
@@ -194,6 +195,8 @@ class PoolImport extends ExamElement {
         "section",
         { class: "sl-exam-import-preview" },
         h("p", {}, t("exam.import.ready", { name })),
+        h("p", {}, button),
+        message,
         h(
           "table",
           { class: "sl-exam-table" },
@@ -260,8 +263,6 @@ class PoolImport extends ExamElement {
                 )
               )
             ),
-        h("p", {}, button),
-        message
       )
     );
   }

@@ -12,7 +12,7 @@
  * draws what it answers.
  */
 
-import { defineExamElement, ExamApiError, ExamElement, examApi, h, t } from "./frame.js";
+import { defineExamElement, ExamApiError, ExamElement, examApi, h, linkButton, t } from "./frame.js";
 import { poolAddress } from "./question-editor.js";
 
 /** The ids of `node` and everything below it. */
@@ -37,7 +37,7 @@ class PoolCategories extends ExamElement {
     return h(
       "div",
       { class: "sl-exam sl-exam-categories" },
-      h("p", {}, h("a", { href: poolAddress(null, this.params.course) }, t("exam.categories.backToPool"))),
+      h("p", {}, linkButton({ label: t("exam.categories.backToPool"), href: poolAddress(null, this.params.course) })),
       this.message,
       h("h2", {}, t("exam.categories.newAtTop")),
       this.namesForm({ submit: t("exam.categories.create"), onSave: (names) => this.act(() => examApi("/pool/categories", { method: "POST", body: { parentId: null, ...names } }), t("exam.categories.created")) }),

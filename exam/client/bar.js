@@ -55,6 +55,16 @@ const creators = {
   course: { kind: "course-new", title: () => t("exam.bar.newCourseDialog"), params: (bar) => ({ slClass: bar.dataset.class }) },
 };
 
+/**
+ * Opens the bar's dialog that creates `what` (`year`, `class`, `course`) for
+ * what the bar has chosen - also for a page's own "new" button, such as the
+ * class page's `+ Course`. Without a bar on the page there is nothing to open.
+ */
+export function openCreatorOf(what) {
+  const bar = document.querySelector(".sl-exam-bar");
+  if (bar) openCreator(bar, what);
+}
+
 function openCreator(bar, what) {
   const creator = creators[what];
   const name = creator && elementFor(creator.kind);
@@ -66,7 +76,7 @@ function openCreator(bar, what) {
     { class: "sl-exam-dialog sl-exam", "aria-label": creator.title() },
     h("h3", {}, creator.title()),
     element,
-    h("p", {}, h("button", { type: "button", onclick: () => dialog.close() }, t("exam.common.cancel")))
+    h("p", {}, h("button", { type: "button", class: "sl-exam-action", onclick: () => dialog.close() }, t("exam.common.cancel")))
   );
   dialog.addEventListener("close", () => dialog.remove());
   bar.after(dialog);

@@ -19,7 +19,7 @@
  * draws what it answers.
  */
 
-import { confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, h, t } from "./frame.js";
+import { confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, h, linkButton, t } from "./frame.js";
 import { displayClass } from "./classes.js";
 import "./rich-text.js";
 
@@ -62,10 +62,12 @@ class QuestionEditor extends ExamElement {
   render({ tree, stored }) {
     this.stored = stored;
     this.categories = flatCategories(tree);
-    const initialCategory = stored ? stored.categoryId : Number(this.params.category) || this.categories[0]?.id || null;
+    // A new question without a category from the browser starts with none
+    // chosen; the form is not sent until one is.
+    const initialCategory = stored ? stored.categoryId : Number(this.params.category) || null;
     this.backAddress = () => poolAddress(Number(this.category.value) || initialCategory, this.params.course);
     if (this.categories.length === 0) {
-      return h("div", { class: "sl-exam" }, h("p", {}, `${t("exam.categories.none")} `), h("a", { href: "/exam/pool/categories" }, t("exam.editor.createCategoryFirst")));
+      return h("div", { class: "sl-exam" }, h("p", {}, `${t("exam.categories.none")} `), linkButton({ label: t("exam.editor.createCategoryFirst"), href: "/exam/pool/categories" }));
     }
 
     this.type = h(
@@ -75,7 +77,8 @@ class QuestionEditor extends ExamElement {
     );
     this.category = h(
       "select",
-      { name: "categoryId", "aria-label": t("exam.import.category") },
+      { name: "categoryId", "aria-label": t("exam.import.category"), required: true },
+      initialCategory === null ? h("option", { value: "", selected: true }, t("exam.editor.chooseCategory")) : null,
       this.categories.map((category) => h("option", { value: String(category.id), selected: category.id === initialCategory }, category.label))
     );
     this.nameDe = h("input", { type: "text", name: "nameDe", value: stored?.nameDe ?? "", "aria-label": t("exam.editor.germanTitle"), maxlength: "200" });
@@ -123,7 +126,7 @@ class QuestionEditor extends ExamElement {
         "div",
         { class: "sl-exam-editor-actions" },
         this.saveButton,
-        h("a", { href: this.backAddress(), class: "sl-exam-editor-back", onClick: (event) => (event.currentTarget.href = this.backAddress()) }, t("exam.categories.backToPool")),
+        linkButton({ label: t("exam.categories.backToPool"), href: this.backAddress(), class: "sl-exam-editor-back", onClick: (event) => (event.currentTarget.href = this.backAddress()) }),
         stored ? this.lifecycleButtons(stored) : null
       ),
       this.message,
@@ -140,8 +143,8 @@ class QuestionEditor extends ExamElement {
 
   /** Retire or revive, and delete, for a stored question. */
   lifecycleButtons(stored) {
-    this.retire = h("button", { type: "button", "data-action": "retire", hidden: stored.retired, onClick: () => this.setRetired(true) }, t("exam.editor.retire"));
-    this.revive = h("button", { type: "button", "data-action": "revive", hidden: !stored.retired, onClick: () => this.setRetired(false) }, t("exam.editor.revive"));
+    this.retire = h("button", { type: "button", class: "sl-exam-action", "data-action": "retire", hidden: stored.retired, onClick: () => this.setRetired(true) }, t("exam.editor.retire"));
+    this.revive = h("button", { type: "button", class: "sl-exam-action", "data-action": "revive", hidden: !stored.retired, onClick: () => this.setRetired(false) }, t("exam.editor.revive"));
     const remove = confirmButton({
       "data-action": "delete",
       label: t("exam.categories.delete"),
@@ -226,7 +229,7 @@ class QuestionEditor extends ExamElement {
     this.answerList.replaceChildren(
       h("div", { class: "sl-exam-editor-row sl-exam-editor-head" }, h("div", {}, single ? t("exam.editor.correct") : t("exam.editor.correctOnes")), h("div"), h("div")),
       ...rows,
-      h("button", { type: "button", class: "sl-exam-editor-add", onClick: () => this.addAnswer() }, t("exam.editor.addAnswer"))
+      h("button", { type: "button", class: "sl-exam-action sl-exam-editor-add", onClick: () => this.addAnswer() }, t("exam.editor.addAnswer"))
     );
   }
 
@@ -332,6 +335,7 @@ class QuestionEditor extends ExamElement {
             "button",
             {
               type: "button",
+              class: "sl-exam-action",
               "data-test": String(test.id),
               onClick: async () => {
                 button.disabled = true;
@@ -359,7 +363,7 @@ class QuestionEditor extends ExamElement {
           );
         })
       ),
-      h("p", {}, h("a", { href: this.backAddress() }, t("exam.categories.backToPool")))
+      h("p", {}, linkButton({ label: t("exam.categories.backToPool"), href: this.backAddress() }))
     );
   }
 
@@ -385,7 +389,7 @@ class QuestionEditor extends ExamElement {
       const used = error instanceof ExamApiError && error.status === 409;
       this.message.replaceChildren(
         h("p", { class: "sl-embed-error" }, error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.editor.deleteFailed")),
-        used && !this.stored.retired ? h("button", { type: "button", "data-action": "retire-instead", onClick: () => this.setRetired(true) }, t("exam.editor.retireInstead")) : null
+        used && !this.stored.retired ? h("button", { type: "button", class: "sl-exam-action", "data-action": "retire-instead", onClick: () => this.setRetired(true) }, t("exam.editor.retireInstead")) : null
       );
     }
   }

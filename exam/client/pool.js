@@ -26,7 +26,7 @@
  * the module's image route only.
  */
 
-import { defineExamElement, ExamApiError, ExamElement, examApi, format, h, markRows, t } from "./frame.js";
+import { defineExamElement, ExamApiError, ExamElement, examApi, format, h, linkButton, markRows, t } from "./frame.js";
 import { displayClass } from "./classes.js";
 
 const typeLabels = {
@@ -130,12 +130,13 @@ class PoolView extends ExamElement {
     );
 
     const courseQuery = this.params.course ? `?course=${this.params.course}` : "";
-    const categories = h("a", { href: `/exam/pool/categories${courseQuery}`, class: "sl-exam-pool-categories-link" }, t("exam.pool.editCategories"));
-    const importing = h("a", { href: `/exam/pool/import${courseQuery}`, class: "sl-exam-pool-import-link" }, t("exam.pool.importQuestions"));
+    const categories = linkButton({ label: t("exam.pool.editCategories"), href: `/exam/pool/categories${courseQuery}`, class: "sl-exam-pool-categories-link" });
+    const importing = linkButton({ label: t("exam.pool.importQuestions"), href: `/exam/pool/import${courseQuery}`, class: "sl-exam-pool-import-link" });
     if (tree.length === 0) {
-      return h("div", { class: "sl-exam" }, h("p", {}, t("exam.pool.empty")), categories, " · ", importing);
+      return h("div", { class: "sl-exam" }, h("p", {}, t("exam.pool.empty")), h("p", { class: "sl-exam-actions" }, categories, importing));
     }
-    this.newQuestion = h("a", { class: "sl-exam-pool-new", hidden: this.categoryId === null }, t("exam.pool.newQuestion"));
+    // Always offered: without a chosen category the editor asks for one.
+    this.newQuestion = linkButton({ label: t("exam.pool.newQuestion"), href: "/exam/pool/questions/new", class: "sl-exam-pool-new" });
     this.updateNewQuestion();
     const retired = h("input", {
       type: "checkbox",
@@ -159,7 +160,7 @@ class PoolView extends ExamElement {
     return h(
       "div",
       { class: "sl-exam sl-exam-pool" },
-      h("div", { class: "sl-exam-pool-side" }, this.tree, h("p", { class: "sl-exam-pool-tree-tools" }, categories, " · ", importing)),
+      h("div", { class: "sl-exam-pool-side" }, h("p", { class: "sl-exam-pool-tree-tools sl-exam-actions" }, categories, importing), this.tree),
       h(
         "div",
         { class: "sl-exam-pool-main" },
@@ -196,7 +197,7 @@ class PoolView extends ExamElement {
         },
       },
       name,
-      h("button", { type: "submit" }, t("exam.pool.createTest"))
+      h("button", { type: "submit", class: "sl-exam-action sl-exam-action-primary" }, t("exam.pool.createTest"))
     );
     let add = null;
     if (tests.length > 0) {
@@ -221,7 +222,7 @@ class PoolView extends ExamElement {
         },
         `${t("exam.pool.orAddTo")} `,
         target,
-        h("button", { type: "submit" }, t("exam.pool.add"))
+        h("button", { type: "submit", class: "sl-exam-action" }, t("exam.pool.add"))
       );
     }
     return h(
@@ -258,6 +259,8 @@ class PoolView extends ExamElement {
     const chosen = this.chosen.has(id);
     row.classList.toggle("is-chosen", chosen);
     row.setAttribute("aria-selected", String(chosen));
+    const box = row.querySelector(".sl-exam-pool-box");
+    if (box) box.checked = chosen;
     this.updateCount();
   }
 
@@ -292,9 +295,8 @@ class PoolView extends ExamElement {
     this.refreshList();
   }
 
-  /** "New question" is offered with a category chosen, and creates the question there. */
+  /** "New question" creates the question in the chosen category, if one is chosen. */
   updateNewQuestion() {
-    this.newQuestion.hidden = this.categoryId === null;
     const query = new URLSearchParams();
     if (this.categoryId !== null) query.set("category", String(this.categoryId));
     if (this.params.course) query.set("course", this.params.course);
@@ -344,6 +346,7 @@ class PoolView extends ExamElement {
         h(
           "tr",
           {},
+          this.course ? h("th", { class: "sl-exam-pool-pick" }, h("span", { class: "sl-exam-visually-hidden" }, t("exam.pool.chosenColumn"))) : null,
           h("th", {}, t("exam.pool.question")),
           h("th", {}, t("exam.pool.used")),
           h("th", {}, t("exam.pool.lastUsed"))
@@ -373,6 +376,15 @@ class PoolView extends ExamElement {
                 if (this.course) this.toggle(question.id, event.currentTarget);
               },
             },
+            // The row's choice as a box: a click on it reaches the row, which
+            // does the choosing, so box and row never disagree (design D6).
+            this.course
+              ? h(
+                  "td",
+                  { class: "sl-exam-pool-pick" },
+                  h("input", { type: "checkbox", class: "sl-exam-pool-box", checked: this.chosen.has(question.id), "aria-label": t("exam.pool.chooseQuestion", { name: question.nameDe }) })
+                )
+              : null,
             h(
               "td",
               {},
@@ -423,6 +435,7 @@ class PoolView extends ExamElement {
           "button",
           {
             type: "button",
+            class: "sl-exam-action",
             "aria-pressed": String(this.language === language),
             onClick: () => {
               this.language = language;
@@ -456,7 +469,7 @@ class PoolView extends ExamElement {
           question.retired ? ` · ${t("exam.pool.retired")}` : ""
         ),
         question.unreviewed ? this.reviewBanner(question) : null,
-        h("div", { class: "sl-exam-pool-question-tools" }, switcher, h("a", { href: this.editAddress(question), class: "sl-exam-pool-edit" }, t("exam.pool.edit"))),
+        h("div", { class: "sl-exam-pool-question-tools" }, switcher, linkButton({ label: t("exam.pool.edit"), href: this.editAddress(question), class: "sl-exam-pool-edit" })),
         storedMarkup(de ? question.textDe : question.textEn, "sl-exam-pool-text"),
         h(
           "ol",
@@ -489,7 +502,7 @@ class PoolView extends ExamElement {
         question.importFileName ? h("code", {}, question.importFileName) : null,
         question.importedAt ? `, ${t("exam.pool.notReviewedYet")}` : t("exam.pool.notReviewedYet")
       ),
-      h("button", { type: "button", onClick: () => this.markReviewed(question.id, message) }, t("exam.pool.markReviewed")),
+      h("button", { type: "button", class: "sl-exam-action sl-exam-action-primary", onClick: () => this.markReviewed(question.id, message) }, t("exam.pool.markReviewed")),
       message
     );
   }

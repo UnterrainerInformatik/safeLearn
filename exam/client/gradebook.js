@@ -16,7 +16,7 @@
 import { parseNumber as parseTyped } from "../../i18n/format.js";
 import { viennaLocal } from "./periods.js";
 import { act, displayClass, displayPerson, messageLine } from "./classes.js";
-import { confirmButton, defineExamElement, ExamElement, examApi, format, h, markRows, saveOnChange, stickyColumns, t } from "./frame.js";
+import { confirmButton, defineExamElement, ExamElement, examApi, format, h, linkButton, markRows, saveOnChange, stickyColumns, t } from "./frame.js";
 
 const categories = ["onlineTests", "manualTests", "participation", "homework"];
 
@@ -197,13 +197,11 @@ class GradebookView extends ExamElement {
       onPage ? null : h("h3", {}, t("exam.gradebook.embedHeading", { course: courseTitle(course) })),
       h(
         "p",
-        {},
+        { class: "sl-exam-actions sl-exam-gradebook-actions" },
         picker,
-        picker ? " " : null,
-        h("a", { href: `/exam/courses/${course.id}` }, t("exam.gradebook.configSheet")),
-        " · ",
-        h("a", { href: "/exam/scale" }, t("exam.gradebook.gradingScale")),
-        onPage ? null : [" · ", h("a", { href: `/exam/courses/${course.id}/gradebook?semester=${semester}` }, t("exam.gradebook.openAsPage"))]
+        linkButton({ label: t("exam.gradebook.configSheet"), href: `/exam/courses/${course.id}`, class: "sl-exam-gradebook-config" }),
+        linkButton({ label: t("exam.gradebook.gradingScale"), href: `/exam/scale?course=${course.id}`, class: "sl-exam-gradebook-scale" }),
+        onPage ? null : linkButton({ label: t("exam.gradebook.openAsPage"), href: `/exam/courses/${course.id}/gradebook?semester=${semester}` })
       ),
       h(
         "p",
@@ -383,9 +381,9 @@ class GradebookView extends ExamElement {
           }),
         onSaved: (record) => show(record.semesters[semester]),
       });
-      overrideCell = h("td", { title: row.comment ?? "" }, override, row.comment ? " ✎" : "");
+      overrideCell = h("td", { title: row.comment ?? "" }, override, row.comment ? [" ", this.commentToggle(row)] : "");
     } else {
-      overrideCell = h("td", { title: row.comment ?? "" }, row.override === null ? "" : String(row.override), row.comment ? " ✎" : "");
+      overrideCell = h("td", { title: row.comment ?? "" }, row.override === null ? "" : String(row.override), row.comment ? [" ", this.commentToggle(row)] : "");
     }
 
     const leadingCells = [
@@ -403,6 +401,38 @@ class GradebookView extends ExamElement {
         : h("td", {})
     );
     return h("tr", { class: row.leftAt ? "sl-exam-left" : null, "data-student": row.username }, leadingCells, fieldCells);
+  }
+
+  /**
+   * The mark of a student's comment, a button that shows the comment's text in
+   * a row of its own under the student's row - readable on a tablet, where
+   * the cell's tooltip never shows (`gradebook-sheet`).
+   */
+  commentToggle(row) {
+    let shown = null;
+    const toggle = h(
+      "button",
+      {
+        type: "button",
+        class: "sl-exam-comment-toggle",
+        "aria-expanded": "false",
+        "aria-label": t("exam.gradebook.showComment", { person: displayPerson(row) }),
+        title: row.comment,
+        onClick: () => {
+          const tr = toggle.closest("tr");
+          if (shown) {
+            shown.remove();
+            shown = null;
+          } else {
+            shown = h("tr", { class: "sl-exam-comment-row", "data-comment-of": row.username }, h("td", { colspan: String(tr.children.length) }, h("span", { class: "sl-exam-comment" }, row.comment)));
+            tr.after(shown);
+          }
+          toggle.setAttribute("aria-expanded", String(shown !== null));
+        },
+      },
+      "✎"
+    );
+    return toggle;
   }
 
   /** A student's field in one column, saved as it changes; read-only text for someone who left. */
@@ -523,7 +553,7 @@ class GradebookView extends ExamElement {
       h("label", {}, `${t("exam.gradebook.date")} `, date),
       proposed < from || proposed > to ? null : h("span", { class: "sl-exam-quiet" }, `${semesterLabels[semester]}: ${displayDate(from)} – ${displayDate(to)}`),
       max ? h("label", {}, `${t("exam.gradebook.outOf")} `, max, ` ${t("exam.gradebook.points")}`) : null,
-      h("p", {}, h("button", { type: "submit", class: "sl-exam-primary" }, t("exam.gradebook.addColumn")), " ", h("button", { type: "button", onclick: () => dialog.close() }, t("exam.common.cancel"))),
+      h("p", {}, h("button", { type: "submit", class: "sl-exam-primary" }, t("exam.gradebook.addColumn")), " ", h("button", { type: "button", class: "sl-exam-action", onclick: () => dialog.close() }, t("exam.common.cancel"))),
       line
     );
     dialog.append(form);
@@ -605,7 +635,7 @@ class GradebookStudent extends ExamElement {
       h("p", {}, h("label", {}, visible, ` ${t("exam.gradebook.commentVisible")}`)),
       h("h3", {}, t("exam.gradebook.resultsHeading", { count: own.length })),
       own.length ? resultsTable(own) : h("p", { class: "sl-exam-quiet" }, t("exam.gradebook.noSemesterResults")),
-      h("p", {}, h("a", { href: `/exam/courses/${course.id}/gradebook?semester=${semester}` }, t("exam.gradebook.enterResults")))
+      h("p", {}, linkButton({ label: t("exam.gradebook.enterResults"), href: `/exam/courses/${course.id}/gradebook?semester=${semester}`, class: "sl-exam-enter-results" }))
     );
   }
 }

@@ -170,6 +170,36 @@
   border-color: rgba(180, 35, 24, 0.35);
 }
 
+/* A row of buttons: a page's or a record's actions, wrapping on a narrow
+   screen. */
+.sl-exam-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.sl-exam-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* A button that switches something on, such as a preview's language. */
+.sl-exam-action[aria-pressed="true"] {
+  background-color: rgba(27, 31, 35, 0.1);
+  border-color: rgba(27, 31, 35, 0.45);
+  font-weight: 600;
+}
+
+#markdown-content.dark-mode .sl-exam-action[aria-pressed="true"] {
+  background-color: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
 /* A confirmation button between its two clicks. */
 .sl-exam-action[data-armed="1"] {
   color: #fff;
@@ -1703,4 +1733,39 @@ sl-date-input .sl-date-input-grid button.is-selected {
 sl-date-input .sl-date-input-grid button.is-disabled {
   opacity: 0.3;
   cursor: not-allowed;
+}
+
+/* The pool's box for choosing a question for the test. */
+
+.sl-exam-pool-pick {
+  width: 1.5em;
+  text-align: center;
+}
+
+/* A comment in the gradebook: its mark opens a row with the text. */
+
+.sl-exam-comment-toggle {
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.sl-exam-comment-toggle:hover,
+.sl-exam-comment-toggle[aria-expanded="true"] {
+  border-color: rgba(27, 31, 35, 0.3);
+}
+
+#markdown-content.dark-mode .sl-exam-comment-toggle:hover,
+#markdown-content.dark-mode .sl-exam-comment-toggle[aria-expanded="true"] {
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.sl-exam-gradebook .sl-exam-comment-row td,
+.sl-exam-comment-row td {
+  white-space: normal;
+  padding-left: 2em;
 }

@@ -22,7 +22,7 @@
  * is told so, and the view stops.
  */
 
-import { confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, t } from "./frame.js";
+import { confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, linkButton, t } from "./frame.js";
 import { displayClass, displayPerson } from "./classes.js";
 import { displayWindow } from "./tests.js";
 
@@ -137,10 +137,9 @@ class LiveView extends ExamElement {
         "p",
         { class: "sl-exam-quiet" },
         `${t("exam.live.serverTime")} `,
-        this.serverClock,
-        " · ",
-        h("a", { href: `/exam/sittings/${sitting.id}/screen`, target: "_blank", rel: "noopener", class: "sl-exam-live-screen-link" }, t("exam.live.classScreenLink"))
+        this.serverClock
       ),
+      h("p", { class: "sl-exam-actions" }, linkButton({ label: t("exam.live.classScreenLink"), href: `/exam/sittings/${sitting.id}/screen`, newWindow: true, class: "sl-exam-live-screen-link" })),
       h(
         "p",
         { class: "sl-exam-quiet" },
@@ -243,7 +242,7 @@ class LiveView extends ExamElement {
     const participant = this.participants.get(username);
     const release =
       participant.status === "writing" && participant.attemptId !== null
-        ? h("button", { type: "button", class: "sl-exam-live-release", onClick: () => this.release(participant) }, t("exam.live.release"))
+        ? h("button", { type: "button", class: "sl-exam-action sl-exam-live-release", onClick: () => this.release(participant) }, t("exam.live.release"))
         : null;
     const remove =
       this.admin && participant.attemptId !== null

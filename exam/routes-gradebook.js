@@ -26,7 +26,7 @@ import {
 import { getCourse, InvalidInputError, NotFoundError } from "./classes.js";
 import { semesters } from "./grading.js";
 import { identityOf, requireTeacher, teacherPage } from "./gate.js";
-import { teacherShell } from "./bar.js";
+import { contextFromQuery, teacherShell } from "./bar.js";
 
 /** A record id from the path or query; anything but a positive integer names nothing. */
 function idParam(value) {
@@ -116,8 +116,8 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
       path,
       teacherPage,
       handle(async (req, res) => {
-        const { kind, params, context } = element(req);
-        res.send(await teacherShell({ db, startPage, req, title, context, kind, params }));
+        const { kind, params, context, current = null } = element(req);
+        res.send(await teacherShell({ db, startPage, req, title, context, kind, params, current }));
       })
     );
 
@@ -135,7 +135,8 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
       context: { courseId },
     };
   });
-  page("/scale", (t) => t("exam.pages.scale"), () => ({ kind: "scale", params: {}, context: {} }));
+  // One of the bar's buttons: the scale belongs to no course, but keeps what the bar has chosen.
+  page("/scale", (t) => t("exam.pages.scale"), (req) => ({ kind: "scale", params: {}, context: contextFromQuery(req.query), current: "scale" }));
 
   // Everyone's own results, a teacher's included - a teacher is on no roster
   // and finds none - now on the student's Exams page (`/exam/my`).
