@@ -15,7 +15,7 @@
 
 import { checkDevice, nextOpenTestsChange, openTestsOf, ownAttempt, recordFocus, resultView, saveAnswer, startAttempt, submitAttempt, writingView } from "./attempts.js";
 import { NotFoundError } from "./classes.js";
-import { identityOf, requireStudent, sessionNow } from "./gate.js";
+import { actsAsTeacher, identityOf, requireStudent, sessionNow } from "./gate.js";
 import { listenTests } from "./live.js";
 import { openEventStream } from "../event-stream.js";
 import { embedPlaceholder, wrapInPage } from "../obsidian.js";
@@ -209,7 +209,9 @@ export function registerAttemptRoutes(router, { db, handle, startPage }) {
   // The student's page of the module: the tests open for them right now above
   // their results, one page behind the top bar's Exams button; no bar. The
   // same elements a page's bare `safelearn-test` and `safelearn-results`
-  // blocks show.
+  // blocks show. While the student writes, the results are hidden: the test
+  // element says when (`sl-exam-writing`), and a reload during an attempt is
+  // rendered hidden from the start, so the results never flash up.
   router.get(
     "/my",
     (req, res, next) => (identityOf(req) ? next() : next("router")),
@@ -217,12 +219,15 @@ export function registerAttemptRoutes(router, { db, handle, startPage }) {
       const { t } = await i18nOf(req);
       const title = t("exam.my.title");
       const loading = t("app.embed.loading");
+      const writing = !(await actsAsTeacher(req)) && openTestsOf(db, identityOf(req)).some((test) => test.attempt !== null);
       const body = `
         <h1>${escapeHtml(title)}</h1>
         <h2>${escapeHtml(t("exam.my.openTests"))}</h2>
         ${embedPlaceholder("test", {}, loading)}
-        <h2>${escapeHtml(t("exam.my.results"))}</h2>
-        ${embedPlaceholder("results", { page: "1" }, loading)}`;
+        <section class="sl-exam-my-results"${writing ? " hidden" : ""}>
+          <h2>${escapeHtml(t("exam.my.results"))}</h2>
+          ${embedPlaceholder("results", { page: "1" }, loading)}
+        </section>`;
       res.send(await wrapInPage(body, startPage(), req, { title, wide: true }));
     })
   );

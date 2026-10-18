@@ -55,6 +55,21 @@ function mountAll() {
   }
 }
 
+// The student's Exams page hides its results while a test is written there,
+// and draws them anew once it is submitted, so they hold the new result. Only
+// that page carries the section, so a content page's results stay as placed.
+// A section the server rendered hidden belongs to an attempt already running.
+let writing = document.querySelector(".sl-exam-my-results[hidden]") ? true : null;
+window.addEventListener("sl-exam-writing", (event) => {
+  const now = event.detail?.writing === true;
+  const ended = writing === true && !now;
+  writing = now;
+  for (const section of document.querySelectorAll(".sl-exam-my-results")) {
+    section.hidden = now;
+    if (ended) for (const results of section.querySelectorAll("sl-exam-results")) results.reload();
+  }
+});
+
 // A module script runs after the document has been parsed, so every
 // placeholder - and a teacher page's module bar - is already there.
 mountAll();

@@ -386,7 +386,8 @@
       "corpus": [
         "md/test-exam-embedding.md",
         "md/test-md-file.md",
-        "md/test-exam-gradebook.md"
+        "md/test-exam-gradebook.md",
+        "md/test-exam-writing-beside-results.md"
       ]
     },
     "test/exam-foundation.test.js": {

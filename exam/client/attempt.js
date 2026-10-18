@@ -57,6 +57,16 @@ class WriteTest extends ExamElement {
   disconnectedCallback() {
     this.stop?.();
     this.closeStream();
+    this.announce(false);
+  }
+
+  /**
+   * Tells the page whether a real attempt is being written, so the student's
+   * Exams page can hide its results meanwhile (`sl-exam-writing`). A preview
+   * never counts as writing.
+   */
+  announce(writing) {
+    window.dispatchEvent(new CustomEvent("sl-exam-writing", { detail: { writing } }));
   }
 
   /**
@@ -123,6 +133,7 @@ class WriteTest extends ExamElement {
 
   openTests(tests) {
     this.listing = true;
+    this.announce(false);
     this.shownKey = JSON.stringify(tests.map((test) => [test.testId, test.closesAt]));
     this.watch();
     if (tests.length === 0) {
@@ -165,6 +176,7 @@ class WriteTest extends ExamElement {
     this.stop?.();
     this.preview = writing.preview === true;
     this.attempt = writing.attempt;
+    if (!this.preview) this.announce(true);
     this.status = h("p", { class: "sl-exam-message", role: "status" });
     this.countdown = h("span", { class: "sl-exam-countdown", "aria-live": "off" });
     const questions = writing.questions.map((question) => this.questionField(question, writing.questions.length, writing.language));
@@ -372,6 +384,7 @@ class WriteTest extends ExamElement {
   }
 
   resultPage(result) {
+    this.announce(false);
     return h(
       "div",
       { class: "sl-exam sl-exam-attempt sl-exam-attempt-result" },

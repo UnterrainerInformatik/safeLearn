@@ -1481,8 +1481,11 @@ describe("online tests: writing", () => {
     const correct = await correctTexts(test.id);
     const page = student.page;
     const bodies = [];
+    // The student's own results, drawn anew under the result once it is
+    // submitted, name records by id and are not part of the writing session.
     const collect = (response) => {
-      if (new URL(response.url()).pathname.startsWith("/exam/api/") && (response.headers()["content-type"] ?? "").includes("json")) {
+      const { pathname } = new URL(response.url());
+      if (pathname.startsWith("/exam/api/") && pathname !== "/exam/api/my/results" && (response.headers()["content-type"] ?? "").includes("json")) {
         bodies.push(response.text().catch(() => ""));
       }
     };
@@ -1553,6 +1556,80 @@ describe("online tests: writing", () => {
     const stillOpen = (await fetchAs(student, "/exam/api/my/tests")).json.tests.length > 0;
     await student.page.goto(`${applicationUrl}${plainPage}`, { waitUntil: "domcontentloaded" });
     assert.equal(!!(await student.page.$("#slExamsButton.sl-exam-open")), stillOpen, "and the button is violet only while another test is still open");
+  });
+
+  /** Whether the Exams page's results section is shown, and what it holds. */
+  const resultsSection = (page) =>
+    page.evaluate(() => {
+      const section = document.querySelector(".sl-exam-my-results");
+      return section ? { hidden: section.hidden, shown: section.offsetParent !== null, text: section.textContent } : null;
+    });
+
+  test("the Exams page hides the student's results while they write, also after a reload, and shows them again with the new result", async () => {
+    const test = await openTest("Hidden results");
+    const correct = await correctTexts(test.id);
+    const page = student.page;
+    await page.goto(`${applicationUrl}/exam/my`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".sl-exam-my-results sl-exam-results .sl-exam-results", { timeout: 20000 });
+    assert.deepEqual(
+      [(await resultsSection(page)).hidden, (await resultsSection(page)).shown],
+      [false, true],
+      "the results are shown while no test is written"
+    );
+    await page.click(`.sl-exam-attempt-open[data-test="${test.id}"] button`);
+    await page.waitForSelector(".sl-exam-attempt-question", { timeout: 20000 });
+    assert.deepEqual([(await resultsSection(page)).hidden, (await resultsSection(page)).shown], [true, false], "hidden once the test is started");
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    assert.equal((await resultsSection(page)).hidden, true, "a reload during the attempt renders them hidden from the start");
+    await page.waitForSelector(".sl-exam-attempt-question", { timeout: 20000 });
+    assert.equal((await resultsSection(page)).hidden, true, "and they stay hidden once the attempt is resumed");
+
+    await choose(page, correct[0][0]);
+    await page.click(".sl-exam-attempt-submit");
+    await page.click(".sl-exam-attempt-submit");
+    await page.waitForSelector(".sl-exam-attempt-result", { timeout: 10000 });
+    await page.waitForFunction(
+      (name) => {
+        const section = document.querySelector(".sl-exam-my-results");
+        return !section.hidden && section.offsetParent !== null && section.textContent.includes(name);
+      },
+      { timeout: 10000 },
+      test.name
+    );
+  });
+
+  test("the Exams page shows the results again when the server submits at the deadline with the page open", async () => {
+    const test = await openTest("Hidden until the deadline");
+    const writing = (await fetchAs(student, `/exam/api/tests/${test.id}/attempt`, { method: "POST" })).json;
+    database((db) => db.prepare("UPDATE attempt SET deadline = ? WHERE id = ?").run(new Date(Date.now() + 4000).toISOString(), writing.attempt));
+    const page = student.page;
+    await page.goto(`${applicationUrl}/exam/my`, { waitUntil: "domcontentloaded" });
+    assert.equal((await resultsSection(page)).hidden, true, "hidden while the attempt runs");
+    await page.waitForSelector(".sl-exam-attempt-question", { timeout: 20000 });
+    await page.waitForSelector(".sl-exam-attempt-result", { timeout: 20000 });
+    await page.waitForFunction(
+      (name) => {
+        const section = document.querySelector(".sl-exam-my-results");
+        return !section.hidden && section.offsetParent !== null && section.textContent.includes(name);
+      },
+      { timeout: 10000 },
+      test.name
+    );
+    assert.ok(database((db) => db.prepare("SELECT submitted_at FROM attempt WHERE id = ?").get(writing.attempt).submitted_at), "the server submitted it");
+  });
+
+  test("a content page that places a test beside results keeps the results visible while the student writes", async () => {
+    const test = await openTest("Beside results");
+    const page = student.page;
+    await render(student, "/md/test-exam-writing-beside-results.md");
+    await page.waitForSelector(`.sl-exam-attempt-open[data-test="${test.id}"] button`, { timeout: 20000 });
+    await page.waitForSelector("sl-exam-results .sl-exam-results", { timeout: 20000 });
+    await page.click(`.sl-exam-attempt-open[data-test="${test.id}"] button`);
+    await page.waitForSelector(".sl-exam-attempt-question", { timeout: 20000 });
+    assert.ok(await page.$eval("sl-exam-results", (el) => el.offsetParent !== null && !el.closest("[hidden]")), "the results element stays visible");
+    const attempt = database((db) => db.prepare("SELECT id FROM attempt WHERE test_id = ?").get(test.id).id);
+    assert.equal((await fetchAs(student, `/exam/api/attempts/${attempt}/submit`, { method: "POST" })).status, 200);
   });
 
   test("a student's open tests appear and go without a reload: a sitting created, one whose window opens later, a test deleted", async () => {
