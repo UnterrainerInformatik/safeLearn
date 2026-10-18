@@ -151,11 +151,26 @@
   margin-left: 4px;
 }
 
+/* The switches above sit 16px below their place (top: 16px), so the first choice keeps clear of them. */
+.flipswitch.menu + .sl-menu-choice {
+  margin-top: 26px;
+}
+
 .sl-menu-choice-label {
   min-width: 70px;
 }
 
+/* The buttons of a group stay on one line, their text centred both ways. */
+.sl-menu-choice-buttons {
+  display: inline-flex;
+  flex-wrap: nowrap;
+}
+
 .sl-menu-choice .button-group-left,
+.sl-menu-choice .button-group-middle,
 .sl-menu-choice .button-group-right {
-  padding-top: 0px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0px 8px;
 }

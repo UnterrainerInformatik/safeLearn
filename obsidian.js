@@ -2896,7 +2896,7 @@ function choiceGroup(label, setter, choices, chosen) {
   });
   return `<div class="sl-menu-choice" role="group" aria-label="${escapeHtmlAttribute(label)}">
       <span class="sl-menu-choice-label">${escapeHtmlAttribute(label)}</span>
-      <span>${buttons.join("")}</span>
+      <span class="sl-menu-choice-buttons">${buttons.join("")}</span>
     </div>`;
 }
 
