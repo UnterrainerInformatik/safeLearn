@@ -123,7 +123,7 @@ Heute gibt es vier Muster:
 - eine Bestätigung in der Seite bei Take back (Import);
 - **keine Bestätigung** bei **Delete** eines geplanten Sittings, bei **Remove from the test** und bei **Release to another browser**.
 
-Ein Muster fürs ganze Modul; der Zweimal-Klick passt zu "keine Browser-Dialoge". Das Sitting-Delete ohne Rückfrage zuerst.
+Ein Muster fürs ganze Modul; der Zweimal-Klick passt zu "keine Browser-Dialoge". Das Sitting-Delete ohne Rückfrage zuerst. **Release to another browser** braucht ausdrücklich keine Bestätigung (Gerald, 2026-10-18), siehe "Live-Ansicht: bound to browser".
 
 ## Fehlende Aktionen
 - Schuljahr, Klasse und Kurs lassen sich anlegen, aber nirgends umbenennen oder löschen.
@@ -201,10 +201,10 @@ Die Oberfläche des Prüfungsmoduls ist heute englisch. Gerald will sie pro Benu
 
 **Was das verlangt:**
 - **Zwei Präferenzen** als Keycloak-User-Attribute, wie `dm` und `vt`, z. B. `lang` (`en`/`de`) und `loc` (`en-GB`/`de-AT`). Der Server braucht sie beim Rendern, weil Seitentitel, Seitenkörper der Routen (`/exam/my`: "Exams", "Open online tests" …), Top-Bar-Labels und Modulleiste (`exam/bar.js`) serverseitig entstehen. Der Client bekommt sie über `/exam/api/me` oder ein Attribut am Frame.
-- **Texte auslagern:** ein Katalog pro Sprache und ein `t(key, params)` in Client und Server. Betroffen sind rund 4.000 Zeilen in `exam/client/*.js` und die Server-Routen. Zu entscheiden ist, ob das Settings-Menü und der Rest der App-Oberfläche gleich mitgehen oder vorerst nur das Prüfungsmodul.
+- **Texte auslagern:** ein Katalog pro Sprache und ein `t(key, params)` in Client und Server. Betroffen sind rund 4.000 Zeilen in `exam/client/*.js` und die Server-Routen. **Entschieden 2026-10-18:** Die Einstellung gibt es für alle Benutzer, nicht nur im Prüfungsmodul. Damit wird auch der Rest der App-Oberfläche übersetzt, etwa "Home", der Suchhinweis "… at least 3 characters", "Site" und "Content" in der Seitenleiste und das Settings-Menü selbst. Der Markdown-Inhalt der Seiten bleibt, wie er geschrieben ist.
 - **Formate über `Intl` mit expliziter Locale** statt `toLocaleDateString()` ohne Argument. Heute gibt es etwa 15 Stellen, gemischt aus Browser-Locale und hartem `de-AT`; das ist auch ein Punkt aus "Konsistenz im Kleinen".
 - **Eigene Datums- und Zeitwahl** statt der nativen Inputs, damit die Locale greift: Notenbuch-Spalten, Schuljahresdaten, Sittings. Mit "Sittings nach Unterrichtseinheit" schrumpft die Zeitwahl bei gesetzter Variable auf Datum plus Einheit. Ein Uhrzeitfeld braucht es dann nur noch im Fallback.
-- **Schreibansicht der Schüler:** Fragen kommen in der Kurssprache, und die Schreibseite ist heute schon nach Kurssprache DE/EN lokalisiert. Zu klären ist, ob die Kurssprache dort Vorrang vor der Benutzersprache behält. Vorschlag: Fragen in der Kurssprache, Bedienung in der Benutzersprache.
+- **Schreibansicht der Schüler (entschieden 2026-10-18):** Inhalte für Schüler, also Fragen und Antworten, kommen immer in der Kurssprache. Die Bedienung folgt der Spracheinstellung des Benutzers.
 
 **Technik — Empfehlung: kein Vue, eine schlanke eigene Lösung.**
 - Das Modul ist ohne Build-Schritt gebaut: Custom Elements, ein `h()`-Helfer (`exam/client/frame.js`) und ES-Module. Vue ginge auch ohne Build (`vue.esm-browser`).
@@ -214,3 +214,14 @@ Die Oberfläche des Prüfungsmoduls ist heute englisch. Gerald will sie pro Benu
 - Für die Datumswahl gibt es zwei Wege: eine kleine eigene Monatsansicht als Custom Element (geschätzt 150–250 Zeilen, Tastatur und ARIA mitgedacht) oder eine schmale Bibliothek mit Locale-Unterstützung und ohne Abhängigkeiten. Bei Bibliotheken vorher den Wartungsstand prüfen: flatpickr ist bekannt, aber seit Jahren ohne Release, als Alternative wäre etwa vanilla-calendar-pro zu prüfen. Tendenz: eigene Ansicht, weil sie nur die Locale-Formate von `Intl` braucht und mit der Einheitenwahl zusammen entsteht.
 
 **Reihenfolge:** sinnvoll nach oder zusammen mit "Sittings nach Unterrichtseinheit", weil beide das Sitting-Formular neu bauen. Und vor der Button- und Label-Vereinheitlichung aus dem Design-Review, damit die Texte nur einmal angefasst werden.
+
+## Live-Ansicht: "bound to browser" statt "Release to another browser"
+In der Live-Ansicht (`client/live.js`) gibt es pro Schüler, der gerade schreibt, den Button **Release to another browser**. Er hebt die Bindung des Versuchs an den Browser auf, in dem er gestartet wurde, damit der Schüler auf einem anderen Gerät weiterschreiben kann. Das versteht man ohne Erklärung nicht.
+
+**Gerald, 2026-10-18:**
+- Eine neue Spalte **bound to browser** zeigt den Browser-String (User-Agent) des gebundenen Browsers.
+- Aus Platzgründen nur gekürzt, etwa Browser, Version und Betriebssystem. Den vollen String zeigt ein Mouseover (`title`) oder ein Klick-Icon, damit es auch auf Touch-Geräten geht.
+- Der Button heißt **Unbind browser** und braucht **keine** Bestätigung. Damit fällt er aus "Bestätigungen vereinheitlichen" heraus.
+
+Voraussetzung: Der User-Agent muss beim Binden mitgespeichert werden. Heute liegt pro Versuch nur der Hash des Geräte-Geheimnisses in der DB (`attempt`). Das braucht eine Migration, und Versuche, die vorher gebunden wurden, zeigen "unknown". Ob abgewiesene Browser ("n refused") ihren String ebenfalls zeigen sollen, ist noch offen. Für die Lehrkraft wäre das ein Hinweis, mit welchem Gerät jemand es versucht hat.
+
