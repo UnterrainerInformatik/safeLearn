@@ -37,12 +37,12 @@ function displayDay(iso) {
 }
 
 /**
- * "periods 3–4", or "period 3", with the clock times as its tooltip. Every
+ * "lessons 3–4", or "lesson 3", with the clock times as its tooltip. Every
  * period the module shows is drawn here, so none lacks its times
  * (`school-periods`, design.md, D6).
  */
 export function periodLabel(periods, from, to = from) {
-  return h("span", { class: "sl-exam-periods", title: periodTimes(periods, from, to) }, from === to ? `period ${from}` : `periods ${from}–${to}`);
+  return h("span", { class: "sl-exam-periods", title: periodTimes(periods, from, to) }, from === to ? `lesson ${from}` : `lessons ${from}–${to}`);
 }
 
 /**
@@ -330,7 +330,7 @@ class TestDetail extends ExamElement {
             drawWindowEditor();
           },
         },
-        byPeriods ? "Exact times instead" : "Periods instead"
+        byPeriods ? "Exact times instead" : "Lessons instead"
       );
       windowEditor.replaceChildren(...(byPeriods ? this.periodsEditor(windowState, (changed) => (windowState = changed)) : this.clockEditor(windowState)), h("p", {}, toggle));
     };
@@ -445,7 +445,7 @@ class TestDetail extends ExamElement {
     const date = h("input", { type: "date", name: "date", required: true, value: current.date });
     const from = select("fromPeriod", periods, current.from);
     let to = select("toPeriod", periods.filter((period) => period.n >= current.from), current.to);
-    const toLabel = h("label", {}, "To period ", to);
+    const toLabel = h("label", {}, "To lesson ", to);
     const times = h("span", { class: "sl-exam-sitting-times" });
     const update = () => {
       const fromN = Number(from.value);
@@ -465,7 +465,7 @@ class TestDetail extends ExamElement {
     return [
       h("label", {}, "Date ", date),
       " ",
-      h("label", {}, "From period ", from),
+      h("label", {}, "From lesson ", from),
       " ",
       toLabel,
       " ",

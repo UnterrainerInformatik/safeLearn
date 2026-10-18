@@ -11,7 +11,7 @@ A sitting is stored as `opens_at`/`closes_at` (ISO instants) plus `duration_s` (
 **Non-Goals:**
 - No change to the database, the sitting API or the server's sitting checks.
 - No weekday or holiday calendar. Every date offers every period.
-- No periods in the gradebook, and no translation of "period". The per-user language change will translate it.
+- No periods in the gradebook, and no German translation of the label. The per-user language change will translate it.
 - No change to **Minutes per attempt**. It keeps its default (15 min, or the first sitting's duration) and is not derived from the window.
 
 ## Decisions
@@ -30,7 +30,7 @@ A sitting is stored as `opens_at`/`closes_at` (ISO instants) plus `duration_s` (
 
 **D7 – The form keeps one window state and two editors.** The state is `{opensAt, closesAt}`. The periods editor (date input plus two `<select>`) and the clock-time editor (the existing two `datetime-local`) both read from and write to it. The switch button swaps which editor is drawn. The submit body is built from the state exactly as today. The date input stays a native `<input type="date">`, until the language change replaces it with its own picker.
 
-**D8 – Label format `Di 20.10. · periods 3–4`.** The date uses the existing `de-AT` short weekday and day.month, consistent with the rest of the module today. "period"/"periods" is in English like the rest of the UI. A window spread over several days is never shown as periods (D5).
+**D8 – Label format `Di 20.10. · lessons 3–4`.** The date uses the existing `de-AT` short weekday and day.month, consistent with the rest of the module today. The UI calls a period "lesson"/"lessons" (Gerald, 2026-10-18: closer to the German "Einheit" than "period"), in English like the rest of the UI; configuration and code keep "period" (`SCHOOL_PERIODS`, `periods.js`). A window spread over several days is never shown as periods (D5).
 
 ## Risks / Trade-offs
 

@@ -81,12 +81,12 @@ With periods configured, the sitting form SHALL offer a button that switches bet
 
 ### Requirement: Windows on period boundaries are shown as periods
 
-With periods configured, every place in the UI that shows a sitting's window SHALL show a window that opens at the start of one period and closes at the end of the same or a later period on the same date as the date and the period range, such as `Di 20.10. · periods 3–4`, or `Di 20.10. · period 3` for a single period. Any other window SHALL be shown in clock times as without periods. This SHALL hold at least in the list of tests, the sittings of a test, the teacher's live view and the class screen.
+With periods configured, every place in the UI that shows a sitting's window SHALL show a window that opens at the start of one period and closes at the end of the same or a later period on the same date as the date and the period range, such as `Di 20.10. · lessons 3–4`, or `Di 20.10. · lesson 3` for a single period. Any other window SHALL be shown in clock times as without periods. This SHALL hold at least in the list of tests, the sittings of a test, the teacher's live view and the class screen.
 
 #### Scenario: A sitting in the list of tests
 
 - **WHEN** the list of tests shows a sitting from 2026-10-20 10:00 to 11:45
-- **THEN** its window reads `Di 20.10. · periods 3–4`
+- **THEN** its window reads `Di 20.10. · lessons 3–4`
 
 #### Scenario: A window off the periods
 
@@ -99,7 +99,7 @@ Wherever the UI shows a period or a range of periods, including the period choic
 
 #### Scenario: Hovering a window
 
-- **WHEN** a teacher hovers `periods 3–4` in the sittings of a test
+- **WHEN** a teacher hovers `lessons 3–4` in the sittings of a test
 - **THEN** the tooltip reads `10:00–11:45`
 
 #### Scenario: Hovering a choice

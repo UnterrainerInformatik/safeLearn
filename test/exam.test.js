@@ -2905,9 +2905,9 @@ describe("the school's periods", () => {
     assert.equal(stored.closesAt, at("11:45"));
   });
 
-  test("the sittings of a test, the list of tests and the live view show periods 3–4 with 10:00–11:45 as tooltip", async () => {
+  test("the sittings of a test, the list of tests and the live view show lessons 3–4 with 10:00–11:45 as tooltip", async () => {
     const [sitting] = (await fetchAs(teacher, `/exam/api/tests/${byForm.id}`)).json.sittings;
-    const expected = { text: new RegExp(`^[A-Z][a-z] ${date.slice(8, 10)}\\.${date.slice(5, 7)}\\. · periods 3–4$`), title: "10:00–11:45" };
+    const expected = { text: new RegExp(`^[A-Z][a-z] ${date.slice(8, 10)}\\.${date.slice(5, 7)}\\. · lessons 3–4$`), title: "10:00–11:45" };
     const check = ([shown], where) => {
       assert.match(shown.text, expected.text, `${where}: ${shown.text}`);
       assert.equal(shown.title, expected.title, where);
@@ -2946,7 +2946,7 @@ describe("the school's periods", () => {
       closesAt: form.querySelector("input[name=closesAt]").value,
       toggle: form.querySelector(".sl-exam-sitting-mode").textContent,
     }));
-    assert.deepEqual(exact, { opensAt: `${date}T10:00`, closesAt: `${date}T11:45`, toggle: "Periods instead" });
+    assert.deepEqual(exact, { opensAt: `${date}T10:00`, closesAt: `${date}T11:45`, toggle: "Lessons instead" });
   });
 
   test("a sitting off the periods shows clock times and opens the form in exact times", async () => {
@@ -2964,7 +2964,7 @@ describe("the school's periods", () => {
       closesAt: form.querySelector("input[name=closesAt]")?.value,
       toggle: form.querySelector(".sl-exam-sitting-mode")?.textContent,
     }));
-    assert.deepEqual(editing, { opensAt: `${date}T10:05`, closesAt: `${date}T10:55`, toggle: "Periods instead" });
+    assert.deepEqual(editing, { opensAt: `${date}T10:05`, closesAt: `${date}T10:55`, toggle: "Lessons instead" });
     // Back to periods: the date stays, the periods are the ones a new sitting gets.
     await page.click(".sl-exam-sitting-form .sl-exam-sitting-mode");
     assert.equal(await page.$eval(".sl-exam-sitting-form input[name=date]", (input) => input.value), date);
