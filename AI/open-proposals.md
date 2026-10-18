@@ -149,54 +149,7 @@ Seit 2026-10-18 zeigt die Seite offene Tests und Ergebnisse untereinander. Läuf
 
 **Entschieden (Gerald, 2026-10-18):** Während eines laufenden Versuchs werden die Ergebnisse ausgeblendet. Bis zur Abgabe sind sie uninteressant und lenken nur ab. Nach der Abgabe erscheinen sie wieder.
 
-## Sittings nach Unterrichtseinheit statt nach Uhrzeit planen (Change `exam-school-periods` angelegt 2026-10-18)
-Heute plant man ein Sitting mit zwei `datetime-local`-Feldern **Opens** und **Closes** plus **Minutes per attempt** (`client/tests.js`, Formular des Sittings). Künftig soll das über die Unterrichtseinheiten der Schule gehen.
-
-**Konfiguration:** Die Einheiten gelten für die ganze Schule und kommen aus einer Env-Variable des Deployments, z. B. `SCHOOL_PERIODS="0=07:05-07:55,1=08:00-08:50,…"`. Name und Format sind noch offen.
-
-**Mit gesetzter Variable** wählt die Lehrkraft:
-- ein Datum (vorbelegt mit heute);
-- **von Einheit** und **bis Einheit** (vorbelegt: die laufende bzw. die nächste Einheit, von = bis).
-
-Intern bleibt alles Zeit: `opens_at` ist der Beginn der Von-Einheit, `closes_at` das Ende der Bis-Einheit. Datenmodell, API und Server-Logik bleiben unverändert.
-
-**Anzeige:**
-- Listen und Live-Ansicht zeigen "Mo 20.10., 3.–4. EH".
-- Ein Fenster, das nicht auf Einheitsgrenzen liegt (alt oder per API angelegt), wird weiter mit Uhrzeit angezeigt.
-- Beim Ändern eines solchen Sittings bleibt es bei den Zeitfeldern, oder es gibt einen Umschalter "genaue Zeit".
-
-**Ohne Variable** gilt das heutige Verhalten mit Zeitstempeln (Fallback).
-
-**Zeiten der Schule (safeLearn/secureLectures), Liste von Gerald, 2026-10-18:**
-
-| Einheit | Zeit |
-|---|---|
-| 0 | 07:05–07:55 (bisher nie gebraucht) |
-| 1 | 08:00–08:50 |
-| 2 | 08:55–09:45 |
-| 3 | 10:00–10:50 |
-| 4 | 10:55–11:45 |
-| 5 | 11:50–12:40 |
-| 6 | 12:45–13:35 |
-| 7 | 13:40–14:30 |
-| 8 | 14:35–15:25 |
-| 9 | 15:30–16:20 |
-| 10 | 16:25–17:15 |
-| 11 | 17:20–18:05 |
-| 12 | 18:05–18:50 |
-| 13 | 19:00–19:45 |
-| 14 | 19:45–20:30 |
-| 15 | 20:40–21:25 |
-| 16 | 21:25–22:10 |
-
-Die Pausen sind unregelmäßig: Manche Einheiten schließen ohne Pause an, vor der 13. und der 15. liegen 10 min. Deshalb muss die Konfiguration jede Einheit mit Beginn und Ende einzeln angeben und darf keine Taktung ableiten.
-
-**Weitere offene Punkte:**
-- Ob **Minutes per attempt** mit Einheiten vorbelegt wird, etwa mit der Länge des Fensters.
-- Ob die Datumsspalten im Notenbuch ebenfalls Einheiten brauchen; eher nein, dort reicht ein Datum.
-- Die Variable muss in die deployment-Config von secureLectures, siehe [[securelectures-downstream-role]].
-
-## Mehrsprachigkeit der Oberfläche: Sprache und Locale pro Benutzer (eigener Change)
+## Mehrsprachigkeit der Oberfläche: Sprache und Locale pro Benutzer (Change `ui-language-locale` angelegt 2026-10-18)
 Die Oberfläche des Prüfungsmoduls ist heute englisch. Gerald will sie pro Benutzer im Settings-Untermenü (Zahnrad oben rechts) umschalten können, auf **Englisch** oder **Deutsch**.
 
 **Sprache und Locale getrennt.** Die Sprache bestimmt die Texte, die Locale die Formate von Datum, Uhrzeit und Zahlen. Gerald selbst will Englisch mit deutscher Locale. Das geht heute nicht: Chrome nimmt das Format von `<input type="date">` und `datetime-local` aus dem System bzw. der Browsersprache, nicht von der Seite. Ein `lang`-Attribut ändert daran nichts.
