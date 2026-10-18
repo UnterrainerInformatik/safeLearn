@@ -154,9 +154,9 @@ function buildRouter(db, startPage, periods) {
       // In the reader's language (`ui-language`); a question the editor
       // cannot save names every problem at its field.
       i18nOf(req)
-        .then(({ t }) => {
-          const answer = { error: readableMessage(error, t) };
-          if (error.problems) answer.problems = error.problems.map((problem) => ({ ...problem, message: readableMessage(problem, t) }));
+        .then((i18n) => {
+          const answer = { error: readableMessage(error, i18n) };
+          if (error.problems) answer.problems = error.problems.map((problem) => ({ ...problem, message: readableMessage(problem, i18n) }));
           res.status(status).json(answer);
         })
         .catch(next);

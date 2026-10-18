@@ -18,8 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Marked } from "marked";
 
-import { ConflictError, englishText, inTransaction, NotFoundError, now, withKey } from "./classes.js";
-import { createFormat } from "../i18n/format.js";
+import { ConflictError, dateParam, englishText, inTransaction, NotFoundError, now, withKey } from "./classes.js";
 import { categoryTree, plainText } from "./pool.js";
 import { questionTypes } from "./pool-import.js";
 import { insertCategory, insertQuestion, QuestionProblemsError, questionProblems } from "./pool-edit.js";
@@ -386,11 +385,6 @@ function importWithHash(db, sha256) {
   return db.prepare("SELECT id, imported_at AS importedAt, imported_by AS importedBy, file_name AS fileName FROM question_import WHERE sha256 = ?").get(sha256) ?? null;
 }
 
-/** A date in the school's default format, 17.10.2026. */
-function dayOf(iso) {
-  return createFormat("de-AT").date(iso);
-}
-
 /** The SHA-256 of a file's text. */
 export function fileHash(text) {
   return createHash("sha256").update(String(text ?? ""), "utf8").digest("hex");
@@ -520,7 +514,7 @@ export function checkQuestionFile(db, text, fileName = "") {
 
   const earlier = importWithHash(db, fileHash(raw));
   if (earlier) {
-    add(1, null, "exam.errors.import.importedBefore", { date: dayOf(earlier.importedAt), by: earlier.importedBy, file: earlier.fileName });
+    add(1, null, "exam.errors.import.importedBefore", { date: dateParam(earlier.importedAt), by: earlier.importedBy, file: earlier.fileName });
   }
 
   problems.sort((a, b) => a.line - b.line);

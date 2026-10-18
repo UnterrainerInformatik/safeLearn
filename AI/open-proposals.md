@@ -68,7 +68,7 @@ Eigene Übersichtsseiten in der Web-App, die Lehrer über das Menü öffnen kön
 
 # Prüfungsmodul-UI (Design-Review 2026-10-18)
 
-Als Changes angelegt am 2026-10-18: `exam-ui-consistency` (archiviert 2026-10-18), `exam-my-hide-results-while-writing` (archiviert 2026-10-19) und `exam-live-bound-browser`. Der Eintrag "Konsistenz im Kleinen: Datum und Schreibseite" ist der Rest, den `exam-ui-consistency` nicht abgedeckt hat.
+Als Changes angelegt am 2026-10-18: `exam-ui-consistency` (archiviert 2026-10-18), `exam-my-hide-results-while-writing` (archiviert 2026-10-19) und `exam-live-bound-browser`.
 
 Leitlinien von Gerald für alle Einträge hier:
 - Aktionen sind Buttons, keine Links.
@@ -77,10 +77,6 @@ Leitlinien von Gerald für alle Einträge hier:
 - Funktion steckt in der Struktur selbst (Liste, Baum, Tabellenkopf), nicht in einem eigenen Menü oder als Link am Seitenende.
 
 Die Bestandsaufnahme mit Datei:Zeile stammt aus einem Audit über `exam/client/*.js`, `exam/bar.js` und `css/exam.css`.
-
-## Konsistenz im Kleinen: Datum und Schreibseite (Rest aus dem Design-Review)
-- **Datum:** de-AT im Pool und Import, Browser-Locale in Klassen und Notenbuch.
-- **Schreibseite:** Sie ist DE/EN lokalisiert, ihre Ergebnisanzeige und "Time is up" in der Vorschau sind aber nur Englisch.
 
 ## Live-Ansicht: "bound to browser" statt "Release to another browser" (Change `exam-live-bound-browser`)
 In der Live-Ansicht (`client/live.js`) gibt es pro Schüler, der gerade schreibt, den Button **Release to another browser**. Er hebt die Bindung des Versuchs an den Browser auf, in dem er gestartet wurde, damit der Schüler auf einem anderen Gerät weiterschreiben kann. Das versteht man ohne Erklärung nicht.

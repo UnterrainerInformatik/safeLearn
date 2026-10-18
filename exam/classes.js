@@ -8,7 +8,21 @@
 
 import { i18nFor } from "../i18n/server.js";
 
-const english = i18nFor("en", "de-AT").t;
+const { t: englishT, format: englishFormat } = i18nFor("en", "de-AT");
+
+/** A day as a message parameter, formatted in the format of whoever reads the message. */
+export function dateParam(iso) {
+  return { isoDate: iso };
+}
+
+/** `params` with every `dateParam` written as a day in `format`. */
+function filledParams(params, format) {
+  return Object.fromEntries(
+    Object.entries(params).map(([name, value]) => [name, value?.isoDate !== undefined ? format.date(value.isoDate) : value])
+  );
+}
+
+const english = (key, params = {}) => englishT(key, filledParams(params, englishFormat));
 
 /** Whether `text` names a text of the catalogs' `exam.errors` group. */
 function isErrorKey(text) {
@@ -64,11 +78,12 @@ export function englishText(key, params = {}) {
 }
 
 /**
- * The text of a refusal or of a problem in the language `t` speaks: its
- * catalog text where it has a key, else its message as it was written.
+ * The text of a refusal or of a problem for the reader `i18n` (`i18nOf`): its
+ * catalog text in their language, days in their format, where it has a key,
+ * else its message as it was written.
  */
-export function readableMessage(item, t) {
-  return item.key ? t(item.key, item.params ?? {}) : item.message;
+export function readableMessage(item, { t, format }) {
+  return item.key ? t(item.key, filledParams(item.params ?? {}, format)) : item.message;
 }
 
 /**

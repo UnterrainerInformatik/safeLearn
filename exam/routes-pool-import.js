@@ -66,8 +66,8 @@ export function registerPoolImportRoutes(router, { db, handle, startPage }) {
   api("post", "/pool/imports/check", rawText)(async (req) => {
     const { problems, plan } = checkQuestionFile(db, bodyText(req), fileNameOf(req));
     // Each problem in the reader's language (`ui-language`).
-    const { t } = await i18nOf(req);
-    return { problems: problems.map((problem) => ({ ...problem, message: readableMessage(problem, t) })), plan };
+    const i18n = await i18nOf(req);
+    return { problems: problems.map((problem) => ({ ...problem, message: readableMessage(problem, i18n) })), plan };
   });
   api("post", "/pool/imports", rawText)((req) => importQuestionFile(db, bodyText(req), { fileName: fileNameOf(req), username: identityOf(req) }));
   api("get", "/pool/imports")(() => listImports(db));

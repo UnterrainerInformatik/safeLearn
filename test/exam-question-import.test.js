@@ -16,8 +16,9 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, test } from "node:test";
 
-import { ConflictError, createClass, createCourse, createYear } from "../exam/classes.js";
+import { ConflictError, createClass, createCourse, createYear, readableMessage } from "../exam/classes.js";
 import { migrate, openDatabase, readMigrations } from "../exam/db.js";
+import { i18nFor } from "../i18n/server.js";
 import { importPool } from "../exam/pool-import.js";
 import { categoryTree, getQuestion, listQuestions } from "../exam/pool.js";
 import { createTest } from "../exam/tests.js";
@@ -486,6 +487,10 @@ describe("what the check refuses", () => {
     const [[line, message]] = problemsOf(db, content);
     assert.equal(line, 1);
     assert.match(message, /^Exactly this file was imported on \d{2}\.\d{2}\.\d{4} by g\.unterrainer \(as "first\.md"\)\. Take that import back first/);
+    // The date is written in the format of whoever reads the problem.
+    const [problem] = checkQuestionFile(db, content, "q.md").problems;
+    assert.match(readableMessage(problem, i18nFor("en", "en-GB")), /^Exactly this file was imported on \d{2}\/\d{2}\/\d{4} by /);
+    assert.match(readableMessage(problem, i18nFor("de", "de-AT")), /^Genau diese Datei wurde am \d{2}\.\d{2}\.\d{4} von /);
     assert.deepEqual(problemsOf(db, `${content}\n`), [], "one byte more is another file");
   });
 
