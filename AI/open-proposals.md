@@ -63,3 +63,133 @@ safeLearn soll sich auch ohne Keycloak betreiben lassen: `AUTH=none`, kein Login
 
 ## Admin-Seiten für Lehrer im Menü
 Eigene Übersichtsseiten in der Web-App, die Lehrer über das Menü öffnen können. Erste zwei Seiten: (1) **unreferenzierte Anhänge**: die Liste, die `attachment-access-control` beim Start ins Log schreibt, als Seite, damit man die Dateien aus dem Repo werfen kann; (2) **Directory-/LDAP-Zustand**: das, was das Obsidian-Plugin heute auf seiner Übersichtsseite zeigt (Fetch-Status, Einträge, `builtAt`, übersprungene Datensätze, siehe `/api/admin/directory/status`). Hier im Browser mit Session-Auth statt Bearer-Token. Gibt es nur in Stufe 2 und 3, weil sie eine Lehrer-Identität brauchen.
+
+# Prüfungsmodul-UI (Design-Review 2026-10-18)
+
+Leitlinien von Gerald für alle Einträge hier:
+- Aktionen sind Buttons, keine Links.
+- Was man auf einer Seite tun kann, sieht man auf den ersten Blick.
+- Eine Klickstrecke für Seltenes ist erwünscht: Frage anzeigen → erst dort **Edit**.
+- Funktion steckt in der Struktur selbst (Liste, Baum, Tabellenkopf), nicht in einem eigenen Menü oder als Link am Seitenende.
+
+Die Bestandsaufnahme mit Datei:Zeile stammt aus einem Audit über `exam/client/*.js`, `exam/bar.js` und `css/exam.css`.
+
+## Kategoriebaum per Drag-and-Drop statt eigener Kategorienseite
+Heute laufen Anlegen, Umbenennen, Verschieben und Löschen über eine eigene Seite, `/exam/pool/categories` (`client/pool-categories.js`), die vom Pool aus als Textlink "Edit categories" unter dem Baum erreichbar ist (`client/pool.js:139`). Jeder Knoten trägt dort sechs Bedienelemente: ↑, ↓, Rename, ein `<select>` mit allen Kategorien plus einen eigenen Move-Button, + Subcategory und Delete. Das Inline-Panel hat kein Cancel.
+
+Ziel ist, das direkt im Baum auf `/exam/pool` zu erledigen:
+- **Ziehen auf einen Knoten** macht die Kategorie zur Unterkategorie.
+- **Ziehen zwischen zwei Knoten** verschiebt sie auf dieselbe Ebene, angezeigt durch eine Linie zwischen den Elementen.
+- Eine Frage aus der Liste auf eine Kategorie zu ziehen verschiebt die Frage.
+- **Neu:** ein `+` am Knoten bzw. am Baumende öffnet ein kleines Namens-Popup (DE/EN) direkt in der Liste.
+- **Umbenennen** im selben Popup, per Doppelklick oder Stift-Icon am Knoten.
+- **Löschen** nur für leere Knoten, als Icon am Knoten mit Bestätigung.
+- Die Server-Ablehnungen (Unterbaum, Duplikat, nicht leer) erscheinen am Knoten, nicht oben auf der Seite.
+
+Danach entfällt die Kategorienseite. Tastaturbedienung (Ausschneiden/Einfügen o. ä.) wäre als Ersatz fürs Ziehen mitzudenken.
+
+## Textlinks, die Aktionen sind, werden Buttons
+Plain `<a>` statt Button, zum Teil als leise Zeile (`sl-exam-quiet`, Deckkraft .7):
+- im Pool: **Edit** in der Vorschau, **New question**, **Edit categories** und **Import questions**;
+- **Back to the pool**, viermal;
+- **Open the gradebook** (Kursseite) und **Enter results in the gradebook** (Schülerseite);
+- **Config sheet · Grading scale** über dem Notenbuch;
+- auf der Testseite: **Add questions from the pool**, **Try this test as a student sees it** und **Solution on the board**;
+- in der Testliste: **live view · class screen**;
+- **Class screen** in der Live-Ansicht;
+- **Download the format description** im Import.
+
+Umgekehrt ist der Fragenname in der Pool-Liste ein Button, der wie ein Link aussieht (`sl-exam-link`). Dazu kommt ein einheitlicher Button-Stil fürs Modul: `sl-button` aus `css/buttons.css` wird dort nie benutzt, und viele Klassen sind reine Hooks ohne CSS (`sl-exam-delete`, `sl-exam-pool-new`, `sl-exam-pool-edit`, `sl-exam-editor-add`, `sl-exam-test-remove`, `sl-exam-live-release`, `sl-exam-import-go` …). `sl-exam-primary` ist nur fett. Hauptaktionen, die heute nicht primär sind:
+- **Create test** im Pool;
+- **Import n questions**;
+- **Mark as reviewed**;
+- **Make current**.
+
+## Aktionen am Seitenende in die Struktur holen
+- **Delete this test** steht unter allen Fragen ganz am Ende (`client/tests.js:212`) und gehört in den Kopf neben **Rename**.
+- Die Meldungen der Testseite erscheinen unter dem Umbenennen-Formular, weit weg von Sittings und Delete. Sie gehören an die Aktion.
+- Die **Kurse** stehen als Linkliste am Ende der Klassenseite, Anlegen geht nur übers `+` in der Leiste. Gewünscht ist die Liste mit einem `+ Course` darin.
+- Die **Modul-Links** "Grading scale · Question pool" stehen als leise Zeile ganz unten auf `/exam/` ("Online tests" fehlt dort). Sie gehören in die Leiste oder als Buttons an den Kopf; die Notenskala ist sonst nur übers Notenbuch zu erreichen.
+- **New question** ist versteckt, bis eine Kategorie gewählt ist (`client/pool.js:144`). Besser wäre es immer sichtbar, oder als `+` an der Kategorie im Baum.
+- **Import n questions** steht unter den Vorschautabellen und gehört über die Vorschau.
+- Die **Online-Tests-Liste** hat keinen Button **New test**; heute führt nur ein Satz in den Pool, und die Zusammenstellung erscheint erst mit einem Kurs in der Leiste.
+- Die Auswahl im Pool ist unsichtbar: Ein Klick auf die Zeile wählt die Frage aus, aber es gibt keine Checkbox. Eine Checkbox pro Zeile würde das zeigen.
+- Der Kommentar im Notenbuch steht nur im Tooltip (` ✎` mit `title`).
+
+## Bestätigungen vereinheitlichen
+Heute gibt es vier Muster:
+- `window.confirm` beim Austragen aus dem Roster, beim Löschen von Spalte, Kategorie und Frage;
+- Zweimal-Klick bei Delete this test und Submit;
+- eine Bestätigung in der Seite bei Take back (Import);
+- **keine Bestätigung** bei **Delete** eines geplanten Sittings, bei **Remove from the test** und bei **Release to another browser**.
+
+Ein Muster fürs ganze Modul; der Zweimal-Klick passt zu "keine Browser-Dialoge". Das Sitting-Delete ohne Rückfrage zuerst.
+
+## Fehlende Aktionen
+- Schuljahr, Klasse und Kurs lassen sich anlegen, aber nirgends umbenennen oder löschen.
+- Die Live-Ansicht kann ein Sitting weder beenden noch verlängern.
+- Die Schülerseite im Kurs hat keinen Weg zum vorigen/nächsten Schüler und oben keinen Rückweg zum Notenbuch.
+- Die Leerzustände "Nobody is on this course's roster." und "There is no school year yet." führen nirgends hin; sie sollten den Button zur nächsten Aktion tragen.
+
+## Konsistenz im Kleinen
+- **Speichern:** Die Notenskala hat einen expliziten **Save**, alles andere speichert beim Ändern. Auf der Schülerseite fehlt der Hinweis "saved as it changes".
+- **Labels:**
+  - "Whole year" in der Leiste, "Whole year (summer semester)" im Notenbuch;
+  - Leistenposition "Grades", Seite "Gradebook";
+  - "One correct" gegenüber "One correct answer";
+  - Title Case in den Notenbuch-Spaltenköpfen, sonst Sentence case;
+  - "Deutsch"/"English" nebeneinander;
+  - "true (Richtig)" und "false (Falsch)" im Editor;
+  - "the Claude" im Import-Text.
+- **Datum:** de-AT im Pool und Import, Browser-Locale in Klassen und Notenbuch.
+- **Schreibseite:** Sie ist DE/EN lokalisiert, ihre Ergebnisanzeige und "Time is up" in der Vorschau sind aber nur Englisch.
+
+## Schüler-Seite "Exams" (`/exam/my`): Ergebnisse während des Schreibens
+Seit 2026-10-18 zeigt die Seite offene Tests und Ergebnisse untereinander. Läuft ein Versuch, steht die Schreibansicht oben und die Ergebnisse darunter. Zu entscheiden ist, ob die Ergebnisse während eines laufenden Versuchs ausgeblendet werden sollen, damit nichts ablenkt.
+
+## Sittings nach Unterrichtseinheit statt nach Uhrzeit planen
+Heute plant man ein Sitting mit zwei `datetime-local`-Feldern **Opens** und **Closes** plus **Minutes per attempt** (`client/tests.js`, Formular des Sittings). Künftig soll das über die Unterrichtseinheiten der Schule gehen.
+
+**Konfiguration:** Die Einheiten gelten für die ganze Schule und kommen aus einer Env-Variable des Deployments, z. B. `SCHOOL_PERIODS="0=07:05-07:55,1=08:00-08:50,…"`. Name und Format sind noch offen.
+
+**Mit gesetzter Variable** wählt die Lehrkraft:
+- ein Datum (vorbelegt mit heute);
+- **von Einheit** und **bis Einheit** (vorbelegt: die laufende bzw. die nächste Einheit, von = bis).
+
+Intern bleibt alles Zeit: `opens_at` ist der Beginn der Von-Einheit, `closes_at` das Ende der Bis-Einheit. Datenmodell, API und Server-Logik bleiben unverändert.
+
+**Anzeige:**
+- Listen und Live-Ansicht zeigen "Mo 20.10., 3.–4. EH".
+- Ein Fenster, das nicht auf Einheitsgrenzen liegt (alt oder per API angelegt), wird weiter mit Uhrzeit angezeigt.
+- Beim Ändern eines solchen Sittings bleibt es bei den Zeitfeldern, oder es gibt einen Umschalter "genaue Zeit".
+
+**Ohne Variable** gilt das heutige Verhalten mit Zeitstempeln (Fallback).
+
+**Zeiten der Schule (safeLearn/secureLectures), Liste von Gerald, 2026-10-18:**
+
+| Einheit | Zeit |
+|---|---|
+| 0 | 07:05–07:55 (bisher nie gebraucht) |
+| 1 | 08:00–08:50 |
+| 2 | 08:55–09:45 |
+| 3 | 10:00–10:50 |
+| 4 | 10:55–11:45 |
+| 5 | 11:50–12:40 |
+| 6 | 12:45–13:35 |
+| 7 | 13:40–14:30 |
+| 8 | 14:35–15:25 |
+| 9 | 15:30–16:20 |
+| 10 | 16:25–17:15 |
+| 11 | 17:20–18:05 |
+| 12 | 18:05–18:50 |
+| 13 | 19:00–19:45 |
+| 14 | 19:45–20:30 |
+| 15 | 20:40–21:25 |
+| 16 | 21:25–22:10 |
+
+Die Pausen sind unregelmäßig: Manche Einheiten schließen ohne Pause an, vor der 13. und der 15. liegen 10 min. Deshalb muss die Konfiguration jede Einheit mit Beginn und Ende einzeln angeben und darf keine Taktung ableiten.
+
+**Weitere offene Punkte:**
+- Ob **Minutes per attempt** mit Einheiten vorbelegt wird, etwa mit der Länge des Fensters.
+- Ob die Datumsspalten im Notenbuch ebenfalls Einheiten brauchen; eher nein, dort reicht ein Datum.
+- Die Variable muss in die deployment-Config von secureLectures, siehe [[securelectures-downstream-role]].
