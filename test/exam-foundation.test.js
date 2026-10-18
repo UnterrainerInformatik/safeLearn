@@ -439,7 +439,7 @@ describe("starting the module", () => {
 
       const next = await originalFetch(`${base}/exam/api/me`);
       assert.equal(next.status, 200, "the next request is answered as if nothing happened");
-      assert.deepEqual(await next.json(), { username: "sdent", teacher: false, periods: [] });
+      assert.deepEqual(await next.json(), { username: "sdent", teacher: false, admin: false, periods: [] });
     } finally {
       console.error = originalConsoleError;
       await new Promise((resolve) => server.close(resolve));

@@ -3,15 +3,17 @@
  * list of a course's or a school year's tests, a test with its snapshot, its
  * sittings, and releasing an attempt to another browser.
  * Every one of them is a teacher's: the API refuses any other session with
- * 403, and the pages are not there for it (`gate.js`).
+ * 403, and the pages are not there for it (`gate.js`). Taking back what
+ * students have written - deleting a written test, removing a question from
+ * one, deleting an attempt - is an admin's alone.
  */
 
-import { createSitting, createTest, deleteSitting, deleteTest, getTest, listTests, updateSitting, updateTest } from "./tests.js";
-import { correctShares, previewView, releaseAttempt } from "./attempts.js";
+import { createSitting, createTest, deleteSitting, deleteTest, getTest, listTests, removeWrittenQuestion, updateSitting, updateTest } from "./tests.js";
+import { correctShares, deleteAttempt, previewView, releaseAttempt, scoreAttempt } from "./attempts.js";
 import { notifySittings } from "./live.js";
 import { embedPlaceholder, wrapInPage, wrapInReveal } from "../obsidian.js";
 import { NotFoundError } from "./classes.js";
-import { requireTeacher, teacherPage } from "./gate.js";
+import { actsAsAdmin, requireAdmin, requireTeacher, teacherPage } from "./gate.js";
 import { contextFromQuery, teacherShell } from "./bar.js";
 
 /** A record id from the path; anything but a positive integer names nothing. */
@@ -87,12 +89,24 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
     notifySittings();
     return answer;
   };
-  api("delete", "/tests/:id", (req) => announced(deleteTest(db, idParam(req.params.id))));
+  api("delete", "/tests/:id", async (req) => announced(deleteTest(db, idParam(req.params.id), { admin: await actsAsAdmin(req) })));
   api("post", "/tests/:id/sittings", (req) => announced(createSitting(db, idParam(req.params.id), req.body ?? {})));
   api("put", "/sittings/:id", (req) => announced(updateSitting(db, idParam(req.params.id), req.body ?? {})));
   api("delete", "/sittings/:id", (req) => announced(deleteSitting(db, idParam(req.params.id))));
   api("post", "/attempts/:id/release", (req) => releaseAttempt(db, idParam(req.params.id)));
   api("get", "/tests/:id/preview", (req) => previewView(db, idParam(req.params.id)));
+  const adminApi = (method, path, fn) =>
+    router[method](
+      `/api${path}`,
+      requireAdmin,
+      handle(async (req, res) => {
+        res.json(await fn(req));
+      })
+    );
+  adminApi("delete", "/tests/:id/questions/:question", (req) =>
+    announced(removeWrittenQuestion(db, idParam(req.params.id), idParam(req.params.question), scoreAttempt))
+  );
+  adminApi("delete", "/attempts/:id", (req) => announced(deleteAttempt(db, idParam(req.params.id))));
 
   // The list the bar's "Online tests" button opens: the chosen course's tests,
   // or the school year's when no course is chosen.

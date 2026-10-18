@@ -21,7 +21,7 @@ import { embedPlaceholder } from "../obsidian.js";
 import { scheduleDailyBackups } from "./backup.js";
 import { databasePath, openDatabase } from "./db.js";
 import { SessionEndedError } from "../middlewares/keycloak-middleware.js";
-import { actsAsTeacher, identityOf, teacherPage } from "./gate.js";
+import { actsAsAdmin, actsAsTeacher, identityOf, teacherPage } from "./gate.js";
 import { teacherShell } from "./bar.js";
 import { ConflictError, InvalidInputError, listYears, NotFoundError } from "./classes.js";
 import { registerClassRoutes } from "./routes-classes.js";
@@ -95,7 +95,7 @@ function buildRouter(db, startPage, periods) {
         res.status(403).json({ error: "Forbidden" });
         return;
       }
-      res.json({ username, teacher: await actsAsTeacher(req), periods });
+      res.json({ username, teacher: await actsAsTeacher(req), admin: await actsAsAdmin(req), periods });
     })
   );
 

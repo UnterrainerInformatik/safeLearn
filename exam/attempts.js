@@ -456,6 +456,19 @@ export function releaseAttempt(db, id) {
   return { released: id };
 }
 
+/**
+ * An admin's correction: deletes an attempt with its questions, tokens,
+ * answers and refused browsers, submitted or not. The student counts as not
+ * started again and can write the test while a sitting of theirs is open.
+ */
+export function deleteAttempt(db, id) {
+  const row = db.prepare("SELECT * FROM attempt WHERE id = ?").get(id);
+  if (!row) throw new NotFoundError("There is no such attempt.");
+  db.prepare("DELETE FROM attempt WHERE id = ?").run(id);
+  notify(row.sitting_id, "deleted", row.username);
+  return { deleted: id };
+}
+
 // ---------------------------------------------------------- a teacher's try
 
 /**

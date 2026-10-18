@@ -23,7 +23,7 @@
 
 import { defineExamElement, ExamApiError, ExamElement, examApi, examMe, h } from "./frame.js";
 import { displayClass, displayPerson } from "./classes.js";
-import { displayWindow } from "./tests.js";
+import { armedButton, displayWindow } from "./tests.js";
 
 const stateLabels = { scheduled: "Not open yet", open: "Live", over: "Over" };
 
@@ -70,6 +70,7 @@ class LiveView extends ExamElement {
   async load() {
     const [snapshot, me] = await Promise.all([examApi(`/sittings/${this.params.sitting}/live`), examMe()]);
     this.periods = me.periods ?? [];
+    this.admin = me.admin === true;
     return snapshot;
   }
 
@@ -204,6 +205,15 @@ class LiveView extends ExamElement {
       participant.status === "writing" && participant.attemptId !== null
         ? h("button", { type: "button", class: "sl-exam-live-release", onClick: () => this.release(participant) }, "Release to another browser")
         : null;
+    const remove =
+      this.admin && participant.attemptId !== null
+        ? armedButton({
+            class: "sl-exam-live-delete sl-exam-admin",
+            label: "Delete attempt",
+            armed: "Click again to delete it with its answers",
+            action: () => this.deleteAttempt(participant),
+          })
+        : null;
     const tr = h(
       "tr",
       { "data-username": username, "data-status": participant.status },
@@ -212,7 +222,7 @@ class LiveView extends ExamElement {
       h("td", { class: "sl-exam-live-left" }, participant.remainingMs === null ? "" : clock(participant.remainingMs)),
       this.focusCell(participant),
       h("td", { class: "sl-exam-live-refused" }, participant.refused === 0 ? "–" : `${participant.refused} refused${participant.bound === false ? ", released" : ""}`),
-      h("td", {}, release)
+      h("td", {}, release, release && remove ? " " : null, remove)
     );
     this.rows.set(username, tr);
     return tr;
@@ -289,6 +299,16 @@ class LiveView extends ExamElement {
       this.message.textContent = `${displayPerson(participant)} can go on in another browser now.`;
     } catch (error) {
       this.message.textContent = error instanceof ExamApiError && error.status < 500 ? error.message : "The attempt could not be released.";
+    }
+  }
+
+  /** An admin's correction: the attempt goes, and the participant counts as not started. */
+  async deleteAttempt(participant) {
+    try {
+      await examApi(`/attempts/${participant.attemptId}`, { method: "DELETE" });
+      this.message.textContent = `The attempt of ${displayPerson(participant)} is deleted.`;
+    } catch (error) {
+      this.message.textContent = error instanceof ExamApiError && error.status < 500 ? error.message : "The attempt could not be deleted.";
     }
   }
 

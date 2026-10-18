@@ -153,6 +153,23 @@ function storedMarkup(html, className) {
   return container;
 }
 
+/**
+ * A button that acts only on a second click, its label telling what the second
+ * one does - the module's way of asking twice, without a browser dialog.
+ */
+export function armedButton({ class: className, label, armed, action }) {
+  const button = h("button", { type: "button", class: className }, label);
+  button.addEventListener("click", () => {
+    if (button.dataset.armed !== "1") {
+      button.dataset.armed = "1";
+      button.textContent = armed;
+      return;
+    }
+    action();
+  });
+  return button;
+}
+
 /** Why a request was refused, in a sentence for the teacher. */
 function refusal(error) {
   return error instanceof ExamApiError && error.status < 500 ? error.message : "That could not be saved. Please try again.";
@@ -171,6 +188,7 @@ class TestDetail extends ExamElement {
   async load() {
     const [test, me] = await Promise.all([examApi(`/tests/${this.params.test}`), examMe()]);
     this.periods = me.periods ?? [];
+    this.admin = me.admin === true;
     const klass = await examApi(`/classes/${test.course.classId}`);
     this.roster = klass.roster.filter((entry) => !entry.leftAt);
     return test;
@@ -208,7 +226,13 @@ class TestDetail extends ExamElement {
       this.sittingsSection(test),
       h("h2", {}, "Questions"),
       test.started
-        ? h("p", { class: "sl-exam-quiet" }, "This test has been written; its questions cannot change any more.")
+        ? h(
+            "p",
+            { class: "sl-exam-quiet" },
+            this.admin
+              ? "This test has been written. As an admin you can still remove a question: every submitted attempt is scored again without it."
+              : "This test has been written; its questions cannot change any more."
+          )
         : h("p", { class: "sl-exam-quiet" }, h("a", { href: `/exam/pool?course=${course.id}` }, "Add questions from the pool"), "."),
       h(
         "ol",
@@ -231,13 +255,22 @@ class TestDetail extends ExamElement {
                 )
               )
             ),
-            test.started || test.questions.length === 1
+            test.questions.length === 1
               ? null
-              : h("button", { type: "button", class: "sl-exam-test-remove", onClick: () => this.removeQuestion(question.questionId) }, "Remove from the test")
+              : !test.started
+                ? h("button", { type: "button", class: "sl-exam-test-remove", onClick: () => this.removeQuestion(question.questionId) }, "Remove from the test")
+                : this.admin
+                  ? armedButton({
+                      class: "sl-exam-test-remove sl-exam-admin",
+                      label: "Remove from the test",
+                      armed: "Click again to remove it and score every attempt again",
+                      action: () => this.removeWrittenQuestion(question.questionId),
+                    })
+                  : null
           )
         )
       ),
-      test.started ? null : this.deleteButton(test)
+      test.started && !this.admin ? null : this.deleteButton(test)
     );
   }
 
@@ -508,6 +541,16 @@ class TestDetail extends ExamElement {
     this.change({ questionIds });
   }
 
+  /** An admin's removal from a written test; the server scores the attempts again. */
+  async removeWrittenQuestion(questionId) {
+    try {
+      const test = await examApi(`/tests/${this.test.id}/questions/${questionId}`, { method: "DELETE" });
+      this.show(this.render(test));
+    } catch (error) {
+      this.message.textContent = refusal(error);
+    }
+  }
+
   /** Sends a change of the test and draws what the server answers. A new name is a new page title. */
   async change(body, renamed = false) {
     try {
@@ -522,21 +565,26 @@ class TestDetail extends ExamElement {
     }
   }
 
-  /** Deleting takes a second click on the same button, so one click alone never deletes. */
+  /**
+   * Deleting takes a second click on the same button, so one click alone never
+   * deletes. A written test only an admin deletes, with its attempts.
+   */
   deleteButton(test) {
-    const button = h("button", { type: "button", class: "sl-exam-test-delete" }, "Delete this test");
-    button.addEventListener("click", async () => {
-      if (button.dataset.armed !== "1") {
-        button.dataset.armed = "1";
-        button.textContent = "Click again to delete it with its sittings";
-        return;
-      }
-      try {
-        await examApi(`/tests/${test.id}`, { method: "DELETE" });
-        window.location.assign(`/exam/tests?course=${test.course.id}`);
-      } catch (error) {
-        this.message.textContent = refusal(error);
-      }
+    const written = test.attempts.started;
+    const button = armedButton({
+      class: test.started ? "sl-exam-test-delete sl-exam-admin" : "sl-exam-test-delete",
+      label: "Delete this test",
+      armed: test.started
+        ? `Click again to delete it with its sittings and ${written} ${written === 1 ? "attempt" : "attempts"}`
+        : "Click again to delete it with its sittings",
+      action: async () => {
+        try {
+          await examApi(`/tests/${test.id}`, { method: "DELETE" });
+          window.location.assign(`/exam/tests?course=${test.course.id}`);
+        } catch (error) {
+          this.message.textContent = refusal(error);
+        }
+      },
     });
     return h("p", {}, button);
   }

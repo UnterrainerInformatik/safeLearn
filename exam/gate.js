@@ -29,6 +29,15 @@ export function actsAsTeacher(req) {
   return hasSomeRoles(req, ["teacher"], true);
 }
 
+/**
+ * Whether the request acts as an admin, after the student-view downgrade. An
+ * admin passes every role check of the content, so the role itself is asked
+ * here: a teacher who is no admin answers false.
+ */
+export function actsAsAdmin(req) {
+  return hasSomeRoles(req, ["admin"], true);
+}
+
 function refuse(req, res) {
   res.status(403).json({ error: "Forbidden" });
 }
@@ -42,6 +51,20 @@ export function requireTeacher(req, res, next) {
   actsAsTeacher(req)
     .then((teacher) => {
       if (teacher && identityOf(req)) next();
+      else refuse(req, res);
+    })
+    .catch(next);
+}
+
+/**
+ * Lets a request through only when it acts as a teacher and as an admin: the
+ * writes that take back what students have written (`online-test`, admin
+ * corrections). Everything else is refused with 403.
+ */
+export function requireAdmin(req, res, next) {
+  Promise.all([actsAsTeacher(req), actsAsAdmin(req)])
+    .then(([teacher, admin]) => {
+      if (teacher && admin && identityOf(req)) next();
       else refuse(req, res);
     })
     .catch(next);

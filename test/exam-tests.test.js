@@ -22,10 +22,11 @@ import { entryCategory, proposal } from "../exam/grading.js";
 import { getQuestion, listQuestions } from "../exam/pool.js";
 import { NotFoundError } from "../exam/classes.js";
 import { importPool } from "../exam/pool-import.js";
-import { createSitting, createTest, deleteSitting, deleteTest, getTest, listTests, updateSitting, updateTest, viennaDate } from "../exam/tests.js";
+import { createSitting, createTest, deleteSitting, deleteTest, getTest, listTests, removeWrittenQuestion, updateSitting, updateTest, viennaDate } from "../exam/tests.js";
 import {
   checkDevice,
   correctShares,
+  deleteAttempt,
   DeviceRefusedError,
   finalizeDue,
   openTestsOf,
@@ -33,6 +34,7 @@ import {
   recordFocus,
   releaseAttempt,
   saveAnswer,
+  scoreAttempt,
   startAttempt,
   submitAttempt,
   writingView,
@@ -499,6 +501,74 @@ describe("attempts", () => {
     assert.equal(studentMaySeeImage(db, "ben", image), false, "not for a neighbour without an attempt");
     submitAttempt(db, attemptRow(db, attemptId));
     assert.equal(studentMaySeeImage(db, "anna", image), false, "not after submitting");
+  });
+});
+
+// ------------------------------------------------------- admin corrections
+
+describe("an admin's corrections of a written test", () => {
+  /** Anna answers every question correctly and submits; Ben starts and stays. */
+  function written() {
+    const seed = running();
+    const anna = startAttempt(seed.db, "anna", seed.test.id).attemptId;
+    for (const [n, tokens] of Object.entries(correctTokens(seed.db, anna))) saveAnswer(seed.db, attemptRow(seed.db, anna), Number(n), tokens);
+    submitAttempt(seed.db, attemptRow(seed.db, anna));
+    const ben = startAttempt(seed.db, "ben", seed.test.id).attemptId;
+    return { ...seed, anna, ben };
+  }
+  const count = (db, sql, ...args) => db.prepare(sql).get(...args).n;
+
+  test("a written test is deleted only by an admin, with every attempt and its answers", () => {
+    const { db, test } = written();
+    assert.throws(() => deleteTest(db, test.id), ConflictError, "not by a teacher");
+    deleteTest(db, test.id, { admin: true });
+    for (const table of ["attempt", "attempt_question", "attempt_token", "response", "sitting", "test_question", "test_answer", "test_image", "question_usage", "test"]) {
+      assert.equal(count(db, `SELECT COUNT(*) AS n FROM ${table}`), 0, `${table} is empty`);
+    }
+    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+  });
+
+  test("removing a question from a written test scores every submitted attempt again over the rest", () => {
+    const { db, test, anna, ben, ids } = written();
+    assert.equal(attemptRow(db, anna).score, 3);
+    // Anna's answer to the multi-answer question becomes wrong; removing it gives her full marks over two.
+    const multi = db.prepare("SELECT id, question_id FROM test_question WHERE test_id = ? AND type = 'multichoiceset'").get(test.id);
+    db.prepare("DELETE FROM response WHERE attempt_id = ? AND test_answer_id IN (SELECT id FROM test_answer WHERE test_question_id = ?)").run(anna, multi.id);
+    db.prepare("UPDATE attempt SET score = ? WHERE id = ?").run(scoreAttempt(db, anna), anna);
+    assert.equal(attemptRow(db, anna).score, 2);
+
+    const after = removeWrittenQuestion(db, test.id, multi.question_id, scoreAttempt);
+    assert.equal(after.questions.length, 2);
+    assert.deepEqual([attemptRow(db, anna).score, attemptRow(db, anna).question_count], [2, 2], "2 of 2 now");
+    assert.deepEqual([attemptRow(db, ben).score, attemptRow(db, ben).question_count], [null, 2], "an open attempt keeps writing, over two");
+    for (const attempt of [anna, ben]) {
+      const positions = db.prepare("SELECT position FROM attempt_question WHERE attempt_id = ? ORDER BY position").all(attempt).map((row) => row.position);
+      assert.deepEqual(positions, [0, 1], "no gap in the attempt's order");
+    }
+    assert.deepEqual(writingView(db, attemptRow(db, ben)).questions.map((q) => q.n), [1, 2], "Ben writes on with two questions");
+    assert.equal(count(db, "SELECT COUNT(*) AS n FROM question_usage WHERE test_id = ? AND question_id = ?", test.id, multi.question_id), 0);
+    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+    assert.ok(ids.includes(multi.question_id), "the pool question itself stays");
+    assert.ok(getQuestion(db, multi.question_id));
+  });
+
+  test("the last question of a written test cannot be removed, and a question not in it is not found", () => {
+    const { db, test, ids } = written();
+    const inTest = db.prepare("SELECT question_id FROM test_question WHERE test_id = ? ORDER BY position").all(test.id).map((row) => row.question_id);
+    removeWrittenQuestion(db, test.id, inTest[0], scoreAttempt);
+    removeWrittenQuestion(db, test.id, inTest[1], scoreAttempt);
+    assert.throws(() => removeWrittenQuestion(db, test.id, inTest[2], scoreAttempt), ConflictError);
+    assert.throws(() => removeWrittenQuestion(db, test.id, inTest[0], scoreAttempt), NotFoundError);
+    assert.equal(ids.length, 3);
+  });
+
+  test("deleting an attempt lets the student start again while the sitting is open", () => {
+    const { db, test, anna } = written();
+    deleteAttempt(db, anna);
+    assert.equal(attemptRow(db, anna), undefined);
+    assert.equal(count(db, "SELECT COUNT(*) AS n FROM response WHERE attempt_id = ?", anna), 0);
+    assert.equal(startAttempt(db, "anna", test.id).created, true, "a fresh attempt");
+    assert.throws(() => deleteAttempt(db, anna), NotFoundError);
   });
 });
 

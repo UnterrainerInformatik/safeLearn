@@ -171,16 +171,66 @@ export function updateTest(db, id, { name, questionIds } = {}) {
   });
 }
 
-/** Deletes a test with its sittings and usage records, only while no attempt has started. */
-export function deleteTest(db, id) {
+/**
+ * Deletes a test with its sittings and usage records, only while no attempt
+ * has started - or, for an admin, with every attempt written of it and their
+ * answers, which takes its column out of the gradebook.
+ */
+export function deleteTest(db, id, { admin = false } = {}) {
   testRow(db, id);
   inTransaction(db, () => {
-    if (testStarted(db, id)) throw new ConflictError("This test has been written and cannot be deleted.");
+    if (testStarted(db, id) && !admin) throw new ConflictError("This test has been written and cannot be deleted.");
+    // An attempt's questions, tokens, answers and refused browsers go with it.
+    db.prepare("DELETE FROM attempt WHERE test_id = ?").run(id);
     dropSnapshot(db, id);
     db.prepare("DELETE FROM sitting WHERE test_id = ?").run(id);
     db.prepare("DELETE FROM test WHERE id = ?").run(id);
   });
   return { deleted: id };
+}
+
+/**
+ * An admin's correction of a written test: takes the pool question
+ * `questionId` out of its snapshot and out of every attempt - their answers to
+ * it included - closes the gap it leaves in each attempt's order, and scores
+ * every submitted attempt again over the questions left, so the gradebook and
+ * the students' results follow. The last question cannot go; delete the test.
+ */
+export function removeWrittenQuestion(db, testId, questionId, rescore) {
+  testRow(db, testId);
+  return inTransaction(db, () => {
+    const question = db.prepare("SELECT id FROM test_question WHERE test_id = ? AND question_id = ?").get(testId, questionId);
+    if (!question) throw new NotFoundError("This question is not in the test.");
+    if (db.prepare("SELECT COUNT(*) AS n FROM test_question WHERE test_id = ?").get(testId).n === 1) {
+      throw new ConflictError("A test keeps at least one question; delete the test instead.");
+    }
+    const answers = "SELECT id FROM test_answer WHERE test_question_id = ?";
+    db.prepare(`DELETE FROM response WHERE test_answer_id IN (${answers})`).run(question.id);
+    db.prepare(`DELETE FROM attempt_token WHERE test_answer_id IN (${answers})`).run(question.id);
+    const attempts = db.prepare("SELECT id, submitted_at FROM attempt WHERE test_id = ?").all(testId);
+    const placed = db.prepare("SELECT position FROM attempt_question WHERE attempt_id = ? AND test_question_id = ?");
+    const unplace = db.prepare("DELETE FROM attempt_question WHERE attempt_id = ? AND test_question_id = ?");
+    // Two steps, so no position is held twice while the later ones move up.
+    const lift = db.prepare("UPDATE attempt_question SET position = -position - 1 WHERE attempt_id = ? AND position > ?");
+    const settle = db.prepare("UPDATE attempt_question SET position = -position - 2 WHERE attempt_id = ? AND position < 0");
+    for (const attempt of attempts) {
+      const at = placed.get(attempt.id, question.id);
+      if (!at) continue;
+      unplace.run(attempt.id, question.id);
+      lift.run(attempt.id, at.position);
+      settle.run(attempt.id);
+    }
+    db.prepare("DELETE FROM test_question WHERE id = ?").run(question.id);
+    db.prepare("DELETE FROM question_usage WHERE test_id = ? AND question_id = ?").run(testId, questionId);
+    db.prepare("DELETE FROM test_image WHERE test_id = ? AND image_id IN (SELECT id FROM image WHERE question_id = ?)").run(testId, questionId);
+    const count = db.prepare("SELECT COUNT(*) AS n FROM attempt_question WHERE attempt_id = ?");
+    const store = db.prepare("UPDATE attempt SET question_count = ?, score = CASE WHEN submitted_at IS NULL THEN NULL ELSE ? END WHERE id = ?");
+    for (const attempt of attempts) {
+      store.run(count.get(attempt.id).n, attempt.submitted_at === null ? null : rescore(db, attempt.id), attempt.id);
+    }
+    db.prepare("UPDATE test SET updated_at = ? WHERE id = ?").run(now(), testId);
+    return getTest(db, testId);
+  });
 }
 
 /** A test's snapshot: its questions in the teacher's order, each with its answers and correct flags. */

@@ -112,10 +112,10 @@ describe("the instance with the exam module", () => {
   test("answers who a session is, after the student-view downgrade", async () => {
     const asTeacher = await fetchAs(teacher, "/exam/api/me");
     assert.equal(asTeacher.status, 200);
-    assert.deepEqual(asTeacher.json, { username: teacher.username.toLowerCase(), teacher: true, periods: [] });
+    assert.deepEqual(asTeacher.json, { username: teacher.username.toLowerCase(), teacher: true, admin: false, periods: [] });
 
     const asStudent = await fetchAs(student, "/exam/api/me");
-    assert.deepEqual(asStudent.json, { username: student.username.toLowerCase(), teacher: false, periods: [] });
+    assert.deepEqual(asStudent.json, { username: student.username.toLowerCase(), teacher: false, admin: false, periods: [] });
 
     await setPreferences(teacher, { vt: 0 });
     try {
@@ -2968,5 +2968,118 @@ describe("the school's periods", () => {
     // Back to periods: the date stays, the periods are the ones a new sitting gets.
     await page.click(".sl-exam-sitting-form .sl-exam-sitting-mode");
     assert.equal(await page.$eval(".sl-exam-sitting-form input[name=date]", (input) => input.value), date);
+  });
+});
+
+// Last: an admin's corrections of what students have written (`online-test`).
+describe("online tests: an admin's corrections", () => {
+  let student;
+  let teacher;
+  let admin;
+  let course;
+  let questions;
+
+  /** A test of the GB course that the shared student has written and submitted, in a sitting still open. */
+  async function writtenTest(name) {
+    const test = (await fetchAs(teacher, `/exam/api/courses/${course.id}/tests`, { method: "POST", body: { name, questionIds: questions.slice(0, 3).map((q) => q.id) } })).json;
+    const sitting = (
+      await fetchAs(teacher, `/exam/api/tests/${test.id}/sittings`, {
+        method: "POST",
+        body: { opensAt: new Date(Date.now() - 60000).toISOString(), closesAt: new Date(Date.now() + 50 * 60000).toISOString(), durationMinutes: 15 },
+      })
+    ).json;
+    const writing = (await fetchAs(student, `/exam/api/tests/${test.id}/attempt`, { method: "POST" })).json;
+    const submitted = await fetchAs(student, `/exam/api/attempts/${writing.attempt}/submit`, { method: "POST" });
+    assert.equal(submitted.status, 200, JSON.stringify(submitted.json));
+    return { test, sitting, attempt: writing.attempt };
+  }
+
+  before(async () => {
+    student = await sharedSession("student");
+    teacher = await sharedSession("teacher");
+    admin = await sharedSession("admin");
+    for (const session of [student, teacher, admin]) await reauthenticate(session).catch(() => {});
+    const year = (await fetchAs(teacher, "/exam/api/years")).json.current;
+    const gbClass = (await fetchAs(teacher, `/exam/api/years/${year.id}/classes`)).json.find((c) => c.name === "9xgb");
+    course = (await fetchAs(teacher, `/exam/api/classes/${gbClass.id}`)).json.courses.find((c) => c.subject === "GB");
+    questions = (await fetchAs(teacher, "/exam/api/pool/questions")).json;
+  });
+
+  test("/me tells an admin from a teacher", async () => {
+    assert.equal((await fetchAs(admin, "/exam/api/me")).json.admin, true);
+    assert.equal((await fetchAs(teacher, "/exam/api/me")).json.admin, false);
+  });
+
+  test("a teacher who is no admin can take back nothing written, and is offered nothing", async () => {
+    const { test, attempt } = await writtenTest("Admin: refused");
+    assert.equal((await fetchAs(teacher, `/exam/api/tests/${test.id}`, { method: "DELETE" })).status, 409);
+    assert.equal((await fetchAs(teacher, `/exam/api/tests/${test.id}/questions/${questions[0].id}`, { method: "DELETE" })).status, 403);
+    assert.equal((await fetchAs(teacher, `/exam/api/attempts/${attempt}`, { method: "DELETE" })).status, 403);
+    assert.equal((await fetchAs(student, `/exam/api/attempts/${attempt}`, { method: "DELETE" })).status, 403);
+    await teacher.page.goto(`${applicationUrl}/exam/tests/${test.id}`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(".sl-exam-test-questions li", { timeout: 20000 });
+    const offered = await teacher.page.evaluate(() => ({
+      admin: document.querySelectorAll(".sl-exam-admin").length,
+      remove: document.querySelectorAll(".sl-exam-test-remove").length,
+      deleteTest: document.querySelectorAll(".sl-exam-test-delete").length,
+    }));
+    assert.deepEqual(offered, { admin: 0, remove: 0, deleteTest: 0 });
+    assert.equal((await fetchAs(teacher, `/exam/api/tests/${test.id}`)).json.questions.length, 3, "nothing changed");
+  });
+
+  test("an admin removes a question from a written test in the page, and the attempt is scored over the rest", async () => {
+    const { test, attempt } = await writtenTest("Admin: remove");
+    const page = admin.page;
+    await page.goto(`${applicationUrl}/exam/tests/${test.id}`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".sl-exam-test-questions .sl-exam-test-remove.sl-exam-admin", { timeout: 20000 });
+    const first = await page.$eval(".sl-exam-test-questions > li", (li) => li.dataset.question);
+    const button = `.sl-exam-test-questions > li[data-question="${first}"] .sl-exam-test-remove`;
+    await page.click(button);
+    assert.match(await page.$eval(button, (b) => b.textContent), /score every attempt again/, "asks once more");
+    await page.click(button);
+    await page.waitForFunction(() => document.querySelectorAll(".sl-exam-test-questions > li").length === 2, { timeout: 10000 });
+    assert.equal((await fetchAs(admin, `/exam/api/tests/${test.id}`)).json.questions.length, 2);
+    const { db } = openDatabase(run.databasePath);
+    try {
+      const row = db.prepare("SELECT score, question_count FROM attempt WHERE id = ?").get(attempt);
+      assert.equal(row.question_count, 2);
+      assert.ok(row.score >= 0 && row.score <= 2);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("an admin deletes an attempt in the live view, and the student counts as not started", async () => {
+    const { sitting } = await writtenTest("Admin: attempt");
+    const page = admin.page;
+    const username = student.username.toLowerCase();
+    await page.goto(`${applicationUrl}/exam/sittings/${sitting.id}/live`, { waitUntil: "domcontentloaded" });
+    const button = `sl-exam-live tr[data-username="${username}"] .sl-exam-live-delete`;
+    await page.waitForSelector(button, { timeout: 20000 });
+    await page.click(button);
+    await page.click(button);
+    await page.waitForFunction((u) => document.querySelector(`sl-exam-live tr[data-username="${u}"]`)?.dataset.status === "not started", { timeout: 10000 }, username);
+    const snapshot = (await fetchAs(admin, `/exam/api/sittings/${sitting.id}/live`)).json;
+    assert.equal(snapshot.participants.find((p) => p.username === username).attemptId, null);
+    await teacher.page.goto(`${applicationUrl}/exam/sittings/${sitting.id}/live`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(`sl-exam-live tr[data-username="${username}"]`, { timeout: 20000 });
+    assert.equal(await teacher.page.$$eval(".sl-exam-live-delete", (buttons) => buttons.length), 0, "no teacher is offered it");
+  });
+
+  test("an admin deletes a written test with its attempts", async () => {
+    const { test, attempt } = await writtenTest("Admin: delete");
+    const page = admin.page;
+    await page.goto(`${applicationUrl}/exam/tests/${test.id}`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".sl-exam-test-delete.sl-exam-admin", { timeout: 20000 });
+    await page.click(".sl-exam-test-delete");
+    assert.match(await page.$eval(".sl-exam-test-delete", (b) => b.textContent), /and 1 attempt$/);
+    await Promise.all([page.waitForNavigation({ timeout: 20000 }), page.click(".sl-exam-test-delete")]);
+    assert.equal((await fetchAs(admin, `/exam/api/tests/${test.id}`)).status, 404);
+    const { db } = openDatabase(run.databasePath);
+    try {
+      assert.equal(db.prepare("SELECT COUNT(*) AS n FROM attempt WHERE id = ?").get(attempt).n, 0);
+    } finally {
+      db.close();
+    }
   });
 });

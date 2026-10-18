@@ -689,12 +689,19 @@ a.sl-exam-button.sl-exam-open:hover,
   list-style: none;
 }
 
-.sl-exam-test-delete[data-armed="1"] {
+.sl-exam-test-delete[data-armed="1"],
+.sl-exam-admin[data-armed="1"] {
   color: #c0392b;
 }
 
-#markdown-content.dark-mode .sl-exam-test-delete[data-armed="1"] {
+#markdown-content.dark-mode .sl-exam-test-delete[data-armed="1"],
+#markdown-content.dark-mode .sl-exam-admin[data-armed="1"] {
   color: #ff7b72;
+}
+
+/* An admin's correction of what students have written: marked as such. */
+.sl-exam-admin {
+  border-style: dashed;
 }
 
 /* A sitting's form on the test's page. */
