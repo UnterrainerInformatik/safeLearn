@@ -944,7 +944,7 @@ describe("the gradebook", () => {
       proposal: document.querySelector(`tr[data-student="${who}"] .sl-exam-proposal`).textContent,
       columns: [...document.querySelectorAll('.sl-exam-column-head input[aria-label="Column name"]')].map((input) => input.value),
     }), username);
-    assert.deepEqual(seen.leading, ["Student", "Winter", "Calculated Proposal", "Teacher Override", "Actual Grade"]);
+    assert.deepEqual(seen.leading, ["Student", "Winter", "Calculated proposal", "Teacher override", "Actual grade"]);
     assert.equal(seen.winter, "1 (override)");
     assert.ok(seen.proposal.startsWith("2 ("), seen.proposal);
     assert.deepEqual(seen.columns, ["summer test"], "the summer semester's columns only");
@@ -3714,6 +3714,59 @@ describe("the module's actions", () => {
     assert.equal(await teacher.page.$eval('.sl-exam-bar-page[data-page="scale"]', (a) => a.getAttribute("aria-current")), "page");
   });
 
+  test("the grading scale saves as it changes, without a button, and only while it is a valid scale", async () => {
+    const page = teacher.page;
+    const original = (await fetchAs(teacher, "/exam/api/scale")).json;
+    const stored = async (grade) => (await fetchAs(teacher, "/exam/api/scale")).json.find((row) => row.grade === grade).minPercent;
+    const field = (grade) => `sl-exam-scale input[aria-label="${text("en", "exam.gradebook.gradeFrom").replace("{grade}", grade)}"]`;
+    /** Types `value` into grade's field and leaves it, which fires its `change`. */
+    const enter = async (grade, value) => {
+      await page.$eval(field(grade), (input) => {
+        input.focus();
+        input.select();
+      });
+      await page.keyboard.type(value);
+      await page.keyboard.press("Tab");
+    };
+    const waitFor = async (condition, what) => {
+      const until = Date.now() + 10000;
+      while (!(await condition())) {
+        if (Date.now() > until) assert.fail(`timed out: ${what}`);
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+    };
+    try {
+      await page.goto(`${applicationUrl}/exam/scale`, { waitUntil: "domcontentloaded" });
+      await page.waitForSelector(field(2), { timeout: 20000 });
+      assert.equal(await page.$$eval("sl-exam-scale button", (buttons) => buttons.length), 0, "the scale has no Save button");
+      assert.ok((await page.$eval("sl-exam-scale", (el) => el.textContent)).includes(text("en", "exam.classes.savedAsChanged")), "it says that it saves as it changes");
+
+      await enter(2, "74.5");
+      await waitFor(async () => (await stored(2)) === 74.5, "a valid threshold is stored on leaving the field");
+      const saved = text("en", "exam.gradebook.scaleSaved");
+      await waitFor(() => page.$eval(".sl-exam-scale-status", (p, expected) => p.textContent === expected, saved), "the scale says it was saved");
+
+      await enter(2, "95");
+      await waitFor(() => page.$eval(".sl-exam-scale-status", (p) => p.classList.contains("sl-embed-error") && p.textContent.length > 0), "the scale says why it is not saved");
+      assert.equal(
+        await page.$eval(".sl-exam-scale-status", (p) => p.textContent),
+        text("en", "exam.errors.gradebook.thresholdOrder").replace("{grade}", "2").replace("{better}", "1")
+      );
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      assert.equal(await stored(2), 74.5, "an invalid scale is not stored");
+    } finally {
+      const thresholds = Object.fromEntries(original.filter((row) => row.grade < 5).map((row) => [row.grade, row.minPercent]));
+      assert.equal((await fetchAs(teacher, "/exam/api/scale", { method: "PUT", body: { thresholds } })).status, 200);
+    }
+  });
+
+  test("the student's page in a course says that its fields are saved as they change", async () => {
+    const overview = (await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=ws`)).json;
+    await teacher.page.goto(`${applicationUrl}/exam/courses/${course.id}/students/${overview.students[0].username}`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(".sl-exam-saved-hint", { timeout: 20000 });
+    assert.equal(await teacher.page.$eval(".sl-exam-saved-hint", (p) => p.textContent), text("en", "exam.classes.savedAsChanged"));
+  });
+
   test("with a course in the bar, every pool row's box follows the row's choice", async () => {
     const page = teacher.page;
     await page.goto(`${applicationUrl}/exam/pool?course=${course.id}`, { waitUntil: "domcontentloaded" });
@@ -4214,6 +4267,39 @@ describe("the interface in the reader's language and format", () => {
     assert.equal(shown.submit, text("en", "exam.attempt.submit"), "the controls are English");
     const attempt = (await fetchAs(student, `/exam/api/tests/${created.json.id}/attempt`, { method: "POST" })).json.attempt;
     await fetchAs(student, `/exam/api/attempts/${attempt}/submit`, { method: "POST" });
+  });
+
+  test("the bar and the gradebook's heading name the gradebook and the whole year alike, in English and in German", async () => {
+    for (const lang of ["en", "de"]) {
+      await setPreferences(teacher, { lang });
+      await teacher.page.goto(`${applicationUrl}/exam/courses/${course.id}/gradebook?semester=ss`, { waitUntil: "domcontentloaded" });
+      await teacher.page.waitForSelector(".sl-exam-sheet", { timeout: 20000 });
+      const shown = await teacher.page.evaluate(() => {
+        const position = document.querySelector('.sl-exam-bar-position[data-position="gradebook"]');
+        return {
+          bar: position.querySelector("a, span").textContent.trim(),
+          chosen: position.querySelector("select").selectedOptions[0].textContent.trim(),
+          heading: document.querySelector("#markdown-content h1").textContent.trim(),
+        };
+      });
+      assert.equal(shown.bar, text(lang, "exam.pages.gradebook"), `${lang}: the bar names the gradebook as its page does`);
+      assert.equal(shown.chosen, text(lang, "exam.bar.wholeYear"), `${lang}: the bar chooses the whole year`);
+      assert.ok(shown.heading.startsWith(`${shown.bar} – `) && shown.heading.endsWith(` – ${shown.chosen}`), `${lang}: the heading uses the bar's names: ${shown.heading}`);
+    }
+  });
+
+  test("an English test head names a German course's language as German", async () => {
+    await setPreferences(teacher, { lang: "en" });
+    const created = (await fetchAs(teacher, `/exam/api/courses/${course.id}/tests`, { method: "POST", body: { name: "Language: head", questionIds: questions.slice(0, 1).map((q) => q.id) } })).json;
+    try {
+      await teacher.page.goto(`${applicationUrl}/exam/tests/${created.id}`, { waitUntil: "domcontentloaded" });
+      await teacher.page.waitForSelector(".sl-exam-test-head", { timeout: 20000 });
+      const head = await teacher.page.$eval(".sl-exam-test-head", (p) => p.textContent);
+      assert.ok(head.includes(` · ${text("en", "exam.classes.languageGerman")} · `), `the head says German: ${head}`);
+      assert.ok(!head.includes("Deutsch"), "and not Deutsch");
+    } finally {
+      await fetchAs(teacher, `/exam/api/tests/${created.id}`, { method: "DELETE" });
+    }
   });
 
   test("in German at the legibility viewport, the module bar and the gradebook's headings fit", async () => {

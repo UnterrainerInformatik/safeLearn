@@ -200,9 +200,9 @@ class TestDetail extends ExamElement {
       { class: "sl-exam sl-exam-test" },
       h(
         "p",
-        { class: "sl-exam-quiet" },
+        { class: "sl-exam-quiet sl-exam-test-head" },
         h("a", { href: `/exam/tests?course=${course.id}` }, `${displayClass(course.className)} ${course.subject}`),
-        ` (${course.yearName}) · ${en ? "English" : "Deutsch"} · ${t("exam.tests.questionCount", { count: test.questions.length })} · `,
+        ` (${course.yearName}) · ${en ? t("exam.classes.languageEnglish") : t("exam.classes.languageGerman")} · ${t("exam.tests.questionCount", { count: test.questions.length })} · `,
         test.started ? t("exam.tests.writtenBy", { started: test.attempts.started, submitted: test.attempts.submitted }) : t("exam.tests.notWrittenYet")
       ),
       h(

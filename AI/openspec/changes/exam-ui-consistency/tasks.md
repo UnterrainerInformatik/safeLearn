@@ -99,17 +99,17 @@
 
 ## 5. Phase 5: Consistency
 
-- [ ] 5.1 Grading scale (`client/gradebook.js`, around `:677`): save as it changes while the scale is valid, with saving/saved/refused marking as on the sheet, and the explicit Save removed. Add "Every field is saved as it changes." to the student page.
-- [ ] 5.2 Apply the wording table of design D12 in `i18n/en.json` and `i18n/de.json`, keeping the keys identical. Use the catalog's language names in the test head (`client/tests.js:205`). Run `test/i18n-catalog.test.js`.
-- [ ] 5.3 Harness checks in `test/exam.test.js`:
+- [x] 5.1 Grading scale (`client/gradebook.js`, around `:677`): save as it changes while the scale is valid, with saving/saved/refused marking as on the sheet, and the explicit Save removed. Add "Every field is saved as it changes." to the student page.
+- [x] 5.2 Apply the wording table of design D12 in `i18n/en.json` and `i18n/de.json`, keeping the keys identical. Use the catalog's language names in the test head (`client/tests.js:205`). Run `test/i18n-catalog.test.js`.
+- [x] 5.3 Harness checks in `test/exam.test.js`:
   - the bar and the gradebook heading show the same name for the whole year in en and de;
   - an English test head of a German course says "German";
   - the scale saves without a button.
-- [ ] 5.4 Run `npm test`, record the result here, and commit phase 5.
+- [x] 5.4 Run `npm test`, record the result here, and commit phase 5. Result 2026-10-18: `npm test` 723/723, `test/exam.test.js` 126/126; this time neither timing check failed.
 
 ## 6. Wrap-up
 
-- [ ] 6.1 Update `docs-exam-module.md` (category tree, keys, rename/delete, end/extend) and `AI/architecture.md` (component map: `tree-drag.js`, removed `pool-categories.js`, new routes; observations).
+- [x] 6.1 Update `docs-exam-module.md` (category tree, keys, rename/delete, end/extend) and `AI/architecture.md` (component map: `tree-drag.js`, removed `pool-categories.js`, new routes; observations).
 - [ ] 6.2 Deploy to secureLectures (sync order: safeLearn first) and smoke-check with Gerald's teacher account: one drag in the tree, one rename, and one sitting extended in a trial test.
 
 ## Notes for applying
@@ -120,3 +120,4 @@
 - The scale page (`exam/routes-gradebook.js`, `page("/scale", …)`) passes no `current`; 2.5 needs `current: "scale"` through `teacherShell`.
 - Phase 3 (applied 2026-10-18): the tree lives in `exam/client/pool-tree.js` beside `pool.js`, which only mounts it; `categoryTree` answers `empty` (nothing held, retired questions included) for the bin. Each node carries 📝 (new question in it) beside `+`, as decided in design.md. A refused question move is told in the tree's status line; the spec asks for the node only for categories.
 - Phase 4 (applied 2026-10-18): the student page takes `?semester=` and keeps it on the way to the neighbours and back; the sheet's student links carry it. A window change (end, extend) is announced on the live channel without a participant, and the live view then fetches a fresh snapshot, since every deadline may have moved. A course's refusal counts columns, results, grades and online tests (tests include question usage left behind by a deleted test).
+- Phase 5 (applied 2026-10-18): the scale is saved as one value for its four fields, as the config sheet's weights are; the reason it is not saved stands in a status line under it, checked in the browser as the server checks. `exam.pool.type.multichoiceset` also became "Several correct answers", as in the editor, since the spec asks for one name per question type; `exam.common.save` went, as nothing uses it any more.

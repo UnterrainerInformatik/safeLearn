@@ -63,7 +63,7 @@
       "class": "Klasse",
       "course": "Kurs",
       "currentYear": "{name} (aktuell)",
-      "grades": "Noten",
+      "grades": "Notenbuch",
       "newClass": "Neue Klasse in diesem Schuljahr",
       "newClassDialog": "Neue Klasse",
       "newCourse": "Neuer Kurs in dieser Klasse",
@@ -156,7 +156,6 @@
     },
     "common": {
       "cancel": "Abbrechen",
-      "save": "Speichern",
       "tryAgain": "Das hat nicht geklappt. Bitte noch einmal versuchen."
     },
     "dateInput": {
@@ -281,7 +280,7 @@
         "commentVisible": "Ob der Schüler den Kommentar sieht, ist ja oder nein.",
         "maxPositive": "Das Maximum muss eine Punktezahl über 0 sein.",
         "noColumn": "Es gibt keine Spalte {id}.",
-        "nobodyOnRoster": "Ohne Benutzernamen steht niemand auf der Klassenliste der Klasse dieses Kurses.",
+        "nobodyOnRoster": "Es wurde kein Schüler angegeben. Den Benutzernamen eines Schülers auf der Klassenliste der Klasse dieses Kurses angeben.",
         "notOnCourseRoster": "{username} steht nicht auf der Klassenliste der Klasse dieses Kurses.",
         "override": "Eine festgelegte Note ist eine Note von 1 bis 5 oder keine.",
         "participationMark": "Eine Mitarbeitsnote ist + oder -.",
@@ -500,7 +499,7 @@
       "scaleSaved": "Gespeichert. Jeder Vorschlag folgt dem neuen Notenschlüssel.",
       "schoolYear": "Schuljahr",
       "semester": {
-        "ss": "Ganzes Jahr (Sommersemester)",
+        "ss": "Ganzes Jahr",
         "ws": "Wintersemester"
       },
       "semesterLabel": "Semester",
@@ -515,8 +514,8 @@
     "import": {
       "atTop": "auf oberster Ebene",
       "by": "Von",
-      "cannotImport_one": "{name} kann nicht importiert werden: {count} Problem. Es wurde nichts gespeichert. Die Liste dem Claude zurückgeben, der die Datei geschrieben hat.",
-      "cannotImport_other": "{name} kann nicht importiert werden: {count} Probleme. Es wurde nichts gespeichert. Die Liste dem Claude zurückgeben, der die Datei geschrieben hat.",
+      "cannotImport_one": "{name} kann nicht importiert werden: {count} Problem. Es wurde nichts gespeichert. Die Liste Claude zurückgeben, das die Datei geschrieben hat.",
+      "cannotImport_other": "{name} kann nicht importiert werden: {count} Probleme. Es wurde nichts gespeichert. Die Liste Claude zurückgeben, das die Datei geschrieben hat.",
       "category": "Kategorie",
       "checkFailed": "Die Datei konnte nicht geprüft werden. Bitte noch einmal versuchen.",
       "checking": "{name} wird geprüft…",
@@ -531,7 +530,7 @@
       "file": "Fragendatei",
       "fileColumn": "Datei",
       "fileHeading": "2. Die Datei",
-      "formatExplained": " und sie zusammen mit dem Thema der Fragen einem Claude geben. Sie beschreibt die Datei, die der Import liest, und listet die aktuellen Kategorien des Fragenpools.",
+      "formatExplained": " und sie zusammen mit dem Thema der Fragen Claude geben. Sie beschreibt die Datei, die der Import liest, und listet die aktuellen Kategorien des Fragenpools.",
       "formatHeading": "1. Die Formatbeschreibung",
       "importButton_one": "{count} Frage importieren",
       "importButton_other": "{count} Fragen importieren",
@@ -680,8 +679,8 @@
       "testName": "Name des Tests",
       "testSaveFailed": "Der Test konnte nicht gespeichert werden. Bitte noch einmal versuchen.",
       "type": {
-        "multichoice": "Eine richtig",
-        "multichoiceset": "Mehrere richtig",
+        "multichoice": "Eine richtige Antwort",
+        "multichoiceset": "Mehrere richtige Antworten",
         "truefalse": "Richtig / falsch"
       },
       "used": "Verwendet",

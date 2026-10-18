@@ -579,6 +579,7 @@ class GradebookStudent extends ExamElement {
       "div",
       { class: "sl-exam" },
       this.neighbours(record),
+      h("p", { class: "sl-exam-quiet sl-exam-saved-hint" }, t("exam.classes.savedAsChanged")),
       student.leftAt ? h("p", { class: "sl-exam-quiet" }, t("exam.gradebook.leftOn", { date: displayDate(student.leftAt) })) : null,
       ["ws", "ss"].map((semester) => this.semesterSection(record, semester))
     );
@@ -703,8 +704,11 @@ class ScaleView extends ExamElement {
     return examApi("/scale");
   }
 
+  /**
+   * The thresholds of grades 1 to 4, saved together as they change, and only
+   * while they form a valid scale; until then the status says why not.
+   */
   render(scale) {
-    const line = messageLine();
     const inputs = Object.fromEntries(
       scale
         .filter(({ grade }) => grade < 5)
@@ -713,25 +717,50 @@ class ScaleView extends ExamElement {
           h("input", { type: "number", min: "0.1", max: "100", step: "0.1", class: "sl-exam-number", value: String(minPercent), "aria-label": t("exam.gradebook.gradeFrom", { grade }) }),
         ])
     );
-    const save = (event) =>
-      act(event.target, line, async () => {
-        const thresholds = Object.fromEntries(Object.entries(inputs).map(([grade, input]) => [grade, Number(input.value)]));
-        await examApi("/scale", { method: "PUT", body: { thresholds } });
-        line.report(t("exam.gradebook.scaleSaved"));
-      });
-    return h(
-      "div",
-      { class: "sl-exam" },
-      h("p", { class: "sl-exam-quiet" }, t("exam.gradebook.scaleHint")),
-      h(
-        "table",
-        { class: "sl-exam-table" },
-        h("tbody", {}, Object.entries(inputs).map(([grade, input]) => h("tr", {}, h("td", {}, t("exam.gradebook.gradeFrom", { grade })), h("td", {}, input, " %"))), h("tr", {}, h("td", {}, t("exam.gradebook.gradeFive")), h("td", {}, t("exam.gradebook.belowThat"))))
-      ),
-      h("p", {}, h("button", { type: "button", class: "sl-exam-primary", onclick: save }, t("exam.common.save"))),
-      line
+    const thresholds = () => Object.fromEntries(Object.entries(inputs).map(([grade, input]) => [grade, input.value.trim() === "" ? Number.NaN : Number(input.value)]));
+    const status = h("p", { class: "sl-exam-scale-status", "aria-live": "polite" });
+    const showStatus = (text, refused = false) => {
+      status.textContent = text;
+      status.classList.toggle("sl-embed-error", refused);
+    };
+    const table = h(
+      "table",
+      { class: "sl-exam-table sl-exam-scale" },
+      h("tbody", {}, Object.entries(inputs).map(([grade, input]) => h("tr", {}, h("td", {}, t("exam.gradebook.gradeFrom", { grade })), h("td", {}, input, " %"))), h("tr", {}, h("td", {}, t("exam.gradebook.gradeFive")), h("td", {}, t("exam.gradebook.belowThat"))))
     );
+    // One save for the four fields: their `change` events reach the table.
+    saveOnChange(table, {
+      value: () => JSON.stringify(thresholds()),
+      check: () => {
+        const reason = scaleProblem(thresholds());
+        if (reason) showStatus(reason, true);
+        return reason;
+      },
+      save: async () => {
+        try {
+          return await examApi("/scale", { method: "PUT", body: { thresholds: thresholds() } });
+        } catch (error) {
+          showStatus(error.message, true);
+          throw error;
+        }
+      },
+      onSaved: () => showStatus(t("exam.gradebook.scaleSaved")),
+    });
+    return h("div", { class: "sl-exam" }, h("p", { class: "sl-exam-quiet" }, t("exam.gradebook.scaleHint"), " ", t("exam.classes.savedAsChanged")), table, status);
   }
+}
+
+/** Why `thresholds` do not form a valid scale, as the server would refuse them, or null. */
+function scaleProblem(thresholds) {
+  const grades = [1, 2, 3, 4];
+  for (const grade of grades) {
+    const value = thresholds[grade];
+    if (!Number.isFinite(value) || value <= 0 || value > 100 || Math.round(value * 10) !== value * 10) {
+      return t("exam.errors.gradebook.thresholdRange", { grade });
+    }
+  }
+  const unordered = grades.find((grade) => grade > 1 && thresholds[grade] >= thresholds[grade - 1]);
+  return unordered ? t("exam.errors.gradebook.thresholdOrder", { grade: unordered, better: unordered - 1 }) : null;
 }
 
 // ----------------------------------------------------- a student's results
