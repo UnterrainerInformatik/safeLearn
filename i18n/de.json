@@ -719,6 +719,7 @@
       "change": "Ändern",
       "changeSitting": "Termin ändern",
       "classScreenLink": "Klassenanzeige",
+      "classWithoutCourse": "{name} hat noch keinen Kurs.",
       "closes": "Endet",
       "columnQuestions": "Fragen",
       "columnSittings": "Termine",

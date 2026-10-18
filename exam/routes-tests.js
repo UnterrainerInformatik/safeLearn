@@ -117,7 +117,7 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
   adminApi("delete", "/attempts/:id", (req) => announced(deleteAttempt(db, idParam(req.params.id))));
 
   // The list the bar's "Online tests" button opens: the chosen course's tests,
-  // or the school year's when no course is chosen.
+  // the chosen class's when no course is chosen, or the school year's.
   router.get(
     "/tests",
     teacherPage,

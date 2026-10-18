@@ -84,7 +84,15 @@ class TestList extends ExamElement {
       return h(
         "div",
         { class: "sl-exam" },
-        h("p", {}, list.year ? t("exam.tests.yearWithoutCourse", { year: list.year.name }) : t("exam.tests.noYear")),
+        h(
+          "p",
+          {},
+          list.class
+            ? t("exam.tests.classWithoutCourse", { name: displayClass(list.class.name) })
+            : list.year
+              ? t("exam.tests.yearWithoutCourse", { year: list.year.name })
+              : t("exam.tests.noYear")
+        ),
         list.year ? null : h("p", {}, button({ label: t("exam.classes.createYear"), kind: "primary", class: "sl-exam-year-create", action: () => openCreatorOf("year") }))
       );
     }

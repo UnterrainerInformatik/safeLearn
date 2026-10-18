@@ -719,6 +719,7 @@
       "change": "Change",
       "changeSitting": "Change the sitting",
       "classScreenLink": "Class screen",
+      "classWithoutCourse": "{name} has no course yet.",
       "closes": "Closes",
       "columnQuestions": "Questions",
       "columnSittings": "Sittings",

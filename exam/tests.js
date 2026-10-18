@@ -328,15 +328,20 @@ function courseTests(db, courseId) {
 
 /**
  * The courses a test list covers: the one course when `courseId` is given,
- * otherwise every course of the school year - the one `classId` belongs to,
- * `yearId`, or the current one.
+ * the courses of the class when `classId` is, otherwise every course of the
+ * school year - `yearId`, or the current one.
  */
 function coursesInScope(db, { yearId = null, classId = null, courseId = null }) {
   if (courseId !== null) {
     const course = getCourse(db, courseId);
     return { scope: "course", year: course.year, courses: [course] };
   }
-  const year = classId !== null ? getClass(db, classId).year : yearId !== null ? getYear(db, yearId) : currentYear(db);
+  if (classId !== null) {
+    // A class chosen without a course: that class's courses only.
+    const klass = getClass(db, classId);
+    return { scope: "class", year: klass.year, klass, courses: klass.courses.map((course) => ({ ...course, className: klass.name })) };
+  }
+  const year = yearId !== null ? getYear(db, yearId) : currentYear(db);
   if (!year) return { scope: "year", year: null, courses: [] };
   const courses = listClasses(db, year.id).flatMap((klass) =>
     listCourses(db, klass.id).map((course) => ({ ...course, className: klass.name }))
@@ -350,10 +355,11 @@ function coursesInScope(db, { yearId = null, classId = null, courseId = null }) 
  * subject, language, tests }] }`.
  */
 export function listTests(db, scope = {}) {
-  const { scope: kind, year, courses } = coursesInScope(db, scope);
+  const { scope: kind, year, klass, courses } = coursesInScope(db, scope);
   return {
     scope: kind,
     year: year ? { id: year.id, name: year.name } : null,
+    class: klass ? { id: klass.id, name: klass.name } : null,
     groups: courses.map((course) => ({
       courseId: course.id,
       classId: course.classId,

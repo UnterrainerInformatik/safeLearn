@@ -281,7 +281,7 @@ describe("changing a test", () => {
 });
 
 describe("the lists of tests", () => {
-  test("a course's tests, and a year's grouped by class and course", () => {
+  test("a course's tests, a class's, and a year's grouped by class and course", () => {
     const { db, year, klass, course, ids } = seeded();
     const other = createCourse(db, createClass(db, year.id, { name: "4ahif" }).id, { subject: "NVS" });
     createCourse(db, klass.id, { subject: "DBI" });
@@ -294,7 +294,10 @@ describe("the lists of tests", () => {
 
     const all = listTests(db, { yearId: year.id });
     assert.deepEqual(all.groups.map((g) => `${g.className} ${g.subject} ${g.tests.length}`), ["4ahif NVS 1", "4bhif DBI 0", "4bhif WMC 1"]);
-    assert.deepEqual(listTests(db, { classId: klass.id }).groups.length, 3, "a class names its school year");
+    const ofClass = listTests(db, { classId: klass.id });
+    assert.equal(ofClass.scope, "class");
+    assert.deepEqual(ofClass.groups.map((g) => `${g.className} ${g.subject} ${g.tests.length}`), ["4bhif DBI 0", "4bhif WMC 1"], "a class chosen without a course lists that class's courses only");
+    assert.deepEqual([ofClass.year.name, ofClass.class.name], ["2026/27", "4bhif"]);
     assert.deepEqual(listTests(db).year.name, "2026/27", "the current year without a choice");
   });
 });

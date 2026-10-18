@@ -1111,8 +1111,8 @@ describe("the module bar", () => {
     assert.deepEqual(Object.values(await buttons()).map((b) => b.current), [null, "page", null], "the tests' button is marked");
     await teacher.page.waitForSelector(`.sl-exam-tests-course[data-course="${course.id}"]`, { timeout: 20000 });
 
-    // Choosing another class on the tests page stays there; with no course
-    // chosen the year's courses are listed, grouped by class and course.
+    // Emptying the course on the tests page stays there; with the class but
+    // no course chosen, that class's courses are listed, one group each.
     await Promise.all([
       teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }),
       teacher.page.select('.sl-exam-bar select[data-position="course"]', ""),
@@ -1120,7 +1120,8 @@ describe("the module bar", () => {
     assert.equal(new URL(teacher.page.url()).pathname, "/exam/tests");
     await teacher.page.waitForSelector(".sl-exam-tests-course h2", { timeout: 20000 });
     const groups = await teacher.page.evaluate(() => [...document.querySelectorAll(".sl-exam-tests-course h2")].map((h2) => h2.textContent));
-    assert.ok(groups.includes("9XGB GB"), `the year's courses are listed: ${groups.join(", ")}`);
+    assert.ok(groups.includes("9XGB GB"), `the class's courses are listed: ${groups.join(", ")}`);
+    assert.ok(groups.every((group) => group.startsWith("9XGB ")), `and only the class's: ${groups.join(", ")}`);
     assert.deepEqual((await chosen()).slice(0, 2), expected.slice(0, 2), "the class stays chosen");
   });
 
