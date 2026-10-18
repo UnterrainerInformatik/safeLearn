@@ -428,7 +428,8 @@
       "loadFailed": "This element could not be loaded.",
       "notAvailable": "This element is not available on this instance yet.",
       "notFound": "This record does not exist.",
-      "saveFailed": "That could not be saved. Please try again."
+      "saveFailed": "That could not be saved. Please try again.",
+      "sessionEnded": "Your session has ended. The page is loaded anew so you can log in again."
     },
     "gradebook": {
       "actualGrade": "Actual Grade",

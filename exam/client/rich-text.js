@@ -14,7 +14,7 @@
  * Fires `input` when its content changes.
  */
 
-import { ExamApiError, h, t } from "./frame.js";
+import { apiError, ExamApiError, h, t } from "./frame.js";
 
 /** What a paste keeps: these elements, without any attribute. Everything else is unwrapped. */
 const pastedTags = new Set(["P", "BR", "B", "STRONG", "I", "EM", "CODE", "PRE", "UL", "OL", "LI"]);
@@ -39,7 +39,7 @@ export async function uploadImage(file) {
   } catch {
     // No answer of the module's own.
   }
-  if (!response.ok) throw new ExamApiError(response.status, answer?.error);
+  if (!response.ok) throw apiError(response.status, answer?.error);
   return answer.src;
 }
 

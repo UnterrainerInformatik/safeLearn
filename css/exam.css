@@ -496,6 +496,13 @@ a.sl-exam-button.sl-exam-open:hover,
   font-weight: bold;
 }
 
+/* A modal dialog scrolls what overflows it by the browser's own styles; the
+   date field's calendar is meant to stand out over its edge instead, so the
+   dialog is not made to scroll by it. Its few fields always fit. */
+.sl-exam-dialog {
+  overflow: visible;
+}
+
 .sl-exam-dialog form {
   display: flex;
   flex-direction: column;
@@ -1806,6 +1813,13 @@ sl-date-input .sl-date-input-popup {
   border: 1px solid #8c959f;
   border-radius: 6px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+sl-date-input .sl-date-input-popup.is-above {
+  top: auto;
+  bottom: 100%;
+  margin-top: 0;
+  margin-bottom: 4px;
 }
 
 .dark-mode sl-date-input .sl-date-input-popup {

@@ -26,6 +26,7 @@ import {
   sharedSession,
   shutdown,
   useExamModule,
+  whileUnanswered,
 } from "./harness.js";
 import { openDatabase } from "../exam/db.js";
 import { importPool } from "../exam/pool-import.js";
@@ -3811,6 +3812,58 @@ describe("the module's actions", () => {
       db.close();
     }
   }
+
+  test("a request the server answers with an empty 401 - an ended session - loads the page anew, into the login", async () => {
+    const page = teacher.page;
+    await page.goto(`${applicationUrl}/exam/courses/${course.id}/gradebook?semester=ws`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".sl-exam-sheet", { timeout: 20000 });
+    const path = `/exam/api/courses/${course.id}/assessments`;
+    let refused = 0;
+    // The harness leaves the path unanswered (`whileUnanswered`); this answers it as a server whose session ended.
+    const endSession = (request) => {
+      if (new URL(request.url()).pathname === path && request.method() === "POST") {
+        refused++;
+        request.respond({ status: 401, body: "" }).catch(() => {});
+      }
+    };
+    page.on("request", endSession);
+    try {
+      await whileUnanswered(teacher, path, async () => {
+        await page.click('button.sl-exam-add[aria-label="Add a column to Homework"]');
+        await page.waitForSelector("dialog[open] input[name=name]");
+        await page.type("dialog[open] input[name=name]", "After the session");
+        await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 }), page.click("dialog[open] button[type=submit]")]);
+      });
+      assert.equal(refused, 1, "the request was answered with 401");
+      assert.equal(new URL(page.url()).pathname, `/exam/courses/${course.id}/gradebook`, "the page is loaded anew (with a session, the server serves it again)");
+    } finally {
+      page.off("request", endSession);
+    }
+    const left = (await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=ws`)).json.columns.find((c) => c.name === "After the session");
+    assert.equal(left, undefined, "nothing was stored");
+  });
+
+  test("the calendar of the new column's date stands out over the dialog, which does not scroll", async () => {
+    const page = teacher.page;
+    await page.goto(`${applicationUrl}/exam/courses/${course.id}/gradebook?semester=ws`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".sl-exam-sheet", { timeout: 20000 });
+    await page.click('button.sl-exam-add[aria-label="Add a column to Homework"]');
+    await page.waitForSelector("dialog[open] sl-date-input .sl-date-input-toggle");
+    await page.click("dialog[open] sl-date-input .sl-date-input-toggle");
+    await page.waitForSelector("dialog[open] .sl-date-input-popup:not([hidden]) [role=grid]", { timeout: 5000 });
+    const seen = await page.$eval("dialog[open]", (dialog) => {
+      const popup = dialog.querySelector(".sl-date-input-popup").getBoundingClientRect();
+      const hit = document.elementFromPoint(popup.left + popup.width / 2, popup.bottom - 4);
+      return {
+        scrolls: dialog.scrollHeight > dialog.clientHeight && getComputedStyle(dialog).overflowY !== "visible",
+        inWindow: popup.top >= 0 && popup.bottom <= window.innerHeight,
+        reachable: dialog.querySelector(".sl-date-input-popup").contains(hit),
+      };
+    });
+    assert.deepEqual(seen, { scrolls: false, inWindow: true, reachable: true }, "the whole calendar is shown and clickable, without scrolling the dialog");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+  });
 
   // ------------------------------------------- missing actions (phase 4)
 

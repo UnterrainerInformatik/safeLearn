@@ -21,6 +21,26 @@ export class ExamApiError extends Error {
   }
 }
 
+let reloading = false;
+
+/**
+ * The error a refused API request rejects with. An empty 401 means the session
+ * has ended - expired at the identity provider, or dropped by a restart of the
+ * instance. A request made by the page cannot follow the login itself, so the
+ * page is loaded anew: that navigation is sent into the login and comes back
+ * here (`answerUnauthenticated`). Every module request rejects through this.
+ */
+export function apiError(status, message, problems = null) {
+  if (status === 401) {
+    if (!reloading) {
+      reloading = true;
+      window.location.reload();
+    }
+    return new ExamApiError(status, t("exam.frame.sessionEnded"));
+  }
+  return new ExamApiError(status, message, problems);
+}
+
 /**
  * A request to the module's API with the session cookie. `body`, if given, is
  * sent as JSON. Resolves to the answer's JSON; rejects with an `ExamApiError`
@@ -44,7 +64,7 @@ export async function examApi(path, { method = "GET", body } = {}) {
     } catch {
       // No message of the module's own.
     }
-    throw new ExamApiError(response.status, answer?.error, answer?.problems ?? null);
+    throw apiError(response.status, answer?.error, answer?.problems ?? null);
   }
   return response.json();
 }

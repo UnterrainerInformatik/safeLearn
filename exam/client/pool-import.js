@@ -15,7 +15,7 @@
  * draws what it answers.
  */
 
-import { confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, format, h, linkButton, t } from "./frame.js";
+import { apiError, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, format, h, linkButton, t } from "./frame.js";
 
 const typeLabels = {
   multichoiceset: t("exam.pool.type.multichoiceset"),
@@ -41,7 +41,7 @@ async function sendFile(path, text, name) {
   } catch {
     // No answer of the module's own.
   }
-  if (!response.ok) throw new ExamApiError(response.status, answer?.error, answer?.problems ?? null);
+  if (!response.ok) throw apiError(response.status, answer?.error, answer?.problems ?? null);
   return answer;
 }
 

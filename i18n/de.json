@@ -428,7 +428,8 @@
       "loadFailed": "Dieses Element konnte nicht geladen werden.",
       "notAvailable": "Dieses Element ist auf dieser Instanz noch nicht verfügbar.",
       "notFound": "Diesen Eintrag gibt es nicht.",
-      "saveFailed": "Das konnte nicht gespeichert werden. Bitte noch einmal versuchen."
+      "saveFailed": "Das konnte nicht gespeichert werden. Bitte noch einmal versuchen.",
+      "sessionEnded": "Deine Sitzung ist abgelaufen. Die Seite wird neu geladen, damit du dich wieder anmelden kannst."
     },
     "gradebook": {
       "actualGrade": "Gültige Note",

@@ -330,7 +330,28 @@ class DateInput extends HTMLElement {
     this.popup.hidden = false;
     this.toggle.setAttribute("aria-expanded", "true");
     this.drawGrid();
+    this.place();
     this.popup.querySelector("[data-day][tabindex='0']")?.focus();
+  }
+
+  /**
+   * Keeps the calendar inside the window, so it is seen whole without
+   * scrolling - in a dialog, say: below the field where it fits, else above
+   * it, else moved up just as far as the window needs, over the field.
+   */
+  place() {
+    this.popup.classList.remove("is-above");
+    this.popup.style.top = "";
+    const box = this.popup.getBoundingClientRect();
+    if (box.bottom <= window.innerHeight) return;
+    const field = this.getBoundingClientRect();
+    if (field.top - box.height - 4 >= 0) {
+      this.popup.classList.add("is-above");
+      return;
+    }
+    // The popup keeps its 4px margin above; 8 leaves 4 below it too.
+    const top = Math.max(0, window.innerHeight - box.height - 8);
+    this.popup.style.top = `${top - field.top}px`;
   }
 
   close(returnFocus) {
