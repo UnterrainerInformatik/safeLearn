@@ -1199,6 +1199,16 @@ export function registerEmbedClientScript(src) {
   embedClientScript = src;
 }
 
+let openTestsCheck = null;
+
+/**
+ * Whether a request's session has a test open for it right now, which turns a
+ * student's Exams button violet. Set by the module at start-up.
+ */
+export function registerOpenTestsCheck(check) {
+  openTestsCheck = check;
+}
+
 function escapeHtmlAttribute(value) {
   return String(value)
     .replace(/&/g, "&amp;")
@@ -2975,17 +2985,6 @@ async function getTopBar(startPage, req, title = null) {
     }</div>
     <div class="topbar-menu">
       ${
-        (await hasSomeRoles(req, ["teacher"]))
-          ? `<div class="flipswitch" style="display: inline-block; top: 8px;">
-        <input checked="" onchange="toggleViewTeacher()" id="studentTeacherFs" class="flipswitch-cb" name="flipswitch" type="checkbox">
-        <label for="studentTeacherFs" class="flipswitch-label">
-            <div class="flipswitch-inner"></div>
-            <div class="flipswitch-switch"></div>
-        </label>
-      </div>`
-          : ""
-      }
-      ${
         // The exam module's home, for a session acting as a teacher, on an
         // instance where the module is active - the same rule its page applies,
         // so a teacher in student view gets no button to a page they would not
@@ -2997,16 +2996,29 @@ async function getTopBar(startPage, req, title = null) {
           : ""
       }
       ${
-        // A student's two pages of the module, on every page, so a class finds
-        // its open tests and its results without a link in the content. Shown
-        // to every session not acting as a teacher - a teacher in student view
-        // included, who finds both empty, as a student off every roster would.
+        // A student's page of the module, on every page, so a class finds its
+        // open tests and its results without a link in the content. Shown to
+        // every session not acting as a teacher - a teacher in student view
+        // included, who finds it empty, as a student off every roster would.
+        // Violet while a test is open for the session; the page script keeps
+        // the colour current while the page stays open.
         embedClientScript !== null && !(await hasSomeRoles(req, ["teacher"], true))
-          ? `<a class="sl-button sl-exam-button sl-exam-student-button" href="/exam/my/tests" title="My online tests" aria-label="My online tests" style="height: 32px; margin: 6px;">${lucideIcon(
-              "ClipboardList"
-            )}<span class="sl-exam-button-label">Tests</span></a><a class="sl-button sl-exam-button sl-exam-student-button" href="/exam/results" title="My results" aria-label="My results" style="height: 32px; margin: 6px;">${lucideIcon(
+          ? `<a id="slExamsButton" class="sl-button sl-exam-button sl-exam-student-button${
+              openTestsCheck?.(req) ? " sl-exam-open" : ""
+            }" href="/exam/my" title="My online tests and results" aria-label="Exams" style="height: 32px; margin: 6px;">${lucideIcon(
               "Award"
-            )}<span class="sl-exam-button-label">Results</span></a>`
+            )}<span class="sl-exam-button-label">Exams</span></a>`
+          : ""
+      }
+      ${
+        (await hasSomeRoles(req, ["teacher"]))
+          ? `<div class="flipswitch" style="display: inline-block; top: 8px;">
+        <input checked="" onchange="toggleViewTeacher()" id="studentTeacherFs" class="flipswitch-cb" name="flipswitch" type="checkbox">
+        <label for="studentTeacherFs" class="flipswitch-label">
+            <div class="flipswitch-inner"></div>
+            <div class="flipswitch-switch"></div>
+        </label>
+      </div>`
           : ""
       }
       <button class="sl-button" style="height: 32px; margin: 6px;" onclick="openAsPresentation(false)">${lucideIcon(

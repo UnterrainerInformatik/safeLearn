@@ -156,16 +156,16 @@ describe("the instance with the exam module", () => {
     }
   });
 
-  test("the top bar leads a teacher to the module and a student to their tests and results; module pages use the whole width", async () => {
+  test("the top bar leads a teacher to the module and a student to their Exams page; module pages use the whole width", async () => {
     const buttons = async (session) => {
       await render(session, plainPage);
       return session.page.evaluate(() => [...document.querySelectorAll("#topbar a.sl-exam-button")].map((a) => a.getAttribute("href")));
     };
     assert.deepEqual(await buttons(teacher), ["/exam/"]);
-    assert.deepEqual(await buttons(student), ["/exam/my/tests", "/exam/results"], "a student reaches both own pages from every page");
+    assert.deepEqual(await buttons(student), ["/exam/my"], "a student reaches their Exams page from every page");
     await setPreferences(teacher, { vt: 0 });
     try {
-      assert.deepEqual(await buttons(teacher), ["/exam/my/tests", "/exam/results"], "in student view, what a student gets, and not the module's home");
+      assert.deepEqual(await buttons(teacher), ["/exam/my"], "in student view, what a student gets, and not the module's home");
     } finally {
       await setPreferences(teacher, {});
     }
@@ -602,7 +602,7 @@ describe("the gradebook", () => {
     assert.equal(gb.semesters.ws.comment, "strong oral exam", "saving the visibility alone keeps override and comment");
     assert.equal(gb.semesters.ws.grade, 1);
 
-    await student.page.goto(`${applicationUrl}/exam/results`, { waitUntil: "domcontentloaded" });
+    await student.page.goto(`${applicationUrl}/exam/my`, { waitUntil: "domcontentloaded" });
     await student.page.waitForFunction(() => document.querySelector(".sl-exam-results"), { timeout: 20000 });
     const page = await student.page.evaluate(() => document.querySelector(".sl-exam-results").textContent);
     assert.match(page, /GB – 9XGB/);
@@ -1094,8 +1094,8 @@ describe("the module bar", () => {
   });
 
   test("no bar for a student, a teacher in student view, or anyone's own results", async () => {
-    assert.doesNotMatch(await html(student, "/exam/results"), /sl-exam-bar/);
-    assert.doesNotMatch(await html(teacher, "/exam/results"), /sl-exam-bar/, "a teacher's own results carry none either");
+    assert.doesNotMatch(await html(student, "/exam/my"), /sl-exam-bar/);
+    assert.doesNotMatch(await html(teacher, "/exam/my"), /sl-exam-bar/, "a teacher's own results carry none either");
     assert.doesNotMatch(await html(student, `/exam/courses/${course.id}/gradebook`), /sl-exam-bar/);
     for (const reference of ["/exam/pool", "/exam/tests", `/exam/tests?course=${course.id}`]) {
       assert.doesNotMatch(await html(student, reference), /sl-exam-bar/, `${reference} for a student`);
@@ -1487,8 +1487,9 @@ describe("online tests: writing", () => {
     };
     page.on("response", collect);
     try {
-      await page.goto(`${applicationUrl}/exam/my/tests`, { waitUntil: "domcontentloaded" });
+      await page.goto(`${applicationUrl}/exam/my`, { waitUntil: "domcontentloaded" });
       assert.equal(await page.$(".sl-exam-bar"), null, "no bar on the student's page");
+      assert.ok(await page.$("#slExamsButton.sl-exam-open"), "the Exams button is violet while a test is open");
       await page.waitForSelector(`.sl-exam-attempt-open[data-test="${test.id}"] button`, { timeout: 20000 });
       await page.click(`.sl-exam-attempt-open[data-test="${test.id}"] button`);
       await page.waitForSelector(".sl-exam-attempt-question", { timeout: 20000 });
@@ -1548,6 +1549,9 @@ describe("online tests: writing", () => {
     assert.deepEqual(Object.keys(again.json).sort(), ["grade", "questionCount", "score", "submitted"]);
     assert.equal((await fetchAs(student, `/exam/api/tests/${test.id}/attempt`, { method: "POST" })).status, 409, "no second attempt");
     assert.deepEqual((await fetchAs(student, "/exam/api/my/tests")).json.tests.filter((t) => t.testId === test.id), [], "the test is hidden");
+    const stillOpen = (await fetchAs(student, "/exam/api/my/tests")).json.tests.length > 0;
+    await student.page.goto(`${applicationUrl}${plainPage}`, { waitUntil: "domcontentloaded" });
+    assert.equal(!!(await student.page.$("#slExamsButton.sl-exam-open")), stillOpen, "and the button is violet only while another test is still open");
   });
 
   test("a teacher tries a test in a window of its own, and nothing is saved, submitted or graded", async () => {

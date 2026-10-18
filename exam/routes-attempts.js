@@ -136,18 +136,25 @@ export function registerAttemptRoutes(router, { db, handle, startPage }) {
     })
   );
 
-  // The student's own page of open tests, beside their results; no bar. The
-  // same element a page's bare `safelearn-test` block shows.
+  // The student's page of the module: the tests open for them right now above
+  // their results, one page behind the top bar's Exams button; no bar. The
+  // same elements a page's bare `safelearn-test` and `safelearn-results`
+  // blocks show.
   router.get(
-    "/my/tests",
+    "/my",
     (req, res, next) => (identityOf(req) ? next() : next("router")),
     handle(async (req, res) => {
-      const title = "My online tests";
+      const title = "Exams";
       const body = `
         <h1>${title}</h1>
-        <p><a href="/exam/results">My results</a></p>
-        ${embedPlaceholder("test", {})}`;
+        <h2>Open online tests</h2>
+        ${embedPlaceholder("test", {})}
+        <h2>My results</h2>
+        ${embedPlaceholder("results", { page: "1" })}`;
       res.send(await wrapInPage(body, startPage(), req, { title, wide: true }));
     })
   );
+
+  // The two pages it replaced, for links and bookmarks that still name them.
+  router.get("/my/tests", (req, res, next) => (identityOf(req) ? res.redirect("/exam/my") : next("router")));
 }

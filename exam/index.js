@@ -33,7 +33,7 @@ import { purgeUploads, QuestionProblemsError } from "./pool-edit.js";
 import { registerTestRoutes } from "./routes-tests.js";
 import { registerAttemptRoutes } from "./routes-attempts.js";
 import { registerLiveRoutes } from "./routes-live.js";
-import { scheduleSweep } from "./attempts.js";
+import { openTestsOf, scheduleSweep } from "./attempts.js";
 
 const clientDir = path.join(import.meta.dirname, "client");
 const clientScript = "/exam/assets/exam-client.js";
@@ -196,6 +196,12 @@ export async function init({ startPage }) {
     router: buildRouter(db, startPage),
     embedHandlers: buildEmbedHandlers(),
     clientScript,
+    // Whether the session has a test open for it right now, for the colour of
+    // the top bar's Exams button.
+    hasOpenTests: (req) => {
+      const username = identityOf(req);
+      return username !== null && openTestsOf(db, username).length > 0;
+    },
     dbPath,
   };
 }

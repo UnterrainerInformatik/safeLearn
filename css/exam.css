@@ -163,7 +163,22 @@ a.sl-exam-button,
   text-decoration: none;
 }
 
-/* A student's buttons name their page beside the icon while there is room. */
+/* A student's Exams button while a test is open for them: violet, in both
+   themes, so it is seen from any page without being looked for. */
+a.sl-exam-button.sl-exam-open,
+.dark-mode a.sl-exam-button.sl-exam-open:link,
+.dark-mode a.sl-exam-button.sl-exam-open:visited {
+  background-color: #7c3aed;
+  border-color: #6d28d9;
+  color: #ffffff;
+}
+a.sl-exam-button.sl-exam-open:hover,
+.dark-mode a.sl-exam-button.sl-exam-open:hover {
+  background-color: #6d28d9;
+  color: #ffffff;
+}
+
+/* A student's button names its page beside the icon while there is room. */
 .sl-exam-button-label {
   margin-left: 6px;
   margin-right: 4px;

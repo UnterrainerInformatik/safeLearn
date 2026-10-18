@@ -688,6 +688,32 @@ function initSearchField() {
 
 document.addEventListener("DOMContentLoaded", initSearchField);
 
+/**
+ * Keeps a student's Exams button violet exactly while a test is open for them:
+ * the page is drawn with the colour of its moment, and a test opened or closed
+ * while the page stays open is picked up by asking again every 30 s - only
+ * while the page is visible, and once more as it becomes visible.
+ */
+function initExamsButton() {
+  const button = document.getElementById("slExamsButton");
+  if (!button) return;
+  const refresh = async () => {
+    if (document.visibilityState !== "visible") return;
+    try {
+      const response = await fetch("/exam/api/my/tests", { credentials: "same-origin" });
+      if (!response.ok) return;
+      const { tests } = await response.json();
+      button.classList.toggle("sl-exam-open", tests.length > 0);
+    } catch (error) {
+      // Offline or the session ended: the colour stays as it was.
+    }
+  };
+  setInterval(refresh, 30000);
+  document.addEventListener("visibilitychange", refresh);
+}
+
+document.addEventListener("DOMContentLoaded", initExamsButton);
+
 let mainFontsArray = [];
 
 let navFontsArray = [];

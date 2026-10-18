@@ -26,7 +26,6 @@ import {
 import { getCourse, InvalidInputError, NotFoundError } from "./classes.js";
 import { semesters } from "./grading.js";
 import { identityOf, requireTeacher, teacherPage } from "./gate.js";
-import { embedPlaceholder, wrapInPage } from "../obsidian.js";
 import { teacherShell } from "./bar.js";
 
 /** A record id from the path or query; anything but a positive integer names nothing. */
@@ -139,17 +138,6 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
   page("/scale", "Grading scale", () => ({ kind: "scale", params: {}, context: {} }));
 
   // Everyone's own results, a teacher's included - a teacher is on no roster
-  // and finds none.
-  router.get(
-    "/results",
-    (req, res, next) => (identityOf(req) ? next() : next("router")),
-    handle(async (req, res) => {
-      const title = "My results";
-      const body = `
-        <h1>${title}</h1>
-        <p><a href="/exam/my/tests">My online tests</a></p>
-        ${embedPlaceholder("results", { page: "1" })}`;
-      res.send(await wrapInPage(body, startPage(), req, { title, wide: true }));
-    })
-  );
+  // and finds none - now on the student's Exams page (`/exam/my`).
+  router.get("/results", (req, res, next) => (identityOf(req) ? res.redirect("/exam/my") : next("router")));
 }

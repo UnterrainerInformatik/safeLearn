@@ -140,7 +140,7 @@ describe("exam-module elements without the module", () => {
 
   test("every path under /exam/ answers as a path with nothing behind it", async () => {
     const nothing = await answerTo(teacher, absent);
-    for (const reference of ["/exam/", "/exam/api/me", "/exam/assets/exam-client.js", "/exam/results", "/exam/api/my/results"]) {
+    for (const reference of ["/exam/", "/exam/api/me", "/exam/assets/exam-client.js", "/exam/my", "/exam/api/my/results"]) {
       assert.deepEqual(
         await answerTo(teacher, reference),
         nothing,
