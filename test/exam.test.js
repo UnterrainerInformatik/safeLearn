@@ -1800,30 +1800,98 @@ describe("online tests: writing", () => {
     assert.equal(await teacher.page.evaluate(() => Number(document.activeElement.dataset.col)), online, "and back, never into an online column");
   });
 
-  test("a second browser is refused and recorded until the teacher releases the attempt", async () => {
+  test("a second browser is refused and recorded until the teacher unbinds the attempt, and the live view names both browsers", async () => {
+    const firefox = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0";
+    const safari = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
+    const android = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.58 Mobile Safari/537.36";
+    const original = await student.page.browser().userAgent();
     const test = await openTest("Device");
-    const started = await fetchAs(student, `/exam/api/tests/${test.id}/attempt`, { method: "POST" });
-    assert.equal(started.status, 200);
-    const attemptId = started.json.attempt;
-    const cookieName = `sl-attempt-${attemptId}`;
-    const cookie = (await student.context.cookies()).find((c) => c.name === cookieName);
-    assert.ok(cookie, "the browser holds the attempt's cookie");
-    assert.deepEqual([cookie.httpOnly, cookie.sameSite, cookie.path], [true, "Strict", "/exam/"]);
+    const username = student.username.toLowerCase();
+    const row = `sl-exam-live tr[data-username="${username}"]`;
+    const dialogs = [];
+    const onDialog = (dialog) => {
+      dialogs.push(dialog.type());
+      dialog.dismiss().catch(() => {});
+    };
+    teacher.page.on("dialog", onDialog);
+    try {
+      await student.page.setUserAgent(firefox);
+      const started = await fetchAs(student, `/exam/api/tests/${test.id}/attempt`, { method: "POST" });
+      assert.equal(started.status, 200);
+      const attemptId = started.json.attempt;
+      const cookieName = `sl-attempt-${attemptId}`;
+      const cookie = (await student.context.cookies()).find((c) => c.name === cookieName);
+      assert.ok(cookie, "the browser holds the attempt's cookie");
+      assert.deepEqual([cookie.httpOnly, cookie.sameSite, cookie.path], [true, "Strict", "/exam/"]);
 
-    // Another browser of the same account: the session without the cookie.
-    await student.context.deleteCookie(cookie);
-    const refused = await fetchAs(student, `/exam/api/attempts/${attemptId}`);
-    assert.equal(refused.status, 409);
-    assert.match(refused.json.error, /another browser/);
-    assert.equal(database((db) => db.prepare("SELECT COUNT(*) AS n FROM refused_device WHERE attempt_id = ?").get(attemptId).n), 1, "the refusal is recorded");
+      await teacher.page.goto(`${applicationUrl}/exam/sittings/${test.sitting.id}/live`, { waitUntil: "domcontentloaded" });
+      await teacher.page.waitForFunction(() => document.querySelector("sl-exam-live")?.dataset.mode === "stream", { timeout: 20000 });
+      await teacher.page.waitForSelector(`${row} .sl-exam-live-bound .sl-exam-live-ua-short`, { timeout: 20000 });
+      assert.deepEqual(
+        await teacher.page.$eval(`${row} .sl-exam-live-ua-short`, (el) => [el.textContent, el.title]),
+        ["Firefox 131 · Windows", firefox],
+        "the short label, and the full string on mouse-over"
+      );
+      const toggle = `${row} .sl-exam-live-bound .sl-exam-live-ua-toggle`;
+      const fullShown = () => teacher.page.$eval(`${row} .sl-exam-live-bound .sl-exam-live-ua-full`, (el) => (el.hidden ? null : el.textContent));
+      assert.equal(await fullShown(), null);
+      await teacher.page.tap(toggle);
+      assert.equal(await fullShown(), firefox, "a tap shows the full string in place");
+      assert.equal(await teacher.page.$eval(toggle, (el) => el.getAttribute("aria-expanded")), "true");
+      await teacher.page.tap(toggle);
+      assert.equal(await fullShown(), null, "and another hides it");
 
-    assert.equal((await fetchAs(student, `/exam/api/attempts/${attemptId}/release`, { method: "POST" })).status, 403, "a student cannot release");
-    assert.equal((await fetchAs(teacher, `/exam/api/attempts/${attemptId}/release`, { method: "POST" })).status, 200);
-    const resumed = await fetchAs(student, `/exam/api/attempts/${attemptId}`);
-    assert.equal(resumed.status, 200, "the released attempt resumes on the new browser");
-    assert.ok(resumed.json.remainingMs > 0 && resumed.json.questions.length === 2);
-    assert.ok((await student.context.cookies()).some((c) => c.name === cookieName && c.value !== cookie.value), "bound to the new browser");
-    await fetchAs(student, `/exam/api/attempts/${attemptId}/submit`, { method: "POST" });
+      // Another browser of the same account: the session without the cookie.
+      await student.context.deleteCookie(cookie);
+      await student.page.setUserAgent(safari);
+      const refused = await fetchAs(student, `/exam/api/attempts/${attemptId}`);
+      assert.equal(refused.status, 409);
+      assert.match(refused.json.error, /another browser/);
+      assert.equal(database((db) => db.prepare("SELECT COUNT(*) AS n FROM refused_device WHERE attempt_id = ?").get(attemptId).n), 1, "the refusal is recorded");
+      await teacher.page.waitForFunction(
+        (selector) => document.querySelector(`${selector} .sl-exam-live-refused`)?.textContent.includes("Safari 18 · iOS"),
+        { timeout: 10000 },
+        row
+      );
+      assert.match(await teacher.page.$eval(`${row} .sl-exam-live-refused`, (el) => el.textContent), /^1 refused/, "the count, and the browser refused last");
+
+      assert.equal((await fetchAs(student, `/exam/api/attempts/${attemptId}/release`, { method: "POST" })).status, 403, "a student cannot unbind");
+      assert.equal(await teacher.page.$eval(`${row} .sl-exam-live-release`, (b) => b.textContent), "Unbind browser");
+      await teacher.page.click(`${row} .sl-exam-live-release`);
+      await teacher.page.waitForSelector(`${row} .sl-exam-live-bound[data-bound="waiting"]`, { timeout: 10000 });
+      assert.match(await teacher.page.$eval(`${row} .sl-exam-live-bound`, (el) => el.textContent), /waiting for the next browser/);
+      assert.deepEqual(dialogs, [], "a single click, no dialog");
+
+      await student.page.setUserAgent(android);
+      const resumed = await fetchAs(student, `/exam/api/attempts/${attemptId}`);
+      assert.equal(resumed.status, 200, "the unbound attempt resumes on the new browser");
+      assert.ok(resumed.json.remainingMs > 0 && resumed.json.questions.length === 2);
+      assert.ok((await student.context.cookies()).some((c) => c.name === cookieName && c.value !== cookie.value), "bound to the new browser");
+      await teacher.page.waitForFunction(
+        (selector) => document.querySelector(`${selector} .sl-exam-live-bound .sl-exam-live-ua-short`)?.textContent === "Chrome 130 · Android",
+        { timeout: 10000 },
+        row
+      );
+
+      // Nothing of it reaches the class screen or the student.
+      const agents = [firefox, safari, android];
+      const carries = (text) => agents.filter((agent) => text.includes(agent) || text.includes(agent.slice(0, 60)));
+      await teacher.page.goto(`${applicationUrl}/exam/sittings/${test.sitting.id}/screen`, { waitUntil: "domcontentloaded" });
+      await teacher.page.waitForSelector(".sl-exam-screen-clock", { timeout: 20000 });
+      const screen = await teacher.page.evaluate(() => document.body.innerText + document.body.innerHTML);
+      assert.deepEqual(carries(screen), [], "the class screen names no browser");
+      assert.doesNotMatch(screen, /Firefox 131|Safari 18|Chrome 130/);
+      assert.deepEqual(carries(JSON.stringify(resumed.json)), [], "the student's attempt names no browser");
+      await student.page.goto(`${applicationUrl}/exam/my`, { waitUntil: "domcontentloaded" });
+      await student.page.waitForSelector(".sl-exam-attempt-question", { timeout: 20000 });
+      const own = await student.page.evaluate(() => document.body.innerHTML);
+      assert.deepEqual(carries(own), [], "nor does the student's writing page");
+      assert.doesNotMatch(own, /Chrome 130 · Android|Bound to browser/);
+      await fetchAs(student, `/exam/api/attempts/${attemptId}/submit`, { method: "POST" });
+    } finally {
+      teacher.page.off("dialog", onDialog);
+      await student.page.setUserAgent(original);
+    }
   });
 
   test("a write after the deadline is refused, and the attempt is submitted with what was saved", async () => {
@@ -3136,6 +3204,8 @@ describe("online tests: an admin's corrections", () => {
     const username = student.username.toLowerCase();
     await page.goto(`${applicationUrl}/exam/sittings/${sitting.id}/live`, { waitUntil: "domcontentloaded" });
     const button = `sl-exam-live tr[data-username="${username}"] .sl-exam-live-delete`;
+    // The stream's first snapshot draws every row anew; armed before it, the button would be gone.
+    await page.waitForFunction(() => document.querySelector("sl-exam-live")?.dataset.mode === "stream", { timeout: 20000 });
     await page.waitForSelector(button, { timeout: 20000 });
     await page.click(button);
     await page.click(button);

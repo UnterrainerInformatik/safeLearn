@@ -13,7 +13,7 @@
  * memory and does not survive a restart.
  */
 
-import { checkDevice, nextOpenTestsChange, openTestsOf, ownAttempt, recordFocus, resultView, saveAnswer, startAttempt, submitAttempt, writingView } from "./attempts.js";
+import { checkDevice, keptUserAgent, nextOpenTestsChange, openTestsOf, ownAttempt, recordFocus, resultView, saveAnswer, startAttempt, submitAttempt, writingView } from "./attempts.js";
 import { NotFoundError } from "./classes.js";
 import { actsAsTeacher, identityOf, requireStudent, sessionNow } from "./gate.js";
 import { listenTests } from "./live.js";
@@ -76,7 +76,7 @@ export function registerAttemptRoutes(router, { db, handle, startPage }) {
    */
   const attemptOf = (req, res) => {
     const row = ownAttempt(db, idParam(req.params.id), identityOf(req));
-    const { bound } = checkDevice(db, row, readCookie(req, cookieName(row.id)));
+    const { bound } = checkDevice(db, row, readCookie(req, cookieName(row.id)), undefined, { userAgent: keptUserAgent(req.get("User-Agent")) });
     if (bound) bindBrowser(req, res, row.id, bound, row.deadline);
     return row;
   };
@@ -158,7 +158,7 @@ export function registerAttemptRoutes(router, { db, handle, startPage }) {
     "/api/tests/:id/attempt",
     requireStudent,
     handle(async (req, res) => {
-      const started = startAttempt(db, identityOf(req), idParam(req.params.id));
+      const started = startAttempt(db, identityOf(req), idParam(req.params.id), undefined, { userAgent: keptUserAgent(req.get("User-Agent")) });
       if (started.created) {
         const row = ownAttempt(db, started.attemptId, identityOf(req));
         bindBrowser(req, res, row.id, started.secret, row.deadline);

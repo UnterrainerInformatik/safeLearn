@@ -5,7 +5,9 @@
  *   until it opens or closes, and the server's time in Vienna; per participant not started, writing with the time left, or
  *   submitted; the share of their attempt they kept the page in focus as a
  *   bar, with how often and how long they left it; requests refused from
- *   another browser; and the button that releases an attempt to a new browser
+ *   another browser, with the browser refused last; the browser the attempt
+ *   is bound to; and the button that unbinds it, so the next browser that
+ *   opens the attempt is bound instead
  *
  * With `screen: 1` it is the view for the class, on its own page
  * (`/exam/sittings/<id>/screen`) for a projector: whether the sitting is
@@ -35,6 +37,33 @@ const statusLabels = {
   writing: () => t("exam.live.statusWriting"),
   submitted: () => t("exam.live.statusSubmitted"),
 };
+
+/**
+ * A browser as the participant snapshot names it (`boundBrowser`,
+ * `refusedBrowser`): the short label, with the full string on mouse-over and
+ * behind a small toggle that shows it in place, for touch and keyboard. No
+ * browser dialog. "Other browser" when the server recognized none.
+ */
+function browserCell(browser) {
+  const label = browser.short ?? (browser.os ? `${t("exam.live.otherBrowser")} · ${browser.os}` : t("exam.live.otherBrowser"));
+  const full = h("small", { class: "sl-exam-live-ua-full", hidden: true }, browser.full);
+  const toggle = h("button", {
+    type: "button",
+    class: "sl-exam-live-ua-toggle",
+    "aria-expanded": "false",
+    "aria-label": t("exam.live.showFullBrowser"),
+    title: t("exam.live.showFullBrowser"),
+  }, "i");
+  toggle.addEventListener("click", () => {
+    const open = full.hidden;
+    full.hidden = !open;
+    toggle.setAttribute("aria-expanded", String(open));
+    const text = open ? t("exam.live.hideFullBrowser") : t("exam.live.showFullBrowser");
+    toggle.setAttribute("aria-label", text);
+    toggle.title = text;
+  });
+  return h("span", { class: "sl-exam-live-ua" }, h("span", { class: "sl-exam-live-ua-short", title: browser.full }, label), " ", toggle, full);
+}
 
 /** "12:05" for a number of milliseconds. */
 function clock(ms) {
@@ -128,7 +157,7 @@ class LiveView extends ExamElement {
       h(
         "table",
         { class: "sl-exam-table sl-exam-live-table" },
-        h("thead", {}, h("tr", {}, h("th", {}, t("exam.live.columnStudent")), h("th", {}, t("exam.live.columnStatus")), h("th", {}, t("exam.live.columnTimeLeft")), h("th", {}, t("exam.live.columnInFocus")), h("th", {}, t("exam.live.columnOtherBrowsers")), h("th", {}, ""))),
+        h("thead", {}, h("tr", {}, h("th", {}, t("exam.live.columnStudent")), h("th", {}, t("exam.live.columnStatus")), h("th", {}, t("exam.live.columnTimeLeft")), h("th", {}, t("exam.live.columnInFocus")), h("th", {}, t("exam.live.columnBoundBrowser")), h("th", {}, t("exam.live.columnOtherBrowsers")), h("th", {}, ""))),
         this.body
       ),
       this.message
@@ -232,6 +261,7 @@ class LiveView extends ExamElement {
       h("td", { class: "sl-exam-live-status" }, statusLabels[participant.status]()),
       h("td", { class: "sl-exam-live-left" }, participant.remainingMs === null ? "" : clock(participant.remainingMs)),
       this.focusCell(participant),
+      this.boundCell(participant),
       h(
         "td",
         { class: "sl-exam-live-refused" },
@@ -239,12 +269,35 @@ class LiveView extends ExamElement {
           ? "–"
           : participant.bound === false
             ? t("exam.live.refusedReleased", { count: participant.refused })
-            : t("exam.live.refused", { count: participant.refused })
+            : t("exam.live.refused", { count: participant.refused }),
+        participant.refused > 0 && participant.refusedBrowser ? [h("br", {}), browserCell(participant.refusedBrowser)] : null
       ),
       h("td", {}, release, release && remove ? " " : null, remove)
     );
     this.rows.set(username, tr);
     return tr;
+  }
+
+  /**
+   * The browser an open attempt is bound to: its label, "unknown" for a
+   * binding from before browser strings were kept, and after an unbind that
+   * the attempt waits for the next browser - replaced by that browser's
+   * label as soon as the change arrives. Nothing once there is no open attempt.
+   */
+  boundCell(participant) {
+    const cell = h("td", { class: "sl-exam-live-bound" });
+    if (participant.status !== "writing") cell.append("–");
+    else if (participant.bound === false) {
+      cell.dataset.bound = "waiting";
+      cell.append(h("span", { class: "sl-exam-quiet" }, t("exam.live.boundWaiting")));
+    } else if (!participant.boundBrowser?.full) {
+      cell.dataset.bound = "unknown";
+      cell.append(h("span", { class: "sl-exam-quiet" }, t("exam.live.boundUnknown")));
+    } else {
+      cell.dataset.bound = "known";
+      cell.append(browserCell(participant.boundBrowser));
+    }
+    return cell;
   }
 
   /**
@@ -361,10 +414,14 @@ class LiveView extends ExamElement {
     source.addEventListener("open", () => {
       this.failures = 0;
       this.stopPolling();
+    });
+    // Streaming once the stream's first snapshot is drawn: it replaces every
+    // row the first load drew.
+    source.addEventListener("snapshot", (event) => {
+      this.draw(JSON.parse(event.data));
       this.dataset.mode = "stream";
       this.state.textContent = t("exam.live.streaming");
     });
-    source.addEventListener("snapshot", (event) => this.draw(JSON.parse(event.data)));
     source.addEventListener("change", (event) => {
       const change = JSON.parse(event.data);
       this.syncClock(change.serverTime);

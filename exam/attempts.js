@@ -34,6 +34,14 @@ function hashSecret(secret) {
   return crypto.createHash("sha256").update(String(secret)).digest("hex");
 }
 
+/** The longest browser string kept; an attacker-sized header must not bloat the database. */
+const userAgentLimit = 512;
+
+/** A request's browser string as it is kept: cut to the limit, null when there is none. */
+export function keptUserAgent(value) {
+  return typeof value === "string" && value.length > 0 ? value.slice(0, userAgentLimit) : null;
+}
+
 /** A new random secret or token: 128 bits, URL-safe. */
 function randomToken() {
   return crypto.randomBytes(16).toString("base64url");
@@ -242,7 +250,7 @@ export function nextOpenTestsChange(db, username, at = now()) {
  * for the browser's cookie. `UNIQUE (test_id, username)` makes a second start
  * of the same attempt impossible, across all sittings.
  */
-export function startAttempt(db, username, testId, at = now()) {
+export function startAttempt(db, username, testId, at = now(), { userAgent = null } = {}) {
   finalizeDue(db, at, username);
   const existing = db.prepare("SELECT * FROM attempt WHERE test_id = ? AND username = ?").get(testId, username);
   if (existing) {
@@ -263,10 +271,10 @@ export function startAttempt(db, username, testId, at = now()) {
     const deadline = earlier(new Date(Date.parse(at) + sitting.duration_s * 1000).toISOString(), sitting.closes_at);
     const { lastInsertRowid } = db
       .prepare(
-        `INSERT INTO attempt (test_id, sitting_id, username, started_at, deadline, question_count, device_hash)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO attempt (test_id, sitting_id, username, started_at, deadline, question_count, device_hash, device_user_agent)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(testId, sitting.id, username, at, deadline, questions.length, hashSecret(secret));
+      .run(testId, sitting.id, username, at, deadline, questions.length, hashSecret(secret), keptUserAgent(userAgent));
     const id = Number(lastInsertRowid);
     const placeQuestion = db.prepare("INSERT INTO attempt_question (attempt_id, position, test_question_id) VALUES (?, ?, ?)");
     const placeAnswer = db.prepare("INSERT INTO attempt_token (attempt_id, token, test_answer_id, position) VALUES (?, ?, ?, ?)");
@@ -302,19 +310,22 @@ export function ownAttempt(db, id, username, at = now()) {
  * it: `secret` is that browser's cookie. An attempt released by the teacher
  * binds to the first browser that asks, which then gets `bound` - a new
  * secret for its cookie. Any other browser is refused, and the refusal is
- * recorded for the live view.
+ * recorded for the live view. `userAgent` is the asking browser's string,
+ * kept with a new binding and with a refusal so the teacher sees which
+ * browser it was; it never decides anything.
  */
-export function checkDevice(db, row, secret, at = now()) {
+export function checkDevice(db, row, secret, at = now(), { userAgent = null } = {}) {
   if (row.submitted_at !== null) return {};
   if (row.device_hash === null) {
     const fresh = randomToken();
-    db.prepare("UPDATE attempt SET device_hash = ? WHERE id = ?").run(hashSecret(fresh), row.id);
+    db.prepare("UPDATE attempt SET device_hash = ?, device_user_agent = ? WHERE id = ?").run(hashSecret(fresh), keptUserAgent(userAgent), row.id);
+    notify(row.sitting_id, "bound", row.username);
     return { bound: fresh };
   }
   const given = typeof secret === "string" ? Buffer.from(hashSecret(secret)) : null;
   const kept = Buffer.from(row.device_hash);
   if (given && given.length === kept.length && crypto.timingSafeEqual(given, kept)) return {};
-  db.prepare("INSERT INTO refused_device (attempt_id, at) VALUES (?, ?)").run(row.id, at);
+  db.prepare("INSERT INTO refused_device (attempt_id, at, user_agent) VALUES (?, ?, ?)").run(row.id, at, keptUserAgent(userAgent));
   notify(row.sitting_id, "refused", row.username);
   throw new DeviceRefusedError();
 }
@@ -451,7 +462,7 @@ export function releaseAttempt(db, id) {
   const row = db.prepare("SELECT * FROM attempt WHERE id = ?").get(id);
   if (!row) throw new NotFoundError("exam.errors.attempts.noAttempt");
   if (row.submitted_at !== null) throw new ConflictError("exam.errors.attempts.submittedAlready");
-  db.prepare("UPDATE attempt SET device_hash = NULL WHERE id = ?").run(id);
+  db.prepare("UPDATE attempt SET device_hash = NULL, device_user_agent = NULL WHERE id = ?").run(id);
   notify(row.sitting_id, "released", row.username);
   return { released: id };
 }

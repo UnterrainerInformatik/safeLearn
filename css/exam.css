@@ -942,6 +942,54 @@ a.sl-exam-button.sl-exam-open:hover,
   font-variant-numeric: tabular-nums;
 }
 
+/* The browser an attempt is bound to, and the one refused last: the short
+   label on one line, a small round toggle beside it, and the full string
+   wrapping in place below when it is shown. */
+
+.sl-exam-live-ua-short {
+  white-space: nowrap;
+}
+
+.sl-exam-live-ua-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6em;
+  height: 1.6em;
+  padding: 0;
+  border: 1px solid rgba(27, 31, 35, 0.3);
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font: italic 700 0.8em/1 Georgia, serif;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.sl-exam-live-ua-toggle[aria-expanded="true"] {
+  background-color: rgba(27, 31, 35, 0.12);
+}
+
+#markdown-content.dark-mode .sl-exam-live-ua-toggle {
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+#markdown-content.dark-mode .sl-exam-live-ua-toggle[aria-expanded="true"] {
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+.sl-exam-live-ua-full {
+  display: block;
+  max-width: 28em;
+  margin-top: 0.2em;
+  overflow-wrap: anywhere;
+  opacity: 0.8;
+}
+
+.sl-exam-live-ua-full[hidden] {
+  display: none;
+}
+
 /* A question chosen for the test being assembled. Opaque, so the chosen
    row that sticks to the top of the list covers the rows it passes over. */
 

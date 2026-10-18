@@ -40,6 +40,8 @@ import {
   writingView,
 } from "../exam/attempts.js";
 import { studentMaySeeImage } from "../exam/pool.js";
+import { liveParticipant, liveSnapshot } from "../exam/live.js";
+import { browserLabel, parseUserAgent } from "../exam/user-agent.js";
 
 const temporaryDirs = [];
 const openDatabases = [];
@@ -162,6 +164,31 @@ describe("the migration to online tests", () => {
       if (semester === "ws") assert.deepEqual(record.proposal, { fraction: proposed.fraction, grade: proposed.grade }, `${key}: the proposal`);
     }
     assert.equal(studentRecord(db, 1, "ben").semesters.ws.override, 4, "the override is kept");
+  });
+});
+
+describe("the migration to bound browsers", () => {
+  test("a database at schema 8 with attempts and refusals migrates with every row unchanged and the browser strings NULL", () => {
+    const dbPath = temporaryPath();
+    const db = new DatabaseSync(dbPath);
+    openDatabases.push(db);
+    db.exec("PRAGMA foreign_keys = ON");
+    migrate(db, dbPath, readMigrations().slice(0, 8));
+    importPool(db, poolXml("de"), poolXml("en"));
+    const year = createYear(db, { name: "2026/27", startsOn: "2026-09-07", summerStartsOn: "2027-02-15", endsOn: "2027-07-02" });
+    const klass = createClass(db, year.id, { name: "4bhif", students: [{ username: "anna" }, { username: "ben" }] });
+    const course = createCourse(db, klass.id, { subject: "WMC", language: "en" });
+    const test = createTest(db, course.id, { name: "T", questionIds: listQuestions(db).map((q) => q.id) });
+    fakeAttempt(db, test.id, "anna");
+    db.prepare("UPDATE attempt SET device_hash = 'abc'").run();
+    const attempt = db.prepare("SELECT id FROM attempt").get().id;
+    db.prepare("INSERT INTO refused_device (attempt_id, at) VALUES (?, 'x'), (?, 'y')").run(attempt, attempt);
+    const rows = (table) => db.prepare(`SELECT * FROM ${table} ORDER BY id`).all().map((row) => ({ ...row }));
+    const before = { attempt: rows("attempt"), refused_device: rows("refused_device") };
+
+    assert.deepEqual(migrate(db, dbPath, readMigrations().slice(0, 9)), { from: 8, to: 9 });
+    assert.deepEqual(rows("attempt"), before.attempt.map((row) => ({ ...row, device_user_agent: null })));
+    assert.deepEqual(rows("refused_device"), before.refused_device.map((row) => ({ ...row, user_agent: null })));
   });
 });
 
@@ -492,6 +519,56 @@ describe("attempts", () => {
     assert.throws(() => checkDevice(db, attemptRow(db, attemptId), secret), DeviceRefusedError, "the old browser is the stranger now");
   });
 
+  test("the browser string is kept at start, cleared on release, replaced on re-binding, recorded with each refusal and cut at 512", () => {
+    const { db, test, sitting } = running();
+    const firefox = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0";
+    const android = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.58 Mobile Safari/537.36";
+    const safari = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
+    const { attemptId } = startAttempt(db, "anna", test.id, undefined, { userAgent: firefox });
+    assert.equal(attemptRow(db, attemptId).device_user_agent, firefox, "kept at start");
+    assert.deepEqual(liveParticipant(db, sitting.id, "anna").boundBrowser, { short: "Firefox 131 · Windows", os: "Windows", full: firefox });
+
+    assert.throws(() => checkDevice(db, attemptRow(db, attemptId), "stranger", undefined, { userAgent: safari }), DeviceRefusedError);
+    assert.deepEqual(
+      db.prepare("SELECT user_agent FROM refused_device WHERE attempt_id = ?").all(attemptId).map((row) => row.user_agent),
+      [safari],
+      "recorded with the refusal"
+    );
+    const refused = liveParticipant(db, sitting.id, "anna");
+    assert.deepEqual([refused.refused, refused.refusedBrowser.short], [1, "Safari 18 · iOS"]);
+
+    releaseAttempt(db, attemptId);
+    assert.deepEqual([attemptRow(db, attemptId).device_hash, attemptRow(db, attemptId).device_user_agent], [null, null], "cleared with the hash");
+    assert.equal(liveParticipant(db, sitting.id, "anna").boundBrowser, null, "an unbound attempt names no browser");
+
+    checkDevice(db, attemptRow(db, attemptId), undefined, undefined, { userAgent: android });
+    assert.equal(attemptRow(db, attemptId).device_user_agent, android, "replaced on re-binding");
+    assert.equal(liveSnapshot(db, sitting.id).participants.find((p) => p.username === "anna").boundBrowser.short, "Chrome 130 · Android");
+
+    const long = `Mozilla/5.0 ${"x".repeat(2000)}`;
+    const ben = startAttempt(db, "ben", test.id, undefined, { userAgent: long }).attemptId;
+    assert.equal(attemptRow(db, ben).device_user_agent, long.slice(0, 512), "cut at 512");
+    assert.throws(() => checkDevice(db, attemptRow(db, ben), "stranger", undefined, { userAgent: long }), DeviceRefusedError);
+    assert.equal(db.prepare("SELECT user_agent FROM refused_device WHERE attempt_id = ?").get(ben).user_agent.length, 512);
+
+    db.prepare("UPDATE attempt SET device_user_agent = NULL WHERE id = ?").run(ben);
+    assert.deepEqual(liveParticipant(db, sitting.id, "ben").boundBrowser, { short: null, os: null, full: null }, "bound before strings were kept: unknown");
+  });
+
+  test("no student response carries a browser string", () => {
+    const { db, test } = running();
+    const marker = "Mozilla/5.0 (X11; Linux x86_64) MarkerBrowser/1.0";
+    const { attemptId } = startAttempt(db, "anna", test.id, undefined, { userAgent: marker });
+    assert.throws(() => checkDevice(db, attemptRow(db, attemptId), "stranger", undefined, { userAgent: marker }), DeviceRefusedError);
+    const seen = [
+      openTestsOf(db, "anna"),
+      writingView(db, attemptRow(db, attemptId)),
+      submitAttempt(db, attemptRow(db, attemptId)),
+      ownAttempt(db, attemptId, "anna").submitted_at ? "submitted" : "open",
+    ];
+    assert.doesNotMatch(JSON.stringify(seen), /MarkerBrowser|user_?agent|boundBrowser|refusedBrowser/i);
+  });
+
   test("a student sees a test's image only while their attempt is open", () => {
     const { db, test, ids } = running();
     const image = db.prepare("SELECT id FROM image WHERE question_id = ?").get(ids[0]).id;
@@ -635,5 +712,33 @@ describe("online tests in the gradebook", () => {
 
     const own = resultsOf(db, "ben", { today: "2027-03-02" }).courses.find((c) => c.id === course.id);
     assert.deepEqual(own.entries.map((e) => [e.name, e.date, e.points, e.maxPoints, e.category]), [["HTTP caching", "2026-12-01", 3, 3, "onlineTests"]]);
+  });
+});
+
+describe("shortening a browser string", () => {
+  const cases = [
+    ["Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0", "Firefox 131 · Windows"],
+    ["Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0", "Firefox 132 · Linux"],
+    ["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36", "Chrome 130 · Windows"],
+    ["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.2849.68", "Edge 130 · Windows"],
+    ["Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15", "Safari 18 · macOS"],
+    ["Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1", "Safari 18 · iOS"],
+    ["Mozilla/5.0 (iPad; CPU OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1", "Safari 17 · iPadOS"],
+    ["Mozilla/5.0 (Linux; Android 14; SAMSUNG SM-S911B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/26.0 Chrome/122.0.0.0 Mobile Safari/537.36", "Samsung Internet 26 · Android"],
+    ["Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.58 Mobile Safari/537.36", "Chrome 130 · Android"],
+    ["Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36", "Chrome 130 · ChromeOS"],
+  ];
+  for (const [agent, short] of cases) {
+    test(short, () => {
+      assert.deepEqual(browserLabel(agent), { short, os: short.split(" · ")[1], full: agent });
+    });
+  }
+
+  test("an unknown string keeps its system and leaves the name to the view; an empty one names nothing", () => {
+    assert.deepEqual(browserLabel("Mozilla/5.0 (X11; Linux x86_64) SomeKiosk/3"), { short: null, os: "Linux", full: "Mozilla/5.0 (X11; Linux x86_64) SomeKiosk/3" });
+    assert.deepEqual(browserLabel("curl/8.4.0"), { short: null, os: null, full: "curl/8.4.0" });
+    assert.deepEqual(browserLabel(""), { short: null, os: null, full: null });
+    assert.deepEqual(browserLabel(null), { short: null, os: null, full: null });
+    assert.deepEqual(parseUserAgent(undefined), { browser: null, version: null, os: null });
   });
 });
