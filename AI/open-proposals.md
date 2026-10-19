@@ -66,6 +66,23 @@ safeLearn soll sich auch ohne Keycloak betreiben lassen: `AUTH=none`, kein Login
 ## Admin-Seiten für Lehrer im Menü (Change `teacher-admin-pages` angelegt 2026-10-18)
 Eigene Übersichtsseiten in der Web-App, die Lehrer über das Menü öffnen können. Erste zwei Seiten: (1) **unreferenzierte Anhänge**: die Liste, die `attachment-access-control` beim Start ins Log schreibt, als Seite, damit man die Dateien aus dem Repo werfen kann; (2) **Directory-/LDAP-Zustand**: das, was das Obsidian-Plugin heute auf seiner Übersichtsseite zeigt (Fetch-Status, Einträge, `builtAt`, übersprungene Datensätze, siehe `/api/admin/directory/status`). Hier im Browser mit Session-Auth statt Bearer-Token. Gibt es nur in Stufe 2 und 3, weil sie eine Lehrer-Identität brauchen.
 
+## Fragen: eine Änderung gilt überall, Löschen nimmt sie aus allen Tests (offen, 2026-10-19)
+**Gerald, 2026-10-19:**
+- Wird eine Frage in einem Test verwendet und danach geändert, soll sie einfach überall geändert sein.
+- Wird eine Frage gelöscht, soll sie auch aus allen Tests verschwinden. Das ist eine Admin-Funktion: eine Frage löschen, obwohl sie noch irgendwo verwendet wird.
+- Eine Frage, die in einem alten Test verwendet wurde, soll trotzdem löschbar sein.
+
+**Heute (Code-Stand 2026-10-19):**
+- Jeder Test hält einen **Snapshot** seiner Fragen (exam-online-tests D2). Speichern im Editor ändert nur den Pool. Ein noch nicht geschriebener Test übernimmt die Änderung nur, wenn eine Lehrkraft das ausdrücklich verlangt (`unwrittenTestsWith`/`updateTest`, exam-question-editor D8). Ein geschriebener Test bleibt immer beim alten Stand.
+- `deleteQuestion` (`exam/pool-edit.js`) weist jede Frage ab, die in `question_usage` oder `test_question` vorkommt (`usedCannotDelete`). Eine solche Frage lässt sich nur zurückziehen.
+- Für einen einzelnen geschriebenen Test gibt es schon die Admin-Korrektur `removeWrittenQuestion` (`exam/tests.js`): Sie nimmt die Frage aus Snapshot und Versuchen, bewertet neu, und das Notenbuch zieht nach. Die letzte Frage eines Tests kann sie nicht entfernen.
+
+**Vor einem Change zu klären:**
+- Gilt "überall geändert" auch für **geschriebene** Tests? Dann ändert sich nachträglich, was Schüler beantwortet haben. Ändert sich, welche Antwort richtig ist, müssen die abgegebenen Versuche neu bewertet werden, und das Notenbuch ändert sich mit. Alternativ übernehmen nur ungeschriebene Tests automatisch, und geschriebene bleiben beim Snapshot.
+- Löschen einer verwendeten Frage: Für geschriebene Tests `removeWrittenQuestion` pro Test (mit Neubewertung), für ungeschriebene einfach aus dem Snapshot. Was passiert mit einem Test, dessen **einzige** Frage sie ist: den Test mitlöschen, oder das Löschen ablehnen?
+- Was ist ein "alter Test": jeder geschriebene, oder nur einer aus einem abgeschlossenen Schuljahr (P5)? Für einen abgeschlossenen, schreibgeschützten Jahrgang widerspricht das Herausnehmen samt Neubewertung der Regel, dass ein abgeschlossenes Jahr nicht mehr geändert wird.
+- Wer darf das: nur Admins (wie `removeWrittenQuestion`), oder jede Lehrkraft für ungeschriebene Tests?
+
 # Prüfungsmodul-UI (Design-Review 2026-10-18)
 
 Als Changes angelegt am 2026-10-18: `exam-ui-consistency` (archiviert 2026-10-18), `exam-my-hide-results-while-writing` (archiviert 2026-10-19) und `exam-live-bound-browser`.
