@@ -83,6 +83,23 @@ Eigene Übersichtsseiten in der Web-App, die Lehrer über das Menü öffnen kön
 - Was ist ein "alter Test": jeder geschriebene, oder nur einer aus einem abgeschlossenen Schuljahr (P5)? Für einen abgeschlossenen, schreibgeschützten Jahrgang widerspricht das Herausnehmen samt Neubewertung der Regel, dass ein abgeschlossenes Jahr nicht mehr geändert wird.
 - Wer darf das: nur Admins (wie `removeWrittenQuestion`), oder jede Lehrkraft für ungeschriebene Tests?
 
+## Eine vorbeigegangene Sitzung neu ansetzen (offen, 2026-10-19)
+**Gerald, 2026-10-19:** Ein Test lief leer durch, niemand hat geschrieben. Gerald will ihn neu ansetzen: Falls es Ergebnisse gibt, werden sie gelöscht, und die Sitzung wird verschoben. Die alten Einstellungen bleiben dabei erhalten. Meistens ändert sich nur der Tag.
+
+**Heute (Code-Stand 2026-10-19):**
+- `updateSitting` und `deleteSitting` (`exam/tests.js`) verlangen `requireNotOpened`. Ändern und Löschen gibt es also nur, solange die Sitzung noch nicht offen war. Auf der Testseite stehen **Change** und **Delete** nur bei einer geplanten Sitzung. Eine vorbeigegangene Sitzung lässt sich weder verschieben noch löschen.
+- Ausweg heute: eine **Nachholsitzung** (`makeup`) anlegen. Die hat aber eine Teilnehmerliste und keine Dauer, die man frei wählen kann, und die alte Sitzung bleibt als "over" stehen.
+- Versuche löscht heute nur ein Admin, und zwar einzeln (**Delete attempt** in der Live-Ansicht) oder mit dem ganzen Test (**Delete this test**).
+- Die Spalte im Notenbuch ist auf die erste Sitzung datiert (`refreshUsageDate`). Mit dem Verschieben wandert dieses Datum mit, vielleicht sogar ins andere Semester.
+
+**Vorschlag:** Eine beendete Sitzung bietet **Neu ansetzen**. Das öffnet das bestehende Sitzungsformular, vorbelegt mit denselben Stunden, derselben Dauer und denselben Teilnehmern; als Tag ist der nächste Schultag vorgeschlagen. Beim Speichern werden in einer Transaktion die Versuche der Sitzung gelöscht und das Fenster verschoben. Mit Versuchen wird zweimal geklickt, und die Beschriftung nennt die Zahl ("Noch einmal klicken: 3 Versuche löschen und neu ansetzen").
+
+**Vor einem Change zu klären:**
+- Was heißt "alte Einträge beibehalten"? Meine Lesart: Teilnehmer, Dauer und Stunden der Sitzung bleiben gleich, nur das Datum ändert sich. Oder sollen die gelöschten Ergebnisse irgendwo nachvollziehbar bleiben, etwa im Backup oder in einem Protokoll?
+- Wer darf das? Ohne Versuche jede Lehrkraft. Mit Versuchen löscht es Geschriebenes, und das ist bisher Admin-Sache (`exam-record-maintenance`).
+- Was passiert mit den Nachholsitzungen eines Tests, wenn die erste Sitzung verschoben wird?
+- Wandert das Datum der Notenbuch-Spalte mit, auch über die Semestergrenze?
+
 # Prüfungsmodul-UI (Design-Review 2026-10-18)
 
 Als Changes angelegt am 2026-10-18: `exam-ui-consistency` (archiviert 2026-10-18), `exam-my-hide-results-while-writing` (archiviert 2026-10-19) und `exam-live-bound-browser`.
