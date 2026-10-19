@@ -3,16 +3,20 @@
  * (`question-editor`, exam-ui-consistency design D3-D7):
  *
  * - a click on a category chooses it for the list, and its fold (▸/▾) folds;
- * - each category offers 📝 (a new question in it), `+` (a subcategory, by a
- *   small name popup), ✎ (rename, also by a double click on its name) and,
- *   only while it holds nothing, a bin confirmed by a second click; the end of
- *   the tree offers a new top-level category;
+ * - each category has one ⋯ button at the start of its row, before its name,
+ *   so a long name or a deep path never pushes it out of the panel; it opens
+ *   the tree's one menu with New question, New subcategory and Rename (both by
+ *   a small name popup; Rename also by a double click on the name) and, only
+ *   while the category holds nothing, Delete confirmed by a second click; the
+ *   end of the tree offers a new top-level category;
  * - a category is dragged onto a category to become its last subcategory, or
  *   between two to stand there; a question row of the list is dragged onto a
  *   category to move it there (`tree-drag.js`);
  * - everything also by keyboard: an ARIA tree with one tab stop, ↑/↓ and ←/→,
  *   Ctrl+X and Ctrl+V for categories and questions, Alt+↑/↓ among siblings,
- *   F2, Insert or `+`, and Delete - listed under the tree.
+ *   F2, Insert or `+`, and Delete - listed under the tree; the menu itself
+ *   opens from its button by Enter, Space or ↓, moves by ↑/↓, and closes by
+ *   Escape (back to its button), Tab or a click outside.
  *
  * A refusal is shown at the category it concerns, in the tree drawn anew from
  * the server, so a refused move leaves the tree as it was.
@@ -43,6 +47,13 @@ export class CategoryTree {
     this.cut = null;
     this.notice = null;
     this.status = h("p", { class: "sl-exam-message sl-exam-tree-status", role: "status" });
+    // One menu for the whole tree, in the panel rather than in a row, so no row's overflow clips it.
+    this.menu = h("div", { class: "sl-exam-tree-menu", role: "menu", hidden: true, onKeydown: (event) => this.menuKey(event) });
+    this.menuAnchor = null;
+    this.menuDelete = null;
+    this.outside = (event) => {
+      if (!this.menu.contains(event.target) && !this.menuAnchor?.contains(event.target)) this.closeMenu();
+    };
     this.list = h("ul", { role: "tree", "aria-label": t("exam.pool.categories"), onKeydown: (event) => this.key(event) });
     this.element = h(
       "nav",
@@ -50,7 +61,8 @@ export class CategoryTree {
       this.list,
       h("p", { class: "sl-exam-tree-end" }, h("button", { type: "button", class: "sl-exam-action sl-exam-tree-add-top", onClick: (event) => this.openPopup(event.currentTarget.parentElement, null, null) }, t("exam.tree.newTopCategory"))),
       this.status,
-      h("p", { class: "sl-exam-quiet sl-exam-tree-keys" }, t("exam.tree.keys"))
+      h("p", { class: "sl-exam-quiet sl-exam-tree-keys" }, t("exam.tree.keys")),
+      this.menu
     );
     this.draw();
   }
@@ -68,6 +80,7 @@ export class CategoryTree {
   }
 
   draw() {
+    this.closeMenu();
     this.byId = this.index();
     if (this.focusedId !== null && this.focusedId !== "" && !this.byId.has(this.focusedId)) this.focusedId = null;
     const all = this.item({ id: "", nameDe: t("exam.pool.allCategories"), children: [] }, 1);
@@ -105,31 +118,21 @@ export class CategoryTree {
       { class: "sl-exam-tree-fold", "aria-hidden": "true", onClick: hasChildren ? () => this.fold(node.id, open) : null },
       hasChildren ? (open ? "▾" : "▸") : ""
     );
-    const tool = (label, title, onClick, className) =>
-      h("button", { type: "button", tabIndex: -1, class: `sl-exam-tree-tool ${className}`, title, "aria-label": title, onClick }, label);
-    const tools = root
+    const menuButton = root
       ? null
       : h(
-          "span",
-          { class: "sl-exam-tree-tools" },
-          h(
-            "a",
-            { class: "sl-exam-tree-tool sl-exam-tree-new-question", tabIndex: -1, href: this.newQuestionAddress(node.id), title: t("exam.tree.newQuestion", { name: node.nameDe }), "aria-label": t("exam.tree.newQuestion", { name: node.nameDe }) },
-            "📝"
-          ),
-          tool("+", t("exam.tree.addSubcategory", { name: node.nameDe }), (event) => this.openPopup(event.currentTarget.closest(".sl-exam-tree-row"), node, null), "sl-exam-tree-add"),
-          tool("✎", t("exam.tree.rename", { name: node.nameDe }), (event) => this.openPopup(event.currentTarget.closest(".sl-exam-tree-row"), null, node), "sl-exam-tree-rename"),
-          node.empty
-            ? confirmButton({
-                class: "sl-exam-tree-tool sl-exam-tree-delete",
-                tabIndex: -1,
-                title: t("exam.tree.delete", { name: node.nameDe }),
-                "aria-label": t("exam.tree.delete", { name: node.nameDe }),
-                label: "🗑",
-                armed: t("exam.tree.deleteArmed", { name: node.nameDe }),
-                action: () => this.act(node.id, () => examApi(`/pool/categories/${node.id}`, { method: "DELETE" })),
-              })
-            : null
+          "button",
+          {
+            type: "button",
+            tabIndex: -1,
+            class: "sl-exam-tree-tool sl-exam-tree-menu-button",
+            "aria-haspopup": "menu",
+            "aria-expanded": "false",
+            title: t("exam.tree.actions", { name: node.nameDe }),
+            "aria-label": t("exam.tree.actions", { name: node.nameDe }),
+            onClick: (event) => this.toggleMenu(event.currentTarget, node),
+          },
+          "⋯"
         );
     const notice = this.notice && this.notice.id === node.id ? h("p", { class: "sl-exam-tree-message sl-embed-error", role: "alert" }, this.notice.text) : null;
     return h(
@@ -147,7 +150,7 @@ export class CategoryTree {
           if (event.target === event.currentTarget) this.focusedId = root ? "" : node.id;
         },
       },
-      h("div", { class: "sl-exam-tree-row", "data-drop": root ? "top" : String(node.id) }, fold, name, tools),
+      h("div", { class: "sl-exam-tree-row", "data-drop": root ? "top" : String(node.id) }, fold, menuButton, name),
       notice,
       hasChildren && open ? h("ul", { role: "group" }, node.children.map((child) => this.item(child, level + 1))) : null
     );
@@ -175,6 +178,7 @@ export class CategoryTree {
     this.notice = null;
     this.status.textContent = "";
     this.closePopup();
+    this.closeMenu();
     let failed = null;
     try {
       await request();
@@ -233,7 +237,7 @@ export class CategoryTree {
     enableTreeDrag(root, {
       scroller: this.element,
       sourceOf: (element) => {
-        if (element.closest("input, a, .sl-exam-tree-tool, .sl-exam-tree-popup")) return null;
+        if (element.closest("input, a, .sl-exam-tree-tool, .sl-exam-tree-popup, .sl-exam-tree-menu")) return null;
         const name = element.closest(".sl-exam-pool-category");
         if (name && this.list.contains(name) && name.dataset.category !== "") {
           const id = Number(name.dataset.category);
@@ -260,6 +264,125 @@ export class CategoryTree {
         else this.placeCategory(item.id, target, zone);
       },
     });
+  }
+
+  // ------------------------------------------------------------- the menu
+
+  toggleMenu(anchor, node) {
+    if (this.menuAnchor === anchor) this.closeMenu({ back: true });
+    else this.openMenu(anchor, node);
+  }
+
+  /**
+   * The menu of category `node` under its ⋯ button `anchor` (D4), or above it
+   * when there is no room below. The focus goes to its first entry, or to
+   * Delete for `{ focus: "delete" }`.
+   */
+  openMenu(anchor, node, { focus = "first" } = {}) {
+    this.closeMenu();
+    const row = anchor.closest(".sl-exam-tree-row");
+    const entry = (className, label, then) =>
+      h(
+        "button",
+        {
+          type: "button",
+          role: "menuitem",
+          tabIndex: -1,
+          class: `sl-exam-tree-menu-item ${className}`,
+          onClick: () => {
+            this.closeMenu();
+            then();
+          },
+        },
+        label
+      );
+    this.menuDelete = node.empty
+      ? confirmButton({
+          class: "sl-exam-tree-menu-item sl-exam-tree-delete",
+          role: "menuitem",
+          tabIndex: -1,
+          label: t("exam.tree.menuDelete"),
+          armed: t("exam.tree.deleteArmed", { name: node.nameDe }),
+          action: () => this.act(node.id, () => examApi(`/pool/categories/${node.id}`, { method: "DELETE" })),
+        })
+      : null;
+    this.menu.replaceChildren(
+      h("a", { role: "menuitem", tabIndex: -1, class: "sl-exam-tree-menu-item sl-exam-tree-new-question", href: this.newQuestionAddress(node.id) }, t("exam.tree.menuNewQuestion")),
+      entry("sl-exam-tree-add", t("exam.tree.menuNewSubcategory"), () => this.openPopup(row, node, null)),
+      entry("sl-exam-tree-rename", t("exam.tree.menuRename"), () => this.openPopup(row, null, node)),
+      this.menuDelete
+    );
+    this.menu.setAttribute("aria-label", t("exam.tree.actions", { name: node.nameDe }));
+    this.menu.hidden = false;
+    this.menuAnchor = anchor;
+    anchor.setAttribute("aria-expanded", "true");
+    this.placeMenu(anchor);
+    document.addEventListener("pointerdown", this.outside, true);
+    (focus === "delete" && this.menuDelete ? this.menuDelete : this.menuItems()[0]).focus();
+  }
+
+  /** Below `anchor` in the panel's scrolled content, above it when the panel shows too little below, and never past its right edge. */
+  placeMenu(anchor) {
+    const panel = this.element;
+    const frame = panel.getBoundingClientRect();
+    const box = anchor.getBoundingClientRect();
+    const height = this.menu.offsetHeight;
+    const below = Math.min(frame.bottom, window.innerHeight) - box.bottom;
+    const above = box.top - Math.max(frame.top, 0);
+    const up = below < height && above > below;
+    const top = (up ? box.top - height : box.bottom) - frame.top + panel.scrollTop;
+    const left = box.left - frame.left + panel.scrollLeft;
+    this.menu.style.top = `${Math.max(0, top)}px`;
+    this.menu.style.left = `${Math.max(0, Math.min(left, panel.scrollLeft + panel.clientWidth - this.menu.offsetWidth))}px`;
+  }
+
+  menuItems() {
+    return [...this.menu.querySelectorAll("[role=menuitem]")];
+  }
+
+  /** Closes the menu, disarming its Delete; `{ back: true }` returns the focus to its button. */
+  closeMenu({ back = false } = {}) {
+    if (!this.menuAnchor) return;
+    const anchor = this.menuAnchor;
+    this.menuAnchor = null;
+    document.removeEventListener("pointerdown", this.outside, true);
+    this.menuDelete?.disarm();
+    this.menuDelete = null;
+    this.menu.hidden = true;
+    this.menu.replaceChildren();
+    anchor.setAttribute("aria-expanded", "false");
+    if (back) anchor.focus();
+  }
+
+  menuKey(event) {
+    const items = this.menuItems();
+    const at = items.indexOf(document.activeElement);
+    const done = () => {
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    switch (event.key) {
+      case "ArrowDown":
+        items[(at + 1) % items.length]?.focus();
+        return done();
+      case "ArrowUp":
+        items[(at - 1 + items.length) % items.length]?.focus();
+        return done();
+      case "Escape":
+        this.closeMenu({ back: true });
+        return done();
+      case "Tab": {
+        // Tab goes on from the category, as it would without the menu.
+        const li = this.menuAnchor?.closest("li[role=treeitem]");
+        this.closeMenu();
+        li?.focus();
+        return;
+      }
+      case "Delete":
+        if (this.menuDelete) this.menuDelete.click();
+        return done();
+      default:
+    }
   }
 
   // ------------------------------------------------------------ the popup
@@ -364,6 +487,11 @@ export class CategoryTree {
       event.preventDefault();
       event.stopPropagation();
     };
+    // Enter and Space on the ⋯ button click it; ↓ opens its menu, too.
+    if (entry && event.key === "ArrowDown" && event.target.classList.contains("sl-exam-tree-menu-button")) {
+      this.openMenu(event.target, entry.node);
+      return done();
+    }
     if (event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
       if (entry) this.act(id, () => examApi(`/pool/categories/${id}`, { method: "PUT", body: { move: event.key === "ArrowUp" ? "up" : "down" } }));
       return done();
@@ -398,14 +526,13 @@ export class CategoryTree {
         if (entry) this.openPopup(li.querySelector(".sl-exam-tree-row"), entry.node, null);
         else this.openPopup(this.element.querySelector(".sl-exam-tree-end"), null, null);
         return done();
-      case "Delete": {
-        const bin = li.querySelector(":scope > .sl-exam-tree-row .sl-exam-tree-delete");
-        if (bin) {
-          bin.click();
-          bin.focus();
+      case "Delete":
+        // Armed in the category's menu: a second Delete there deletes it.
+        if (entry?.node.empty) {
+          this.openMenu(li.querySelector(":scope > .sl-exam-tree-row .sl-exam-tree-menu-button"), entry.node, { focus: "delete" });
+          this.menuDelete.click();
         }
         return done();
-      }
       case "Escape":
         if (this.cut) {
           this.cut = null;

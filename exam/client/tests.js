@@ -57,15 +57,17 @@ export function displayWindow({ opensAt, closesAt }, periods = []) {
 }
 
 /**
- * The buttons of a sitting that has not ended: its live view, and the view for
- * the class, which opens in a window of its own for the projector.
+ * The buttons of a sitting: its live view, in every state, and while it has
+ * not ended the view for the class, which opens in a window of its own for the
+ * projector.
  */
 function sittingLinks(sitting) {
   return [
     " ",
     linkButton({ label: t("exam.tests.liveViewLink"), href: `/exam/sittings/${sitting.id}/live`, class: "sl-exam-live-link" }),
-    " ",
-    linkButton({ label: t("exam.tests.classScreenLink"), href: `/exam/sittings/${sitting.id}/screen`, newWindow: true, class: "sl-exam-screen-link" }),
+    sitting.state === "over"
+      ? null
+      : [" ", linkButton({ label: t("exam.tests.classScreenLink"), href: `/exam/sittings/${sitting.id}/screen`, newWindow: true, class: "sl-exam-screen-link" })],
   ];
 }
 
@@ -143,7 +145,7 @@ class TestList extends ExamElement {
                                 sitting.makeup ? `${t("exam.tests.makeupPrefix")} ` : null,
                                 displayWindow(sitting, this.periods),
                                 ` · ${stateLabels[sitting.state]()}`,
-                                sitting.state !== "over" ? sittingLinks(sitting) : null
+                                sittingLinks(sitting)
                               )
                             )
                           )
@@ -295,7 +297,7 @@ class TestDetail extends ExamElement {
                 sitting.makeup || sitting.participants.length < this.roster.length
                   ? sitting.participants.map((username) => names.get(username) ?? username).join(", ")
                   : t("exam.tests.wholeClassLower"),
-                sitting.state !== "over" ? sittingLinks(sitting) : null,
+                sittingLinks(sitting),
                 sitting.state === "scheduled"
                   ? [
                       " ",

@@ -579,6 +579,10 @@
       "extendMinutes": "Minutes to extend by",
       "hideFullBrowser": "Hide the full browser string",
       "inFocusShare": "In focus {percent}",
+      "leftPageMinutes_one": "left {count}×, {minutes} min {seconds} s",
+      "leftPageMinutes_other": "left {count}×, {minutes} min {seconds} s",
+      "leftPageWholeMinutes_one": "left {count}×, {minutes} min",
+      "leftPageWholeMinutes_other": "left {count}×, {minutes} min",
       "leftPage_one": "left {count}×, {seconds} s",
       "leftPage_other": "left {count}×, {seconds} s",
       "makeupSitting": "make-up sitting",
@@ -605,6 +609,7 @@
       "studentView": "The student view is active: the live view is not shown. Switch back to the teacher view and reload the page.",
       "summary": "{writing} writing · {submitted} submitted · {notStarted} not started",
       "time": "Time",
+      "waitingForConnection": "waiting for the connection…",
       "window": "Window"
     },
     "my": {
@@ -777,20 +782,21 @@
       "yearWithoutCourse": "{year} has no course yet."
     },
     "tree": {
-      "addSubcategory": "New subcategory under {name}",
+      "actions": "Actions for {name}",
       "cancel": "Cancel",
       "cut": "{name} is cut: paste it on a category with Ctrl+V, or press Escape.",
-      "delete": "Delete {name}",
       "deleteArmed": "Click again to delete {name}",
       "english": "English",
       "german": "German",
       "keys": "Drag a category onto a category or between two, and a question onto a category. Keys: ↑ ↓ move, ← → fold, Enter chooses, Ctrl+X cuts a category or question, Ctrl+V pastes it into the focused category, Alt+↑ ↓ reorders, F2 renames, Insert or + adds a subcategory, Delete deletes an empty one.",
+      "menuDelete": "Delete",
+      "menuNewQuestion": "New question",
+      "menuNewSubcategory": "New subcategory…",
+      "menuRename": "Rename…",
       "newAtTop": "New category at the top",
-      "newQuestion": "New question in {name}",
       "newTopCategory": "+ Category",
       "newUnder": "New category under {name}",
       "ok": "OK",
-      "rename": "Rename {name}",
       "renameTitle": "Rename {name}"
     }
   }

@@ -579,6 +579,10 @@
       "extendMinutes": "Minuten der Verlängerung",
       "hideFullBrowser": "Vollständige Browser-Kennung ausblenden",
       "inFocusShare": "Im Fokus {percent}",
+      "leftPageMinutes_one": "{count}× verlassen, {minutes} min {seconds} s",
+      "leftPageMinutes_other": "{count}× verlassen, {minutes} min {seconds} s",
+      "leftPageWholeMinutes_one": "{count}× verlassen, {minutes} min",
+      "leftPageWholeMinutes_other": "{count}× verlassen, {minutes} min",
       "leftPage_one": "{count}× verlassen, {seconds} s",
       "leftPage_other": "{count}× verlassen, {seconds} s",
       "makeupSitting": "Nachtermin",
@@ -605,6 +609,7 @@
       "studentView": "Die Schüleransicht ist aktiv: Die Live-Ansicht wird nicht gezeigt. Bitte zur Lehreransicht zurückwechseln und die Seite neu laden.",
       "summary": "{writing} schreiben · {submitted} abgegeben · {notStarted} nicht begonnen",
       "time": "Uhrzeit",
+      "waitingForConnection": "Warte auf die Verbindung …",
       "window": "Zeitfenster"
     },
     "my": {
@@ -777,20 +782,21 @@
       "yearWithoutCourse": "{year} hat noch keinen Kurs."
     },
     "tree": {
-      "addSubcategory": "Neue Unterkategorie unter {name}",
+      "actions": "Aktionen für {name}",
       "cancel": "Abbrechen",
       "cut": "{name} ist ausgeschnitten: mit Strg+V auf einer Kategorie einfügen, oder Escape.",
-      "delete": "{name} löschen",
       "deleteArmed": "Noch einmal klicken, um {name} zu löschen",
       "english": "Englisch",
       "german": "Deutsch",
       "keys": "Eine Kategorie auf eine Kategorie oder zwischen zwei ziehen, eine Frage auf eine Kategorie. Tasten: ↑ ↓ bewegen, ← → klappen, Enter wählt, Strg+X schneidet eine Kategorie oder Frage aus, Strg+V fügt sie in die markierte Kategorie ein, Alt+↑ ↓ ordnet um, F2 benennt um, Einfg oder + legt eine Unterkategorie an, Entf löscht eine leere.",
+      "menuDelete": "Löschen",
+      "menuNewQuestion": "Neue Frage",
+      "menuNewSubcategory": "Neue Unterkategorie …",
+      "menuRename": "Umbenennen …",
       "newAtTop": "Neue Kategorie ganz oben",
-      "newQuestion": "Neue Frage in {name}",
       "newTopCategory": "+ Kategorie",
       "newUnder": "Neue Kategorie unter {name}",
       "ok": "OK",
-      "rename": "{name} umbenennen",
       "renameTitle": "{name} umbenennen"
     }
   }

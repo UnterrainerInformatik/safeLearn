@@ -2216,7 +2216,7 @@ describe("online tests: the live view", () => {
     );
     await fetchAs(student, `/exam/api/tests/${written.id}/attempt`, { method: "POST" });
     await teacher.page.goto(`${applicationUrl}/exam/sittings/${sitting.id}/screen`, { waitUntil: "domcontentloaded" });
-    await teacher.page.waitForFunction(() => document.querySelector("sl-exam-live")?.dataset.mode === "stream", { timeout: 20000 });
+    await teacher.page.waitForFunction(() => document.querySelector("sl-exam-live")?.dataset.mode === "polling", { timeout: 20000 });
     const seen = await teacher.page.evaluate(() => ({
       navigation: Boolean(document.querySelector("#topbar, #sidebar, .sl-exam-bar")),
       list: Boolean(document.querySelector("sl-exam-live table, sl-exam-live button")),
@@ -2237,6 +2237,115 @@ describe("online tests: the live view", () => {
     assert.ok(!seen.text.toLowerCase().includes(student.username.toLowerCase()), "no name on the screen");
     assert.ok(seen.size >= 64, `the time left is large: ${seen.size}px`);
     assert.deepEqual(await fetchAs(student, `/exam/sittings/${sitting.id}/screen`), await fetchAs(student, absent), "a student finds no page");
+  });
+
+  test("the view for the class counts a start and a submission within seconds, without a reload", async () => {
+    await openLive("Live screen counts");
+    await teacher.page.goto(`${applicationUrl}/exam/sittings/${sitting.id}/screen`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(".sl-exam-screen .sl-exam-live-summary", { timeout: 20000 });
+    const summary = () => teacher.page.$eval(".sl-exam-live-summary", (p) => p.textContent);
+    const first = await summary();
+    assert.match(first, /^0 writing · 0 submitted · \d+ not started$/, first);
+    const roster = Number(first.match(/(\d+) not started/)[1]);
+    const counted = (text) =>
+      teacher.page.waitForFunction((text) => document.querySelector(".sl-exam-live-summary")?.textContent === text, { timeout: 10000, polling: 250 }, text);
+    const writing = (await fetchAs(student, `/exam/api/tests/${written.id}/attempt`, { method: "POST" })).json;
+    await counted(`1 writing · 0 submitted · ${roster - 1} not started`);
+    await fetchAs(student, `/exam/api/attempts/${writing.attempt}/submit`, { method: "POST" });
+    await counted(`0 writing · 1 submitted · ${roster - 1} not started`);
+  });
+
+  test("the view for the class waits through a failed snapshot, says so, draws the next one, and reloads after an ended session", async () => {
+    await openLive("Live screen waits");
+    await teacher.page.goto(`${applicationUrl}/exam/sittings/${sitting.id}/screen`, { waitUntil: "domcontentloaded" });
+    const polling = () => teacher.page.waitForFunction(() => document.querySelector("sl-exam-live")?.dataset.mode === "polling", { timeout: 20000, polling: 250 });
+    await polling();
+    /** The next snapshots fail as `failures` says: a status, or "network". */
+    const failNext = (failures) =>
+      teacher.page.evaluate((failures) => {
+        const real = window.fetch;
+        window.fetch = (input, init) => {
+          if (String(input).endsWith("/live") && failures.length > 0) {
+            const failure = failures.shift();
+            return failure === "network"
+              ? Promise.reject(new TypeError("Failed to fetch"))
+              : Promise.resolve(new Response(JSON.stringify({ error: "Failed" }), { status: Number(failure), headers: { "Content-Type": "application/json" } }));
+          }
+          return real(input, init);
+        };
+      }, failures);
+    await failNext(["500", "network"]);
+    await teacher.page.waitForFunction(() => document.querySelector("sl-exam-live")?.dataset.mode === "waiting", { timeout: 10000, polling: 250 });
+    assert.match(await teacher.page.$eval("sl-exam-live .sl-exam-live-state", (el) => el.textContent), /waiting for the connection/);
+    await fetchAs(student, `/exam/api/tests/${written.id}/attempt`, { method: "POST" });
+    await teacher.page.waitForFunction(() => /^1 writing/.test(document.querySelector(".sl-exam-live-summary")?.textContent), { timeout: 20000, polling: 250 });
+    assert.equal(await teacher.page.evaluate(() => document.querySelector("sl-exam-live").dataset.mode), "polling", "updating again");
+
+    // An ended session: the page goes through the login and comes back polling.
+    const reloaded = teacher.page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 });
+    await failNext(["401"]);
+    await reloaded;
+    await polling();
+    assert.equal(new URL(teacher.page.url()).pathname, `/exam/sittings/${sitting.id}/screen`);
+    assert.match(await teacher.page.$eval(".sl-exam-live-summary", (p) => p.textContent), /^1 writing/);
+  });
+
+  test("a sitting that is over links its live view, not the view for the class, and the live view shows each focus record", async () => {
+    await openLive("Live after");
+    const writing = (await fetchAs(student, `/exam/api/tests/${written.id}/attempt`, { method: "POST" })).json;
+    await fetchAs(student, `/exam/api/attempts/${writing.attempt}/submit`, { method: "POST" });
+    const setFocus = (count, ms) => {
+      const { db } = openDatabase(run.databasePath);
+      try {
+        db.prepare("UPDATE attempt SET focus_count = ?, focus_ms = ? WHERE id = ?").run(count, ms, writing.attempt);
+      } finally {
+        db.close();
+      }
+    };
+    setFocus(2, 252000);
+    const { db } = openDatabase(run.databasePath);
+    try {
+      db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ? WHERE id = ?").run(new Date(Date.now() - 3 * 3600000).toISOString(), new Date(Date.now() - 3600000).toISOString(), sitting.id);
+    } finally {
+      db.close();
+    }
+    const links = async (reference, item) => {
+      await teacher.page.goto(`${applicationUrl}${reference}`, { waitUntil: "domcontentloaded" });
+      await teacher.page.waitForSelector(item, { timeout: 20000 });
+      return teacher.page.$eval(item, (li) => ({
+        live: li.querySelector("a.sl-exam-live-link")?.getAttribute("href") ?? null,
+        screen: Boolean(li.querySelector(".sl-exam-screen-link")),
+      }));
+    };
+    const expected = { live: `/exam/sittings/${sitting.id}/live`, screen: false };
+    assert.deepEqual(await links(`/exam/tests?course=${course.id}`, `tr[data-test="${written.id}"] li[data-state="over"]`), expected, "the course's list");
+    assert.deepEqual(await links(`/exam/tests/${written.id}`, `li[data-sitting="${sitting.id}"][data-state="over"]`), expected, "the test's page");
+
+    await teacher.page.click(`li[data-sitting="${sitting.id}"] a.sl-exam-live-link`);
+    await teacher.page.waitForFunction((u) => document.querySelector(`sl-exam-live tr[data-username="${u}"]`)?.dataset.status === "submitted", { timeout: 20000 }, student.username.toLowerCase());
+    const seen = await teacher.page.evaluate((u) => ({
+      badge: document.querySelector(".sl-exam-live-badge").textContent,
+      focus: document.querySelector(`sl-exam-live tr[data-username="${u}"] .sl-exam-live-focus`).textContent.trim(),
+      others: [...document.querySelectorAll(`sl-exam-live tbody tr:not([data-username="${u}"])`)].map((row) => [row.dataset.status, row.querySelector(".sl-exam-live-focus").textContent]),
+      release: Boolean(document.querySelector(".sl-exam-live-release")),
+      window: [...document.querySelectorAll(".sl-exam-live-end, .sl-exam-live-extend")].some((button) => button.offsetParent !== null),
+      screen: document.querySelector(".sl-exam-live-screen-link")?.offsetParent != null,
+    }), student.username.toLowerCase());
+    assert.equal(seen.badge, "Over");
+    assert.match(seen.focus, /^\d+(\.\d)? % · left 2×, 4 min 12 s$/, seen.focus);
+    assert.ok(seen.others.every(([status, focus]) => status === "not started" && focus === "–"), JSON.stringify(seen.others));
+    assert.equal(seen.release, false, "no Unbind");
+    assert.equal(seen.window, false, "no End now and no Extend");
+    assert.equal(seen.screen, false, "no link to the view for the class");
+
+    const shownAs = async (count, ms) => {
+      setFocus(count, ms);
+      await teacher.page.evaluate(() => document.querySelector("sl-exam-live").poll());
+      return teacher.page.$eval(`sl-exam-live tr[data-username="${student.username.toLowerCase()}"] .sl-exam-live-left-page`, (el) => el.textContent);
+    };
+    assert.equal(await shownAs(2, 300000), " · left 2×, 5 min", "whole minutes");
+    assert.equal(await shownAs(3, 47000), " · left 3×, 47 s", "below a minute in seconds");
+    assert.equal(await shownAs(1, 60000), " · left 1×, 1 min");
   });
 
   test("a teacher who switches to the student view gets refused, and the view says why", async () => {
@@ -2777,6 +2886,24 @@ describe("the question editor", () => {
   /** Waits until the pool's tree, drawn anew, shows `selector`. */
   const shown = (selector) => teacher.page.waitForSelector(selector, { timeout: 10000 });
 
+  /** Opens the menu of category `id` by its ⋯ button. */
+  async function openMenu(id) {
+    // Right after the page is drawn the row may still be drawn anew; a click that found no box is tried again.
+    for (let tries = 1; ; tries += 1) {
+      try {
+        await teacher.page.click(`${rowOf(id)} .sl-exam-tree-menu-button`);
+        break;
+      } catch (error) {
+        if (tries === 3 || !/not clickable/.test(error.message)) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+    }
+    await teacher.page.waitForSelector(".sl-exam-tree-menu:not([hidden])", { timeout: 5000 });
+  }
+
+  /** `entry` in the open menu. */
+  const inMenu = (entry) => `.sl-exam-tree-menu:not([hidden]) ${entry}`;
+
   test("tree: a category dragged onto another becomes its last subcategory, and between two stands there - by mouse and by touch", async () => {
     const [a, b, c] = await threeCategories("Ziehen");
     const names = [a.nameDe, b.nameDe, c.nameDe];
@@ -2913,7 +3040,9 @@ describe("the question editor", () => {
     const [a, b] = await threeCategories("Popup");
     const page = teacher.page;
     await openPoolTree();
-    await page.click(`${rowOf(a.id)} .sl-exam-tree-add`);
+    await openMenu(a.id);
+    await page.click(inMenu(".sl-exam-tree-add"));
+    assert.equal(await page.$(".sl-exam-tree-menu:not([hidden])"), null, "the menu closes with its action");
     await page.waitForSelector(".sl-exam-tree-popup[role=dialog] input[name=nameDe]", { timeout: 5000 });
     await page.type(".sl-exam-tree-popup input[name=nameDe]", "Popup Neu");
     await page.type(".sl-exam-tree-popup input[name=nameEn]", "Popup new");
@@ -2939,7 +3068,8 @@ describe("the question editor", () => {
     await page.click(".sl-exam-tree-popup button[type=submit]");
     await page.waitForFunction((selector) => document.querySelector(selector)?.textContent.startsWith("Popup B2"), { timeout: 10000 }, nameOf(b.id));
 
-    await page.click(`${rowOf(b.id)} .sl-exam-tree-rename`);
+    await openMenu(b.id);
+    await page.click(inMenu(".sl-exam-tree-rename"));
     await page.waitForSelector(".sl-exam-tree-popup", { timeout: 5000 });
     await page.type(".sl-exam-tree-popup input[name=nameDe]", "nicht gespeichert");
     await page.click(".sl-exam-tree-popup .sl-exam-tree-cancel");
@@ -2947,19 +3077,83 @@ describe("the question editor", () => {
     assert.equal((await treeOf(["Popup B2"])).length, 1, "and nothing changed");
   });
 
-  test("tree: only an empty category offers its bin, and deleting it takes a second click", async () => {
+  test("tree: only an empty category's menu offers Delete, and deleting takes a second click", async () => {
     const [a, b] = await threeCategories("Leer");
     await fetchAs(teacher, "/exam/api/pool/categories", { method: "POST", body: { parentId: a.id, nameDe: "Leer Kind", nameEn: "Empty child" } });
     const page = teacher.page;
     await openPoolTree();
-    assert.equal(await page.$(`${rowOf(a.id)} .sl-exam-tree-delete`), null, "A holds a subcategory: no bin");
-    assert.equal(await page.$(`${rowOf(categoryId)} .sl-exam-tree-delete`), null, "a category with questions: no bin");
-    const bin = `${rowOf(b.id)} .sl-exam-tree-delete`;
+    const entries = () => page.$$eval(".sl-exam-tree-menu:not([hidden]) [role=menuitem]", (items) => items.map((item) => item.className.match(/sl-exam-tree-(new-question|add|rename|delete)/)[1]));
+    await openMenu(a.id);
+    assert.deepEqual(await entries(), ["new-question", "add", "rename"], "A holds a subcategory: no Delete");
+    await page.keyboard.press("Escape");
+    await openMenu(categoryId);
+    assert.deepEqual(await entries(), ["new-question", "add", "rename"], "a category with questions: no Delete");
+    await page.mouse.click(1, 1);
+    assert.equal(await page.$(".sl-exam-tree-menu:not([hidden])"), null, "a click outside closes the menu");
+    await openMenu(b.id);
+    assert.deepEqual(await entries(), ["new-question", "add", "rename", "delete"]);
+    const bin = inMenu(".sl-exam-tree-delete");
     await page.click(bin);
-    assert.match(await page.$eval(bin, (button) => button.textContent), /^Click again/);
+    assert.match(await page.$eval(bin, (button) => button.textContent), /^Click again/, "armed, and the menu stays open");
     await page.click(bin);
     await page.waitForFunction((selector) => !document.querySelector(selector), { timeout: 10000 }, rowOf(b.id));
     assert.deepEqual(await treeOf([b.nameDe]), [], "B is gone");
+  });
+
+  test("tree: a long name deep in the tree keeps its menu button in the panel, and the menu works by keyboard", async () => {
+    let parentId = null;
+    let deepest;
+    for (let level = 1; level <= 5; level += 1) {
+      const nameDe = level < 5 ? `Tief ${level}` : "Netzwerkprotokollzustandsautomatenübergangstabellenverwaltungsrichtlinienentwurf".padEnd(80, "s");
+      const created = await fetchAs(teacher, "/exam/api/pool/categories", { method: "POST", body: { parentId, nameDe, nameEn: `Deep ${level}` } });
+      assert.equal(created.status, 200, JSON.stringify(created.json));
+      parentId = created.json.id;
+      deepest = created.json;
+    }
+    assert.equal(deepest.nameDe.length, 80);
+    const page = teacher.page;
+    await openPoolTree();
+    await page.$eval(".sl-exam-pool-tree", (nav) => {
+      nav.style.width = "280px";
+      nav.style.maxWidth = "280px";
+    });
+    const button = `${rowOf(deepest.id)} .sl-exam-tree-menu-button`;
+    await page.$eval(button, (element) => element.scrollIntoView({ block: "center" }));
+    const placed = await page.$eval(button, (element) => {
+      const nav = element.closest(".sl-exam-pool-tree");
+      const panel = nav.getBoundingClientRect();
+      const box = element.getBoundingClientRect();
+      return { inside: box.left >= panel.left && box.right <= panel.left + nav.clientWidth && box.width > 0, label: element.getAttribute("aria-label") };
+    });
+    assert.ok(placed.inside, "the button is fully inside the 280 px panel");
+    assert.equal(placed.label, `Actions for ${deepest.nameDe}`);
+    await openMenu(deepest.id);
+    assert.equal(await page.$eval(button, (element) => element.getAttribute("aria-expanded")), "true");
+    await page.keyboard.press("Escape");
+
+    // By keyboard: Enter opens with the first entry focused, ↓ moves, Escape returns to the button, Tab closes.
+    await page.$eval(button, (element) => element.focus());
+    await page.keyboard.press("Enter");
+    await page.waitForSelector(".sl-exam-tree-menu:not([hidden])", { timeout: 5000 });
+    const focused = () => page.evaluate(() => document.activeElement?.className ?? "");
+    assert.match(await focused(), /sl-exam-tree-new-question/);
+    await page.keyboard.press("ArrowDown");
+    assert.match(await focused(), /sl-exam-tree-add/);
+    await page.keyboard.press("Escape");
+    assert.equal(await page.$(".sl-exam-tree-menu:not([hidden])"), null, "Escape closes the menu");
+    assert.match(await focused(), /sl-exam-tree-menu-button/, "and the focus is back on the button");
+    assert.equal(await page.$eval(button, (element) => element.getAttribute("aria-expanded")), "false");
+    await page.keyboard.press("ArrowDown");
+    await page.waitForSelector(".sl-exam-tree-menu:not([hidden])", { timeout: 5000 });
+    await page.keyboard.press("Tab");
+    assert.equal(await page.$(".sl-exam-tree-menu:not([hidden])"), null, "Tab closes it");
+
+    // The Delete key still arms and deletes an empty category, through its menu.
+    await page.$eval(`.sl-exam-pool-tree li[data-category="${deepest.id}"]`, (li) => li.focus());
+    await page.keyboard.press("Delete");
+    assert.match(await page.$eval(inMenu(".sl-exam-tree-delete"), (entry) => entry.textContent), /^Click again/);
+    await page.keyboard.press("Delete");
+    await page.waitForFunction((selector) => !document.querySelector(selector), { timeout: 10000 }, rowOf(deepest.id));
   });
 
   test("tree: the former categories page lands on the pool, keeping the course", async () => {
@@ -3738,7 +3932,7 @@ describe("the module's actions", () => {
           await teacher.page.click(".sl-exam-pool-questions tbody tr");
           await teacher.page.waitForSelector(".sl-exam-pool-edit", { timeout: 10000 });
         }
-        // The tree's icon tools (the bin among them) are compact on purpose, like ✎ and + beside them.
+        // The tree's ⋯ buttons are compact on purpose; the Delete in their menu is a menu entry, not a button.
         const buttons = await teacher.page.$$eval(".sl-exam :is(.sl-exam-action, .sl-exam-primary):not(.sl-exam-tree-tool)", (elements) =>
           elements
             .filter((element) => element.offsetParent !== null)

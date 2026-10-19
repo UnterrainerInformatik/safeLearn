@@ -18,8 +18,12 @@
  * Changes arrive over the sitting's own event stream as they happen. When the
  * stream fails three times in a row the view fetches snapshots every 5 s and
  * tries the stream again every minute, so it keeps updating without a reload.
- * A session that stops acting as a teacher - the student view switched on -
- * is told so, and the view stops.
+ * The view for the class holds no stream at all and only fetches snapshots
+ * every 5 s: it is idle by design, and a fetch that waits for a connection is
+ * only delayed, never stuck. A failed snapshot is said in its connection line,
+ * and the next one is fetched as usual; an ended session reloads the page into
+ * the login, as on every module page. A session that stops acting as a
+ * teacher - the student view switched on - is told so, and the view stops.
  */
 
 import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, linkButton, t } from "./frame.js";
@@ -71,10 +75,17 @@ function clock(ms) {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 }
 
-/** "left 3×, 47 s", or nothing for somebody who stayed. */
+/** "left 3×, 47 s", "left 2×, 4 min 12 s" from a minute on, or nothing for somebody who stayed. */
 function focusText(participant, awayMs) {
   if (participant.focusCount === 0) return t("exam.live.neverLeft");
-  const left = t("exam.live.leftPage", { count: participant.focusCount, seconds: Math.round(awayMs / 1000) });
+  const total = Math.round(awayMs / 1000);
+  const [count, minutes, seconds] = [participant.focusCount, Math.floor(total / 60), total % 60];
+  const left =
+    minutes === 0
+      ? t("exam.live.leftPage", { count, seconds })
+      : seconds === 0
+        ? t("exam.live.leftPageWholeMinutes", { count, minutes })
+        : t("exam.live.leftPageMinutes", { count, minutes, seconds });
   return participant.away ? `${left} ${t("exam.live.awayNow")}` : left;
 }
 
@@ -123,10 +134,12 @@ class LiveView extends ExamElement {
     this.serverClock = h("span", { class: "sl-exam-live-clock" });
     this.message = h("p", { class: "sl-exam-message", role: "status" });
     this.windowActions = this.windowControls(snapshot.sitting);
+    this.screenLink = linkButton({ label: t("exam.live.classScreenLink"), href: `/exam/sittings/${snapshot.sitting.id}/screen`, newWindow: true, class: "sl-exam-live-screen-link" });
     this.body = h("tbody", {});
     this.summary = h("p", { class: "sl-exam-live-summary" });
     this.draw(snapshot);
-    if (!this.streaming) this.connect();
+    if (this.params.screen === "1") this.pollOnly();
+    else if (!this.streaming) this.connect();
     if (!this.ticker) this.ticker = setInterval(() => this.tick(), 1000);
     const { sitting, test, course } = snapshot;
     const head = h(
@@ -140,7 +153,7 @@ class LiveView extends ExamElement {
         `${t("exam.live.serverTime")} `,
         this.serverClock
       ),
-      h("p", { class: "sl-exam-actions" }, linkButton({ label: t("exam.live.classScreenLink"), href: `/exam/sittings/${sitting.id}/screen`, newWindow: true, class: "sl-exam-live-screen-link" }), this.windowActions),
+      h("p", { class: "sl-exam-actions" }, this.screenLink, this.windowActions),
       this.windowMessage,
       h(
         "p",
@@ -217,6 +230,8 @@ class LiveView extends ExamElement {
           : t("exam.live.closedAgo", { time: span(now - closes) });
     this.serverClock.textContent = format.clock(new Date(now));
     if (this.windowActions) this.windowActions.hidden = state !== "open";
+    // The board has nothing to show once the sitting is over.
+    if (this.screenLink) this.screenLink.hidden = state === "over";
     const key = `${this.sitting.opensAt} ${this.sitting.closesAt}`;
     if (key !== this.windowKey) {
       this.windowKey = key;
@@ -487,11 +502,25 @@ class LiveView extends ExamElement {
     }, streamRetryMs);
   }
 
+  /** The view for the class: snapshots every 5 s, and never a stream. */
+  pollOnly() {
+    this.dataset.mode = "polling";
+    this.state.textContent = t("exam.live.polling");
+    if (!this.poller) this.poller = setInterval(() => this.poll(), pollMs);
+  }
+
   async poll() {
     try {
       this.draw(await examApi(`/sittings/${this.params.sitting}/live`));
+      if (this.dataset.mode === "waiting") this.pollOnly();
     } catch (error) {
       if (error instanceof ExamApiError && error.status === 403) this.studentView();
+      // Only the view for the class says so: the live view has its stream to
+      // fall back on. A 401 has already sent the page into the login.
+      else if (this.params.screen === "1" && error.status !== 401) {
+        this.dataset.mode = "waiting";
+        this.state.textContent = t("exam.live.waitingForConnection");
+      }
     }
   }
 

@@ -196,6 +196,15 @@
   gap: 6px;
 }
 
+/* Their display would otherwise outweigh `hidden`, as for the live view's
+   End now and Extend outside the window and its link to the view for the
+   class once the sitting is over. */
+.sl-exam-actions[hidden],
+.sl-exam-action[hidden],
+#markdown-content a.sl-exam-action[hidden] {
+  display: none;
+}
+
 .sl-exam-visually-hidden {
   position: absolute;
   width: 1px;
@@ -652,6 +661,7 @@ a.sl-exam-button.sl-exam-open:hover,
 }
 
 .sl-exam-pool-tree {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
@@ -1508,9 +1518,9 @@ sl-rich-text {
 }
 
 /* The pool's category tree (`pool-tree.js`): a row per category with its
-   fold, its name and its tools, the name popup below a row, and while
-   dragging a ghost at the pointer, a highlight for "into" and a line for
-   "before" or "after". */
+   fold, its ⋯ menu button and its name, the tree's one menu under a button,
+   the name popup below a row, and while dragging a ghost at the pointer, a
+   highlight for "into" and a line for "before" or "after". */
 
 .sl-exam-tree-row {
   display: flex;
@@ -1533,24 +1543,105 @@ sl-rich-text {
   overflow-wrap: anywhere;
 }
 
-.sl-exam-tree-tools {
-  display: inline-flex;
+/* Before the name, so a long name never pushes it out of the panel; quiet
+   until its row is hovered or focused. */
+.sl-exam-tree-menu-button {
   flex: 0 0 auto;
-  gap: 1px;
-  visibility: hidden;
+  opacity: 0.35;
 }
 
-.sl-exam-tree-row:hover .sl-exam-tree-tools,
-.sl-exam-tree-row:focus-within .sl-exam-tree-tools,
-li[role="treeitem"]:focus > .sl-exam-tree-row .sl-exam-tree-tools {
-  visibility: visible;
+.sl-exam-tree-row:hover .sl-exam-tree-menu-button,
+.sl-exam-tree-row:focus-within .sl-exam-tree-menu-button,
+li[role="treeitem"]:focus > .sl-exam-tree-row .sl-exam-tree-menu-button,
+.sl-exam-tree-menu-button[aria-expanded="true"] {
+  opacity: 1;
 }
 
-/* A touch screen has no hover: the tools stay visible there. */
+/* A touch screen has no hover: the button is always shown in full there. */
 @media (hover: none) {
-  .sl-exam-tree-tools {
-    visibility: visible;
+  .sl-exam-tree-menu-button {
+    opacity: 1;
   }
+}
+
+.sl-exam-tree-menu {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 11em;
+  padding: 4px;
+  border: 1px solid rgba(27, 31, 35, 0.25);
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(27, 31, 35, 0.15);
+}
+
+.sl-exam-tree-menu[hidden] {
+  display: none;
+}
+
+#markdown-content.dark-mode .sl-exam-tree-menu {
+  border-color: rgba(255, 255, 255, 0.3);
+  background: #1e1e1e;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+/* Its entries read as a list, Delete among them, not as buttons. */
+.sl-exam-tree-menu-item,
+.sl-exam-tree-menu .sl-exam-tree-menu-item.sl-exam-action,
+#markdown-content a.sl-exam-tree-menu-item {
+  display: block;
+  margin: 0;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 4px;
+  box-shadow: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: 1.4;
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sl-exam-tree-menu .sl-exam-tree-menu-item.sl-exam-action-danger {
+  color: #b42318;
+}
+
+#markdown-content.dark-mode .sl-exam-tree-menu .sl-exam-tree-menu-item.sl-exam-action {
+  border: none;
+  background: none;
+}
+
+#markdown-content.dark-mode .sl-exam-tree-menu .sl-exam-tree-menu-item.sl-exam-action-danger {
+  color: #ff7b72;
+}
+
+.sl-exam-tree-menu-item:hover,
+.sl-exam-tree-menu-item:focus,
+.sl-exam-tree-menu .sl-exam-tree-menu-item.sl-exam-action:hover,
+#markdown-content a.sl-exam-tree-menu-item:hover {
+  outline: none;
+  background: rgba(27, 31, 35, 0.08);
+  text-decoration: none;
+}
+
+#markdown-content.dark-mode .sl-exam-tree-menu-item:hover,
+#markdown-content.dark-mode .sl-exam-tree-menu-item:focus,
+#markdown-content.dark-mode .sl-exam-tree-menu .sl-exam-tree-menu-item.sl-exam-action:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.sl-exam-tree-menu-item:focus-visible {
+  outline: 2px solid #0969da;
+  outline-offset: -2px;
+}
+
+#markdown-content.dark-mode .sl-exam-tree-menu-item:focus-visible {
+  outline-color: #58a6ff;
 }
 
 .sl-exam-tree-tool,
@@ -1575,9 +1666,13 @@ li[role="treeitem"]:focus > .sl-exam-tree-row .sl-exam-tree-tools {
   border-color: rgba(255, 255, 255, 0.35);
 }
 
-/* The bin between its two clicks says so in full. */
-.sl-exam-tree-tool.sl-exam-action[data-armed="1"] {
+/* Delete between its two clicks says so in full, marked as every armed button is. */
+.sl-exam-tree-menu .sl-exam-tree-menu-item.sl-exam-action[data-armed="1"],
+#markdown-content.dark-mode .sl-exam-tree-menu .sl-exam-tree-menu-item.sl-exam-action[data-armed="1"] {
+  max-width: 18em;
   white-space: normal;
+  color: #fff;
+  background-color: #b42318;
 }
 
 li[role="treeitem"]:focus {
