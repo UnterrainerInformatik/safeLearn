@@ -22,7 +22,7 @@
 
 - [x] 4.1 Update `docs-exam-module.md` (class screen updates, live view after the sitting, category tree menu) and `AI/architecture.md` where it describes the class screen's stream
 - [x] 4.2 Run `npm test` in both module configurations and record the result here
-- [ ] 4.3 (Waiting for Gerald's go-ahead to deploy.) Deploy to secureLectures; on the board, check that the counts follow a real start and submit; check that the live view of an ended sitting can be opened from the test's page
+- [x] 4.3 (Waiting for Gerald's go-ahead to deploy.) Deploy to secureLectures; on the board, check that the counts follow a real start and submit; check that the live view of an ended sitting can be opened from the test's page
 
 ## Notes
 
