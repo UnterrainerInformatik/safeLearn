@@ -1,7 +1,7 @@
 /**
  * The module's bar (`exam-navigation`): school year, class, course and
- * gradebook, from left to right, on every teacher page of the module, and at
- * its right end the buttons to the question pool and the online tests.
+ * gradebook, from left to right, on every teacher page of the module, and
+ * after them the buttons to the question pool and the online tests.
  *
  * Built here, in the page shell, from the database - synchronously, like
  * every other module read - so it is part of the page as it is first shown and
@@ -53,20 +53,49 @@ export function barState(db, { yearId = null, classId = null, courseId = null, s
   };
 }
 
-function option(value, label, selected) {
-  return `<option value="${escapeHtml(value)}"${selected ? " selected" : ""}>${escapeHtml(label)}</option>`;
+function option(value, label, selected, keep = {}) {
+  const kept = Object.entries(keep)
+    .filter(([, id]) => id !== null && id !== undefined)
+    .map(([key, id]) => ` data-keep-${key}="${escapeHtml(id)}"`)
+    .join("");
+  return `<option value="${escapeHtml(value)}"${selected ? " selected" : ""}${kept}>${escapeHtml(label)}</option>`;
+}
+
+const sameName = (a, b) => a.localeCompare(b, undefined, { sensitivity: "accent" }) === 0;
+
+/**
+ * What a choice of class `classId` keeps of the positions to its right: the
+ * course of the same subject as the one chosen now, if the class has one.
+ */
+function keptInClass(db, classId, course) {
+  if (!course) return {};
+  const match = listCourses(db, classId).find((candidate) => sameName(candidate.subject, course.subject));
+  return { course: match?.id ?? null };
+}
+
+/**
+ * What a choice of year `yearId` keeps: the class of the same name as the one
+ * chosen now and, in it, the course of the same subject.
+ */
+function keptInYear(db, yearId, klass, course) {
+  if (!klass) return {};
+  const match = listClasses(db, yearId).find((candidate) => sameName(candidate.name, klass.name));
+  return match ? { class: match.id, ...keptInClass(db, match.id, course) } : {};
 }
 
 /**
  * One position: its name, a link to its overview while it has a value, the
  * choice, and - for the first three - a button to create a new one, offered
- * only once every position to its left has a value.
+ * only once every position to its left has a value. A year's or a class's
+ * choice names, as `data-keep-class` and `data-keep-course`, what of the
+ * positions to its right it keeps: the class of the same name, the course of
+ * the same subject.
  */
 function position({ name, label, href, choices, chosen, enabled, create }) {
   const title = href ? `<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>` : `<span>${escapeHtml(label)}</span>`;
   const select = `<select data-position="${name}" aria-label="${escapeHtml(label)}"${enabled ? "" : " disabled"}>
       ${option("", "–", chosen === null)}
-      ${choices.map((choice) => option(choice.value, choice.label, choice.value === chosen)).join("")}
+      ${choices.map((choice) => option(choice.value, choice.label, choice.value === chosen, choice.keep)).join("")}
     </select>`;
   const button =
     create === undefined
@@ -86,7 +115,7 @@ function contextQuery({ year, klass, course }) {
   return "";
 }
 
-/** A button at the bar's right end, marked while its page is the one shown. */
+/** A button after the bar's positions, marked while its page is the one shown. */
 function pageButton({ name, label, href, current }) {
   return `<a class="sl-exam-action sl-exam-bar-page" data-page="${name}" href="${escapeHtml(href)}"${current === name ? ' aria-current="page"' : ""}>${escapeHtml(label)}</a>`;
 }
@@ -102,12 +131,16 @@ export function renderBar(db, context, current, t) {
   const shownSemester = semester ?? (course ? semesterToday(course.year) : null);
   const query = contextQuery({ year, klass, course });
   return `<nav class="sl-exam-bar" aria-label="${escapeHtml(t("app.topbar.examModule"))}"
-      data-year="${year?.id ?? ""}" data-class="${klass?.id ?? ""}" data-course="${course?.id ?? ""}" data-current="${current ?? ""}">
+      data-year="${year?.id ?? ""}" data-class="${klass?.id ?? ""}" data-course="${course?.id ?? ""}" data-semester="${semester ?? ""}" data-current="${current ?? ""}">
     ${position({
       name: "year",
       label: t("exam.bar.year"),
       href: year ? `/exam/?year=${year.id}` : null,
-      choices: years.map((candidate) => ({ value: String(candidate.id), label: candidate.current ? t("exam.bar.currentYear", { name: candidate.name }) : candidate.name })),
+      choices: years.map((candidate) => ({
+        value: String(candidate.id),
+        label: candidate.current ? t("exam.bar.currentYear", { name: candidate.name }) : candidate.name,
+        keep: keptInYear(db, candidate.id, klass, course),
+      })),
       chosen: year ? String(year.id) : null,
       enabled: years.length > 0,
       create: { title: t("exam.bar.newYear"), offered: true },
@@ -116,7 +149,7 @@ export function renderBar(db, context, current, t) {
       name: "class",
       label: t("exam.bar.class"),
       href: klass ? `/exam/classes/${klass.id}` : null,
-      choices: classes.map((candidate) => ({ value: String(candidate.id), label: candidate.name.toUpperCase() })),
+      choices: classes.map((candidate) => ({ value: String(candidate.id), label: candidate.name.toUpperCase(), keep: keptInClass(db, candidate.id, course) })),
       chosen: klass ? String(klass.id) : null,
       enabled: year !== null,
       create: { title: t("exam.bar.newClass"), offered: year !== null },

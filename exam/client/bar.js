@@ -94,12 +94,30 @@ function publishBottom(bar) {
   if (typeof ResizeObserver === "function") new ResizeObserver(set).observe(bar);
 }
 
+/**
+ * Where a year's or a class's choice leads when it keeps the class of the same
+ * name or the course of the same subject (`data-keep-*` on the option, from
+ * `exam/bar.js`): the page shown now, for the kept record - a gradebook in the
+ * same semester. Null when it keeps nothing.
+ */
+function keptDestination(option, { semester, current }) {
+  const { keepClass, keepCourse } = option?.dataset ?? {};
+  if (keepCourse) {
+    if (current) return samePage(current, "course", keepCourse, {});
+    if (semester) return destination("gradebook", semester, { course: keepCourse });
+    return destination("course", keepCourse, {});
+  }
+  if (keepClass) return destination("class", keepClass, { current });
+  return null;
+}
+
 export function connectBar(bar) {
   publishBottom(bar);
   bar.addEventListener("change", (event) => {
     const select = event.target.closest("select[data-position]");
     if (!select) return;
-    const target = destination(select.dataset.position, select.value, bar.dataset);
+    const target =
+      keptDestination(select.selectedOptions[0], bar.dataset) ?? destination(select.dataset.position, select.value, bar.dataset);
     if (target) window.location.assign(target);
   });
   bar.addEventListener("click", (event) => {

@@ -568,6 +568,7 @@ a.sl-exam-button.sl-exam-open:hover,
    row of label, choice and button keeps one line. */
 .sl-exam-bar select {
   box-sizing: border-box;
+  min-width: 0;
   height: 32px;
   padding: 0 6px;
   border: 1px solid rgba(27, 31, 35, 0.15);
@@ -592,19 +593,22 @@ a.sl-exam-button.sl-exam-open:hover,
   color: rgba(230, 237, 243, 0.45);
 }
 
-/* A position's create button holds only its "+". */
+/* A position's create button holds only its "+"; on a narrow screen the
+   choice beside it gives way, not the button. */
 .sl-exam-bar .sl-exam-bar-create {
+  flex: none;
   margin: 0;
   padding: 5px 10px;
 }
 
-/* The buttons to the question pool, the online tests and the scale, at the
-   bar's right end; the one of the page shown is marked as a pressed button
-   is. */
+/* The buttons to the question pool, the online tests and the scale, a little
+   apart after the gradebook's choice rather than at the bar's right end, so
+   they do not move with the window's width; the one of the page shown is
+   marked as a pressed button is. */
 .sl-exam-bar-pages {
   display: flex;
   gap: 6px;
-  margin-left: auto;
+  margin-left: 14px;
 }
 
 #markdown-content a.sl-exam-bar-page {
@@ -630,15 +634,29 @@ a.sl-exam-button.sl-exam-open:hover,
 
   .sl-exam-bar-position {
     flex: 1 1 40%;
+    min-width: 0;
+  }
+
+  .sl-exam-bar-position select {
+    flex: 1 1 auto;
   }
 
   .sl-exam-bar-pages {
     flex: 1 1 100%;
+    flex-wrap: wrap;
     margin-left: 0;
   }
 
+  /* Narrower buttons, so the three pages and a choice beside its "+" fit
+     a phone's width. */
+  #markdown-content a.sl-exam-bar-page,
+  .sl-exam-bar .sl-exam-bar-create {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
   #markdown-content a.sl-exam-bar-page {
-    flex: 1 1 0;
+    flex: 1 1 auto;
   }
 }
 

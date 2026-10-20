@@ -1159,6 +1159,34 @@ describe("the module bar", () => {
     assert.match(await teacher.page.evaluate(() => document.querySelector("dialog[open] .sl-exam-message").textContent), /already/, "a duplicate is refused as before");
   });
 
+  test("choosing another class keeps the course of the same subject, the semester and the page", async () => {
+    const kept = await fetchAs(teacher, `/exam/api/classes/${spare.id}/courses`, { method: "POST", body: { subject: "gb" } });
+    assert.equal(kept.status, 200, JSON.stringify(kept.json));
+    const choose = (position, value) =>
+      Promise.all([
+        teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+        teacher.page.select(`.sl-exam-bar select[data-position="${position}"]`, value),
+      ]);
+
+    await open(`/exam/courses/${course.id}/gradebook?semester=ws`);
+    await choose("class", String(spare.id));
+    const url = new URL(teacher.page.url());
+    assert.equal(`${url.pathname}${url.search}`, `/exam/courses/${kept.json.id}/gradebook?semester=ws`, "the other class's GB, winter semester");
+    await teacher.page.waitForSelector(".sl-exam-bar");
+    const seen = await bar(teacher.page);
+    assert.deepEqual([seen.class.chosen, seen.course.chosen, seen.gradebook.chosen], ["9XBAR", "gb", "Winter semester"]);
+
+    await open(`/exam/pool?course=${kept.json.id}`);
+    await choose("class", String(gbClass.id));
+    assert.equal(`${new URL(teacher.page.url()).pathname}${new URL(teacher.page.url()).search}`, `/exam/pool?course=${course.id}`, "the pool stays open, for GB");
+
+    const created = await fetchAs(teacher, `/exam/api/years/${year.id}/classes`, { method: "POST", body: { name: "9XBAR2", students: [] } });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    await open(`/exam/courses/${kept.json.id}`);
+    await choose("class", String(created.json.id));
+    assert.equal(new URL(teacher.page.url()).pathname, `/exam/classes/${created.json.id}`, "a class without the subject opens as before");
+  });
+
   test("no bar for a student, a teacher in student view, or anyone's own results", async () => {
     assert.doesNotMatch(await html(student, "/exam/my"), /sl-exam-bar/);
     assert.doesNotMatch(await html(teacher, "/exam/my"), /sl-exam-bar/, "a teacher's own results carry none either");

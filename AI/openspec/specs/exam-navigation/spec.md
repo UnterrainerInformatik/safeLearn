@@ -21,11 +21,16 @@ Every page of the module that only a session acting as a teacher can open SHALL 
 
 ### Requirement: Each position is a choice that depends on the positions to its left
 
-Each position SHALL offer, as a dropdown, the choices that exist under what is chosen to its left: every school year; the classes of the chosen year; the courses of the chosen class; and the gradebook's semesters (winter semester, whole year) of the chosen course. Choosing a value SHALL open the page for that choice. Changing a position SHALL clear the positions to its right that no longer apply. A position with nothing chosen to its left SHALL be shown but offer no choice. The current school year SHALL be chosen when nothing else is.
+Each position SHALL offer, as a dropdown, the choices that exist under what is chosen to its left: every school year; the classes of the chosen year; the courses of the chosen class; and the gradebook's semesters (winter semester, whole year) of the chosen course. Choosing a value SHALL open the page for that choice. Changing the year or the class SHALL keep the positions to its right where the new choice has their match - the class of the same name, the course of the same subject (both regardless of capitalization) - and SHALL then open the page shown before for the kept record, a gradebook in the same semester; positions without a match SHALL be cleared. A position with nothing chosen to its left SHALL be shown but offer no choice. The current school year SHALL be chosen when nothing else is.
 
 #### Scenario: Switching class
 
-- **WHEN** a teacher looks at the gradebook of `WMC 4BHIF` and chooses `4AHIF` in the class position
+- **WHEN** a teacher looks at the winter-semester gradebook of `WMC 5CHIF` and chooses `4BHIF` in the class position, and `4BHIF` has a course `WMC`
+- **THEN** the winter-semester gradebook of `WMC 4BHIF` opens
+
+#### Scenario: Switching to a class without the subject
+
+- **WHEN** a teacher looks at the gradebook of `WMC 4BHIF` and chooses `4AHIF` in the class position, and `4AHIF` has no course `WMC`
 - **THEN** the class page of `4AHIF` opens, and the course position offers the courses of `4AHIF` with none chosen
 
 #### Scenario: Switching year
@@ -67,7 +72,7 @@ The bar SHALL be shown only to a session acting as a teacher, and every action i
 
 ### Requirement: The bar leads to the question pool and the online tests
 
-At its right end, apart from the four positions, the bar SHALL carry two buttons: **Question pool** and **Online tests**. Question pool SHALL open the question browser at any time. Online tests SHALL open the test list of the chosen course; with no course chosen it SHALL open the tests of every course of the chosen school year, grouped by class and course. Both SHALL keep what is chosen in the bar, so that the bar on the page they open shows the same school year, class and course. The button of the page being shown SHALL be marked as the current one.
+After the four positions, a little apart from them and not at the bar's right end, the bar SHALL carry two buttons: **Question pool** and **Online tests**. Question pool SHALL open the question browser at any time. Online tests SHALL open the test list of the chosen course; with no course chosen it SHALL open the tests of every course of the chosen school year, grouped by class and course. Both SHALL keep what is chosen in the bar, so that the bar on the page they open shows the same school year, class and course. The button of the page being shown SHALL be marked as the current one.
 
 #### Scenario: From the gradebook to the pool
 
@@ -110,7 +115,7 @@ While the module is active, the instance's top bar SHALL carry, on every page, o
 
 ### Requirement: The bar leads to the grading scale
 
-The module's bar SHALL carry, at its right end beside the question pool and the online tests, a button to the grading scale, marked while the scale is the page shown. The module's start page SHALL NOT carry a separate line of links to the module's pages.
+The module's bar SHALL carry, beside the question pool and the online tests, a button to the grading scale, marked while the scale is the page shown. The module's start page SHALL NOT carry a separate line of links to the module's pages.
 
 #### Scenario: From any page to the scale
 
