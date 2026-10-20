@@ -1068,9 +1068,9 @@ describe("the module bar", () => {
       "/exam/tests",
     ]) {
       const served = await html(teacher, reference);
-      assert.match(served, /class="sl-exam-bar-page" data-page="pool"/, `${reference} carries the pool's button`);
-      assert.match(served, /class="sl-exam-bar-page" data-page="tests"/, `${reference} carries the tests' button`);
-      assert.match(served, /class="sl-exam-bar-page" data-page="scale"/, `${reference} carries the scale's button`);
+      assert.match(served, /class="sl-exam-action sl-exam-bar-page" data-page="pool"/, `${reference} carries the pool's button`);
+      assert.match(served, /class="sl-exam-action sl-exam-bar-page" data-page="tests"/, `${reference} carries the tests' button`);
+      assert.match(served, /class="sl-exam-action sl-exam-bar-page" data-page="scale"/, `${reference} carries the scale's button`);
     }
 
     const buttons = () =>

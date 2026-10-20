@@ -71,7 +71,7 @@ function position({ name, label, href, choices, chosen, enabled, create }) {
   const button =
     create === undefined
       ? ""
-      : `<button type="button" data-create="${name}" title="${escapeHtml(create.title)}" aria-label="${escapeHtml(create.title)}"${create.offered ? "" : " disabled"}>+</button>`;
+      : `<button type="button" class="sl-exam-action sl-exam-bar-create" data-create="${name}" title="${escapeHtml(create.title)}" aria-label="${escapeHtml(create.title)}"${create.offered ? "" : " disabled"}>+</button>`;
   return `<span class="sl-exam-bar-position" data-position="${name}">${title} ${select} ${button}</span>`;
 }
 
@@ -88,7 +88,7 @@ function contextQuery({ year, klass, course }) {
 
 /** A button at the bar's right end, marked while its page is the one shown. */
 function pageButton({ name, label, href, current }) {
-  return `<a class="sl-exam-bar-page" data-page="${name}" href="${escapeHtml(href)}"${current === name ? ' aria-current="page"' : ""}>${escapeHtml(label)}</a>`;
+  return `<a class="sl-exam-action sl-exam-bar-page" data-page="${name}" href="${escapeHtml(href)}"${current === name ? ' aria-current="page"' : ""}>${escapeHtml(label)}</a>`;
 }
 
 /**
