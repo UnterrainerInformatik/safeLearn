@@ -15,14 +15,29 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, test } from "node:test";
 
-import { addToRoster, ConflictError, createClass, createCourse, createYear, InvalidInputError } from "../exam/classes.js";
+import { addToRoster, ConflictError, createClass, createCourse, createYear, ForbiddenError, InvalidInputError, removeFromRoster } from "../exam/classes.js";
 import { migrate, openDatabase, readMigrations } from "../exam/db.js";
 import { courseOverview, createColumn, readScale, resultsOf, setResult, studentRecord } from "../exam/gradebook.js";
 import { entryCategory, proposal } from "../exam/grading.js";
 import { getQuestion, listQuestions } from "../exam/pool.js";
 import { NotFoundError } from "../exam/classes.js";
 import { importPool } from "../exam/pool-import.js";
-import { createSitting, createTest, deleteSitting, deleteTest, endSitting, extendSitting, getTest, listTests, removeWrittenQuestion, updateSitting, updateTest, viennaDate } from "../exam/tests.js";
+import {
+  createSitting,
+  createTest,
+  deleteSitting,
+  deleteTest,
+  endSitting,
+  extendSitting,
+  getTest,
+  listTests,
+  removeWrittenQuestion,
+  rescheduleSitting,
+  testSittings,
+  updateSitting,
+  updateTest,
+  viennaDate,
+} from "../exam/tests.js";
 import {
   checkDevice,
   correctShares,
@@ -695,6 +710,101 @@ describe("an admin's corrections of a written test", () => {
     assert.equal(count(db, "SELECT COUNT(*) AS n FROM response WHERE attempt_id = ?", anna), 0);
     assert.equal(startAttempt(db, "anna", test.id).created, true, "a fresh attempt");
     assert.throws(() => deleteAttempt(db, anna), NotFoundError);
+  });
+});
+
+describe("rescheduling a sitting that is over", () => {
+  /** The `running` sitting, ended now, with Anna's attempt submitted and Ben's ended with it. */
+  function over({ attempts = true } = {}) {
+    const seed = running();
+    if (attempts) {
+      submitAttempt(seed.db, attemptRow(seed.db, startAttempt(seed.db, "anna", seed.test.id).attemptId));
+      startAttempt(seed.db, "ben", seed.test.id);
+    }
+    endSitting(seed.db, seed.sitting.id);
+    return seed;
+  }
+  const window = { opensAt: inMinutes(60), closesAt: inMinutes(120) };
+  const attempts = (db) => db.prepare("SELECT COUNT(*) AS n FROM attempt").get().n;
+
+  test("each sitting counts its own attempts, not the test's", () => {
+    const { db, test } = running({ participants: ["anna"] });
+    startAttempt(db, "anna", test.id);
+    createSitting(db, test.id, { opensAt: inMinutes(5), closesAt: inMinutes(60), participants: ["ben"] });
+    db.prepare("UPDATE sitting SET opens_at = ? WHERE makeup = 1").run(inMinutes(-1));
+    startAttempt(db, "ben", test.id);
+    startAttempt(db, "ben", test.id);
+    assert.deepEqual(testSittings(db, test.id).map((sitting) => [sitting.makeup, sitting.attempts]), [[false, 1], [true, 1]]);
+  });
+
+  test("a teacher sets one nobody wrote again, with its duration and participants", () => {
+    const { db, sitting } = over({ attempts: false });
+    const moved = rescheduleSitting(db, sitting.id, window);
+    assert.deepEqual(
+      [moved.state, moved.opensAt, moved.closesAt, moved.durationS, moved.participants, moved.deleted],
+      ["scheduled", window.opensAt, window.closesAt, 900, ["anna", "ben"], []]
+    );
+  });
+
+  test("an admin deletes its attempts with their answers; a teacher may not", () => {
+    const { db, sitting } = over();
+    assert.throws(() => rescheduleSitting(db, sitting.id, { ...window, attempts: 2 }), ForbiddenError);
+    assert.throws(() => rescheduleSitting(db, sitting.id, window, { admin: true }), /changed/, "the admin confirms none");
+    assert.throws(() => rescheduleSitting(db, sitting.id, { ...window, attempts: 3 }, { admin: true }), ConflictError);
+    assert.equal(attempts(db), 2, "nothing changed");
+    const moved = rescheduleSitting(db, sitting.id, { ...window, attempts: 2 }, { admin: true });
+    assert.deepEqual([moved.state, moved.attempts, moved.deleted], ["scheduled", 0, ["anna", "ben"]]);
+    for (const table of ["attempt", "attempt_question", "attempt_token", "response"]) {
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n, 0, `${table} is empty`);
+    }
+    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+  });
+
+  test("a scheduled or open sitting is refused, and so is a window that is not a sitting's", () => {
+    const { db, sitting } = running();
+    assert.throws(() => rescheduleSitting(db, sitting.id, window), /Only a sitting that is over/);
+    db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ? WHERE id = ?").run(inMinutes(60), inMinutes(120), sitting.id);
+    assert.throws(() => rescheduleSitting(db, sitting.id, window), ConflictError);
+    endSitting(db, sitting.id, inMinutes(90));
+    assert.throws(() => rescheduleSitting(db, sitting.id, { opensAt: inMinutes(200), closesAt: inMinutes(210) }, {}, inMinutes(100)), /shorter/, "the stored duration");
+    assert.throws(() => rescheduleSitting(db, sitting.id, { opensAt: inMinutes(-60), closesAt: inMinutes(-10) }, {}, inMinutes(100)), /future/);
+  });
+
+  test("those who left the roster are dropped, and nobody left is refused", () => {
+    const { db, klass, test, sitting } = over({ attempts: false });
+    removeFromRoster(db, klass.id, "ben");
+    assert.deepEqual(rescheduleSitting(db, sitting.id, window).participants, ["anna"]);
+    removeFromRoster(db, klass.id, "anna");
+    assert.throws(() => rescheduleSitting(db, sitting.id, { opensAt: inMinutes(300), closesAt: inMinutes(360) }, {}, inMinutes(200)), InvalidInputError);
+    assert.deepEqual(testSittings(db, test.id)[0].participants, ["anna"], "nothing changed");
+  });
+
+  test("a make-up keeps its window, participants and attempts", () => {
+    const { db, test, sitting } = over({ attempts: false });
+    const makeup = createSitting(db, test.id, { opensAt: inMinutes(5), closesAt: inMinutes(60), participants: ["anna"] });
+    db.prepare("UPDATE sitting SET opens_at = ? WHERE id = ?").run(inMinutes(-1), makeup.id);
+    startAttempt(db, "anna", test.id);
+    const before = testSittings(db, test.id).find((candidate) => candidate.id === makeup.id);
+    assert.equal(before.attempts, 1);
+    rescheduleSitting(db, sitting.id, { opensAt: inMinutes(200), closesAt: inMinutes(260) });
+    const after = testSittings(db, test.id);
+    assert.deepEqual(after.find((candidate) => candidate.id === makeup.id), before);
+    assert.equal(after.find((candidate) => candidate.id === sitting.id).makeup, false, "still the first sitting");
+  });
+
+  test("the usage date and the gradebook column move into the next semester", () => {
+    const { db, course, ids } = seeded();
+    const test = createTest(db, course.id, { name: "Moved", questionIds: [ids[0]] });
+    const id = Number(
+      db
+        .prepare("INSERT INTO sitting (test_id, opens_at, closes_at, duration_s, makeup, created_at) VALUES (?, '2027-01-12T08:00:00.000Z', '2027-01-12T09:00:00.000Z', 900, 0, 'x')")
+        .run(test.id).lastInsertRowid
+    );
+    for (const username of ["anna", "ben"]) db.prepare("INSERT INTO sitting_participant (sitting_id, username) VALUES (?, ?)").run(id, username);
+    rescheduleSitting(db, id, { opensAt: "2027-02-23T08:00:00.000Z", closesAt: "2027-02-23T09:00:00.000Z" }, {}, "2027-01-20T10:00:00.000Z");
+    assert.equal(getQuestion(db, ids[0]).usage[0].usedOn, "2027-02-23");
+    assert.deepEqual(courseOverview(db, course.id, "ws").columns, []);
+    assert.deepEqual(courseOverview(db, course.id, "ss").columns.map((column) => [column.name, column.date]), [["Moved", "2027-02-23"]]);
   });
 });
 

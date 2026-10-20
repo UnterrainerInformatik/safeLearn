@@ -23,7 +23,7 @@ import { databasePath, openDatabase } from "./db.js";
 import { SessionEndedError } from "../middlewares/keycloak-middleware.js";
 import { actsAsAdmin, actsAsTeacher, identityOf, teacherPage } from "./gate.js";
 import { teacherShell } from "./bar.js";
-import { ConflictError, InvalidInputError, listYears, NotFoundError, readableMessage } from "./classes.js";
+import { ConflictError, ForbiddenError, InvalidInputError, listYears, NotFoundError, readableMessage } from "./classes.js";
 import { registerClassRoutes } from "./routes-classes.js";
 import { registerGradebookRoutes } from "./routes-gradebook.js";
 import { registerPoolRoutes } from "./routes-pool.js";
@@ -73,6 +73,7 @@ function buildEmbedHandlers() {
 function refusalStatus(error) {
   if (error instanceof QuestionProblemsError) return 422;
   if (error instanceof InvalidInputError) return 400;
+  if (error instanceof ForbiddenError) return 403;
   if (error instanceof NotFoundError) return 404;
   if (error instanceof ConflictError) return 409;
   return null;

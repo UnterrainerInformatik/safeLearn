@@ -16,6 +16,7 @@
 import {
   ConflictError,
   currentYear,
+  ForbiddenError,
   getClass,
   getCourse,
   getYear,
@@ -258,9 +259,10 @@ export function sittingState(sitting, at = now()) {
   return "over";
 }
 
-/** A test's sittings in the order they open, each with its participants. */
+/** A test's sittings in the order they open, each with its participants and the number of its attempts. */
 export function testSittings(db, testId, at = now()) {
   const participants = db.prepare("SELECT username FROM sitting_participant WHERE sitting_id = ? ORDER BY username");
+  const attempts = db.prepare("SELECT COUNT(*) AS n FROM attempt WHERE sitting_id = ?");
   return db
     .prepare(
       `SELECT id, opens_at AS opensAt, closes_at AS closesAt, duration_s AS durationS, makeup
@@ -272,6 +274,7 @@ export function testSittings(db, testId, at = now()) {
       makeup: sitting.makeup === 1,
       state: sittingState({ opensAt: sitting.opensAt, closesAt: sitting.closesAt }, at),
       participants: participants.all(sitting.id).map((row) => row.username),
+      attempts: attempts.get(sitting.id).n,
     }));
 }
 
@@ -544,6 +547,42 @@ export function extendSitting(db, id, { minutes } = {}, at = now()) {
     }
   });
   return getSitting(db, id);
+}
+
+/**
+ * Sets a sitting that is over again, in the window `opensAt`-`closesAt`, with
+ * its duration and its participants - less those who have left the roster
+ * since. Every attempt of the sitting goes with its answers; only an `admin`
+ * may delete any, and only as many as `attempts` confirms. Make-ups stay as
+ * they are; the usage date and the gradebook column follow the earliest
+ * sitting.
+ */
+export function rescheduleSitting(db, id, { opensAt, closesAt, attempts } = {}, { admin = false } = {}, at = now()) {
+  const row = sittingRow(db, id);
+  if (sittingState({ opensAt: row.opens_at, closesAt: row.closes_at }, at) !== "over") throw new ConflictError("exam.errors.tests.sittingNotOver");
+  const written = db.prepare("SELECT COUNT(*) AS n FROM attempt WHERE sitting_id = ?").get(id).n;
+  if (written > 0 && !admin) throw new ForbiddenError("Forbidden");
+  if (written !== (attempts ?? 0)) throw new ConflictError("exam.errors.tests.attemptsChanged");
+  const times = sittingTimes({ opensAt, closesAt, durationMinutes: row.duration_s / 60 }, at);
+  const course = getCourse(db, testRow(db, row.test_id).course_id);
+  const roster = new Set(rosterOf(db, course.classId).filter((entry) => entry.leftAt === null).map((entry) => entry.username));
+  const usernames = db
+    .prepare("SELECT username FROM sitting_participant WHERE sitting_id = ? ORDER BY username")
+    .all(id)
+    .map((participant) => participant.username)
+    .filter((username) => roster.has(username));
+  if (usernames.length === 0) throw new InvalidInputError("exam.errors.tests.emptyRoster");
+  return inTransaction(db, () => {
+    const deleted = db.prepare("SELECT username FROM attempt WHERE sitting_id = ? ORDER BY username").all(id).map((attempt) => attempt.username);
+    // An attempt's questions, tokens, answers and refused browsers go with it.
+    db.prepare("DELETE FROM attempt WHERE sitting_id = ?").run(id);
+    db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ? WHERE id = ?").run(times.opens, times.closes, id);
+    db.prepare("DELETE FROM sitting_participant WHERE sitting_id = ?").run(id);
+    const take = db.prepare("INSERT INTO sitting_participant (sitting_id, username) VALUES (?, ?)");
+    for (const username of usernames) take.run(id, username);
+    refreshUsageDate(db, row.test_id);
+    return { ...getSitting(db, id), deleted };
+  });
 }
 
 /** Deletes a sitting that has not opened yet. A first sitting goes only after its make-ups. */

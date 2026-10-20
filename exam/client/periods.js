@@ -59,6 +59,13 @@ export function nextDate(date) {
   return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
 }
 
+/** The first Monday to Friday after `date`; holidays are not known here. */
+export function nextWeekday(date) {
+  let next = nextDate(date);
+  while ([0, 6].includes(new Date(`${next}T00:00:00Z`).getUTCDay())) next = nextDate(next);
+  return next;
+}
+
 /**
  * The periods `text` declares, in ascending number. Empty or unset text
  * declares none. Throws an `Error` naming the offending entry for anything

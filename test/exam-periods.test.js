@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { defaultPeriods, matchWindow, parsePeriods, periodTimes, viennaInstant, windowFor } from "../exam/client/periods.js";
+import { defaultPeriods, matchWindow, nextWeekday, parsePeriods, periodTimes, viennaInstant, windowFor } from "../exam/client/periods.js";
 
 /** The school's list, from Gerald on 2026-10-18. */
 const schoolList = [
@@ -173,5 +173,16 @@ describe("what the form proposes", () => {
   test("on the DST changeover days", () => {
     assert.deepEqual(defaultPeriods(periods, at("2026-10-25", "10:20")), { date: "2026-10-25", from: 3, to: 3 });
     assert.deepEqual(defaultPeriods(periods, at("2027-03-28", "10:20")), { date: "2027-03-28", from: 3, to: 3 });
+  });
+});
+
+describe("the next weekday", () => {
+  test("after a Tuesday comes Wednesday; after a Friday, a Saturday or a Sunday, Monday", () => {
+    assert.equal(nextWeekday("2026-10-20"), "2026-10-21");
+    for (const date of ["2026-10-23", "2026-10-24", "2026-10-25"]) assert.equal(nextWeekday(date), "2026-10-26", date);
+  });
+
+  test("across the end of a month and a year", () => {
+    assert.equal(nextWeekday("2027-12-31"), "2028-01-03");
   });
 });

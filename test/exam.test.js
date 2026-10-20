@@ -3828,6 +3828,107 @@ describe("online tests: an admin's corrections", () => {
     }
   });
 
+  /** The result of the shared student in the test's gradebook column, in either semester, or undefined. */
+  async function gradebookResult(testId) {
+    const username = student.username.toLowerCase();
+    for (const semester of ["ws", "ss"]) {
+      const sheet = (await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=${semester}`)).json;
+      const result = sheet.students.find((row) => row.username === username)?.results[`test-${testId}`];
+      if (result !== undefined) return result;
+    }
+    return undefined;
+  }
+
+  test("rescheduling a sitting with attempts is an admin's, and its live view hears the window and the deleted attempt", async () => {
+    const { sitting } = await writtenTest("Admin: reschedule over the API");
+    assert.equal((await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/end`, { method: "POST" })).status, 200);
+    const body = { opensAt: new Date(Date.now() + 24 * 3600000).toISOString(), closesAt: new Date(Date.now() + 25 * 3600000).toISOString(), attempts: 1 };
+    assert.equal((await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/reschedule`, { method: "POST", body })).status, 403);
+    assert.equal((await fetchAs(admin, `/exam/api/sittings/${sitting.id}/reschedule`, { method: "POST", body: { ...body, attempts: 2 } })).status, 409);
+    // The admin's page listens to the sitting's stream as the live view does.
+    await admin.page.goto(`${applicationUrl}/exam/tests`, { waitUntil: "domcontentloaded" });
+    await admin.page.evaluate((address) => {
+      window.heard = [];
+      window.opened = new Promise((resolve) => {
+        const source = new EventSource(address);
+        source.addEventListener("snapshot", resolve);
+        source.addEventListener("change", (event) => window.heard.push(JSON.parse(event.data).type));
+      });
+    }, `/exam/api/sittings/${sitting.id}/events`);
+    await admin.page.evaluate(() => window.opened);
+    const moved = await fetchAs(admin, `/exam/api/sittings/${sitting.id}/reschedule`, { method: "POST", body });
+    assert.equal(moved.status, 200, JSON.stringify(moved.json));
+    assert.deepEqual([moved.json.state, moved.json.attempts], ["scheduled", 0]);
+    await admin.page.waitForFunction(() => window.heard.includes("window") && window.heard.includes("deleted"), { timeout: 10000 });
+  });
+
+  test("a teacher reschedules a sitting nobody wrote in the page, and it is scheduled on the next weekday", async () => {
+    const test = (await fetchAs(teacher, `/exam/api/courses/${course.id}/tests`, { method: "POST", body: { name: "Reschedule: unwritten", questionIds: questions.slice(0, 2).map((q) => q.id) } })).json;
+    const sitting = (
+      await fetchAs(teacher, `/exam/api/tests/${test.id}/sittings`, {
+        method: "POST",
+        body: { opensAt: new Date(Date.now() - 60000).toISOString(), closesAt: new Date(Date.now() + 50 * 60000).toISOString(), durationMinutes: 15 },
+      })
+    ).json;
+    await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/end`, { method: "POST" });
+    const page = teacher.page;
+    const line = `li[data-sitting="${sitting.id}"]`;
+    await page.goto(`${applicationUrl}/exam/tests/${test.id}`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(`${line}[data-state="over"] .sl-exam-sitting-reschedule`, { timeout: 20000 });
+    await page.click(`${line} .sl-exam-sitting-reschedule`);
+    await page.waitForSelector(".sl-exam-reschedule .sl-exam-reschedule-kept", { timeout: 5000 });
+    assert.equal(await page.$eval(".sl-exam-reschedule-kept dd", (dd) => dd.textContent), "15", "the minutes per attempt are shown, not edited");
+    // At the legibility viewport, loaded there as a phone would, nothing in
+    // the form runs out of its box. The page itself is wider at 390 px
+    // already, by the top bar and the test's own buttons.
+    const before = page.viewport();
+    await page.setViewport({ width: 390, height: 844 });
+    try {
+      await page.goto(`${applicationUrl}/exam/tests/${test.id}`, { waitUntil: "domcontentloaded" });
+      await page.waitForSelector(`${line} .sl-exam-sitting-reschedule`, { timeout: 20000 });
+      await page.click(`${line} .sl-exam-sitting-reschedule`);
+      await page.waitForSelector(".sl-exam-reschedule", { timeout: 5000 });
+      const overflow = await page.evaluate(() =>
+        [...document.querySelectorAll(".sl-exam-reschedule *")].filter((el) => el.scrollWidth > el.clientWidth + 1).map((el) => el.className)
+      );
+      assert.deepEqual(overflow, [], "the form fits the legibility viewport");
+    } finally {
+      await page.setViewport(before ?? { width: 1280, height: 800 });
+    }
+    await page.goto(`${applicationUrl}/exam/tests/${test.id}`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(`${line} .sl-exam-sitting-reschedule`, { timeout: 20000 });
+    await page.click(`${line} .sl-exam-sitting-reschedule`);
+    await page.waitForSelector(".sl-exam-reschedule-save", { timeout: 5000 });
+    await page.click(".sl-exam-reschedule-save");
+    await page.waitForSelector(`${line}[data-state="scheduled"]`, { timeout: 10000 });
+    const moved = (await fetchAs(teacher, `/exam/api/tests/${test.id}`)).json.sittings[0];
+    const day = new Date(moved.opensAt).getUTCDay();
+    assert.ok(day >= 1 && day <= 5, "a weekday");
+    assert.ok(Date.parse(moved.opensAt) > Date.now(), "in the future");
+    assert.deepEqual([moved.durationS, moved.participants], [sitting.durationS, sitting.participants]);
+  });
+
+  test("an admin reschedules a written sitting with two clicks and the gradebook loses the result; a teacher is offered nothing", async () => {
+    const { test, sitting } = await writtenTest("Admin: reschedule in the page");
+    await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/end`, { method: "POST" });
+    assert.notEqual(await gradebookResult(test.id), undefined, "the result is in the gradebook");
+    const line = `li[data-sitting="${sitting.id}"]`;
+    await teacher.page.goto(`${applicationUrl}/exam/tests/${test.id}`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(`${line}[data-state="over"]`, { timeout: 20000 });
+    assert.equal(await teacher.page.$$eval(".sl-exam-sitting-reschedule", (buttons) => buttons.length), 0, "no Reschedule for a teacher");
+    const page = admin.page;
+    await page.goto(`${applicationUrl}/exam/tests/${test.id}`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(`${line} .sl-exam-sitting-reschedule.sl-exam-admin`, { timeout: 20000 });
+    await page.click(`${line} .sl-exam-sitting-reschedule`);
+    await page.waitForSelector(".sl-exam-reschedule-save", { timeout: 5000 });
+    await page.click(".sl-exam-reschedule-save");
+    assert.equal(await page.$eval(".sl-exam-reschedule-save", (b) => b.textContent), "Click again: delete 1 attempt and reschedule");
+    assert.equal((await fetchAs(admin, `/exam/api/tests/${test.id}`)).json.sittings[0].attempts, 1, "one click changes nothing");
+    await page.click(".sl-exam-reschedule-save");
+    await page.waitForSelector(`${line}[data-state="scheduled"]`, { timeout: 10000 });
+    assert.equal(await gradebookResult(test.id), undefined, "the result is gone");
+  });
+
 });
 
 // The module's actions (`exam-ui-conventions`): buttons in one style, standing

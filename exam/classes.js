@@ -52,6 +52,9 @@ export class InvalidInputError extends Refusal {}
 /** A request that would create something that exists already. Answered with 409. */
 export class ConflictError extends Refusal {}
 
+/** A request the session may not make, though the gate let it through. Answered with 403. */
+export class ForbiddenError extends Refusal {}
+
 /** A request about a record there is none of. Answered with 404. */
 export class NotFoundError extends Refusal {}
 

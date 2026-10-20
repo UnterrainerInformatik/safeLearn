@@ -5,10 +5,24 @@
  * Every one of them is a teacher's: the API refuses any other session with
  * 403, and the pages are not there for it (`gate.js`). Taking back what
  * students have written - deleting a written test, removing a question from
- * one, deleting an attempt - is an admin's alone.
+ * one, deleting an attempt, rescheduling a sitting that has some - is an
+ * admin's alone.
  */
 
-import { createSitting, createTest, deleteSitting, deleteTest, endSitting, extendSitting, getTest, listTests, removeWrittenQuestion, updateSitting, updateTest } from "./tests.js";
+import {
+  createSitting,
+  createTest,
+  deleteSitting,
+  deleteTest,
+  endSitting,
+  extendSitting,
+  getTest,
+  listTests,
+  removeWrittenQuestion,
+  rescheduleSitting,
+  updateSitting,
+  updateTest,
+} from "./tests.js";
 import { correctShares, deleteAttempt, previewView, releaseAttempt, scoreAttempt } from "./attempts.js";
 import { notify, notifySittings } from "./live.js";
 import { embedPlaceholder, wrapInPage, wrapInReveal } from "../obsidian.js";
@@ -101,6 +115,13 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
   };
   api("post", "/sittings/:id/end", (req) => announcedLive(endSitting(db, idParam(req.params.id))));
   api("post", "/sittings/:id/extend", (req) => announcedLive(extendSitting(db, idParam(req.params.id), req.body ?? {})));
+  // Rescheduling deletes the sitting's attempts - an admin's alone once there
+  // are any; an open live view drops their rows.
+  api("post", "/sittings/:id/reschedule", async (req) => {
+    const { deleted, ...sitting } = rescheduleSitting(db, idParam(req.params.id), req.body ?? {}, { admin: await actsAsAdmin(req) });
+    for (const username of deleted) notify(sitting.id, "deleted", username);
+    return announcedLive(sitting);
+  });
   api("post", "/attempts/:id/release", (req) => releaseAttempt(db, idParam(req.params.id)));
   api("get", "/tests/:id/preview", (req) => previewView(db, idParam(req.params.id)));
   const adminApi = (method, path, fn) =>

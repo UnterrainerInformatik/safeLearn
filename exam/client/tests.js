@@ -4,7 +4,7 @@
  * - `tests`: the tests of the course the bar chose, or of every course of its
  *   school year, grouped by class and course
  * - `test-detail`: one test - its sittings, scheduling, changing and deleting
- *   them before they open, its snapshot in the course's language with the
+ *   them before they open, rescheduling one that is over, its snapshot in the course's language with the
  *   correct answers marked, renaming, and while nobody has written it,
  *   removing questions and deleting it
  *
@@ -18,7 +18,7 @@
 import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, linkButton, markRows, t } from "./frame.js";
 import { displayClass, displayPerson } from "./classes.js";
 import { openCreatorOf } from "./bar.js";
-import { defaultPeriods, matchWindow, periodTimes, viennaInstant, viennaLocal, windowFor } from "./periods.js";
+import { defaultPeriods, matchWindow, nextWeekday, periodTimes, viennaInstant, viennaLocal, windowFor } from "./periods.js";
 
 const stateLabels = {
   scheduled: () => t("exam.tests.stateScheduled"),
@@ -277,7 +277,8 @@ class TestDetail extends ExamElement {
    * states, and the form that schedules one - the first for the whole class or
    * chosen students, every later one a make-up for chosen students with the
    * first one's duration. A sitting that has not opened can be changed or
-   * deleted.
+   * deleted; one that is over can be rescheduled - with attempts by an admin
+   * only, since they are deleted.
    */
   sittingsSection(test) {
     const names = new Map(this.roster.map((entry) => [entry.username, displayPerson(entry)]));
@@ -311,6 +312,20 @@ class TestDetail extends ExamElement {
                       }),
                     ]
                   : null,
+                sitting.state === "over" && (sitting.attempts === 0 || this.admin)
+                  ? [
+                      " ",
+                      h(
+                        "button",
+                        {
+                          type: "button",
+                          class: sitting.attempts === 0 ? "sl-exam-action sl-exam-sitting-reschedule" : "sl-exam-action sl-exam-sitting-reschedule sl-exam-admin",
+                          onClick: () => this.editSitting(test, sitting, true),
+                        },
+                        t("exam.tests.reschedule")
+                      ),
+                    ]
+                  : null,
                 this.sittingLine(sitting)
               )
             )
@@ -327,12 +342,18 @@ class TestDetail extends ExamElement {
   }
 
   /**
-   * The form for a new sitting, or for changing `sitting`. Its window is one
-   * state that two editors read and write: date and periods when the school's
-   * periods are configured, clock times otherwise or when the teacher switches
-   * to them (`school-periods`, design.md, D7).
+   * The form for a new sitting, for changing `sitting`, or for rescheduling it
+   * once it is over. Its window is one state that two editors read and write:
+   * date and periods when the school's periods are configured, clock times
+   * otherwise or when the teacher switches to them (`school-periods`,
+   * design.md, D7). Rescheduling proposes the next weekday with the sitting's
+   * periods - or its clock times - and changes nothing but the window.
    */
-  drawSittingForm(test, sitting) {
+  drawSittingForm(test, sitting, reschedule = false) {
+    if (reschedule) {
+      this.rescheduleForm(sitting);
+      return;
+    }
     const first = test.sittings.find((candidate) => !candidate.makeup) ?? null;
     const makeup = sitting ? sitting.makeup : first !== null;
     const periods = this.periods;
@@ -347,31 +368,7 @@ class TestDetail extends ExamElement {
       start.setMinutes(0, 0, 0);
       windowState = { opensAt: start.toISOString(), closesAt: new Date(start.getTime() + 50 * 60 * 1000).toISOString() };
     }
-    let byPeriods = matchWindow(periods, windowState.opensAt, windowState.closesAt) !== null;
-    const windowEditor = h("div", { class: "sl-exam-sitting-window" });
-    const drawWindowEditor = () => {
-      const toggle = h(
-        "button",
-        {
-          type: "button",
-          class: "sl-exam-sitting-mode",
-          onClick: () => {
-            if (!byPeriods) {
-              // A window on period boundaries is carried over; any other keeps
-              // its date and gets the periods a new sitting would.
-              const match = matchWindow(periods, windowState.opensAt, windowState.closesAt);
-              const proposed = match ?? { ...defaultPeriods(periods), date: viennaLocal(windowState.opensAt).date };
-              windowState = windowFor(periods, proposed.date, proposed.from, proposed.to);
-            }
-            byPeriods = !byPeriods;
-            drawWindowEditor();
-          },
-        },
-        byPeriods ? t("exam.tests.exactTimesInstead") : t("exam.tests.lessonsInstead")
-      );
-      windowEditor.replaceChildren(...(byPeriods ? this.periodsEditor(windowState, (changed) => (windowState = changed)) : this.clockEditor(windowState)), h("p", {}, toggle));
-    };
-    if (periods.length > 0) drawWindowEditor();
+    const windowEditor = this.windowEditor(windowState);
     const duration = h("input", {
       type: "number",
       name: "durationMinutes",
@@ -413,8 +410,7 @@ class TestDetail extends ExamElement {
         onSubmit: async (event) => {
           event.preventDefault();
           const body = {
-            opensAt: windowState.opensAt,
-            closesAt: windowState.closesAt,
+            ...windowEditor.current(),
             durationMinutes: Number(duration.value),
             participants: whole.checked ? null : [...people.querySelectorAll("input:checked")].map((input) => input.value),
           };
@@ -428,7 +424,7 @@ class TestDetail extends ExamElement {
         },
       },
       h("h3", {}, sitting ? t("exam.tests.changeSitting") : makeup ? t("exam.tests.scheduleMakeup") : t("exam.tests.scheduleSitting")),
-      periods.length > 0 ? windowEditor : this.clockEditor(windowState),
+      windowEditor.element,
       h("label", {}, `${t("exam.tests.minutesPerAttemptLabel")} `, duration),
       makeup
         ? h(
@@ -442,6 +438,120 @@ class TestDetail extends ExamElement {
       message
     );
     this.sittingForm.replaceChildren(form);
+  }
+
+  /**
+   * The form that reschedules `sitting`, which is over: the window proposed on
+   * the next weekday, the minutes per attempt and the participants shown but
+   * not changed. Deleting attempts takes a second click on save, its label
+   * naming how many go.
+   */
+  rescheduleForm(sitting) {
+    const windowEditor = this.windowEditor(this.proposedWindow(sitting, nextWeekday(viennaLocal(new Date()).date)));
+    const names = new Map(this.roster.map((entry) => [entry.username, displayPerson(entry)]));
+    const save = async () => {
+      try {
+        await examApi(`/sittings/${sitting.id}/reschedule`, { method: "POST", body: { ...windowEditor.current(), attempts: sitting.attempts } });
+        this.reload();
+      } catch (error) {
+        this.sittingLine(sitting).textContent = refusal(error);
+      }
+    };
+    const submit =
+      sitting.attempts === 0
+        ? h("button", { type: "submit", class: "sl-exam-primary sl-exam-reschedule-save" }, t("exam.tests.save"))
+        : confirmButton({
+            class: "sl-exam-reschedule-save sl-exam-admin",
+            label: t("exam.tests.save"),
+            armed: t("exam.tests.rescheduleArmed", { count: sitting.attempts }),
+            action: save,
+          });
+    const form = h(
+      "form",
+      {
+        class: "sl-exam-reschedule",
+        onSubmit: (event) => {
+          event.preventDefault();
+          // With attempts only the armed button saves; Enter in a field does not.
+          if (sitting.attempts === 0) save();
+        },
+      },
+      h("h3", {}, t("exam.tests.rescheduleSitting")),
+      windowEditor.element,
+      h(
+        "dl",
+        { class: "sl-exam-reschedule-kept" },
+        h("dt", {}, t("exam.tests.minutesPerAttemptLabel")),
+        h("dd", {}, String(Math.round(sitting.durationS / 60))),
+        h("dt", {}, t("exam.tests.participants")),
+        h("dd", {}, sitting.participants.map((username) => names.get(username) ?? username).join(", "))
+      ),
+      h("p", { class: "sl-exam-quiet" }, t("exam.tests.rescheduleNote")),
+      h("p", {}, submit, " ", h("button", { type: "button", class: "sl-exam-action", onClick: () => this.drawSittingForm(this.test, null) }, t("exam.tests.cancel")))
+    );
+    this.sittingForm.replaceChildren(form);
+  }
+
+  /**
+   * The window `sitting` is proposed again with on `date`: its periods, or -
+   * for a sitting ended early, which closed before its periods did - from the
+   * period it opened with to the first one that leaves room for an attempt.
+   * Otherwise its clock time, the window as long as it was or long enough for
+   * an attempt.
+   */
+  proposedWindow(sitting, date) {
+    const periods = this.periods;
+    const match = matchWindow(periods, sitting.opensAt, sitting.closesAt);
+    if (match) return windowFor(periods, date, match.from, match.to);
+    const time = viennaLocal(sitting.opensAt).time;
+    const from = periods.find((period) => period.start === time);
+    if (from) {
+      const fitting = periods
+        .filter((period) => period.n >= from.n)
+        .map((period) => windowFor(periods, date, from.n, period.n))
+        .find((window) => Date.parse(window.closesAt) - Date.parse(window.opensAt) > sitting.durationS * 1000);
+      if (fitting) return fitting;
+    }
+    const opens = viennaInstant(date, time);
+    const length = Math.max(Date.parse(sitting.closesAt) - Date.parse(sitting.opensAt), sitting.durationS * 1000 + 5 * 60000);
+    return { opensAt: opens.toISOString(), closesAt: new Date(opens.getTime() + length).toISOString() };
+  }
+
+  /**
+   * The window of a sitting form, starting from `initial`: the periods editor
+   * with its switch to clock times when the school's periods are configured,
+   * the clock editor otherwise. `current()` answers the window as it stands.
+   */
+  windowEditor(initial) {
+    const periods = this.periods;
+    let windowState = { ...initial };
+    if (periods.length === 0) return { element: this.clockEditor(windowState), current: () => windowState };
+    let byPeriods = matchWindow(periods, windowState.opensAt, windowState.closesAt) !== null;
+    const element = h("div", { class: "sl-exam-sitting-window" });
+    const draw = () => {
+      const toggle = h(
+        "button",
+        {
+          type: "button",
+          class: "sl-exam-sitting-mode",
+          onClick: () => {
+            if (!byPeriods) {
+              // A window on period boundaries is carried over; any other keeps
+              // its date and gets the periods a new sitting would.
+              const match = matchWindow(periods, windowState.opensAt, windowState.closesAt);
+              const proposed = match ?? { ...defaultPeriods(periods), date: viennaLocal(windowState.opensAt).date };
+              windowState = windowFor(periods, proposed.date, proposed.from, proposed.to);
+            }
+            byPeriods = !byPeriods;
+            draw();
+          },
+        },
+        byPeriods ? t("exam.tests.exactTimesInstead") : t("exam.tests.lessonsInstead")
+      );
+      element.replaceChildren(...(byPeriods ? this.periodsEditor(windowState, (changed) => (windowState = changed)) : this.clockEditor(windowState)), h("p", {}, toggle));
+    };
+    draw();
+    return { element, current: () => windowState };
   }
 
   /**
@@ -509,8 +619,8 @@ class TestDetail extends ExamElement {
     ];
   }
 
-  editSitting(test, sitting) {
-    this.drawSittingForm(test, sitting);
+  editSitting(test, sitting, reschedule = false) {
+    this.drawSittingForm(test, sitting, reschedule);
     this.sittingForm.scrollIntoView({ block: "nearest" });
   }
 

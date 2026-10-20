@@ -970,6 +970,18 @@ a.sl-exam-button.sl-exam-open:hover,
   cursor: help;
 }
 
+/* What rescheduling keeps: shown, not edited. */
+.sl-exam-reschedule-kept {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 1em;
+  margin: 0;
+}
+
+.sl-exam-reschedule-kept dd {
+  margin: 0;
+}
+
 .sl-exam-sitting-people {
   columns: 2 14em;
   margin: 0;
