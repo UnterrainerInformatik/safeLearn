@@ -18,7 +18,7 @@ Dazu am 2026-09-13 beobachtet: **manuell ausgelöste Syncs setzen `lastSync` nic
 
 # Allgemein
 
-## Fragen: eine Änderung gilt überall, Löschen nimmt sie aus allen Tests (offen, 2026-10-19)
+## Fragen: eine Änderung gilt überall, Löschen nimmt sie aus allen Tests (entschieden 2026-10-20, bereit für einen Change)
 **Gerald, 2026-10-19:**
 - Wird eine Frage in einem Test verwendet und danach geändert, soll sie einfach überall geändert sein.
 - Wird eine Frage gelöscht, soll sie auch aus allen Tests verschwinden. Das ist eine Admin-Funktion: eine Frage löschen, obwohl sie noch irgendwo verwendet wird.
@@ -29,25 +29,11 @@ Dazu am 2026-09-13 beobachtet: **manuell ausgelöste Syncs setzen `lastSync` nic
 - `deleteQuestion` (`exam/pool-edit.js`) weist jede Frage ab, die in `question_usage` oder `test_question` vorkommt (`usedCannotDelete`). Eine solche Frage lässt sich nur zurückziehen.
 - Für einen einzelnen geschriebenen Test gibt es schon die Admin-Korrektur `removeWrittenQuestion` (`exam/tests.js`): Sie nimmt die Frage aus Snapshot und Versuchen, bewertet neu, und das Notenbuch zieht nach. Die letzte Frage eines Tests kann sie nicht entfernen.
 
-**Vor einem Change zu klären:**
-- Gilt "überall geändert" auch für **geschriebene** Tests? Dann ändert sich nachträglich, was Schüler beantwortet haben. Ändert sich, welche Antwort richtig ist, müssen die abgegebenen Versuche neu bewertet werden, und das Notenbuch ändert sich mit. Alternativ übernehmen nur ungeschriebene Tests automatisch, und geschriebene bleiben beim Snapshot.
-- Löschen einer verwendeten Frage: Für geschriebene Tests `removeWrittenQuestion` pro Test (mit Neubewertung), für ungeschriebene einfach aus dem Snapshot. Was passiert mit einem Test, dessen **einzige** Frage sie ist: den Test mitlöschen, oder das Löschen ablehnen?
-- Was ist ein "alter Test": jeder geschriebene, oder nur einer aus einem abgeschlossenen Schuljahr (P5)? Für einen abgeschlossenen, schreibgeschützten Jahrgang widerspricht das Herausnehmen samt Neubewertung der Regel, dass ein abgeschlossenes Jahr nicht mehr geändert wird.
-- Wer darf das: nur Admins (wie `removeWrittenQuestion`), oder jede Lehrkraft für ungeschriebene Tests?
-
-## Eine vorbeigegangene Sitzung neu ansetzen (entschieden 2026-10-20, bereit für einen Change)
-**Gerald, 2026-10-19:** Ein Test lief leer durch, niemand hat geschrieben. Gerald will ihn neu ansetzen: Falls es Ergebnisse gibt, werden sie gelöscht, und die Sitzung wird verschoben. Die alten Einstellungen bleiben dabei erhalten. Meistens ändert sich nur der Tag.
-
-**Heute (Code-Stand 2026-10-19):**
-- `updateSitting` und `deleteSitting` (`exam/tests.js`) verlangen `requireNotOpened`. Ändern und Löschen gibt es also nur, solange die Sitzung noch nicht offen war. Auf der Testseite stehen **Change** und **Delete** nur bei einer geplanten Sitzung. Eine vorbeigegangene Sitzung lässt sich weder verschieben noch löschen.
-- Ausweg heute: eine **Nachholsitzung** (`makeup`) anlegen. Die hat aber eine Teilnehmerliste und keine Dauer, die man frei wählen kann, und die alte Sitzung bleibt als "over" stehen.
-- Versuche löscht heute nur ein Admin, und zwar einzeln (**Delete attempt** in der Live-Ansicht) oder mit dem ganzen Test (**Delete this test**).
-- Die Spalte im Notenbuch ist auf die erste Sitzung datiert (`refreshUsageDate`). Mit dem Verschieben wandert dieses Datum mit, vielleicht sogar ins andere Semester.
-
-**Vorschlag:** Eine beendete Sitzung bietet **Neu ansetzen**. Das öffnet das bestehende Sitzungsformular, vorbelegt mit denselben Stunden, derselben Dauer und denselben Teilnehmern; als Tag ist der nächste Schultag vorgeschlagen. Beim Speichern werden in einer Transaktion die Versuche der Sitzung gelöscht und das Fenster verschoben. Mit Versuchen wird zweimal geklickt, und die Beschriftung nennt die Zahl ("Noch einmal klicken: 3 Versuche löschen und neu ansetzen").
-
-**Entschieden (Gerald, 2026-10-20):**
-- Beibehalten werden nur die Einstellungen: Teilnehmer, Dauer und Stunden bleiben, nur der Tag ändert sich. Die Versuche der Sitzung werden endgültig gelöscht; einzige Spur ist das Backup.
-- Ohne Versuche darf jede Lehrkraft des Kurses neu ansetzen. Würden dabei Versuche gelöscht, nur ein Admin (wie `exam-record-maintenance`).
-- Nachholsitzungen des Tests bleiben unverändert. Neu ansetzen betrifft nur die gewählte Sitzung.
-- Das Datum der Notenbuch-Spalte wandert mit dem neuen Termin mit, auch über die Semestergrenze.
+**Entschieden (Gerald, 2026-10-20):** Der Snapshot entsteht erst, wenn der Test beginnt, nicht beim Anlegen. Er dient der Revisionssicherheit des geschriebenen Tests; alles davor folgt dem Pool.
+- Vor Beginn verweist ein Test nur auf Pool-Fragen. Eine Änderung im Pool gilt sofort für ihn, ohne „Übernehmen“ (`unwrittenTestsWith`/`updateTest` entfallen).
+- Beim Öffnen der ersten Sitzung wird der Snapshot gezogen. Nachholsitzungen verwenden denselben Snapshot.
+- Werden die Sitzungen eines Tests samt Versuchen gelöscht (auch beim Neu-Ansetzen), fällt der Snapshot weg, und der Test folgt wieder dem Pool.
+- Löschen einer Frage nimmt sie aus allen noch nicht begonnenen Tests. Begonnene Tests behalten ihre Kopie im Snapshot, Versuche und Notenbuch bleiben unverändert. Damit ist auch eine Frage löschbar, die in einem alten Test verwendet wurde.
+- Verliert ein nicht begonnener Test dadurch seine einzige Frage, bleibt er leer stehen; eine Sitzung lässt sich erst öffnen, wenn er wieder Fragen hat. Die Bestätigung beim Löschen nennt die betroffenen Tests.
+- Löschen darf jede Lehrkraft, auch bei verwendeten Fragen, mit dieser Bestätigung.
+- Offen für den Change: `question_usage`/`test_question.question_id` dürfen auf eine gelöschte Frage zeigen bzw. müssen sie loslassen; Zählung „verwendet“ im Pool neu definieren.
