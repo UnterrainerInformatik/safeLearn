@@ -25,10 +25,10 @@ Anyone who has even one of these roles assigned will be able to view the documen
 * If a directory on the left has only files invisible to the viewer, then the entry of that directory will be invisible as well.
 
 ### Attachments
-Images, PDFs and every other file a page embeds or links (`![[name]]`, `![](path)`, `[text](path)`, a raw `<img src>`) follow the places they are used in. There is no directive for an attachment itself.
+Images, PDFs and every other file a page embeds or links (`![[name]]`, `[[name]]`, `![](path)`, `[text](path)`, a raw `<img src>`) follow the places they are used in. There is no directive for an attachment itself.
 * An attachment is as visible as its **most visible** reference. One that sits on a teacher page, in a `@@@ 4bhif` block and on an unrestricted page is served to everyone; one that sits only on the teacher page is served to teachers only. A reference counts where the reader may see it right now: inside a closed time window, in the exam variant without the exam view, or in a teacher block while a teacher is in the student view, it counts for nobody.
 * An attachment **no page references is not served** to anyone, even though the file sits under `md/`. The server logs these files after every scan, one line `[Attachments] unreferenced: <path>` each and one line with their count, so they can be removed from the repository. To keep such a file reachable, reference it on a page with the restriction it should have.
-* An embed whose file name exists in several folders and that does not give the folder (`![[diagram.png]]` with two `diagram.png`) renders as nothing and makes neither file reachable. Write the path, `![[folder/diagram.png]]`.
+* An embed or wiki link whose file name exists in several folders and that does not give the folder (`![[diagram.png]]` with two `diagram.png`) renders as nothing and makes neither file reachable. Write the path, `![[folder/diagram.png]]`.
 * A refused attachment is answered exactly like a file that does not exist.
 * Tightening the restriction around a reference takes effect at once where the server rescans on change (`NEXT_AUTOSCAN`, as the WYSIWYG container has it). Without autoscan, a reader who opened the page before the edit may keep loading the attachment for **up to 10 minutes**.
 

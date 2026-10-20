@@ -1785,33 +1785,59 @@ function encodePathPreservingSlashes(rawPath) {
     .join("/");
 }
 
-function preReplaceObsidianFileLinks(html, req) {
-  const regex = /(?<!\!)\[\[([^\]\n]+)\]\]/g;
+/** A wiki link `[[name]]`, not an embed; `name` is group 1. */
+const wikiLinkPattern = /(?<!\!)\[\[([^\]\n]+)\]\]/g;
 
-  return html.replace(regex, (match) => {
-    let fileName = match.slice(2, -2);
-    let alt = null;
-    if (fileName && fileName.includes("|")) {
-      const parts = fileName.split("|");
-      fileName = parts[0].trim();
-      if (fileName.endsWith("\\")) {
-        fileName = fileName.slice(0, -1);
-      }
-      alt = parts[1].trim();
-      if (alt === "") {
-        alt = null;
-      }
+/**
+ * A wiki link's target and text, from what stands between `[[` and `]]`.
+ *
+ * The one reading of that text, shared by the renderer and the attachment gate,
+ * so the two cannot disagree about which name a link gives. `|text` is split
+ * off, together with the `\` a table escapes the `|` with, and the target loses
+ * a leading `/md/` or `md/`.
+ */
+function parseWikiLink(inner) {
+  let name = inner;
+  let text = null;
+  if (name.includes("|")) {
+    const parts = name.split("|");
+    name = parts[0].trim();
+    if (name.endsWith("\\")) {
+      name = name.slice(0, -1);
     }
-    if (fileName.startsWith("/md/")) {
-      fileName = fileName.slice(4);
+    text = parts[1].trim();
+    if (text === "") {
+      text = null;
     }
-    if (fileName.startsWith("md/")) {
-      fileName = fileName.slice(3);
+  }
+  return { name: stripCorpusPrefix(name), text };
+}
+
+/**
+ * The attachment a wiki link names, or null. A name that is a Markdown page is
+ * a link to that page, never to an attachment, as the renderer reads it.
+ */
+function resolveWikiLinkAttachment(name) {
+  if (mdFilesMap[name.split("/").pop()]) {
+    return null;
+  }
+  return resolveAttachment(name);
+}
+
+/**
+ * Replaces the wiki links of `html` with Markdown links. Matched on the text
+ * with its code masked, so a link written as inline code stays as written, as
+ * `extractAttachmentReferences` reads it.
+ */
+function preReplaceObsidianFileLinks(html, req) {
+  const masked = maskCode(html);
+  return html.replace(new RegExp(wikiLinkPattern), (match, inner, offset) => {
+    if (masked.slice(offset, offset + match.length) !== match) {
+      return match;
     }
+    const { name: fileName, text: alt } = parseWikiLink(inner);
     const lastPartOfFileName = fileName.split("/").pop();
     const filePath = mdFilesMap[lastPartOfFileName];
-    // console.log(fileName)
-    // console.log(mdFilesMap)
     if (filePath) {
       let f = filePath[0];
       if (filePath.length > 1) {
@@ -1831,9 +1857,15 @@ function preReplaceObsidianFileLinks(html, req) {
       const encodedPath = encodePathPreservingSlashes(dirPrefix + f);
       const url = `${serverUrl}/${encodedPath}`;
       return `[${alt ? alt : fileName}](${url})`;
-    } else {
+    }
+    // Not a page: a wiki link to an attachment resolves as its embed does.
+    const attachment = resolveWikiLinkAttachment(fileName);
+    if (attachment === null) {
       return match;
     }
+    const serverUrl = `${req.protocol}://${req.get("host")}`;
+    const url = `${serverUrl}/${encodePathPreservingSlashes(dirPrefix + attachment)}`;
+    return `[${alt ? alt : fileName}](${url})`;
   });
 }
 
@@ -2197,6 +2229,8 @@ function targetReference(target, kind, offset) {
  * `{ raw, kind, offset }`.
  *
  * - `embed`: `![[name]]` and `![[name|size]]`, `raw` the name without its size.
+ * - `wikilink`: `[[name]]` and `[[name|text]]`, `raw` the name as
+ *   `parseWikiLink` reads it. One that names a Markdown page resolves to nothing.
  * - `image` and `link`: Markdown images, links and link definitions whose target
  *   is relative or under `/md/`.
  * - `html`: `src`, `href` and `poster` of raw `img`, `video`, `audio`, `source`
@@ -2220,6 +2254,11 @@ export function extractAttachmentReferences(markdown) {
     const name = match[1];
     const sized = parseWidthHeight(name);
     references.push({ raw: sized ? sized.name : name, kind: "embed", offset: match.index });
+  }
+
+  const wikiLink = new RegExp(wikiLinkPattern);
+  while ((match = wikiLink.exec(text)) !== null) {
+    references.push({ raw: parseWikiLink(match[1]).name, kind: "wikilink", offset: match.index });
   }
 
   const inline =
@@ -2260,6 +2299,9 @@ export function extractAttachmentReferences(markdown) {
 export function resolveAttachmentReference(reference, folder = "") {
   if (reference.kind === "embed") {
     return resolveAttachment(reference.raw);
+  }
+  if (reference.kind === "wikilink") {
+    return resolveWikiLinkAttachment(reference.raw);
   }
   let target;
   try {
@@ -2497,32 +2539,30 @@ const imageFileTypes = [
 ];
 
 function getHtmlFor(fileType, fileName, serverUrl, dirPrefix, file, r) {
+  const url = `${serverUrl}/${encodePathPreservingSlashes(dirPrefix + file)}`;
   if (fileType !== null) {
     const type = fileType.toLowerCase();
-    // console.log(type)
     if (imageFileTypes.includes(type)) {
-      return `<img src="${serverUrl}/${
-        dirPrefix + file
-      }" alt="${fileName}" style="${
+      return `<img src="${url}" alt="${fileName}" style="${
         r ? `width: ${r.width}; height: ${r.height};` : ""
       }"/>`;
     } else if (type === "svg") {
-      return `<img src="${serverUrl}/${dirPrefix + file}" alt="${fileName}" />`;
+      return `<img src="${url}" alt="${fileName}" />`;
     } else if (type === "mp4") {
-      return `<video controls><source src="${serverUrl}/${
-        dirPrefix + file
-      }" type="video/mp4"></video>`;
+      return `<video controls><source src="${url}" type="video/mp4"></video>`;
     } else if (type === "webm") {
-      return `<video controls><source src="${serverUrl}/${
-        dirPrefix + file
-      }" type="video/webm"></video>`;
+      return `<video controls><source src="${url}" type="video/webm"></video>`;
     } else if (type === "ogg") {
-      return `<audio controls><source src="${serverUrl}/${
-        dirPrefix + file
-      }" type="audio/ogg"></audio>`;
+      return `<audio controls><source src="${url}" type="audio/ogg"></audio>`;
+    } else if (type === "pdf") {
+      // A placeholder the sanitizer keeps, which `upgradePdfEmbeds` turns into
+      // an inline viewer on the page and on a slide. The link stays beneath it,
+      // for a browser that shows no PDF inline and for the printable document.
+      const size = r ? ` data-width="${r.width}" data-height="${r.height}"` : "";
+      return `<div class="sl-pdf" data-src="${url}"${size}><a href="${url}">${fileName}</a></div>`;
     }
   }
-  return `<a href="${serverUrl}/${dirPrefix + file}">${fileName}</a>`;
+  return `<a href="${url}">${fileName}</a>`;
 }
 
 function replacePreMarkCallouts(html) {
@@ -3156,6 +3196,52 @@ function getMermaidScriptEntry() {
 </script>`;
 }
 
+/**
+ * Turns every PDF placeholder `getHtmlFor` emitted into an inline viewer above
+ * its link. Included by the page view and the presentation, not by the printable
+ * document, which keeps the link only. On load is enough: a hot reload is a full
+ * reload. A placeholder is upgraded once, and only to a PDF under this origin's
+ * `/md/`: the sanitizer keeps `data-*` of author-written HTML too, so `data-src`
+ * is not trusted to be what the renderer wrote.
+ */
+function getPdfEmbedScript() {
+  return `<script>
+(function () {
+  function upgradePdfEmbeds() {
+    document.querySelectorAll(".sl-pdf").forEach(function (embed) {
+      if (embed.querySelector("iframe")) return;
+      let url;
+      try {
+        url = new URL(embed.dataset.src, location.href);
+      } catch {
+        return;
+      }
+      if (url.origin !== location.origin || !url.pathname.startsWith("/md/")) return;
+      const link = embed.querySelector("a");
+      const frame = document.createElement("iframe");
+      frame.src = url.href;
+      frame.title = link ? link.textContent : url.pathname.split("/").pop();
+      frame.loading = "lazy";
+      // Scrolling the PDF on a touch screen must not change the slide.
+      frame.setAttribute("data-prevent-swipe", "");
+      if (embed.dataset.width) frame.style.width = embed.dataset.width;
+      if (embed.dataset.height && embed.dataset.height !== "auto") frame.style.height = embed.dataset.height;
+      embed.insertBefore(frame, link);
+      if (link) {
+        link.target = "_blank";
+        link.rel = "noopener";
+      }
+    });
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", upgradePdfEmbeds);
+  } else {
+    upgradePdfEmbeds();
+  }
+})();
+</script>`;
+}
+
 function getAutoReloadScript() {
   return `<script>
 (function () {
@@ -3439,6 +3525,7 @@ export async function wrapInPage(html, startPage, req, options = {}) {
         <script src="/obsidian-page.js"></script>
         ${getMermaidScriptEntry()}
         ${getAutoReloadScript()}
+        ${getPdfEmbedScript()}
         <script lang="javascript">
         initFonts('${JSON.stringify(mainFontsArray)}', '${JSON.stringify(
     navFontsArray
@@ -3528,6 +3615,7 @@ export async function wrapInReveal(reveal, req, options = {}) {
 
     ${getMermaidScriptEntry()}
     ${getAutoReloadScript()}
+    ${getPdfEmbedScript()}
   </head>
 
   <!-- Hidden from the first byte, as in the two page views, and for the second

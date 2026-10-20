@@ -24,12 +24,14 @@ import {
   hasAttachmentGrant,
   manipulateHtml,
   mayServeAttachment,
+  preParse,
   recordAttachmentGrants,
   resolveAttachment,
   resolveAttachmentReference,
   scanFiles,
   unreferencedAttachments,
 } from "../obsidian.js";
+import { sanitizeHtml } from "../sanitize.js";
 
 const projectRoot = path.resolve(import.meta.dirname, "..");
 const originalFetch = global.fetch;
@@ -105,6 +107,10 @@ before(async () => {
   write("two/diagram.png");
   write("folder/img/relative.png");
   write("ex/Solution.java");
+  write("assets/linked.pdf");
+  write("assets/teacher-linked.pdf");
+  write("one/handout.pdf");
+  write("two/handout.pdf");
 
   write(
     "page.md",
@@ -135,6 +141,17 @@ before(async () => {
   write("teachers.md", "@@@ teacher\n# Teachers\n![[everywhere.png]]\n");
   write("class.md", "# Class\n@@@ 4bhif\n![[everywhere.png]]\n@@@\n");
   write("open.md", "# Open\n![[everywhere.png]]\n");
+  write(
+    "wikilinks.md",
+    [
+      "# Wiki links",
+      "[[linked.pdf]] beside [[page]] and [[handout.pdf]] and [[two/handout.pdf|Two]]",
+      "@@@ teacher",
+      "[[teacher-linked.pdf|Sheet]]",
+      "@@@",
+      "",
+    ].join("\n")
+  );
   write("folder/page.md", "# Folder\n![x](img/relative.png)\n![escape](../../outside.png)\n");
   await scan();
 });
@@ -217,6 +234,26 @@ describe("what a page addresses", () => {
       ["e.png"]
     );
   });
+
+  test("a wiki link is recorded by its name, without text or corpus prefix", () => {
+    const markdown = [
+      "[[a.pdf]] and [[md/b.pdf|Text]] and | [[c.pdf\\|Cell]] |",
+      "![[d.png]] is an embed, not a wiki link.",
+      "`[[e.pdf]]`",
+      "```",
+      "[[f.pdf]]",
+      "```",
+    ].join("\n");
+    assert.deepEqual(
+      extractAttachmentReferences(markdown).map(({ raw, kind }) => ({ raw, kind })),
+      [
+        { raw: "a.pdf", kind: "wikilink" },
+        { raw: "b.pdf", kind: "wikilink" },
+        { raw: "c.pdf", kind: "wikilink" },
+        { raw: "d.png", kind: "embed" },
+      ]
+    );
+  });
 });
 
 describe("which attachment a reference addresses", () => {
@@ -246,6 +283,18 @@ describe("which attachment a reference addresses", () => {
     });
   });
 
+  test("a wiki link resolves as an embed does, and a page name to no attachment", () => {
+    const resolve = (markdown) =>
+      extractAttachmentReferences(markdown).map((reference) => resolveAttachmentReference(reference, "folder"));
+    assert.deepEqual(resolve("[[linked.pdf]] [[md/linked.pdf|Text]] [[page]] [[missing.pdf]]"), [
+      "assets/linked.pdf",
+      "assets/linked.pdf",
+      null,
+      null,
+    ]);
+    assert.deepEqual(resolve("[[handout.pdf]] [[two/handout.pdf]]"), [null, "two/handout.pdf"]);
+  });
+
   test("a path that leaves the corpus addresses nothing", () => {
     for (const markdown of ["![x](../../app.js)", "![x](/md/../app.js)", "![x](../outside.png)"]) {
       const [reference] = extractAttachmentReferences(markdown);
@@ -267,6 +316,48 @@ describe("what the renderer makes of an embed", () => {
   });
 });
 
+describe("what the renderer makes of a PDF embed", () => {
+  test("a placeholder with its size and an encoded link, both kept by the sanitizer", async () => {
+    write("assets/mündliche RDP.pdf");
+    await scan();
+    const html = "<p>![[mündliche RDP.pdf]]</p>\n<p>![[mündliche RDP.pdf|600x400]]</p>";
+    const rendered = sanitizeHtml(manipulateHtml(html, student()));
+    const url = "https://learn.example/md/assets/m%C3%BCndliche%20RDP.pdf";
+    const link = `<a href="${url}">mündliche RDP.pdf</a>`;
+    assert.ok(rendered.includes(`<div class="sl-pdf" data-src="${url}">${link}</div>`), rendered);
+    assert.ok(
+      rendered.includes(`<div class="sl-pdf" data-src="${url}" data-width="600px" data-height="400px">${link}</div>`),
+      rendered
+    );
+  });
+});
+
+describe("what the renderer makes of a wiki link", () => {
+  test("a wiki link to an attachment becomes a Markdown link to its encoded path", async () => {
+    write("assets/mündliche RDP.pdf");
+    await scan();
+    const markdown = [
+      "[[linked.pdf]]",
+      "[[linked.pdf|Arbeitsblatt]]",
+      "[[mündliche RDP.pdf]]",
+      "[[handout.pdf]]",
+      "[[one/handout.pdf]]",
+      "[[missing.pdf]]",
+      "`[[linked.pdf]]`",
+    ].join("\n\n");
+    const lines = (await preParse(markdown, student())).split("\n\n");
+    assert.deepEqual(lines, [
+      "[linked.pdf](https://learn.example/md/assets/linked.pdf)",
+      "[Arbeitsblatt](https://learn.example/md/assets/linked.pdf)",
+      "[mündliche RDP.pdf](https://learn.example/md/assets/m%C3%BCndliche%20RDP.pdf)",
+      "[[handout.pdf]]",
+      "[one/handout.pdf](https://learn.example/md/one/handout.pdf)",
+      "[[missing.pdf]]",
+      "`[[linked.pdf]]`",
+    ]);
+  });
+});
+
 describe("who is served an attachment", () => {
   test("a reference on an unrestricted page serves everyone", async () => {
     preferences({ vt: 1 });
@@ -281,6 +372,15 @@ describe("who is served an attachment", () => {
     preferences({ vt: 1 });
     assert.equal(await mayServeAttachment(student(), "assets/teacher-only.png"), false);
     assert.equal(await mayServeAttachment(teacher(), "assets/teacher-only.png"), true);
+  });
+
+  test("a wiki link serves its attachment where the link is visible", async () => {
+    preferences({ vt: 1 });
+    assert.equal(await mayServeAttachment(student(), "assets/linked.pdf"), true);
+    assert.equal(await mayServeAttachment(student(), "assets/teacher-linked.pdf"), false);
+    assert.equal(await mayServeAttachment(teacher(), "assets/teacher-linked.pdf"), true);
+    assert.equal(await mayServeAttachment(teacher(), "one/handout.pdf"), false);
+    assert.equal(await mayServeAttachment(teacher(), "two/handout.pdf"), true);
   });
 
   test("a teacher in student view is not served what only teachers see", async () => {
@@ -350,9 +450,11 @@ describe("the unreferenced report", () => {
     // names what no page mentions, not what nobody may see right now.
     assert.deepEqual(paths, [
       "assets/in-code.png",
+      "assets/mündliche RDP.pdf",
       "assets/old.pdf",
       "assets/with space.png",
       "ex/Solution.java",
+      "one/handout.pdf",
       "two/diagram.png",
     ]);
     assert.deepEqual(

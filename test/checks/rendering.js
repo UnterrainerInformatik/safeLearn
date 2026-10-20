@@ -361,8 +361,9 @@ describe("rendering", () => {
     assert.equal(absolute.width, "100px", "the |WxH suffix should become the element's width");
     assert.equal(absolute.height, "300px", "the |WxH suffix should become the element's height");
 
-    const embedded = images.find((image) => image.src?.endsWith("/md/assets/Pasted image 20240315152828.png"));
-    assert.ok(embedded, "the Obsidian embed should resolve to the file it names under md/assets");
+    // Percent-encoded, as every address an embed emits is (`attachment-rendering`).
+    const embedded = images.find((image) => image.src?.endsWith("/md/assets/Pasted%20image%2020240315152828.png"));
+    assert.ok(embedded, "the Obsidian embed should resolve to the file it names under md/assets, percent-encoded");
     assert.equal(embedded.alt, "Pasted image 20240315152828.png", "the embed keeps the file name as its description");
 
     const relative = images.find((image) => image.src === "/md/assets/test-local-image.jpg");

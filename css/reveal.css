@@ -5,6 +5,22 @@
   background-color: #c3c3c3;
 }
 
+/* An embedded PDF on a slide: the slide's width and most of its height, leaving
+   room for the heading and the link beneath. A size the author gave wins, as it
+   is set on the element; the maxima keep it on the slide either way. */
+.reveal .sl-pdf iframe {
+  display: block;
+  /* The border inside the size, so 600x400 is 600 by 400 and 100% fits. */
+  box-sizing: border-box;
+  width: 100%;
+  height: 60vh;
+  max-width: 100%;
+  max-height: 65vh;
+  margin: 0 auto;
+  border: 1px solid #5f5f5f;
+  background-color: #fff;
+}
+
 pre.shiki {
   max-width: 90%;
 }

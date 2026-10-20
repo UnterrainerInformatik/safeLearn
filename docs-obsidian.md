@@ -159,6 +159,27 @@ Those work on normal image-links, like the standard DM ones and the shortcut-lin
 # And as short-link
 ![[my-img.png|120]]
 ```
+## PDFs And Other Attachments
+A wiki link or an embed can name any file of the vault, not only a Markdown page or an image. It is found the same way: by its name alone, or by its path where that name exists in more than one folder.
+
+```markdown
+# A link to the PDF, showing its name.
+[[handout.pdf]]
+# A link with its own text.
+[[handout.pdf|Arbeitsblatt]]
+
+# The PDF shown inline, with a link to it beneath.
+![[handout.pdf]]
+# Inline, at 800 by 600 pixels, or 800 pixels wide.
+![[handout.pdf|800x600]]
+![[handout.pdf|800]]
+```
+
+An embedded PDF is shown in the browser's own PDF viewer, on the page and on a slide: as wide as the text and most of the screen high, or as large as you give it. On a slide you can scroll inside it without changing the slide. The link beneath it is always there, because most phones show no PDF inside a page, or only its first page; on a phone, that link is the way to the document. The printable document (`?document`) shows the link only, as a viewer does not print.
+
+Other kinds of files, such as Office documents or ZIP archives, are not shown inline: an embed of one renders as a link to it, like a wiki link does.
+
+Linking or embedding a file is also what lets students download it: a file in the vault is served to someone only if a page they may see links or embeds it - see [permissions](docs-permissions.md). A link or embed written as code, between backticks or in a fenced block, is shown as written and counts for nothing.
 ## Fragments in Reveal.js
 You may use fragments when starting a presentation.
 Fragments are parts of you page that pop up one after another, step by step, when you're pressing the forward-button you normally press to advance to the next vertical page.

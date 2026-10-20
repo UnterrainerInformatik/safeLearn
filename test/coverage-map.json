@@ -170,6 +170,21 @@
         "md/assets/attachments-b/test-attachment-ambiguous.png"
       ]
     },
+    "test/checks/pdf-embeds.js": {
+      "what": "Wiki links and embeds that name a PDF, in the page view, the presentation and the printable document: [[name.pdf]] and [[name.pdf|text]] render as links to the percent-encoded path and the PDF is served to a student (so the gate counts the wiki link as a reference), a wiki link in inline code stays as written, the sanitized page keeps the .sl-pdf placeholder with its data-* size, the page view upgrades it to an iframe served as application/pdf with the link beneath and the author's 600x400, the slide shows a visible viewer within the slide bounds that prevents swiping, and the document view shows the link and no viewer.",
+      "guards": [
+        "obsidian.js",
+        "app.js",
+        "sanitize.js",
+        "css/markdown.css",
+        "css/reveal.css"
+      ],
+      "corpus": [
+        "md/test-pdf-link.md",
+        "md/test-pdf-embed.md",
+        "md/assets/test-pdf mündlich.pdf"
+      ]
+    },
     "test/checks/deployment-surface.js": {
       "what": "What a running instance publishes over HTTP: that keycloak.json, the application sources, the dependency manifests and what sits beside a mounted package directory are not served and a refusal looks like a path with no file behind it, that the assets a page addresses still are — including the ones only a stylesheet names — that every same-origin reference of a rendered page resolves in all three views, the assets from their mounts and the attachments under /md for the session the page was rendered for, and that the one endpoint answering before authentication survives a parameter it cannot interpret. That a page which cannot reach the reload stream keeps trying with a growing delay rather than on a fixed timer. That a self-authenticating route — the directory search endpoint and the status endpoint beside it — returns no directory data to a request carrying neither a bearer token nor, distinctly, to one carrying only a valid browser session. That no route fetches a URL a request names: the former /convert route, asked by GET and POST to fetch a local listener or render a posted body, makes no outbound request and is answered exactly like a path that never existed.",
       "guards": [
@@ -285,7 +300,7 @@
       "corpus": []
     },
     "test/attachments.test.js": {
-      "what": "What a page addresses and which file that is: embeds with and without a size, Markdown images, links and definitions, raw img/video/audio/source/a attributes, external URLs and Markdown targets left out, references inside fenced or inline code ignored, an ambiguous basename resolving to nothing, relative paths against the page's folder, /md/ paths with percent-encoding, and paths that leave md/ rejected. Who is served an attachment by the full decision, case by case, including a removed reference and a file added after the page that embeds it. The unreferenced report: sorted paths, one log line each plus the count, replaced as a whole on rescan, and every listed path refused. The grant store: only same-origin attachments the body addresses, expiry and pruning, invalidation by a scan and by a preference write, and that app.js records grants in exactly one place, behind the corpus check. Scans a temporary fixture corpus and stubs fetch; needs no server, no browser, no login.",
+      "what": "What a page addresses and which file that is: embeds with and without a size, Markdown images, links and definitions, raw img/video/audio/source/a attributes, external URLs and Markdown targets left out, references inside fenced or inline code ignored, an ambiguous basename resolving to nothing, relative paths against the page's folder, /md/ paths with percent-encoding, and paths that leave md/ rejected. Who is served an attachment by the full decision, case by case, including a removed reference and a file added after the page that embeds it. The unreferenced report: sorted paths, one log line each plus the count, replaced as a whole on rescan, and every listed path refused. The grant store: only same-origin attachments the body addresses, expiry and pruning, invalidation by a scan and by a preference write, and that app.js records grants in exactly one place, behind the corpus check. Scans a temporary fixture corpus and stubs fetch; needs no server, no browser, no login. Wiki links [[name]] as references of their own kind, resolved like embeds and never to a Markdown page, the renderer turning them into Markdown links to the encoded path (inline code left as written), and the PDF embed placeholder with its size surviving the sanitizer.",
       "guards": [
         "obsidian.js",
         "app.js",

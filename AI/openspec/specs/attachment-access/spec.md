@@ -8,7 +8,7 @@ Defines which session is served which attachment from the Markdown corpus, the i
 
 ### Requirement: An attachment is served where at least one of its references is visible
 
-An attachment in the corpus SHALL be served to a session only when that session may see at least one place in the corpus that references it. A place SHALL count as visible when the session may see the Markdown file it is in, under the whole-file directive with its time windows, and, where the reference sits inside an inline `@@@` block, may also see that block under the same rules the rendered page applies to it: its roles, its time windows, the view pseudo-roles, and the student-view downgrade. A reference is any way a rendered page addresses the attachment: an embed, an image, or a link.
+An attachment in the corpus SHALL be served to a session only when that session may see at least one place in the corpus that references it. A place SHALL count as visible when the session may see the Markdown file it is in, under the whole-file directive with its time windows, and, where the reference sits inside an inline `@@@` block, may also see that block under the same rules the rendered page applies to it: its roles, its time windows, the view pseudo-roles, and the student-view downgrade. A reference is any way a rendered page addresses the attachment: an embed (`![[name]]`), an image, a link, or a wiki link (`[[name]]`, `[[name|text]]`) that resolves to the attachment.
 
 #### Scenario: Referenced from an unrestricted page
 
@@ -41,6 +41,12 @@ An attachment in the corpus SHALL be served to a session only when that session 
 
 - **WHEN** an attachment is referenced only inside a block gated by the exam view, and a session without that view requests it
 - **THEN** it is not served
+
+#### Scenario: Referenced by a wiki link
+
+- **WHEN** an attachment is referenced only by a wiki link `[[handout.pdf]]` on an unrestricted page, outside any `@@@` block
+- **THEN** it is served to every authenticated session
+- **AND** if that wiki link is moved inside a `@@@ teacher` block, it is no longer served to a student session
 
 ### Requirement: An attachment no page references is not served
 
