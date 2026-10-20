@@ -109,9 +109,9 @@ Each entry is marked with its implementation status:
 | Feature | Status | Implementation |
 | --- | --- | --- |
 | Always-current material, readable anywhere | **[verified]** | Content is rendered per request from disk; no build or publish step |
-| Responsive layout for phone/tablet | **[verified]** | `css/media.css` plus the collapsible sidebar in `obsidian-page.js` |
+| Responsive layout for phone/tablet | **[verified]** | `css/media.css` plus the collapsible sidebar in `obsidian-page.js`: `toggleSidebar()` opens and closes an overlay at 1024 px and below, and above that folds the column away with `sl-sidebar-folded` on `#wrapper` (`css/sidebar.css`), not remembered across page loads |
 | Remember last opened page | **[verified]** | `app.js` writes the `lastVisitedUrl` attribute; the `/` handler redirects to it when preference `sl == 1` |
-| Automatic table of contents | **[verified]** | `obsidian.js` `makeContentMap` assigns UUID anchors, `getContentListing` renders the sidebar list |
+| Automatic table of contents | **[verified]** | `obsidian.js` `makeContentMap` assigns UUID anchors and leaves the heading list on the request (`req.contentListing`), `getContentListing` renders it into the sidebar of the same page; a page without a rendering of its own (admin and module pages) shows no Content section |
 | Active-heading highlight while scrolling | **[undocumented]** | `obsidian-page.js` `markTopAnchor` |
 | Font selection (main and navigation, separately) | **[verified]** | `obsidian.js` `scanFonts` + `getFontImports` + the `typefaces` table; `obsidian-page.js` `mainFontChange`/`navFontChange`, stored by name and migrated off the old index through `LEGACY_FONT_ORDER` |
 | Font size and line spacing controls | **[verified]** | `obsidian-page.js` `fontBigger`/`fontSmaller`/`spacingBigger`/`spacingSmaller` |
@@ -247,7 +247,7 @@ read file (app.js)
        2. replaceObsidianImageLinks     ![[embeds]] → img / video / audio / link by extension
        3. replaceObsidianImageAltResize  alt="name|WxH" → inline width/height
        4. postprocessFragments          markers → .fragment spans, index reset at h2/h3
-       5. makeContentMap                UUID anchors on every heading; builds the TOC map
+       5. makeContentMap                UUID anchors on every heading; TOC map onto req
   └─ DOMPurify.sanitize            final output filter
 ```
 

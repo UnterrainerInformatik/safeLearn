@@ -145,7 +145,6 @@ export const mainFonts = {};
 export const mainFontsArray = [];
 export const navFonts = {};
 export const navFontsArray = [];
-export let contentMap = {};
 
 function parseLocalDateTime(value) {
   if (typeof value !== "string") {
@@ -837,7 +836,6 @@ export async function scanFiles(prefix, dir, resetFonts = false, root = dir) {
     Object.keys(navFonts).forEach(key => delete navFonts[key]);
     navFontsArray.length = 0;
   }
-  contentMap = {};
   mdFilesDirStructure = {};
 
   // Rebuild maps
@@ -1937,7 +1935,7 @@ export function manipulateHtml(html, req) {
   r = replaceObsidianImageLinks(r, req);
   r = replaceObsidianImageAltResizeValues(r);
   r = postprocessFragments(r)
-  r = makeContentMap(r);
+  r = makeContentMap(r, req);
   return r;
 }
 
@@ -1989,11 +1987,18 @@ function splitSubSections(html) {
     .join("")}</section>`;
 }
 
-function makeContentMap(html) {
+/**
+ * Gives every heading an anchor and leaves the list of them on the request,
+ * where the sidebar of this same page reads it. Not module state: renders of
+ * other readers' pages interleave with this one at every await, and a page
+ * without a rendering of its own (the module and admin pages) has to show no
+ * list rather than whichever one was built last.
+ */
+function makeContentMap(html, req) {
   const dom = new JSDOM(html);
   const document = dom.window.document;
   const headers = document.querySelectorAll("h1, h2, h3, h4, h5, h6");
-  contentMap = {};
+  const contentMap = {};
 
   contentMap["ROOT"] = { text: "TOP", indent: 1 };
   headers.forEach((header) => {
@@ -2003,6 +2008,9 @@ function makeContentMap(html) {
     header.setAttribute("id", guid);
     header.setAttribute("class", "docanchor");
   });
+  if (req) {
+    req.contentListing = contentMap;
+  }
   return `<span id="ROOT" class="docanchor"></span>` + dom.serialize();
 }
 
@@ -2889,11 +2897,14 @@ function insertDirLink(file, req, indent, i, files) {
   return r;
 }
 
-function getContentListing() {
+// textContent has decoded the heading's entities, so a heading written as
+// `&lt;b&gt;` would turn back into markup here without the escape.
+function getContentListing(req) {
+  const contentMap = req.contentListing;
   const list = Object.keys(contentMap).map((guid) => {
     const o = contentMap[guid];
     let indentation = "&nbsp;".repeat((o.indent - 1) * 2);
-    return `${indentation}<a href="#${guid}">${o.text}</a>`;
+    return `${indentation}<a href="#${guid}">${escapeHtmlAttribute(o.text)}</a>`;
   });
   return list.join("<br>");
 }
@@ -3224,10 +3235,14 @@ async function getSideBar(startPage, req) {
     <div class="sidebar-menu sidebar-dirlist">
       ${await getDirectoryListing(req)}
     </div>
-    <div class="sidebar-title sidebar-title-content"><b>${t("app.sidebar.content")}</b></div>
+    ${
+      req.contentListing
+        ? `<div class="sidebar-title sidebar-title-content"><b>${t("app.sidebar.content")}</b></div>
     <div class="sidebar-menu sidebar-anchors">
-      ${await getContentListing()}
-    </div>
+      ${getContentListing(req)}
+    </div>`
+        : ""
+    }
   `;
 }
 

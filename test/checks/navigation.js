@@ -4,8 +4,8 @@
  * Reads `md/test-md-file.md`, `md/test-presentation.md`,
  * `md/presentations/test-presentation.md`, `md/test-chapter-10.md`,
  * `md/presentations/test-chapter-10.md`,
- * `md/presentations/test - name - with - spaces.md` and the folders under
- * `md/folder-tests/`.
+ * `md/presentations/test - name - with - spaces.md`, `md/test-content-list.md`,
+ * `md/test-search-jump.md` and the folders under `md/folder-tests/`.
  *
  * These are the cases that broke before: a basename that exists in two folders —
  * with a digit in the name and without one, because the path that disambiguates
@@ -32,6 +32,22 @@ const duplicateInFolder = "/md/presentations/test-presentation.md";
 const digitPage = "/md/test-chapter-10.md";
 const digitInFolder = "/md/presentations/test-chapter-10.md";
 const nameWithSpaces = "/md/presentations/test - name - with - spaces.md";
+const contentListPage = "/md/test-content-list.md";
+const teacherHeadingPage = "/md/test-search-jump.md";
+const teacherHeading = "Nur fuer Lehrende";
+const modulePage = "/admin/attachments";
+
+/** The Content list of the page the session is looking at, or `null` when it has none. */
+const contentList = (session) =>
+  session.page.evaluate(() => {
+    const anchors = document.querySelector(".sidebar-anchors");
+    if (!anchors && !document.querySelector(".sidebar-title-content")) return null;
+    return [...(anchors?.querySelectorAll("a") ?? [])].map((entry) => ({
+      target: entry.getAttribute("href"),
+      text: entry.textContent.trim(),
+      markup: entry.innerHTML,
+    }));
+  });
 
 /** Every Markdown file of the corpus, as the path the application serves it on. */
 function corpusFiles(directory = corpusRoot, collected = []) {
@@ -262,6 +278,141 @@ describe("navigation", () => {
         contents.entries.some((entry) => entry.text === heading),
         `the heading "${heading}" is missing from the table of contents`
       );
+    }
+  });
+
+  // ---- The Content list belongs to the page it is drawn on ----
+
+  test("a module page after a corpus page has no Content section and none of its headings", async () => {
+    await render(session, corpusPage);
+    const corpusHeadings = (await contentList(session)).map((entry) => entry.text);
+    assert.ok(corpusHeadings.length > 1, `${corpusPage} should list its headings`);
+
+    await render(session, modulePage);
+    assert.equal(await contentList(session), null, `${modulePage} should show no Content section`);
+    const sidebar = await session.page.$eval("#sidebar", (element) => element.textContent);
+    for (const heading of corpusHeadings.filter((heading) => heading !== "TOP")) {
+      assert.ok(
+        !sidebar.includes(heading),
+        `the sidebar of ${modulePage} shows "${heading}", a heading of ${corpusPage}`
+      );
+    }
+  });
+
+  test("two corpus pages requested at the same time each list exactly their own headings", async () => {
+    const answers = await session.page.evaluate(async (paths) => {
+      const parse = async (pagePath) => {
+        const response = await fetch(pagePath, { credentials: "same-origin" });
+        const document = new DOMParser().parseFromString(await response.text(), "text/html");
+        return {
+          pagePath,
+          listed: [...document.querySelectorAll(".sidebar-anchors a")].map((entry) =>
+            entry.getAttribute("href").slice(1)
+          ),
+          anchors: [
+            ...document.querySelectorAll(
+              "#markdown-content #ROOT, #markdown-content h1, #markdown-content h2, #markdown-content h3, #markdown-content h4, #markdown-content h5, #markdown-content h6"
+            ),
+          ].map((heading) => heading.id),
+        };
+      };
+      // Several rounds, so the renders really do interleave.
+      return Promise.all([...Array(4)].flatMap(() => paths.map(parse)));
+    }, [corpusPage, contentListPage]);
+
+    for (const answer of answers) {
+      assert.ok(answer.anchors.length > 1, `${answer.pagePath} should still have headings`);
+      assert.deepEqual(
+        answer.listed,
+        answer.anchors,
+        `the Content list of ${answer.pagePath} should hold exactly that page's headings`
+      );
+    }
+  });
+
+  test("a heading naming a tag reaches the Content list as text, not as markup", async () => {
+    await render(session, contentListPage);
+    const entry = (await contentList(session)).find((listed) => listed.text.includes("naming"));
+    assert.ok(entry, `${contentListPage} should list its heading naming <b>`);
+    assert.equal(entry.text, "A heading naming <b> as text");
+    assert.ok(!/<b>/i.test(entry.markup), `the entry should not contain a <b> element: ${entry.markup}`);
+  });
+
+  test("a student's Content list omits the heading of a section only teachers may see", async () => {
+    const student = await sharedSession("student");
+    await setPreferences(student, {});
+    const studentRoles = await roles(student);
+    const mayRead = studentRoles.has("teacher") || studentRoles.has("admin");
+
+    await render(student, teacherHeadingPage);
+    const listed = (await contentList(student)).map((entry) => entry.text);
+    assert.equal(
+      listed.includes(teacherHeading),
+      mayRead,
+      `the student's Content list of ${teacherHeadingPage} should ${mayRead ? "" : "not "}list "${teacherHeading}"`
+    );
+
+    await render(session, teacherHeadingPage);
+    const teacherListed = (await contentList(session)).map((entry) => entry.text);
+    assert.ok(teacherListed.includes(teacherHeading), `the teacher should still see "${teacherHeading}" listed`);
+  });
+
+  // ---- The burger folds the column on a wide window ----
+
+  test("at 1600px the burger folds the column away, the content takes its width, and the next page opens unfolded", async () => {
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 500));
+    const measure = () =>
+      session.page.evaluate(() => {
+        const content = document.querySelector("#markdown-content");
+        const style = getComputedStyle(content);
+        const box = content.getBoundingClientRect();
+        const left = box.left + parseFloat(style.paddingLeft);
+        const right = box.right - parseFloat(style.paddingRight);
+        return {
+          sidebar: document.querySelector("#sidebar").getBoundingClientRect().width,
+          burger: getComputedStyle(document.querySelector(".topbar-burger")).opacity,
+          contentLeft: left,
+          gaps: [left, document.documentElement.clientWidth - right],
+          firstLeft: content.firstElementChild?.getBoundingClientRect().left ?? null,
+        };
+      });
+    const click = async () => {
+      await session.page.click(".topbar-burger");
+      await settle();
+    };
+
+    await session.page.setViewport({ width: 1600, height: 900 });
+    try {
+      await render(session, modulePage);
+      await settle();
+      const shown = await measure();
+      assert.ok(shown.sidebar > 200, `the column should be shown when ${modulePage} opens, but is ${shown.sidebar}px wide`);
+      assert.equal(shown.burger, "1", "the burger should be visible at 1600px");
+
+      await click();
+      const folded = await measure();
+      assert.equal(folded.sidebar, 0, `one click should fold the column, but it is ${folded.sidebar}px wide`);
+      assert.ok(folded.firstLeft <= 30, `${modulePage} should run to the left margin, but starts at ${folded.firstLeft}px`);
+
+      await click();
+      const back = await measure();
+      assert.equal(back.sidebar, shown.sidebar, "a second click should bring the column back at its width");
+      assert.equal(back.contentLeft, shown.contentLeft, "and the content back to its place beside it");
+
+      await render(session, corpusPage);
+      await click();
+      const reading = await measure();
+      assert.equal(reading.sidebar, 0, `one click should fold the column on ${corpusPage} too`);
+      assert.ok(
+        Math.abs(reading.gaps[0] - reading.gaps[1]) <= 2,
+        `the reading column should be centred once the column is folded, but its gaps are ${reading.gaps.map(Math.round).join(" and ")}px`
+      );
+
+      await render(session, corpusPage);
+      const next = await measure();
+      assert.equal(next.sidebar, shown.sidebar, "the next page should open with the column shown");
+    } finally {
+      await session.page.setViewport({ width: 1280, height: 900 });
     }
   });
 

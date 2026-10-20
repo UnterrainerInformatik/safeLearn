@@ -109,10 +109,14 @@
       ]
     },
     "test/checks/navigation.js": {
-      "what": "Wiki-link resolution including the duplicated basename — with a digit in the name and without one — and the name with spaces, the folder-name edge cases, the table of contents and the navigation tree.",
+      "what": "Wiki-link resolution including the duplicated basename — with a digit in the name and without one — and the name with spaces, the folder-name edge cases, the table of contents and the navigation tree. That the Content list holds the headings of the page it is drawn on and no other: none on a module page after a corpus page, each page's own when two are rendered at once, a heading naming a tag as text, and no heading of a section the reader may not see. That at 1600px the burger is visible, folds the column away so the content takes its width, brings it back, and that the next page opens unfolded.",
       "guards": [
         "obsidian.js",
-        "app.js"
+        "app.js",
+        "obsidian-page.js",
+        "css/sidebar.css",
+        "css/topbar.css",
+        "css/media.css"
       ],
       "corpus": [
         "md/test-md-file.md",
@@ -121,6 +125,8 @@
         "md/test-chapter-10.md",
         "md/presentations/test-chapter-10.md",
         "md/presentations/test - name - with - spaces.md",
+        "md/test-content-list.md",
+        "md/test-search-jump.md",
         "md/folder-tests/folder with spaces/Untitled.md",
         "md/folder-tests/special chars $'&`´!/Untitled.md",
         "md/folder-tests/a very long folder with spaces oh my god i cannot believe how long it is/Untitled.md"

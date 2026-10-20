@@ -1710,6 +1710,8 @@ describe("online tests: writing", () => {
       [false, true],
       "the results are shown while no test is written"
     );
+    // The open tests are an embed of their own and may draw after the results.
+    await page.waitForSelector(`.sl-exam-attempt-open[data-test="${test.id}"] button`, { timeout: 20000 });
     await page.click(`.sl-exam-attempt-open[data-test="${test.id}"] button`);
     await page.waitForSelector(".sl-exam-attempt-question", { timeout: 20000 });
     assert.deepEqual([(await resultsSection(page)).hidden, (await resultsSection(page)).shown], [true, false], "hidden once the test is started");
@@ -1932,6 +1934,22 @@ describe("online tests: writing", () => {
     await teacher.page.keyboard.press("ArrowLeft");
     await teacher.page.keyboard.press("ArrowLeft");
     assert.equal(await teacher.page.evaluate(() => Number(document.activeElement.dataset.col)), online, "and back, never into an online column");
+
+    // The column head shows the test's name as it was written: the corpus
+    // tables' capitalize must not reach the module's tables.
+    const quiz = "Quiz: HTTP and databases";
+    assert.equal((await fetchAs(teacher, `/exam/api/tests/${written.id}`, { method: "PUT", body: { name: quiz } })).status, 200);
+    try {
+      await teacher.page.goto(`${applicationUrl}/exam/courses/${course.id}/gradebook?semester=ws`, { waitUntil: "domcontentloaded" });
+      await teacher.page.waitForSelector(`th[data-column="${column.id}"] a`, { timeout: 20000 });
+      const shown = await teacher.page.$eval(`th[data-column="${column.id}"]`, (th) => ({
+        name: th.querySelector("a").innerText,
+        transform: getComputedStyle(th).textTransform,
+      }));
+      assert.deepEqual(shown, { name: quiz, transform: "none" });
+    } finally {
+      await fetchAs(teacher, `/exam/api/tests/${written.id}`, { method: "PUT", body: { name: "Writing" } });
+    }
   });
 
   test("a second browser is refused and recorded until the teacher unbinds the attempt, and the live view names both browsers", async () => {

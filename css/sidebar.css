@@ -1,8 +1,12 @@
+/* Below the bar rather than over it, at every width: the burger is the way
+   back to a folded column, and at top: 0 the column's first link sits exactly
+   where the burger is - a reader clicking to fold or close the navigation
+   navigated Home instead. */
 #sidebar {
   width: 250px;
-  height: 100vh;
+  height: calc(100vh - 50px);
   padding-left: 10px;
-  top: 0px;
+  top: 50px;
   z-index: 99999;
   position: fixed;
   border-top-right-radius: 10px;
@@ -20,4 +24,25 @@
   width: 4px;
   height: 100%;
   cursor: ew-resize;
+}
+/* The column folded away by the burger above 1024px (`toggleSidebar`). Folded
+   like the overlay in media.css: without the padding and the overflow the
+   fixed column would stay 10px wide over the text, resize handle included. The
+   content takes the freed width - the reading column centres itself, the wide
+   module pages run to the left margin. */
+@media screen and (min-width: 1025px) {
+  #wrapper.sl-sidebar-folded #sidebar {
+    max-width: 0;
+    padding: 0;
+    opacity: 0;
+    overflow: hidden;
+  }
+
+  #wrapper.sl-sidebar-folded #markdown-content {
+    padding-left: 0;
+  }
+
+  #wrapper.sl-sidebar-folded #markdown-content.sl-wide {
+    padding-left: 20px;
+  }
 }

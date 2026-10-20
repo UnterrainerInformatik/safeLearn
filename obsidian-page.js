@@ -99,9 +99,20 @@ document.addEventListener("DOMContentLoaded", (event) => {
   });
 });
 
+/**
+ * The burger: an overlay the button opens and closes at 1024px and below, a
+ * column it folds away above. Decided at click time and kept as two separate
+ * states, so a column folded on a wide window does not turn into an open
+ * overlay when the window is narrowed. Neither is remembered across page loads.
+ */
 function toggleSidebar() {
   const sidebar = document.querySelector("#sidebar");
-  if (sidebar) {
+  const wrapper = document.querySelector("#wrapper");
+  if (!window.matchMedia("(max-width: 1024px)").matches) {
+    if (wrapper) {
+      wrapper.classList.toggle("sl-sidebar-folded");
+    }
+  } else if (sidebar) {
     if (sidebar.classList.contains("width-reveal")) {
       sidebar.style.maxWidth = "0px";
       sidebar.classList.remove("width-reveal");

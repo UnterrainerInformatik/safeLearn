@@ -493,7 +493,6 @@ a.sl-exam-button.sl-exam-open:hover,
 }
 
 .sl-exam-sheet .sl-exam-column-head {
-  text-transform: none;
   font-weight: normal;
   vertical-align: top;
 }
@@ -514,7 +513,11 @@ a.sl-exam-button.sl-exam-open:hover,
   width: 5em;
 }
 
-.sl-exam-sheet .sl-exam-category {
+/* Names and labels as they were entered. markdown.css capitalises every table
+   heading under #markdown-content, so the opt-out needs the ID as well to
+   outrank it; keyed on the class every module table carries, which also covers
+   the module's tables embedded in a corpus page. */
+#markdown-content .sl-exam-table th {
   text-transform: none;
 }
 
