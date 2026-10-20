@@ -369,9 +369,9 @@ export function useExamModule() {
   reachableHosts = new Set([new URL(applicationUrl).host, new URL(identityProviderUrl).host]);
   const examDir = mkdtempSync(path.join(os.tmpdir(), "safelearn-exam-run-"));
   instance = {
-    // No school periods unless a check restarts with them, whatever the
-    // shell running the suite has set.
-    env: { EXAM_MODULE: "on", EXAM_DB_PATH: path.join(examDir, "exam.sqlite"), SCHOOL_PERIODS: "" },
+    // No school periods unless a check restarts with them, and the default
+    // retention period, whatever the shell running the suite has set.
+    env: { EXAM_MODULE: "on", EXAM_DB_PATH: path.join(examDir, "exam.sqlite"), SCHOOL_PERIODS: "", EXAM_RETENTION_YEARS: "" },
     adopt: false,
     examDir,
   };

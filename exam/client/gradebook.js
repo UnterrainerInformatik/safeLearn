@@ -16,7 +16,7 @@
 import { parseNumber as parseTyped } from "../../i18n/format.js";
 import { viennaLocal } from "./periods.js";
 import { act, displayClass, displayPerson, messageLine } from "./classes.js";
-import { confirmButton, defineExamElement, ExamElement, examApi, format, h, linkButton, markRows, saveOnChange, stickyColumns, t } from "./frame.js";
+import { confirmButton, defineExamElement, ExamElement, examApi, format, h, linkButton, markRows, readOnlyFor, saveOnChange, stickyColumns, t } from "./frame.js";
 
 const categories = ["onlineTests", "manualTests", "participation", "homework"];
 
@@ -180,6 +180,7 @@ class GradebookView extends ExamElement {
       : h(
           "select",
           {
+            "data-sl-reads": "",
             "aria-label": t("exam.gradebook.semesterLabel"),
             onchange: (event) => {
               this.semester = event.target.value;
@@ -191,7 +192,9 @@ class GradebookView extends ExamElement {
     this.line = messageLine();
     // Every category is shown with its weight, even without columns yet.
     const groups = categories.map((category) => ({ category, columns: overview.columns.filter((column) => column.category === category) }));
-    return h(
+    // A closed year's sheet shows every result as text (exam-year-change D1).
+    const open = !course.year.closed;
+    return readOnlyFor(course.year, h(
       "div",
       { class: "sl-exam" },
       onPage ? null : h("h3", {}, t("exam.gradebook.embedHeading", { course: courseTitle(course) })),
@@ -211,11 +214,11 @@ class GradebookView extends ExamElement {
         t("exam.gradebook.hintArrows")
       ),
       overview.students.length
-        ? this.sheet(overview, groups, overview.students, true)
+        ? this.sheet(overview, groups, overview.students, open)
         : h("p", {}, t("exam.gradebook.emptyRoster"), " ", linkButton({ label: t("exam.gradebook.toRoster"), href: `/exam/classes/${course.classId}`, class: "sl-exam-to-roster" })),
       overview.left.length ? [h("h4", {}, t("exam.gradebook.leftHeading", { count: overview.left.length })), this.sheet(overview, groups, overview.left, false)] : null,
       this.line
-    );
+    ));
   }
 
   /** The leading columns, left to right: the year view adds the winter grade it builds on. */
@@ -415,6 +418,7 @@ class GradebookView extends ExamElement {
       {
         type: "button",
         class: "sl-exam-comment-toggle",
+        "data-sl-reads": "",
         "aria-expanded": "false",
         "aria-label": t("exam.gradebook.showComment", { person: displayPerson(row) }),
         title: row.comment,
@@ -575,14 +579,14 @@ class GradebookStudent extends ExamElement {
     const { course, student } = record;
     const heading = document.querySelector("#markdown-content h1");
     if (heading) heading.textContent = `${displayPerson(student)} – ${courseTitle(course)}`;
-    return h(
+    return readOnlyFor(course.year, h(
       "div",
       { class: "sl-exam" },
       this.neighbours(record),
       h("p", { class: "sl-exam-quiet sl-exam-saved-hint" }, t("exam.classes.savedAsChanged")),
       student.leftAt ? h("p", { class: "sl-exam-quiet" }, t("exam.gradebook.leftOn", { date: displayDate(student.leftAt) })) : null,
       ["ws", "ss"].map((semester) => this.semesterSection(record, semester))
-    );
+    ));
   }
 
   /**

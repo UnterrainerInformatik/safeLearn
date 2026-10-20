@@ -422,6 +422,19 @@
         "startFormat": "The start has to be a date and time.",
         "writtenCannotDelete": "This test has been written and cannot be deleted.",
         "writtenQuestionsFixed": "This test has been written; its questions cannot change any more."
+      },
+      "years": {
+        "alreadyClosed": "{name} is closed already.",
+        "closeCurrent": "{name} is the current school year. Make the next school year current first, then close {name}.",
+        "closed": "This school year is closed; nothing in it can be changed any more.",
+        "courseList": "The courses to copy are a list of the class's own courses.",
+        "noSuccessor": "{name} has no class to move up to.",
+        "notEnded": "{name} ends on {endsOn}; it can be closed after that day.",
+        "notPreviousYear": "{name} is not a class of the school year before this one."
+      },
+      "retention": {
+        "changed": "The records to remove have changed since the report. Look at the new report and confirm again.",
+        "noReport": "Removing records needs the report it was confirmed for."
       }
     },
     "frame": {
@@ -430,7 +443,8 @@
       "notAvailable": "This element is not available on this instance yet.",
       "notFound": "This record does not exist.",
       "saveFailed": "That could not be saved. Please try again.",
-      "sessionEnded": "Your session has ended. The page is loaded anew so you can log in again."
+      "sessionEnded": "Your session has ended. The page is loaded anew so you can log in again.",
+      "yearClosed": "The school year {name} is closed: everything in it can be read, nothing can be changed."
     },
     "gradebook": {
       "actualGrade": "Actual grade",
@@ -806,6 +820,45 @@
       "newUnder": "New category under {name}",
       "ok": "OK",
       "renameTitle": "Rename {name}"
+    },
+    "years": {
+      "close": "Close school year",
+      "closeArmed": "Close {name} for good?",
+      "closeExplanation": "Once {name} is closed, nothing in it can be changed any more - no class, roster, course, result or test, not even by you. A closed year cannot be reopened.",
+      "closeHeading": "Close school year",
+      "coursesToCopy": "Copy courses (language, weights and winter share; no columns, results or tests):",
+      "createNext": "Create {name}",
+      "directoryNoOthers": "Nobody else.",
+      "directoryOthers": "Also in {name} in the directory ({count})",
+      "lastYearRoster": "Last year's {from} ({count})",
+      "nextClassHeading": "{from} → {name}",
+      "nextExists": "{from} →",
+      "nextHeading_one": "From {previous}: {count} class to create",
+      "nextHeading_other": "From {previous}: {count} classes to create",
+      "nextNone": "{from}: no class follows it."
+    },
+    "retention": {
+      "attempts_one": "{count} online-test attempt",
+      "attempts_other": "{count} online-test attempts",
+      "due_one": "{count} student who left is past the retention period. Removing their records deletes:",
+      "due_other": "{count} students who left are past the retention period. Removing their records deletes:",
+      "explanation_one": "The records of a student who is on no roster of the current school year are kept for {count} year after the end of the last school year they were on a roster, and then removed here.",
+      "explanation_other": "The records of a student who is on no roster of the current school year are kept for {count} years after the end of the last school year they were on a roster, and then removed here.",
+      "heading": "Remove leavers' records",
+      "nothingDue": "No records are due for removal.",
+      "overrides_one": "{count} override or comment",
+      "overrides_other": "{count} overrides or comments",
+      "remove": "Remove leavers' records",
+      "removeArmed_one": "Delete the records of {count} student for good?",
+      "removeArmed_other": "Delete the records of {count} students for good?",
+      "removed_one": "The records of {count} student were removed.",
+      "removed_other": "The records of {count} students were removed.",
+      "results_one": "{count} result",
+      "results_other": "{count} results",
+      "rosterEntries_one": "{count} roster entry",
+      "rosterEntries_other": "{count} roster entries",
+      "sittings_one": "{count} sitting participation",
+      "sittings_other": "{count} sitting participations"
     }
   }
 }

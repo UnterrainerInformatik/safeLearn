@@ -11,7 +11,8 @@
  *
  * and never rejects for a reason it can name: a database that cannot be opened,
  * a failed migration, a read-only data directory or a malformed
- * `SCHOOL_PERIODS` disable the module, and the reader keeps serving.
+ * `SCHOOL_PERIODS` or `EXAM_RETENTION_YEARS` disable the module, and the
+ * reader keeps serving.
  */
 
 import express from "express";
@@ -23,7 +24,7 @@ import { databasePath, openDatabase } from "./db.js";
 import { SessionEndedError } from "../middlewares/keycloak-middleware.js";
 import { actsAsAdmin, actsAsTeacher, identityOf, teacherPage } from "./gate.js";
 import { teacherShell } from "./bar.js";
-import { ConflictError, ForbiddenError, InvalidInputError, listYears, NotFoundError, readableMessage } from "./classes.js";
+import { asRefusal, ConflictError, ForbiddenError, InvalidInputError, listYears, NotFoundError, readableMessage } from "./classes.js";
 import { registerClassRoutes } from "./routes-classes.js";
 import { registerGradebookRoutes } from "./routes-gradebook.js";
 import { registerPoolRoutes } from "./routes-pool.js";
@@ -35,6 +36,7 @@ import { registerAttemptRoutes } from "./routes-attempts.js";
 import { registerLiveRoutes } from "./routes-live.js";
 import { openTestsOf, scheduleSweep } from "./attempts.js";
 import { parsePeriods } from "./client/periods.js";
+import { parseRetentionYears } from "./retention.js";
 import { i18nOf } from "../i18n/server.js";
 
 const clientDir = path.join(import.meta.dirname, "client");
@@ -79,7 +81,7 @@ function refusalStatus(error) {
   return null;
 }
 
-function buildRouter(db, startPage, periods) {
+function buildRouter(db, startPage, periods, retentionYears) {
   const router = express.Router();
 
   // The module's client: its directory and nothing beside it. Mounted here, so
@@ -103,7 +105,7 @@ function buildRouter(db, startPage, periods) {
     })
   );
 
-  registerClassRoutes(router, { db, handle, startPage });
+  registerClassRoutes(router, { db, handle, startPage, retentionYears });
   registerGradebookRoutes(router, { db, handle, startPage });
   registerPoolRoutes(router, { db, handle, startPage });
   registerPoolEditRoutes(router, { db, handle, startPage });
@@ -137,7 +139,10 @@ function buildRouter(db, startPage, periods) {
 
   // The end of every module request that fails. That request alone is answered
   // with a server error; the process and every other session carry on.
-  router.use((error, req, res, next) => {
+  router.use((thrown, req, res, next) => {
+    // A write the database refused because its school year is closed is a
+    // refusal like any other (exam-year-change design D2).
+    const error = asRefusal(thrown);
     // A session that ended meanwhile is answered by app.js's handler, the way
     // checkAuthenticated answers a request without one.
     if (error instanceof SessionEndedError) {
@@ -183,8 +188,11 @@ export async function init({ startPage }) {
   // The school's periods, checked before anything is opened: a value nobody
   // can read would otherwise fall back to clock times unnoticed.
   let periods;
+  let retentionYears;
   try {
     periods = parsePeriods(process.env.SCHOOL_PERIODS);
+    // How long a leaver's records are kept (exam-year-change design D5).
+    retentionYears = parseRetentionYears(process.env.EXAM_RETENTION_YEARS);
   } catch (error) {
     return { active: false, reason: error.message };
   }
@@ -216,7 +224,7 @@ export async function init({ startPage }) {
   scheduleSweep(db);
   return {
     active: true,
-    router: buildRouter(db, startPage, periods),
+    router: buildRouter(db, startPage, periods, retentionYears),
     embedHandlers: buildEmbedHandlers(),
     clientScript,
     // Whether the session has a test open for it right now, for the colour of

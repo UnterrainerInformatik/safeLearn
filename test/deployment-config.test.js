@@ -255,12 +255,26 @@ test("the school's periods reach the container through its environment", () => {
   );
 });
 
+test("the retention period of leavers' records reaches the container through its environment", () => {
+  assert.ok(
+    containerEnv.has("EXAM_RETENTION_YEARS") && deployEnv.has("EXAM_RETENTION_YEARS"),
+    `EXAM_RETENTION_YEARS is expected in ${composePath}'s environment: block and in deploy/.env — see ` +
+      `docs-exam-module.md.`
+  );
+  assert.ok(
+    !imageEnv.has("EXAM_RETENTION_YEARS"),
+    `EXAM_RETENTION_YEARS is baked into the image's own .env by ${workflowPath}. The period is one ` +
+      `school's decision, and the image serves every deployment.`
+  );
+});
+
 test("the WYSIWYG containers run without the exam module", () => {
   for (const template of ["wysiwyg-container-linux", "wysiwyg-container-windows"]) {
     const file = `${template}/docker-compose.yml`;
     const text = readFileSync(path.join(projectRoot, file), "utf8");
     assert.ok(!/EXAM_MODULE/.test(text), `${file} sets EXAM_MODULE; the WYSIWYG container runs without the module.`);
     assert.ok(!/SCHOOL_PERIODS/.test(text), `${file} sets SCHOOL_PERIODS; the WYSIWYG container runs without the module.`);
+    assert.ok(!/EXAM_RETENTION_YEARS/.test(text), `${file} sets EXAM_RETENTION_YEARS; the WYSIWYG container runs without the module.`);
     assert.ok(!/\/app\/data/.test(text), `${file} mounts a data volume; the WYSIWYG container keeps no data.`);
   }
 });

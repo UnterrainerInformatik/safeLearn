@@ -1,12 +1,16 @@
 /**
- * School years, classes, rosters and courses (`class-roster`), as plain SQL
+ * School years, classes, rosters and courses (`class-roster`), and closing a
+ * year and starting the next one from it (`school-year-change`), as plain SQL
  * over the module's database. Every function takes the open database first and
  * is synchronous, like `DatabaseSync` itself. Nothing here knows about HTTP or
- * the directory: the router decides who may call what, and the roster source
- * (`roster-source.js`) decides whom a class's checklist offers.
+ * fetches the directory: the router decides who may call what and passes the
+ * directory's people in, and the roster source (`roster-source.js`) decides
+ * whom a class's checklist offers.
  */
 
 import { i18nFor } from "../i18n/server.js";
+import { viennaLocal } from "./client/periods.js";
+import { classCandidates, isKnownTeacher } from "./roster-source.js";
 
 const { t: englishT, format: englishFormat } = i18nFor("en", "de-AT");
 
@@ -114,9 +118,10 @@ export function validDate(value, key) {
 
 /**
  * Runs `fn` inside one transaction: everything it writes lands, or nothing
- * does.
+ * does. Called inside another one, it joins it, so the outer one decides.
  */
 export function inTransaction(db, fn) {
+  if (db.isTransaction) return fn();
   db.exec("BEGIN");
   try {
     const result = fn();
@@ -126,6 +131,28 @@ export function inTransaction(db, fn) {
     db.exec("ROLLBACK");
     throw error;
   }
+}
+
+/**
+ * True for the database's refusal of a write to a closed school year: the
+ * abort every trigger of migration 010 raises (exam-year-change design D2).
+ */
+export function isClosedYearError(error) {
+  return /exam: school year closed/.test(error?.message ?? "");
+}
+
+/**
+ * `error` as the module answers it: the database's refusal of a write to a
+ * closed year becomes a `ConflictError`, so every route answers 409 with a
+ * readable text without a check of its own. Anything else stays as it is.
+ */
+export function asRefusal(error) {
+  return isClosedYearError(error) ? new ConflictError("exam.errors.years.closed") : error;
+}
+
+/** Today in Vienna, as `YYYY-MM-DD`: the day a school year's dates are compared with. */
+export function viennaToday(at = now()) {
+  return viennaLocal(at).date;
 }
 
 /** True for SQLite's answer to a broken UNIQUE constraint. */
@@ -143,6 +170,8 @@ function yearFromRow(row) {
     summerStartsOn: row.summer_starts_on,
     endsOn: row.ends_on,
     current: row.is_current === 1,
+    closed: (row.closed_at ?? null) !== null,
+    closedAt: row.closed_at ?? null,
   };
 }
 
@@ -225,6 +254,21 @@ export function renameYear(db, id, { name } = {}) {
     if (isUniqueViolation(error)) throw new ConflictError("exam.errors.classes.yearExists", { name: trimmed });
     throw error;
   }
+  return getYear(db, id);
+}
+
+/**
+ * Closes a school year for good (exam-year-change design D1): from then on the
+ * database refuses every change to what it holds. Only a year whose end date
+ * has passed in Vienna and that is not the current one can be closed; the
+ * current year is moved on first. A closed year is never opened again.
+ */
+export function closeYear(db, id, today = viennaToday()) {
+  const year = getYear(db, id);
+  if (year.closed) throw new ConflictError("exam.errors.years.alreadyClosed", { name: year.name });
+  if (year.current) throw new ConflictError("exam.errors.years.closeCurrent", { name: year.name });
+  if (year.endsOn >= today) throw new ConflictError("exam.errors.years.notEnded", { name: year.name, endsOn: dateParam(year.endsOn) });
+  db.prepare("UPDATE school_year SET closed_at = ? WHERE id = ? AND closed_at IS NULL").run(now(), id);
   return getYear(db, id);
 }
 
@@ -616,6 +660,21 @@ export function updateCourse(db, id, { subject, language, weights, winterShare }
 }
 
 /**
+ * Copies a course of an earlier year into the class `classId`: its subject,
+ * language, weights and winter share, and nothing else - no column, result
+ * or test (exam-year-change design D6).
+ */
+export function copyCourse(db, courseId, classId) {
+  const source = getCourse(db, courseId);
+  return createCourse(db, classId, {
+    subject: source.subject,
+    language: source.language,
+    weights: source.weights,
+    winterShare: source.winterShare,
+  });
+}
+
+/**
  * Deletes a course nothing depends on: no gradebook column (an empty one
  * counts), no result, no semester grade and no online test (design D8). The
  * refusal names each by its count.
@@ -632,4 +691,85 @@ export function deleteCourse(db, id) {
   if (Object.values(held).some((n) => n > 0)) throw new ConflictError("exam.errors.classes.courseInUse", { subject: course.subject, ...held });
   db.prepare("DELETE FROM course WHERE id = ?").run(id);
   return { deleted: id, classId: course.classId };
+}
+
+// ------------------------------------------------------------ the next year
+
+/** The school year before `year` by its start, or null for the first one. */
+export function previousYear(db, year) {
+  const row = db.prepare("SELECT * FROM school_year WHERE starts_on < ? ORDER BY starts_on DESC LIMIT 1").get(year.startsOn);
+  return row ? yearFromRow(row) : null;
+}
+
+/**
+ * The class a class moves up to the next year: the leading year digit raised
+ * by one (`3ahif` → `4ahif`). A fifth-year class, or one whose name does not
+ * start with a digit from 1 to 4, has none.
+ */
+export function successorName(name) {
+  const match = /^([1-4])(.*)$/.exec(name);
+  return match ? `${Number(match[1]) + 1}${match[2]}` : null;
+}
+
+/**
+ * What the year `yearId` is offered from the year before it (exam-year-change
+ * design D6): for each of that year's classes the successor's name, or none,
+ * and whether it exists in `yearId` already; last year's roster - those who
+ * did not leave - and the directory's current members of the successor
+ * (`people`, null while the directory holds nothing), each person flagged
+ * whether they were on last year's roster; and the class's courses to copy.
+ * A known teacher is never offered. Reading a closed year is allowed.
+ */
+export function nextYearProposal(db, yearId, people) {
+  const year = getYear(db, yearId);
+  const previous = previousYear(db, year);
+  if (!previous) return { year, previous: null, classes: [] };
+  const existing = new Map(
+    db.prepare("SELECT id, name FROM class WHERE school_year_id = ?").all(yearId).map((row) => [row.name, row.id])
+  );
+  const classes = db
+    .prepare("SELECT * FROM class WHERE school_year_id = ? ORDER BY name")
+    .all(previous.id)
+    .map((row) => {
+      const successor = successorName(row.name);
+      const proposal = { from: { id: row.id, name: row.name }, name: successor, existing: successor ? (existing.get(successor) ?? null) : null };
+      if (!successor || proposal.existing !== null) return proposal;
+      const offered = (person) => !isKnownTeacher(people, person.username);
+      const lastRoster = rosterOf(db, row.id)
+        .filter((entry) => entry.leftAt === null && offered(entry))
+        .map((entry) => ({ username: entry.username, givenName: entry.givenName, familyName: entry.familyName, lastYear: true }));
+      const onLastRoster = new Set(lastRoster.map((person) => person.username));
+      const directory = classCandidates(people, successor);
+      const newcomers = directory.ready
+        ? directory.candidates.filter((person) => !onLastRoster.has(person.username)).map((person) => ({ ...person, lastYear: false }))
+        : [];
+      const courses = listCourses(db, row.id).map((course) => ({ id: course.id, subject: course.subject, language: course.language }));
+      return { ...proposal, people: [...lastRoster, ...newcomers], courses };
+    });
+  return { year, previous, classes };
+}
+
+/**
+ * Creates the successor of last year's class `from` in the year `yearId`, with
+ * the people the teacher ticked (`students`, as `createClass` takes them) and
+ * copies of the courses `courseIds` of `from`, all in one transaction.
+ */
+export function createNextClass(db, yearId, { from, students = [], courseIds = [] } = {}) {
+  const year = getYear(db, yearId);
+  const source = Number.isInteger(from) ? db.prepare("SELECT * FROM class WHERE id = ?").get(from) : undefined;
+  if (!source) throw new NotFoundError("exam.errors.classes.noClass", { id: from });
+  const previous = previousYear(db, year);
+  if (!previous || source.school_year_id !== previous.id) {
+    throw new InvalidInputError("exam.errors.years.notPreviousYear", { name: source.name.toUpperCase() });
+  }
+  const name = successorName(source.name);
+  if (!name) throw new InvalidInputError("exam.errors.years.noSuccessor", { name: source.name.toUpperCase() });
+  if (!Array.isArray(courseIds)) throw new InvalidInputError("exam.errors.years.courseList");
+  const own = new Set(listCourses(db, source.id).map((course) => course.id));
+  if (!courseIds.every((id) => own.has(id))) throw new InvalidInputError("exam.errors.years.courseList");
+  return inTransaction(db, () => {
+    const klass = createClass(db, yearId, { name, students });
+    for (const courseId of courseIds) copyCourse(db, courseId, klass.id);
+    return getClass(db, klass.id);
+  });
 }

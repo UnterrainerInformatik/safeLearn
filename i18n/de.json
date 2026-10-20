@@ -422,6 +422,19 @@
         "startFormat": "Der Beginn muss ein Datum mit Uhrzeit sein.",
         "writtenCannotDelete": "Dieser Test wurde bereits geschrieben und kann nicht gelöscht werden.",
         "writtenQuestionsFixed": "Dieser Test wurde bereits geschrieben; seine Fragen können sich nicht mehr ändern."
+      },
+      "years": {
+        "alreadyClosed": "{name} ist bereits abgeschlossen.",
+        "closeCurrent": "{name} ist das aktuelle Schuljahr. Mach zuerst das nächste Schuljahr zum aktuellen und schließ dann {name} ab.",
+        "closed": "Dieses Schuljahr ist abgeschlossen; darin kann nichts mehr geändert werden.",
+        "courseList": "Die zu kopierenden Kurse sind eine Liste der eigenen Kurse der Klasse.",
+        "noSuccessor": "Auf {name} folgt keine Klasse.",
+        "notEnded": "{name} endet am {endsOn}; abschließen kannst du es erst danach.",
+        "notPreviousYear": "{name} ist keine Klasse des Schuljahrs davor."
+      },
+      "retention": {
+        "changed": "Die zu löschenden Daten haben sich seit dem Bericht geändert. Sieh dir den neuen Bericht an und bestätige noch einmal.",
+        "noReport": "Zum Löschen braucht es den Bericht, für den es bestätigt wurde."
       }
     },
     "frame": {
@@ -430,7 +443,8 @@
       "notAvailable": "Dieses Element ist auf dieser Instanz noch nicht verfügbar.",
       "notFound": "Diesen Eintrag gibt es nicht.",
       "saveFailed": "Das konnte nicht gespeichert werden. Bitte noch einmal versuchen.",
-      "sessionEnded": "Deine Sitzung ist abgelaufen. Die Seite wird neu geladen, damit du dich wieder anmelden kannst."
+      "sessionEnded": "Deine Sitzung ist abgelaufen. Die Seite wird neu geladen, damit du dich wieder anmelden kannst.",
+      "yearClosed": "Das Schuljahr {name} ist abgeschlossen: Alles darin kann gelesen, aber nichts mehr geändert werden."
     },
     "gradebook": {
       "actualGrade": "Gültige Note",
@@ -806,6 +820,45 @@
       "newUnder": "Neue Kategorie unter {name}",
       "ok": "OK",
       "renameTitle": "{name} umbenennen"
+    },
+    "years": {
+      "close": "Schuljahr abschließen",
+      "closeArmed": "{name} endgültig abschließen?",
+      "closeExplanation": "Sobald {name} abgeschlossen ist, kann darin nichts mehr geändert werden – keine Klasse, keine Klassenliste, kein Kurs, kein Ergebnis und kein Test, auch nicht von dir. Ein abgeschlossenes Schuljahr kann nicht wieder geöffnet werden.",
+      "closeHeading": "Schuljahr abschließen",
+      "coursesToCopy": "Kurse kopieren (Sprache, Gewichtung und Wintersemester-Anteil; keine Spalten, Ergebnisse oder Tests):",
+      "createNext": "{name} anlegen",
+      "directoryNoOthers": "Sonst niemand.",
+      "directoryOthers": "Außerdem in {name} laut Verzeichnis ({count})",
+      "lastYearRoster": "{from} im letzten Jahr ({count})",
+      "nextClassHeading": "{from} → {name}",
+      "nextExists": "{from} →",
+      "nextHeading_one": "Aus {previous}: {count} Klasse anzulegen",
+      "nextHeading_other": "Aus {previous}: {count} Klassen anzulegen",
+      "nextNone": "{from}: Auf diese Klasse folgt keine."
+    },
+    "retention": {
+      "attempts_one": "{count} Online-Test-Versuch",
+      "attempts_other": "{count} Online-Test-Versuche",
+      "due_one": "Bei {count} ausgeschiedenen Schüler ist die Aufbewahrungsfrist abgelaufen. Das Löschen entfernt:",
+      "due_other": "Bei {count} ausgeschiedenen Schülern ist die Aufbewahrungsfrist abgelaufen. Das Löschen entfernt:",
+      "explanation_one": "Die Daten eines Schülers, der auf keiner Klassenliste des aktuellen Schuljahrs steht, werden {count} Jahr nach dem Ende seines letzten Schuljahrs auf einer Klassenliste aufbewahrt und dann hier gelöscht.",
+      "explanation_other": "Die Daten eines Schülers, der auf keiner Klassenliste des aktuellen Schuljahrs steht, werden {count} Jahre nach dem Ende seines letzten Schuljahrs auf einer Klassenliste aufbewahrt und dann hier gelöscht.",
+      "heading": "Daten ausgeschiedener Schüler löschen",
+      "nothingDue": "Es sind keine Daten zu löschen.",
+      "overrides_one": "{count} festgelegte Note oder Kommentar",
+      "overrides_other": "{count} festgelegte Noten oder Kommentare",
+      "remove": "Daten ausgeschiedener Schüler löschen",
+      "removeArmed_one": "Die Daten von {count} Schüler endgültig löschen?",
+      "removeArmed_other": "Die Daten von {count} Schülern endgültig löschen?",
+      "removed_one": "Die Daten von {count} Schüler wurden gelöscht.",
+      "removed_other": "Die Daten von {count} Schülern wurden gelöscht.",
+      "results_one": "{count} Ergebnis",
+      "results_other": "{count} Ergebnisse",
+      "rosterEntries_one": "{count} Eintrag auf einer Klassenliste",
+      "rosterEntries_other": "{count} Einträge auf Klassenlisten",
+      "sittings_one": "{count} Teilnahme an einem Termin",
+      "sittings_other": "{count} Teilnahmen an Terminen"
     }
   }
 }

@@ -13,8 +13,9 @@
  * elements only draw what it answers.
  */
 
-import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, format, h, linkButton, markRows, saveOnChange, stickyColumns, t } from "./frame.js";
+import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, format, h, linkButton, markRows, readOnlyFor, saveOnChange, stickyColumns, t } from "./frame.js";
 import { openCreatorOf } from "./bar.js";
+import { viennaLocal } from "./periods.js";
 import "./date-input.js";
 
 export const categoryLabels = {
@@ -167,10 +168,12 @@ class ClassesHome extends ExamElement {
     const { years, current } = await examApi("/years");
     const selected = years.find((year) => String(year.id) === this.params.year) ?? current ?? years.at(-1) ?? null;
     const classes = selected ? await examApi(`/years/${selected.id}/classes`) : [];
-    return { selected, classes };
+    const next = selected && !selected.closed ? await examApi(`/years/${selected.id}/next-classes`) : null;
+    const retention = selected?.current ? await examApi("/retention") : null;
+    return { selected, classes, next, retention };
   }
 
-  render({ selected, classes }) {
+  render({ selected, classes, next, retention }) {
     if (!selected) {
       return h(
         "div",
@@ -180,7 +183,7 @@ class ClassesHome extends ExamElement {
       );
     }
     const line = messageLine();
-    const makeCurrent = selected.current
+    const makeCurrent = selected.current || selected.closed
       ? null
       : h("button", {
           type: "button",
@@ -231,7 +234,7 @@ class ClassesHome extends ExamElement {
       "div",
       { class: "sl-exam" },
       h("h2", {}, selected.current ? t("exam.classes.currentYearHeading", { name: selected.name }) : t("exam.classes.yearHeading", { name: selected.name }), " ", makeCurrent),
-      yearActions,
+      readOnlyFor(selected, yearActions),
       h(
         "p",
         { class: "sl-exam-quiet" },
@@ -242,7 +245,171 @@ class ClassesHome extends ExamElement {
         })
       ),
       line,
-      table
+      table,
+      next ? this.nextSection(next) : null,
+      this.closeSection(selected),
+      retention ? this.retentionSection(retention) : null
+    );
+  }
+
+  /**
+   * **Remove leavers' records** (exam-year-change design D4): how many
+   * students who left are past the retention period and how many records of
+   * each kind would go - counts, never names - and the purge, asked by a
+   * second click. The server deletes only if the counts are still these.
+   */
+  retentionSection(report) {
+    const line = messageLine();
+    const { records } = report;
+    const remove = (event) =>
+      act(event.target, line, async () => {
+        const removed = await examApi("/retention/purge", { method: "POST", body: { expected: report } });
+        section.replaceChildren(section.firstChild, h("p", { role: "status", class: "sl-exam-retention-done" }, t("exam.retention.removed", { count: removed.students })));
+      });
+    const section = h(
+      "section",
+      { class: "sl-exam-retention" },
+      h("h3", {}, t("exam.retention.heading")),
+      h("p", { class: "sl-exam-quiet" }, t("exam.retention.explanation", { count: report.years })),
+      report.students === 0
+        ? h("p", {}, t("exam.retention.nothingDue"))
+        : [
+            h("p", {}, t("exam.retention.due", { count: report.students })),
+            h(
+              "ul",
+              { class: "sl-exam-retention-counts" },
+              h("li", {}, t("exam.retention.results", { count: records.results })),
+              h("li", {}, t("exam.retention.overrides", { count: records.overrides })),
+              h("li", {}, t("exam.retention.attempts", { count: records.attempts })),
+              h("li", {}, t("exam.retention.sittings", { count: records.sittings })),
+              h("li", {}, t("exam.retention.rosterEntries", { count: records.rosterEntries }))
+            ),
+            h(
+              "p",
+              {},
+              confirmButton({
+                class: "sl-exam-retention-remove",
+                label: t("exam.retention.remove"),
+                armed: t("exam.retention.removeArmed", { count: report.students }),
+                action: remove,
+              })
+            ),
+          ],
+      line
+    );
+    return section;
+  }
+
+  /**
+   * The classes of the year before, each offered one level up
+   * (exam-year-change design D6): last year's roster ticked, the directory's
+   * other current members of the new class unticked beside it, the courses to
+   * copy, and **Create**. Nobody lands on a roster without being ticked.
+   */
+  nextSection({ state, year, previous, classes }) {
+    if (!previous || classes.length === 0) return null;
+    const pending = classes.filter((proposal) => proposal.name && proposal.existing === null);
+    const notice = directoryNotice(state);
+    return h(
+      "details",
+      { class: "sl-exam-next-year", open: pending.length > 0 },
+      h("summary", {}, t("exam.years.nextHeading", { previous: previous.name, count: pending.length })),
+      notice ? h("p", { class: "sl-exam-quiet" }, notice) : null,
+      h(
+        "ul",
+        { class: "sl-exam-next-done" },
+        classes
+          .filter((proposal) => !proposal.name || proposal.existing !== null)
+          .map((proposal) =>
+            h(
+              "li",
+              { class: "sl-exam-quiet" },
+              proposal.name
+                ? [t("exam.years.nextExists", { from: displayClass(proposal.from.name) }), " ", h("a", { href: `/exam/classes/${proposal.existing}` }, displayClass(proposal.name))]
+                : t("exam.years.nextNone", { from: displayClass(proposal.from.name) })
+            )
+          )
+      ),
+      pending.map((proposal) => this.nextClass(year.id, proposal))
+    );
+  }
+
+  /** One of last year's classes, ready to be created one level up. */
+  nextClass(yearId, proposal) {
+    const line = messageLine();
+    const box = (person) => h("input", { type: "checkbox", value: person.username, checked: person.lastYear, "aria-label": displayPerson(person) });
+    const entry = (person) => {
+      const tick = box(person);
+      return { tick, item: h("li", {}, h("label", {}, tick, " ", displayPerson(person), " ", h("span", { class: "sl-exam-quiet" }, person.username))) };
+    };
+    const lastYear = proposal.people.filter((person) => person.lastYear).map(entry);
+    const newcomers = proposal.people.filter((person) => !person.lastYear).map(entry);
+    const courses = proposal.courses.map((course) => ({
+      course,
+      tick: h("input", { type: "checkbox", value: String(course.id), checked: true, "aria-label": course.subject }),
+    }));
+    const create = (event) =>
+      act(event.target, line, async () => {
+        const klass = await examApi(`/years/${yearId}/next-classes`, {
+          method: "POST",
+          body: {
+            from: proposal.from.id,
+            students: [...lastYear, ...newcomers].filter(({ tick }) => tick.checked).map(({ tick }) => tick.value),
+            courses: courses.filter(({ tick }) => tick.checked).map(({ course }) => course.id),
+          },
+        });
+        window.location.assign(`/exam/classes/${klass.id}`);
+      });
+    return h(
+      "section",
+      { class: "sl-exam-next-class", "data-from": proposal.from.name },
+      h("h3", {}, t("exam.years.nextClassHeading", { from: displayClass(proposal.from.name), name: displayClass(proposal.name) })),
+      h("div", { class: "sl-exam-next-lists" },
+        h("div", {},
+          h("h4", {}, t("exam.years.lastYearRoster", { from: displayClass(proposal.from.name), count: lastYear.length })),
+          lastYear.length ? h("ul", { class: "sl-exam-checklist sl-exam-next-last" }, lastYear.map(({ item }) => item)) : h("p", { class: "sl-exam-quiet" }, t("exam.classes.rosterEmpty"))
+        ),
+        h("div", {},
+          h("h4", {}, t("exam.years.directoryOthers", { name: displayClass(proposal.name), count: newcomers.length })),
+          newcomers.length ? h("ul", { class: "sl-exam-checklist sl-exam-next-new" }, newcomers.map(({ item }) => item)) : h("p", { class: "sl-exam-quiet" }, t("exam.years.directoryNoOthers"))
+        )
+      ),
+      courses.length
+        ? h("p", { class: "sl-exam-next-courses" }, t("exam.years.coursesToCopy"), " ", courses.map(({ course, tick }) => h("label", {}, tick, " ", `${course.subject} (${languageLabels[course.language]})`, " ")))
+        : null,
+      h("p", {}, button({ label: t("exam.years.createNext", { name: displayClass(proposal.name) }), kind: "primary", class: "sl-exam-next-create", action: create })),
+      line
+    );
+  }
+
+  /**
+   * **Close school year**, once the year's end date has passed and another
+   * year is current (exam-year-change design D1). Asks by a second click that
+   * says nothing can be changed afterwards.
+   */
+  closeSection(year) {
+    if (year.closed || year.current || year.endsOn >= viennaLocal(new Date().toISOString()).date) return null;
+    const line = messageLine();
+    return h(
+      "section",
+      { class: "sl-exam-year-close" },
+      h("h3", {}, t("exam.years.closeHeading")),
+      h("p", { class: "sl-exam-quiet" }, t("exam.years.closeExplanation", { name: year.name })),
+      h(
+        "p",
+        {},
+        confirmButton({
+          class: "sl-exam-year-close-button",
+          label: t("exam.years.close"),
+          armed: t("exam.years.closeArmed", { name: year.name }),
+          action: (event) =>
+            act(event.target, line, async () => {
+              await examApi(`/years/${year.id}/close`, { method: "POST" });
+              window.location.reload();
+            }),
+        })
+      ),
+      line
     );
   }
 }
@@ -362,7 +529,7 @@ class ClassNew extends ExamElement {
         window.location.assign(`/exam/classes/${klass.id}`);
       });
 
-    return h(
+    return readOnlyFor(year, h(
       "div",
       { class: "sl-exam" },
       h("p", {}, t("exam.classes.yearSentence", { name: year.name })),
@@ -372,7 +539,7 @@ class ClassNew extends ExamElement {
       h("p", {}, extra, " ", h("button", { type: "button", class: "sl-exam-action", onclick: addExtra }, t("exam.classes.addByUsername"))),
       h("p", {}, h("button", { type: "button", class: "sl-exam-primary", onclick: create }, t("exam.classes.createClass"))),
       line
-    );
+    ));
   }
 }
 
@@ -402,7 +569,7 @@ class ClassView extends ExamElement {
         window.location.assign(`/exam/?year=${klass.year.id}`);
       },
     });
-    return h("div", { class: "sl-exam" }, head, this.rosterSection(klass), this.addSection(klass, directory), this.courseSection(klass));
+    return readOnlyFor(klass.year, h("div", { class: "sl-exam" }, head, this.rosterSection(klass), this.addSection(klass, directory), this.courseSection(klass)));
   }
 
   rosterSection(klass) {
@@ -547,7 +714,7 @@ class CourseNew extends ExamElement {
       h("label", {}, t("exam.classes.language"), " ", language),
       h("button", { type: "submit", class: "sl-exam-primary" }, t("exam.classes.createCourse"))
     );
-    return h("div", { class: "sl-exam" }, form, line);
+    return readOnlyFor(klass.year, h("div", { class: "sl-exam" }, form, line));
   }
 }
 
@@ -603,7 +770,7 @@ class CourseView extends ExamElement {
       save: (value) => put({ winterShare: Number(value) }),
     });
 
-    return h(
+    return readOnlyFor(course.year, h(
       "div",
       { class: "sl-exam" },
       h("p", { class: "sl-exam-actions" }, linkButton({ label: t("exam.classes.openGradebook"), href: `/exam/courses/${course.id}/gradebook`, class: "sl-exam-course-gradebook" })),
@@ -635,7 +802,7 @@ class CourseView extends ExamElement {
         h("br"),
         h("span", { class: "sl-exam-quiet" }, t("exam.classes.summerCountsRest"))
       )
-    );
+    ));
   }
 }
 

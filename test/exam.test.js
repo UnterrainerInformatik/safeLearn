@@ -4820,3 +4820,161 @@ describe("the interface in the reader's language and format", () => {
     }
   });
 });
+
+describe("the year change", () => {
+  let teacher;
+  let past;
+  let pastClass;
+  let pastCourse;
+  let column;
+  // Usernames the directory does not know, so the checks need no directory:
+  // one moves up to the next year, one leaves after the past year.
+  const stays = "yc-stays";
+  const leaves = "yc-leaves";
+
+  before(async () => {
+    teacher = await sharedSession("teacher");
+    await setPreferences(teacher, {});
+    if (!(await fetchAs(teacher, "/exam/api/years")).json.current) {
+      await fetchAs(teacher, "/exam/api/years", { method: "POST", body: { name: "2026/27", startsOn: "2026-09-07", summerStartsOn: "2027-02-15", endsOn: "2027-07-02" } });
+    }
+    // A year long over, with a class, a course and a column with results.
+    past = (await fetchAs(teacher, "/exam/api/years", { method: "POST", body: { name: "2020/21", startsOn: "2020-09-07", summerStartsOn: "2021-02-15", endsOn: "2021-07-02" } })).json;
+    pastClass = (await fetchAs(teacher, `/exam/api/years/${past.id}/classes`, { method: "POST", body: { name: "3YCHIF", students: [stays, leaves] } })).json;
+    pastCourse = (await fetchAs(teacher, `/exam/api/classes/${pastClass.id}/courses`, { method: "POST", body: { subject: "WMC", language: "en", winterShare: 40 } })).json;
+    column = (await fetchAs(teacher, `/exam/api/courses/${pastCourse.id}/assessments`, { method: "POST", body: { kind: "test", name: "Final", date: "2021-05-03", maxPoints: 20 } })).json;
+    for (const [username, points] of [[stays, 15], [leaves, 9]]) {
+      const entered = await fetchAs(teacher, `/exam/api/assessments/${column.id}/results/${username}`, { method: "PUT", body: { points } });
+      assert.equal(entered.status, 200, JSON.stringify(entered.json));
+    }
+  });
+
+  test("a year whose end date has not passed, and the current year, are not closed", async () => {
+    const future = (await fetchAs(teacher, "/exam/api/years", { method: "POST", body: { name: "2030/31", startsOn: "2030-09-02", summerStartsOn: "2031-02-10", endsOn: "2031-07-04" } })).json;
+    try {
+      const early = await fetchAs(teacher, `/exam/api/years/${future.id}/close`, { method: "POST" });
+      assert.equal(early.status, 409);
+      assert.match(early.json.error, /ends on/);
+    } finally {
+      await fetchAs(teacher, `/exam/api/years/${future.id}`, { method: "DELETE" });
+    }
+    const current = (await fetchAs(teacher, "/exam/api/years")).json.current;
+    assert.equal((await fetchAs(teacher, `/exam/api/years/${current.id}/close`, { method: "POST" })).status, 409);
+  });
+
+  test("a teacher closes a past year on its overview by a second click", async () => {
+    const page = teacher.page;
+    await page.goto(`${applicationUrl}/exam/?year=${past.id}`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".sl-exam-year-close-button", { timeout: 20000 });
+    await page.click(".sl-exam-year-close-button");
+    const years = async () => (await fetchAs(teacher, "/exam/api/years")).json.years.find((year) => year.id === past.id);
+    assert.equal((await years()).closed, false, "the first click only asks");
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), page.click(".sl-exam-year-close-button")]);
+    await page.waitForSelector(".sl-exam-closed-note", { timeout: 20000 });
+    assert.equal((await years()).closed, true);
+    assert.equal(await page.$(".sl-exam-year-close-button"), null, "a closed year offers no closing");
+  });
+
+  test("a closed year refuses an entry, a column, a course and a roster change with 409", async () => {
+    const refusals = [
+      ["PUT", `/exam/api/assessments/${column.id}/results/${stays}`, { points: 20 }],
+      ["POST", `/exam/api/courses/${pastCourse.id}/assessments`, { kind: "test", name: "Late", date: "2021-06-01" }],
+      ["POST", `/exam/api/classes/${pastClass.id}/courses`, { subject: "NVS" }],
+      ["PUT", `/exam/api/courses/${pastCourse.id}`, { winterShare: 50 }],
+      ["POST", `/exam/api/classes/${pastClass.id}/roster`, { username: "yc-late" }],
+      ["DELETE", `/exam/api/classes/${pastClass.id}/roster/${stays}`],
+      ["PUT", `/exam/api/years/${past.id}`, { name: "2019/20" }],
+    ];
+    for (const [method, address, body] of refusals) {
+      const answer = await fetchAs(teacher, address, { method, body });
+      assert.equal(answer.status, 409, `${method} ${address}: ${JSON.stringify(answer.json)}`);
+      assert.match(answer.json.error, /closed/, `${method} ${address} says why`);
+    }
+    const sheet = (await fetchAs(teacher, `/exam/api/courses/${pastCourse.id}/gradebook?semester=ss`)).json;
+    assert.deepEqual(
+      sheet.students.map((row) => [row.username, row.results[column.id]?.points]).sort(),
+      [[leaves, 9], [stays, 15]],
+      "every result is as it was"
+    );
+  });
+
+  test("a closed year's sheet and class are shown read-only, with a note", async () => {
+    const page = teacher.page;
+    await page.goto(`${applicationUrl}/exam/courses/${pastCourse.id}/gradebook?semester=ss`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".sl-exam-sheet", { timeout: 20000 });
+    const sheet = await page.evaluate(() => ({
+      note: document.querySelector(".sl-exam-closed-note")?.textContent ?? "",
+      fields: document.querySelectorAll(".sl-exam-sheet input.sl-exam-cell").length,
+      adds: document.querySelectorAll(".sl-exam-sheet .sl-exam-add").length,
+      enabled: [...document.querySelectorAll("sl-exam-gradebook button, sl-exam-gradebook input, sl-exam-gradebook select")].filter((control) => !control.disabled && !control.closest("[data-sl-reads]")).length,
+      results: [...document.querySelectorAll(".sl-exam-sheet tbody td")].map((cell) => cell.textContent.trim()),
+    }));
+    assert.match(sheet.note, /2020\/21/);
+    assert.deepEqual([sheet.fields, sheet.adds, sheet.enabled], [0, 0, 0], "no field, no +, no enabled control");
+    assert.ok(sheet.results.some((text) => /\b15\b/.test(text)), `the results are shown: ${sheet.results}`);
+
+    await page.goto(`${applicationUrl}/exam/classes/${pastClass.id}`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("sl-exam-class .sl-exam-closed-note", { timeout: 20000 });
+    const enabled = await page.$$eval("sl-exam-class button, sl-exam-class input", (controls) => controls.filter((control) => !control.disabled).length);
+    assert.equal(enabled, 0, "every control of the class page is disabled");
+  });
+
+  test("the next year offers the class one level up with last year's roster ticked", async () => {
+    const next = (await fetchAs(teacher, "/exam/api/years", { method: "POST", body: { name: "2021/22", startsOn: "2021-09-06", summerStartsOn: "2022-02-14", endsOn: "2022-07-01" } })).json;
+    const proposal = (await fetchAs(teacher, `/exam/api/years/${next.id}/next-classes`)).json;
+    assert.equal(proposal.previous.id, past.id);
+    const offered = proposal.classes.find((entry) => entry.from.id === pastClass.id);
+    assert.equal(offered.name, "4ychif");
+    assert.deepEqual(offered.people.filter((person) => person.lastYear).map((person) => person.username).sort(), [leaves, stays]);
+
+    const page = teacher.page;
+    await page.goto(`${applicationUrl}/exam/?year=${next.id}`, { waitUntil: "domcontentloaded" });
+    const section = `.sl-exam-next-class[data-from="3ychif"]`;
+    await page.waitForSelector(section, { timeout: 20000 });
+    const shown = await page.$$eval(`${section} .sl-exam-next-last input`, (boxes) => boxes.map((box) => [box.value, box.checked]));
+    assert.deepEqual(shown.sort(), [[leaves, true], [stays, true]], "last year's roster is ticked");
+    // The leaver is unticked; WMC is ticked for copying.
+    await page.click(`${section} input[value="${leaves}"]`);
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), page.click(`${section} .sl-exam-next-create`)]);
+    const classId = Number(new URL(page.url()).pathname.split("/").pop());
+    const created = (await fetchAs(teacher, `/exam/api/classes/${classId}`)).json;
+    assert.equal(created.name, "4ychif");
+    assert.equal(created.year.id, next.id);
+    assert.deepEqual(created.roster.map((entry) => entry.username), [stays], "only the ticked one is on the roster");
+    assert.deepEqual(created.courses.map((course) => [course.subject, course.language, course.winterShare]), [["WMC", "en", 40]]);
+    const copied = (await fetchAs(teacher, `/exam/api/courses/${created.courses[0].id}/gradebook?semester=ws`)).json;
+    assert.equal(copied.columns.length, 0, "the copy has no column");
+  });
+
+  test("the leavers' records are removed only after the confirmation, and only those reported", async () => {
+    // Who is on a roster of the current year has not left, however old their records.
+    const current = (await fetchAs(teacher, "/exam/api/years")).json.current;
+    const kept = await fetchAs(teacher, `/exam/api/years/${current.id}/classes`, { method: "POST", body: { name: "9YCHIF", students: [stays] } });
+    assert.equal(kept.status, 200, JSON.stringify(kept.json));
+    const report = (await fetchAs(teacher, "/exam/api/retention")).json;
+    assert.equal(report.years, 2);
+    assert.ok(report.students >= 1 && report.records.results >= 1 && report.records.rosterEntries >= 1, JSON.stringify(report));
+
+    const changed = await fetchAs(teacher, "/exam/api/retention/purge", { method: "POST", body: { expected: { ...report, students: report.students + 1 } } });
+    assert.equal(changed.status, 409, "counts other than the report's are refused");
+    assert.deepEqual((await fetchAs(teacher, "/exam/api/retention")).json, report, "and nothing was removed");
+
+    const page = teacher.page;
+    await page.goto(`${applicationUrl}/exam/`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".sl-exam-retention-remove", { timeout: 20000 });
+    const listed = await page.$eval(".sl-exam-retention", (section) => section.textContent);
+    assert.ok(!listed.includes(leaves), "the report names nobody");
+    await page.click(".sl-exam-retention-remove");
+    assert.deepEqual((await fetchAs(teacher, "/exam/api/retention")).json, report, "the first click only asks");
+    await page.click(".sl-exam-retention-remove");
+    await page.waitForSelector(".sl-exam-retention-done", { timeout: 20000 });
+
+    assert.equal((await fetchAs(teacher, "/exam/api/retention")).json.students, 0);
+    const roster = (await fetchAs(teacher, `/exam/api/classes/${pastClass.id}`)).json.roster.map((entry) => entry.username);
+    assert.deepEqual(roster, [stays], "the leaver is gone from the closed year, the one who moved up is not");
+    const sheet = (await fetchAs(teacher, `/exam/api/courses/${pastCourse.id}/gradebook?semester=ss`)).json;
+    assert.deepEqual(sheet.students.map((row) => [row.username, row.results[column.id]?.points]), [[stays, 15]], "the column keeps the other result");
+    assert.match(applicationOutput(), /Removed the records of \d+ student\(s\) who left: \d+ result/, "the log records counts");
+    assert.ok(!applicationOutput().includes(leaves), "and no name");
+  });
+});

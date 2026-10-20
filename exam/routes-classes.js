@@ -8,8 +8,10 @@
 
 import {
   addToRoster,
+  closeYear,
   createClass,
   createCourse,
+  createNextClass,
   createYear,
   currentYear,
   deleteClass,
@@ -20,6 +22,7 @@ import {
   InvalidInputError,
   listClasses,
   listYears,
+  nextYearProposal,
   NotFoundError,
   normalizeClassName,
   refreshNames,
@@ -28,8 +31,10 @@ import {
   renameYear,
   setCurrentYear,
   updateCourse,
+  viennaToday,
   weightCategories,
 } from "./classes.js";
+import { purgeLeavers, retentionReport } from "./retention.js";
 import {
   asRosterPerson,
   classCandidates,
@@ -81,7 +86,7 @@ function resolveStudents(usernames, people) {
  * Registers the routes on the module's router. `handle` wraps an async handler
  * so a throw reaches the module's error handler; `db` is the open database.
  */
-export function registerClassRoutes(router, { db, handle, startPage }) {
+export function registerClassRoutes(router, { db, handle, startPage, retentionYears }) {
   const api = (method, path, fn) =>
     router[method](
       `/api${path}`,
@@ -98,6 +103,37 @@ export function registerClassRoutes(router, { db, handle, startPage }) {
   api("post", "/years/:id/current", (req) => setCurrentYear(db, idParam(req.params.id)));
   api("put", "/years/:id", (req) => renameYear(db, idParam(req.params.id), req.body ?? {}));
   api("delete", "/years/:id", (req) => deleteYear(db, idParam(req.params.id)));
+  // For good: nothing in the year can be changed afterwards (exam-year-change D1).
+  api("post", "/years/:id/close", (req) => closeYear(db, idParam(req.params.id)));
+
+  // The next year from the one before it (exam-year-change D6): what each of
+  // last year's classes moves up to, and creating one of them with the
+  // roster the teacher ticked and the courses chosen for copying.
+  api("get", "/years/:id/next-classes", (req) => {
+    const { people, state } = directory();
+    return { state, ...nextYearProposal(db, idParam(req.params.id), people) };
+  });
+  api("post", "/years/:id/next-classes", (req) => {
+    const yearId = idParam(req.params.id);
+    const { people } = directory();
+    const students = resolveStudents(req.body?.students ?? [], people);
+    return createNextClass(db, yearId, { from: req.body?.from, students, courseIds: req.body?.courses ?? [] });
+  });
+
+  // Leavers' records past the retention period (exam-year-change D3-D5):
+  // the report counts, never names; the purge deletes only what the teacher
+  // confirmed, and the log records counts only.
+  api("get", "/retention", () => retentionReport(db, viennaToday(), retentionYears));
+  api("post", "/retention/purge", (req) => {
+    const removed = purgeLeavers(db, viennaToday(), req.body?.expected ?? null, retentionYears);
+    const { records } = removed;
+    console.log(
+      `[exam] Removed the records of ${removed.students} student(s) who left: ${records.results} result(s), ` +
+        `${records.overrides} override(s), ${records.attempts} attempt(s), ${records.sittings} sitting participation(s), ` +
+        `${records.rosterEntries} roster entry(ies).`
+    );
+    return removed;
+  });
 
   // ----------------------------------------------------------------- classes
 

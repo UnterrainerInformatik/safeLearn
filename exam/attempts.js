@@ -17,7 +17,7 @@
 
 import crypto from "node:crypto";
 
-import { ConflictError, getCourse, inTransaction, InvalidInputError, NotFoundError, now } from "./classes.js";
+import { ConflictError, getCourse, inTransaction, InvalidInputError, isClosedYearError, NotFoundError, now } from "./classes.js";
 import { readScale } from "./gradebook.js";
 import { gradeFor } from "./grading.js";
 import { notify } from "./live.js";
@@ -147,15 +147,26 @@ function finalize(db, row, at) {
 /**
  * Finalizes every attempt whose deadline has passed at `at` - of `username`
  * only, when given. The sweep runs this for everyone; every request touching
- * a student's attempts runs it for them first.
+ * a student's attempts runs it for them first. An attempt in a closed school
+ * year cannot be written any more; it is logged and skipped, so the others
+ * are still finalized (exam-year-change design D2). Answers how many were.
  */
 export function finalizeDue(db, at = now(), username = null) {
   const rows =
     username === null
       ? db.prepare("SELECT * FROM attempt WHERE submitted_at IS NULL AND deadline <= ?").all(at)
       : db.prepare("SELECT * FROM attempt WHERE submitted_at IS NULL AND deadline <= ? AND username = ?").all(at, username);
-  for (const row of rows) finalize(db, row, at);
-  return rows.length;
+  let finalized = 0;
+  for (const row of rows) {
+    try {
+      finalize(db, row, at);
+      finalized += 1;
+    } catch (error) {
+      if (!isClosedYearError(error)) throw error;
+      console.error(`[exam] Attempt ${row.id} is in a closed school year and stays unsubmitted.`);
+    }
+  }
+  return finalized;
 }
 
 /**

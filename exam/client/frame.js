@@ -195,6 +195,22 @@ export function elementFor(kind) {
   return elements.get(kind);
 }
 
+/**
+ * `content` read-only when `year` is closed (exam-year-change design D1):
+ * every control in it disabled - those inside `data-sl-reads` excepted, which
+ * only change what is shown - and a note above it that the year is closed.
+ * Links stay. For an open year `content` is answered as it is. The server
+ * refuses a change to a closed year anyway; this only says so before a click.
+ */
+export function readOnlyFor(year, content) {
+  if (!year?.closed) return content;
+  for (const control of content.querySelectorAll("button, input, select, textarea, sl-date-input")) {
+    if (!control.closest("[data-sl-reads]")) control.disabled = true;
+  }
+  content.prepend(h("p", { class: "sl-exam-closed-note", role: "note" }, t("exam.frame.yearClosed", { name: year.name })));
+  return content;
+}
+
 // ------------------------------------------------------------ the buttons
 //
 // Every action of the module is one of these (`exam-ui-conventions`): one

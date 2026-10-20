@@ -2084,3 +2084,22 @@ sl-date-input .sl-date-input-grid button.is-disabled {
   white-space: normal;
   padding-left: 2em;
 }
+
+/* The year change (`school-year-change`): the note on a closed year's pages,
+   and last year's classes offered one level up, last year's roster beside the
+   directory's other members. */
+.sl-exam-closed-note {
+  padding: 6px 10px;
+  border-left: 4px solid currentColor;
+  opacity: 0.85;
+}
+
+.sl-exam-next-lists {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16em, 1fr));
+  gap: 0 2em;
+}
+
+.sl-exam-next-courses label {
+  white-space: nowrap;
+}

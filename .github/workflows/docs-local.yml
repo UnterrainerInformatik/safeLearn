@@ -172,6 +172,10 @@ jobs:
             # a repository variable for the same reason. Unset, sittings are
             # scheduled in clock times.
             echo SCHOOL_PERIODS=${{ vars.SCHOOL_PERIODS }} >> ./deploy/.env
+            # How long the exam module keeps a leaver's records
+            # (docs-exam-module.md), a repository variable as well. Unset,
+            # two years.
+            echo EXAM_RETENTION_YEARS=${{ vars.EXAM_RETENTION_YEARS }} >> ./deploy/.env
       - name: Normalize line endings for deploy scripts
         run: |
             sudo apt-get update -y

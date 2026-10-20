@@ -27,6 +27,10 @@ services:
       # "1=08:00-08:50,2=08:55-09:45" (docs-exam-module.md). Empty, sittings are
       # scheduled and shown in clock times; malformed, the module stays off.
       - SCHOOL_PERIODS=${SCHOOL_PERIODS}
+      # How many years the exam module keeps a leaver's records after the end
+      # of their last school year (docs-exam-module.md), a whole number from 1
+      # to 10. Empty means 2; malformed, the module stays off.
+      - EXAM_RETENTION_YEARS=${EXAM_RETENTION_YEARS}
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro

@@ -16,7 +16,7 @@
  */
 
 import { parseTime } from "../../i18n/format.js";
-import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, linkButton, markRows, t } from "./frame.js";
+import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, linkButton, markRows, readOnlyFor, t } from "./frame.js";
 import { displayClass, displayPerson } from "./classes.js";
 import { openCreatorOf } from "./bar.js";
 import { defaultPeriods, matchWindow, nextWeekday, periodTimes, viennaInstant, viennaLocal, windowFor } from "./periods.js";
@@ -192,7 +192,7 @@ class TestDetail extends ExamElement {
     this.sittingLines = new Map();
     const course = test.course;
     const en = course.language === "en";
-    return h(
+    return readOnlyFor({ name: course.yearName, closed: course.yearClosed }, h(
       "div",
       { class: "sl-exam sl-exam-test" },
       h(
@@ -264,7 +264,7 @@ class TestDetail extends ExamElement {
           )
         )
       )
-    );
+    ));
   }
 
   /**

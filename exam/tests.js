@@ -304,6 +304,7 @@ export function getTest(db, id) {
       subject: course.subject,
       language: course.language,
       yearName: course.year.name,
+      yearClosed: course.year.closed,
     },
     started: started > 0,
     attempts: { started, submitted },
