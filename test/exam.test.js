@@ -3580,10 +3580,43 @@ describe("the school's periods", () => {
       toggle: Boolean(form.querySelector(".sl-exam-sitting-mode")),
       wrapper: Boolean(form.querySelector(".sl-exam-sitting-window")),
     }));
-    assert.deepEqual(form.fields.slice(0, 3), ["opensAt", "closesAt", "durationMinutes"], "today's fields, in today's order");
+    assert.deepEqual(form.fields.slice(0, 4), ["date", "opensTime", "closesTime", "durationMinutes"], "one date and two times - a sitting never runs across midnight");
     assert.equal(form.fields.includes("fromPeriod"), false);
     assert.equal(form.toggle, false, "no switch");
     assert.equal(form.wrapper, false);
+  });
+
+  test("in clock times a sitting is scheduled by one date and two times, and an unreadable time is refused", async () => {
+    const fresh = await newTest("Periods: none, by form");
+    const page = teacher.page;
+    await page.goto(`${applicationUrl}/exam/tests/${fresh.id}`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".sl-exam-sitting-form input[name=opensTime]", { timeout: 20000 });
+    const fill = (opens, closes) =>
+      page.$eval(
+        ".sl-exam-sitting-form form",
+        (form, date, opens, closes) => {
+          const field = form.querySelector("sl-date-input[name=date]");
+          field.value = date;
+          field.dispatchEvent(new Event("change"));
+          for (const [name, value] of [["opensTime", opens], ["closesTime", closes]]) {
+            const input = form.querySelector(`input[name=${name}]`);
+            input.value = value;
+            input.dispatchEvent(new Event("input"));
+          }
+        },
+        date,
+        opens,
+        closes
+      );
+    await fill("10:05", "10.5x");
+    await page.click(".sl-exam-sitting-form button[type=submit]");
+    assert.equal(await page.$eval(".sl-exam-sitting-form input[name=closesTime]", (input) => input.getAttribute("aria-invalid")), "true");
+    assert.deepEqual((await fetchAs(teacher, `/exam/api/tests/${fresh.id}`)).json.sittings, [], "nothing is scheduled");
+    await fill("10:05", "10:55");
+    await page.click(".sl-exam-sitting-form button[type=submit]");
+    await page.waitForSelector(".sl-exam-test-sittings li[data-sitting]", { timeout: 10000 });
+    const [stored] = (await fetchAs(teacher, `/exam/api/tests/${fresh.id}`)).json.sittings;
+    assert.deepEqual([stored.opensAt, stored.closesAt], [at("10:05"), at("10:55")]);
   });
 
   test("a malformed SCHOOL_PERIODS switches the module off and the reader keeps serving", async () => {
@@ -3610,7 +3643,7 @@ describe("the school's periods", () => {
     await page.goto(`${applicationUrl}/exam/tests/${byForm.id}`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".sl-exam-sitting-form select[name=fromPeriod]", { timeout: 20000 });
     const fresh = await page.$eval(".sl-exam-sitting-form form", (form) => ({
-      opensAt: Boolean(form.querySelector("sl-date-input[name=opensAt]")),
+      opensAt: Boolean(form.querySelector("input[name=opensTime]")),
       toggle: form.querySelector(".sl-exam-sitting-mode")?.textContent,
       tag: form.querySelector(".sl-exam-sitting-mode")?.tagName,
     }));
@@ -3685,11 +3718,12 @@ describe("the school's periods", () => {
     assert.deepEqual(editing, { from: "3", to: "4", date });
     await page.click(".sl-exam-sitting-form .sl-exam-sitting-mode");
     const exact = await page.$eval(".sl-exam-sitting-form form", (form) => ({
-      opensAt: form.querySelector("sl-date-input[name=opensAt]").value,
-      closesAt: form.querySelector("sl-date-input[name=closesAt]").value,
+      date: form.querySelector("sl-date-input[name=date]").value,
+      opens: form.querySelector("input[name=opensTime]").value,
+      closes: form.querySelector("input[name=closesTime]").value,
       toggle: form.querySelector(".sl-exam-sitting-mode").textContent,
     }));
-    assert.deepEqual(exact, { opensAt: `${date}T10:00`, closesAt: `${date}T11:45`, toggle: "Lessons instead" });
+    assert.deepEqual(exact, { date, opens: "10:00", closes: "11:45", toggle: "Lessons instead" });
   });
 
   test("a sitting off the periods shows clock times and opens the form in exact times", async () => {
@@ -3703,11 +3737,12 @@ describe("the school's periods", () => {
     assert.match(shown.text, /10:05 – 10:55$/, shown.text);
     await page.click(`li[data-sitting="${created.json.id}"] .sl-exam-sitting-edit`);
     const editing = await page.$eval(".sl-exam-sitting-form form", (form) => ({
-      opensAt: form.querySelector("sl-date-input[name=opensAt]")?.value,
-      closesAt: form.querySelector("sl-date-input[name=closesAt]")?.value,
+      date: form.querySelector("sl-date-input[name=date]")?.value,
+      opens: form.querySelector("input[name=opensTime]")?.value,
+      closes: form.querySelector("input[name=closesTime]")?.value,
       toggle: form.querySelector(".sl-exam-sitting-mode")?.textContent,
     }));
-    assert.deepEqual(editing, { opensAt: `${date}T10:05`, closesAt: `${date}T10:55`, toggle: "Lessons instead" });
+    assert.deepEqual(editing, { date, opens: "10:05", closes: "10:55", toggle: "Lessons instead" });
     // Back to periods: the date stays, the periods are the ones a new sitting gets.
     await page.click(".sl-exam-sitting-form .sl-exam-sitting-mode");
     assert.equal(await page.$eval(".sl-exam-sitting-form sl-date-input[name=date]", (input) => input.value), date);

@@ -970,6 +970,15 @@ a.sl-exam-button.sl-exam-open:hover,
   cursor: help;
 }
 
+/* The times of a sitting in clock times, beside its one date. */
+.sl-exam-sitting-form .sl-exam-time {
+  width: 4.5em;
+}
+
+.sl-exam-sitting-form .sl-exam-time[aria-invalid="true"] {
+  outline: 2px solid #c62828;
+}
+
 /* What rescheduling keeps: shown, not edited. */
 .sl-exam-reschedule-kept {
   display: grid;

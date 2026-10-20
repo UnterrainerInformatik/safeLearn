@@ -15,6 +15,7 @@
  * draw what it answers.
  */
 
+import { parseTime } from "../../i18n/format.js";
 import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, linkButton, markRows, t } from "./frame.js";
 import { displayClass, displayPerson } from "./classes.js";
 import { openCreatorOf } from "./bar.js";
@@ -172,12 +173,6 @@ function storedMarkup(html, className) {
 /** Why a request was refused, in a sentence for the teacher. */
 function refusal(error) {
   return error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.frame.saveFailed");
-}
-
-/** The value of a `time` date field for an ISO timestamp: its Vienna date and time. */
-function localInput(iso) {
-  const { date, time } = viennaLocal(iso);
-  return `${date}T${time}`;
 }
 
 /** One test for its teacher. */
@@ -555,20 +550,52 @@ class TestDetail extends ExamElement {
   }
 
   /**
-   * The clock-time editor: the two fields of a sitting without periods, in
-   * Vienna time and the reader's format. Each writes its instant into
-   * `windowState` once it holds a valid date and time.
+   * The clock-time editor: the date the sitting is written on and the times
+   * it opens and closes, in Vienna time and the reader's format - a sitting
+   * never runs across midnight. Writes the window into `windowState` whenever
+   * the three fields hold a valid date and times; a time it cannot read marks
+   * its field invalid, so the form does not submit.
    */
   clockEditor(windowState) {
-    const field = (name, label) => {
-      const input = h("sl-date-input", { time: true, name, required: true, value: localInput(windowState[name]) });
-      input.addEventListener("change", () => {
-        const [date, time] = input.value.split("T");
-        if (date && time) windowState[name] = viennaInstant(date, time).toISOString();
+    const date = h("sl-date-input", { name: "date", required: true, value: viennaLocal(windowState.opensAt).date });
+    const time = (name, iso) =>
+      h("input", {
+        type: "text",
+        name,
+        required: true,
+        inputmode: "numeric",
+        autocomplete: "off",
+        size: "5",
+        placeholder: t("exam.dateInput.timePattern"),
+        class: "sl-exam-time",
+        value: viennaLocal(iso).time,
       });
-      return h("label", {}, label, input);
+    const opens = time("opensTime", windowState.opensAt);
+    const closes = time("closesTime", windowState.closesAt);
+    const update = () => {
+      const [from, to] = [opens, closes].map((field) => {
+        const parsed = parseTime(field.value);
+        field.setCustomValidity(parsed === null ? t("exam.dateInput.unreadableTime") : "");
+        field.setAttribute("aria-invalid", String(parsed === null));
+        return parsed;
+      });
+      if (/^\d{4}-\d{2}-\d{2}$/.test(date.value) && from !== null && to !== null) {
+        windowState.opensAt = viennaInstant(date.value, from).toISOString();
+        windowState.closesAt = viennaInstant(date.value, to).toISOString();
+      }
     };
-    return [field("opensAt", `${t("exam.tests.opens")} `), field("closesAt", `${t("exam.tests.closes")} `)];
+    date.addEventListener("change", update);
+    for (const field of [opens, closes]) {
+      field.addEventListener("input", update);
+      field.addEventListener("change", update);
+    }
+    return [
+      h("label", {}, `${t("exam.tests.date")} `, date),
+      " ",
+      h("label", {}, `${t("exam.tests.opens")} `, opens),
+      " ",
+      h("label", {}, `${t("exam.tests.closes")} `, closes),
+    ];
   }
 
   /**
