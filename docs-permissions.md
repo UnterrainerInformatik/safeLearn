@@ -17,6 +17,7 @@ Anyone who has even one of these roles assigned will be able to view the documen
 	* You gain a role either by getting the OU= value set by LDAP (`Teachers` gets translated to `teacher` and `Students` to `student`), or by assigning a client-role with that name.
 	* The name of the user works as permission-role as well. So in the case of this test-setup here the user 'student' has first-name 'Stu' and last-name 'Dent'; So the viable permission for this user would be `@@@ Stu Dent`.
 		* The built-in role names are reserved. A user whose displayed name is `admin`, `teacher`, `teachers`, `student` or `students` is not addressable by that name and does not gain the role from it — only LDAP or a client-role grants it. Such a collision is written to the server log; rename the account to make the name usable again.
+	* On an instance without sign-in (`AUTH=none`, see [Keycloak](docs-keycloak.md)) nobody has an account to take roles or a name from. There every reader holds exactly the roles `READER_ROLES` lists — `READER_ROLES=teacher,4bhif` makes every reader a teacher in `4bhif` — and nothing a request carries adds to them or takes one away. Without `READER_ROLES` a reader holds no role, so every restricted section and file stays hidden. The rules above apply to these roles exactly as to a session's: the plural aliases, `admin`, the student view and the exam gate. A block addressed to a person by name is shown to no reader.
 * Roles are case-insensitive. So putting `@@@ Stu Dent, 4BHIF` is the same as putting `@@@ stu dent, 4bhif`.
 * If the directive is in the first line of the document (the very first line), then it applies to the whole document.
 	* In that case, there is no end-directive.
@@ -113,6 +114,11 @@ Teachers may open this during the exam slot, and nobody at any other time.
 ```
 
 When every window in a whole-file directive is shut, no role is active — so the file is hidden from everyone, including the roles it names and from `admin`, which does not short-circuit a closed window. A reader who asks for it anyway is told **This content is not visible right now.**, rather than the **You do not have the required permissions to view this content.** they get for a directive naming roles they simply do not hold. The two messages are deliberately different: the first says come back later, the second says ask someone else. The file is left out of the navigation tree in both cases.
+
+### Where the view switches are kept
+The teacher view, the exam view and the answer view decide what a reader is shown, so where they are read from matters. With sign-in they are read from the reader's Keycloak account and from nothing else: a cookie, a header or a query parameter such as `?ve=1` is ignored. Without sign-in (`AUTH=none`) they are kept in the reader's browser, in the cookie `safelearn_config`, and they can only narrow what the reader's roles allow — the exam view still needs `teacher` among the reader roles. A preference block that does not parse is read as the defaults, which hide rather than show.
+
+Parameters that only choose how one page is presented — `?reveal`, `?document`, print, a heading to scroll to — never change what a reader may see. Every presentation of a page carries the same permitted content, and these parameters stay in the URL, so a presentation link can be bookmarked and shared.
 
 ### File-Content Views
 There are two views.

@@ -12,13 +12,30 @@
 import assert from "node:assert/strict";
 import { before, describe, test } from "node:test";
 
-import { render, roles, setPreferences, sharedSession } from "../harness.js";
+import {
+  applicationUrl,
+  effectivePreferences,
+  render,
+  roles,
+  setPreferences,
+  sharedSession,
+} from "../harness.js";
 
 const examPage = "/md/test-exam-practice-question.md";
 
 const examVariant = "Exam-question: Webservices, REST, SQL-Databases";
 const practiceVariant = "Practice-question: Webservices, REST, SQL-Databases";
 const answerBlock = "Just do it.";
+
+const permissionsPage = "/md/test-perms.md";
+const teacherBlock = "Only visible to teachers.";
+
+/** The two cookies an instance without an identity provider keeps preferences in. */
+const configCookie = "safelearn_config";
+const lastVisitedCookie = "safelearn_last";
+
+/** Every presentation of one page, addressed by its render parameters alone. */
+const presentations = ["", "?reveal=true", "?document=true", "?reveal=true&print-pdf=true"];
 
 describe("views", () => {
   const sessions = new Map();
@@ -139,6 +156,101 @@ describe("views", () => {
         "practice",
         `a ${role} session with the answer preference off`
       );
+    }
+  });
+
+  // ---- Config parameters come from the account alone (anonymous-publishing) ----
+
+  /** Requests `reference` with the session's cookies, without following a redirect. */
+  async function requestUnfollowed(session, reference) {
+    const cookies = await session.page.cookies(applicationUrl);
+    const response = await fetch(new URL(reference, applicationUrl), {
+      redirect: "manual",
+      headers: { cookie: cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ") },
+    });
+    return {
+      status: response.status,
+      location: response.headers.get("location"),
+      setCookie: response.headers.getSetCookie(),
+      body: await response.text(),
+    };
+  }
+
+  /** Runs `check` with the two preference cookies forged into the session's browser. */
+  async function withForgedCookies(session, cookies, check) {
+    await session.page.setCookie(
+      ...Object.entries(cookies).map(([name, value]) => ({ name, value, url: applicationUrl }))
+    );
+    try {
+      return await check();
+    } finally {
+      for (const name of Object.keys(cookies)) {
+        await session.page.deleteCookie({ name, url: applicationUrl });
+      }
+    }
+  }
+
+  test("a teacher session ignores a forged preference cookie and keeps its stored preferences", async () => {
+    const session = sessions.get("teacher");
+    await setPreferences(session, { ve: 0, sl: 1 });
+    const before = await effectivePreferences(session);
+    const forgedLast = "/md/forged-last-visited-page-3b7e.md";
+    await withForgedCookies(
+      session,
+      {
+        [configCookie]: encodeURIComponent(JSON.stringify({ vt: 1, ve: 1, va: 1, sl: 1 })),
+        [lastVisitedCookie]: encodeURIComponent(forgedLast),
+      },
+      async () => {
+        const text = (await render(session, examPage)).text;
+        assertExactlyOne(text, "practice", "a teacher whose stored exam view is off, carrying a forged cookie");
+
+        const page = await requestUnfollowed(session, examPage);
+        const root = await requestUnfollowed(session, "/");
+        for (const answer of [page, root]) {
+          assert.ok(
+            !answer.setCookie.some((cookie) => cookie.startsWith(`${configCookie}=`) || cookie.startsWith(`${lastVisitedCookie}=`)),
+            "a session's response never sets, changes or deletes the preference cookies"
+          );
+        }
+        assert.equal(root.status, 302, "the root redirects");
+        assert.ok(
+          !(root.location ?? "").includes("forged-last-visited-page"),
+          `the root should follow the account's last visited page, not the cookie's (it went to ${root.location})`
+        );
+      }
+    );
+    assert.deepEqual(await effectivePreferences(session), before, "the stored preferences are unchanged");
+  });
+
+  test("view preferences in the query string do not change a session's page", async () => {
+    const session = sessions.get("teacher");
+    await setPreferences(session, { ve: 0 });
+    const answer = await requestUnfollowed(session, `${examPage}?ve=1&vt=1`);
+    assert.ok(answer.body.includes(practiceVariant), "the stored exam view, off, decides");
+    assert.ok(!answer.body.includes(examVariant), "?ve=1 is no way to the exam variant");
+  });
+
+  // ---- Render parameters never change what a session may see (role-resolution) ----
+
+  test("every presentation of a page carries the same permitted content for a session", async () => {
+    const cases = [
+      { role: "student", values: {}, shows: false, situation: "a student" },
+      { role: "teacher", values: { vt: 0 }, shows: false, situation: "a teacher in the student view" },
+      { role: "teacher", values: { vt: 1 }, shows: true, situation: "a teacher" },
+    ];
+    for (const { role, values, shows, situation } of cases) {
+      const session = sessions.get(role);
+      await setPreferences(session, values);
+      for (const query of presentations) {
+        const answer = await requestUnfollowed(session, `${permissionsPage}${query}`);
+        assert.equal(answer.status, 200, `${permissionsPage}${query} should render for ${situation}`);
+        assert.equal(
+          answer.body.includes(teacherBlock),
+          shows,
+          `${situation} should ${shows ? "" : "not "}see the teacher block in ${permissionsPage}${query}`
+        );
+      }
     }
   });
 });

@@ -8,6 +8,8 @@ import {
   SessionEndedError,
 } from "./middlewares/keycloak-middleware.js";
 import { getPermissionContext } from "./permission-context.js";
+import { establishAuthMode, withoutIdentity } from "./auth-mode.js";
+import { readerPreferences } from "./reader-preferences.js";
 import { languages } from "./i18n/t.js";
 import {
   verifyCallerIdentity,
@@ -104,6 +106,10 @@ const __dirname = import.meta.dirname;
 
 config();
 
+// Before anything is mounted: a refused combination ends the start here, and the
+// mode decides below whether Keycloak is contacted at all.
+const { mode: authMode } = establishAuthMode();
+
 const app = express();
 app.set("trust proxy", true);
 
@@ -137,7 +143,9 @@ async function sanitizeAndParseMarkdown(data, req, options = {}) {
     d = await preParse(d, req, options);
     
     let dm = 0;
-    if (req.user.accessTokenDecoded.config) {
+    if (withoutIdentity()) {
+      dm = (await getPermissionContext(req)).preferences.dm;
+    } else if (req.user.accessTokenDecoded.config) {
       const a = JSON.parse(req.user.accessTokenDecoded.config);
       dm = a.dm;
     }
@@ -328,68 +336,84 @@ async function loadExamModule() {
   }
 }
 
-initKeycloak(app).then(async () => {
+/**
+ * Every route of the application, registered against the identity layer the
+ * instance runs with. `identity` carries what differs between the modes:
+ * `checkAuthenticated`, which gates every content route and static mount;
+ * `preferences`, the store a reader's preferences and last visited page are
+ * read from and written to; and `mode`, which decides the routes that exist
+ * only with an identity provider.
+ */
+async function registerRoutes(app, identity) {
+  const { checkAuthenticated, preferences } = identity;
+
   // Awaited before any route is registered, so the order below - the module's
   // router after checkAuthenticated and before the catch-all - holds from the
   // first request on.
   const examModule = await loadExamModule();
 
-  // Ahead of checkAuthenticated on purpose, and never added to its chain: the
-  // caller here is identified by a bearer token proven fresh against Keycloak's
-  // introspection endpoint (see middlewares/directory-service.js), not by the
-  // browser session checkAuthenticated gates everything else on. Registered
-  // first so no later `app.use(checkAuthenticated)` sits in front of it.
-  app.get("/api/admin/directory/search", async (req, res) => {
-    const identity = await verifyCallerIdentity(req);
-    if (!identity.authorized) {
-      res.status(403).json({ error: "Forbidden" });
-      return;
-    }
-
-    const query = typeof req.query.q === "string" ? req.query.q.trim() : "";
-
-    try {
-      const answer = await searchDirectory(query);
-      if (!answer.ready) {
-        // 202, not 200-with-nothing and not an error: the directory has no data
-        // to match against yet, which is neither a query that found nobody nor a
-        // failure. The body is the same payload the status route answers with, so
-        // a caller holding this can render the fetch's progress without a second
-        // request. Answering instead of holding the request open is the whole
-        // point — see `show-directory-fetch-progress`'s design.md.
-        res.status(202).json(getDirectoryStatus());
+  // The directory needs the identity provider twice over: its callers prove
+  // themselves against Keycloak's introspection endpoint, and its data comes
+  // from Keycloak's admin API. Without one, neither route exists, and a request
+  // for either lands in the catch-all like any path nothing serves.
+  if (identity.mode === "keycloak") {
+    // Ahead of checkAuthenticated on purpose, and never added to its chain: the
+    // caller here is identified by a bearer token proven fresh against Keycloak's
+    // introspection endpoint (see middlewares/directory-service.js), not by the
+    // browser session checkAuthenticated gates everything else on. Registered
+    // first so no later `app.use(checkAuthenticated)` sits in front of it.
+    app.get("/api/admin/directory/search", async (req, res) => {
+      const identity = await verifyCallerIdentity(req);
+      if (!identity.authorized) {
+        res.status(403).json({ error: "Forbidden" });
         return;
       }
-      res.json(answer.results);
-    } catch (error) {
-      console.error("Directory search failed:", error);
-      res.status(502).json({ error: "Directory search failed" });
-    }
-  });
 
-  // Registered right beside the search route, and gated identically: same
-  // `verifyCallerIdentity`, same 403 shape, same placement ahead of
-  // checkAuthenticated. It reads process memory only — no Keycloak call, no
-  // disk, and above all no fetch started — which is what lets the plugin's
-  // settings tab poll it without provoking the very work it is reporting on.
-  app.get("/api/admin/directory/status", async (req, res) => {
-    const identity = await verifyCallerIdentity(req);
-    if (!identity.authorized) {
-      res.status(403).json({ error: "Forbidden" });
-      return;
-    }
+      const query = typeof req.query.q === "string" ? req.query.q.trim() : "";
 
-    res.json(getDirectoryStatus());
-  });
+      try {
+        const answer = await searchDirectory(query);
+        if (!answer.ready) {
+          // 202, not 200-with-nothing and not an error: the directory has no data
+          // to match against yet, which is neither a query that found nobody nor a
+          // failure. The body is the same payload the status route answers with, so
+          // a caller holding this can render the fetch's progress without a second
+          // request. Answering instead of holding the request open is the whole
+          // point — see `show-directory-fetch-progress`'s design.md.
+          res.status(202).json(getDirectoryStatus());
+          return;
+        }
+        res.json(answer.results);
+      } catch (error) {
+        console.error("Directory search failed:", error);
+        res.status(502).json({ error: "Directory search failed" });
+      }
+    });
 
-  // Warms the cache searchDirectory() above reads from, so the fetch that can
-  // take minutes against a large realm happens here, at startup, rather than
-  // leaving whichever teacher searches first with a 202 and a wait. Not awaited:
-  // the rest of startup, and every other route, must not wait on it. Started
-  // directly rather than through a throwaway search, now that a search no longer
-  // waits for the fetch it starts — and so no longer surfaces its failure either;
-  // `startDirectoryRefresh` logs that itself.
-  startDirectoryRefresh();
+    // Registered right beside the search route, and gated identically: same
+    // `verifyCallerIdentity`, same 403 shape, same placement ahead of
+    // checkAuthenticated. It reads process memory only — no Keycloak call, no
+    // disk, and above all no fetch started — which is what lets the plugin's
+    // settings tab poll it without provoking the very work it is reporting on.
+    app.get("/api/admin/directory/status", async (req, res) => {
+      const identity = await verifyCallerIdentity(req);
+      if (!identity.authorized) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+
+      res.json(getDirectoryStatus());
+    });
+
+    // Warms the cache searchDirectory() above reads from, so the fetch that can
+    // take minutes against a large realm happens here, at startup, rather than
+    // leaving whichever teacher searches first with a 202 and a wait. Not awaited:
+    // the rest of startup, and every other route, must not wait on it. Started
+    // directly rather than through a throwaway search, now that a search no longer
+    // waits for the fetch it starts — and so no longer surfaces its failure either;
+    // `startDirectoryRefresh` logs that itself.
+    startDirectoryRefresh();
+  }
 
   // Protect all routes and serve them statically after authentication.
   // Order matters when dealing with middleware!
@@ -455,7 +479,7 @@ initKeycloak(app).then(async () => {
             render(data, { embedDefaults: true })
               .then((html) => wrapAsDocument(html, req))
               .then((r) => {
-                rememberLastVisited(req);
+                preferences.rememberLastVisited(req, res);
                 res.send(r);
               })
               .catch(next);
@@ -463,7 +487,7 @@ initKeycloak(app).then(async () => {
             render(data)
               .then((html) => wrapInPage(html, getStartPage(), req))
               .then((r) => {
-                rememberLastVisited(req);
+                preferences.rememberLastVisited(req, res);
                 res.send(r);
               })
               .catch(next);
@@ -642,9 +666,10 @@ initKeycloak(app).then(async () => {
 
   app.get("/userattributes", checkAuthenticated, (req, res, next) => {
     // send the user profile as response
-    refreshAccessToken(req)
-      .then(() => {
-        res.json(req.user);
+    preferences
+      .read(req)
+      .then((user) => {
+        res.json(user);
       })
       .catch(next);
   });
@@ -656,7 +681,8 @@ initKeycloak(app).then(async () => {
           "No data found in body. You have to specify 'attribute' and 'value' in your body in order to save an client-attribute in your keycloak instance.",
       });
     } else {
-      setUserAttribute(req, 'config', JSON.stringify(req.body))
+      preferences
+        .write(req, res, req.body)
         .then((result) => {
           if (result) {
             // The preferences decide what this session sees - teacher or
@@ -709,4 +735,48 @@ initKeycloak(app).then(async () => {
     }
     res.status(500).end();
   });
-});
+}
+
+/**
+ * The identity layer of an instance that runs with Keycloak: the session
+ * middleware `initKeycloak` mounted, and the reader's preferences in the
+ * account's user attributes.
+ */
+const keycloakIdentity = {
+  mode: "keycloak",
+  checkAuthenticated,
+  preferences: {
+    /** The body `GET /userattributes` answers with: the whole session user. */
+    async read(req) {
+      await refreshAccessToken(req);
+      return req.user;
+    },
+    /** Stores the preference block; resolves to whether it was stored. */
+    write(req, res, block) {
+      return setUserAttribute(req, "config", JSON.stringify(block));
+    },
+    rememberLastVisited(req, res) {
+      rememberLastVisited(req);
+    },
+  },
+};
+
+/**
+ * The identity layer of an instance without an identity provider
+ * (`anonymous-publishing`): nobody signs in, so nothing is refused for want of
+ * a session, and the reader's preferences live in the reader's browser. The
+ * roles every reader holds are `READER_ROLES`, read by `permission-context.js`.
+ */
+const readerIdentity = {
+  mode: "none",
+  checkAuthenticated: (req, res, next) => next(),
+  preferences: readerPreferences,
+};
+
+if (authMode === "none") {
+  // No issuer discovery, no session store, no passport and no SESSION_SECRET:
+  // initKeycloak is never called, and keycloak.json is never read.
+  registerRoutes(app, readerIdentity);
+} else {
+  initKeycloak(app).then(() => registerRoutes(app, keycloakIdentity));
+}

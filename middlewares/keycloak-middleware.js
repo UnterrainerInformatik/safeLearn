@@ -38,8 +38,20 @@ function jwtDecode(token) {
 }
 
 export async function initKeycloak(app) {
-  // Load keycloak.json
-  keycloakConfig = JSON.parse(fs.readFileSync("keycloak.json", "utf8"));
+  // Load keycloak.json. Without it there is no sign-in, and the start ends here:
+  // running without an identity provider is a choice an instance states with
+  // AUTH=none, never what a missing file turns it into.
+  try {
+    keycloakConfig = JSON.parse(fs.readFileSync("keycloak.json", "utf8"));
+  } catch (error) {
+    console.error(
+      `SafeLearn runs with Keycloak (AUTH is "keycloak" or unset) and cannot read keycloak.json ` +
+        `from ${process.cwd()}: ${error.message}\n` +
+        "Provide keycloak.json for the realm this instance signs in against, or set AUTH=none " +
+        "to publish without any sign-in (see docs-wysiwyg.md and READER_ROLES)."
+    );
+    process.exit(1);
+  }
   issuerUrl =
     keycloakConfig["auth-server-url"] + "realms/" + keycloakConfig.realm;
   keycloakIssuer = await Issuer.discover(issuerUrl);

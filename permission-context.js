@@ -1,5 +1,7 @@
 import { fetchAccount, keycloakConfig, SessionEndedError } from "./middlewares/keycloak-middleware.js";
 import { languageOf, localeOf } from "./i18n/t.js";
+import { authMode, withoutIdentity } from "./auth-mode.js";
+import { accountFromCookies } from "./reader-preferences.js";
 
 /**
  * The context one request decides every one of its directives against.
@@ -107,21 +109,10 @@ function parsePreferences(rawConfig) {
 }
 
 /**
- * The session's roles, as the two sets a check selects between.
- *
- * Sets rather than the plain object this used to be: `r["constructor"]` and
- * `r["__proto__"]` are truthy on any object literal, so a directive reading
- * `@@@ constructor` was granted to every session that reached it. A `Set` has no
- * inherited keys, and an intersection is what the check actually is.
- *
- * Both sets are built here, up front. The downgrade used to `delete` from the
- * map it had just built, which was harmless only because every call built its
- * own; against one set shared by a whole request it is exactly the evaluation
- * order dependence `role-resolution` forbids.
+ * Adds what the authenticated session carries to `roles`: the LDAP groups, the
+ * display name, and the client roles of the access token.
  */
-function buildRoleViews(req) {
-  const roles = new Set();
-
+function addSessionRoles(req, roles) {
   let calculated = null;
   try {
     calculated = JSON.parse(req?.user?.rolesCalculated);
@@ -162,8 +153,37 @@ function buildRoleViews(req) {
       }
     }
   }
+}
 
-  // The session's role set is complete at this point. Any future source of
+/**
+ * The session's roles, as the two sets a check selects between.
+ *
+ * Sets rather than the plain object this used to be: `r["constructor"]` and
+ * `r["__proto__"]` are truthy on any object literal, so a directive reading
+ * `@@@ constructor` was granted to every session that reached it. A `Set` has no
+ * inherited keys, and an intersection is what the check actually is.
+ *
+ * Both sets are built here, up front. The downgrade used to `delete` from the
+ * map it had just built, which was harmless only because every call built its
+ * own; against one set shared by a whole request it is exactly the evaluation
+ * order dependence `role-resolution` forbids.
+ */
+function buildRoleViews(req) {
+  const roles = new Set();
+  if (withoutIdentity()) {
+    // No session to read anything from: every reader holds the roles the
+    // deployment lists, and nothing a request carries adds to them. They skip
+    // the reserved-name check below on purpose - that check keeps a display
+    // name from standing in for a role, and these are roles the operator
+    // grants, as a client role is.
+    for (const role of authMode().readerRoles) {
+      roles.add(role);
+    }
+  } else {
+    addSessionRoles(req, roles);
+  }
+
+  // The request's role set is complete at this point. Any future source of
   // roles must be merged above this line, so that the canonicalization and
   // the alias below cover it too. Nothing below reads the requested roles to
   // decide which roles the session holds - a directive never grants itself.
@@ -207,7 +227,15 @@ async function buildPermissionContext(req) {
   // The roles above never come from this lookup - they come from the session and
   // from the access token - so a failure here settles the preferences and leaves
   // the identity of the session untouched.
-  if (req?.user?.accessToken && req?.user?.keycloakConfig) {
+  //
+  // Exactly one store is read, and the mode decides which. Without an identity
+  // provider the reader's browser is the store and its cookies carry it. With
+  // one, the account is the store, and a cookie of the same names is never
+  // looked at: it would be a way around the account (design.md of
+  // publishing-without-keycloak, D4).
+  if (withoutIdentity()) {
+    account = accountFromCookies(req);
+  } else if (req?.user?.accessToken && req?.user?.keycloakConfig) {
     try {
       account = await fetchAccount(req);
     } catch (error) {

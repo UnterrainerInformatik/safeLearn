@@ -47,6 +47,11 @@ const optionalWithDefault = new Map([
     "PERMISSION_VISIBILITY_INTERVAL_MS",
     "obsidian.js defaults it to 5000 ms; a deployment only sets it to tune that.",
   ],
+  [
+    "READER_ROLES",
+    "auth-mode.js reads it only with AUTH=none, and absent it grants no role at all - every " +
+      "restricted section and file stays hidden.",
+  ],
 ]);
 
 /**
@@ -137,7 +142,7 @@ function composeEnvironment() {
     if (trimmed.length === 0 || trimmed.startsWith("#")) continue;
     const match = line.match(/^\s+-\s+([A-Z][A-Z0-9_]*)=(.*)$/);
     if (!match) break;
-    entries.set(match[1], { interpolates: match[2].trim() === `\${${match[1]}}` });
+    entries.set(match[1], { value: match[2].trim(), interpolates: match[2].trim() === `\${${match[1]}}` });
   }
   return entries;
 }
@@ -151,7 +156,10 @@ test("every environment variable the application reads reaches a deployed instan
   for (const [name, file] of reads) {
     if (optionalWithDefault.has(name) || testOnly.has(name)) continue;
     const throughImage = imageEnv.has(name);
-    const throughContainer = deployEnv.has(name) && containerEnv.has(name);
+    // A literal in the compose file reaches the container on its own; an
+    // interpolated value needs deploy/.env to fill it in.
+    const literal = containerEnv.has(name) && !containerEnv.get(name).interpolates;
+    const throughContainer = literal || (deployEnv.has(name) && containerEnv.has(name));
     assert.ok(
       throughImage || throughContainer,
       `${file} reads process.env.${name}, and nothing in the deployment sets it: it is not in ` +
@@ -295,5 +303,26 @@ test("no static mount reaches the data directory", () => {
     readFileSync(path.join(projectRoot, "exam/index.js"), "utf8"),
     /express\.static\(clientDir\)/,
     "the exam module serves its client directory and nothing else"
+  );
+});
+
+test("the deployed instance signs in through Keycloak, stated rather than defaulted", () => {
+  const auth = containerEnv.get("AUTH");
+  assert.ok(
+    auth && !auth.interpolates && auth.value === "keycloak",
+    `${composePath} has to pass AUTH=keycloak to the container as a literal, and it passes ` +
+      `${auth ? `AUTH=${auth.value}` : "no AUTH"}. AUTH=none publishes without any sign-in, which the ` +
+      `school's deployment must never do; a value interpolated from deploy/.env could be lost or changed ` +
+      `by a line there.`
+  );
+  assert.ok(
+    !imageEnv.has("AUTH") && !deployEnv.has("AUTH"),
+    `AUTH is written to an .env file by ${workflowPath}. The compose file's literal is the one place ` +
+      `it is set, so nothing else can disagree with it.`
+  );
+  assert.ok(
+    !containerEnv.has("READER_ROLES") && !imageEnv.has("READER_ROLES"),
+    `READER_ROLES reaches the deployed instance. It only means something without an identity provider, ` +
+      `and the deployment runs with one.`
   );
 });

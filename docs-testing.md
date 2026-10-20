@@ -34,6 +34,7 @@ One run does the following:
 | `test/coverage.test.js` | The coverage record. No browser, no login. |
 | `test/checks/exam-embedding.js` | Exam-module elements on an instance without the module: a notice per known element for a teacher (also in the presentation and document views), nothing for a student or a teacher in student view, no module script and no request to `/exam/`, and every path under `/exam/` answering as a path with nothing behind it. |
 | `test/exam.test.js` | The instance **with** the exam module, in a process and on a port of its own, against a database created for the run and removed afterwards — see [The exam-module run](#the-exam-module-run). |
+| `test/anonymous.test.js` | Instances **without** an identity provider (`AUTH=none`), each started by `startAnonymous` on a port of its own, without any login and without Keycloak: what a reader without roles and a reader holding `teacher` are shown, the cookies their preferences live in, the routes that are absent, and the starts that are refused (`expectRefusedStart`). Runs offline. |
 | `test/exam-foundation.test.js` | The exam module unit by unit: database, migrations, backups, the teacher/student gate, the embedding hooks, and failure isolation. No browser, no login, no server. |
 | `test/deployment-config.test.js` | That every environment variable the application reads reaches a deployed instance — through the image's own `.env` or through the container's environment — and that neither path is wired up only halfway. No browser, no login, no server: it reads the workflow, the compose file and the application's own sources. |
 
@@ -209,6 +210,7 @@ Every value has a default; set only what you need to change. No file in the repo
 | `SAFELEARN_TEST_STARTUP_TIMEOUT_MS`   | `120000`                           | How long to wait for the application to answer.                |
 | `SAFELEARN_TEST_NAVIGATION_TIMEOUT_MS`| `45000`                            | How long any single navigation may take.                       |
 | `SAFELEARN_TEST_EXAM_PORT`            | `8089`                             | Port of the instance `test/exam.test.js` starts with the exam module. |
+| `SAFELEARN_TEST_ANONYMOUS_PORT`       | `8090`                             | Port of the instances `test/anonymous.test.js` starts without an identity provider, one at a time. Nothing redirects to it, so the realm needs no entry for it. |
 
 Note that the port is not a free choice: SafeLearn derives its OIDC redirect URI from the server URL, and that URI must be registered on the Keycloak client. `http://localhost:8080/auth/callback` is registered on the demo client; another port needs a matching entry in the Keycloak admin console.
 

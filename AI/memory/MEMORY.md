@@ -35,6 +35,6 @@ Echter Ablageort: `/mnt/data/source/HTL/safeLearn/AI/memory/`
 - [Keycloak importiert beim Blättern](keycloak-import-on-demand.md) — `users/count` zählt nur die lokale DB, `GET /users` paginiert in die LDAP-Föderation und importiert dabei; manual sync schützt nicht
 - [Toter federationLink löscht beim Lesen](keycloak-dead-federation-link-deletes-on-read.md) — nach einer `usersDn`-Verengung entfernt schon ein `GET` die lokale Kopie; erst sichern, dann umstellen
 - [Keycloak-Bot-Account](keycloak-bot-account.md) — `bot@unterrainer.info`, nur lesend; Passwort in `.env.sh` auf babylon5, Schreibrechte gibt Gerald temporär
-- [Reihenfolge der vier Changes](change-order-2026-10.md) — remove-convert-route → attachment-access-control → exam-module (bis P4, vor 05.02.2027) → publishing-without-keycloak
 - [Wackelige Checks](flaky-content-checks.md) — Reload-Backoff, 390px-Viewport und einzelne Exam-Harness-Checks (Ergebnisse ausblenden, Sheet-Spalten, New question) scheitern zeitabhängig, auch auf HEAD; erst nochmal laufen lassen
 - [i18n im BabelEdit-Format](i18n-babeledit-json.md) — Übersetzungen als ein JSON-File pro Sprache mit gleichen Keys, damit BabelEdit sie pflegen und erweitern kann
+- [Obsidian-Pfad für test:obsidian](obsidian-app-path.md) — `SAFELEARN_OBSIDIAN_APP=/usr/bin/obsidian` setzen und `AI/plugin` vorher auf origin/master ziehen, sonst Dutzende Fehlalarme

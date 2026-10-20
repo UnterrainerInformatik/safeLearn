@@ -1,6 +1,16 @@
 Here you find information about the keycloak-setup when you're trying to host it yourself.
 
 [Back](README.md) to the main page.
+## Whether Keycloak is needed at all
+`AUTH` decides it, once at start-up:
+
+- `AUTH=keycloak`, or `AUTH` not set: everything on this page applies. The instance reads `keycloak.json` from its working directory and needs `SESSION_SECRET`; without either it refuses to start, with a message naming what is missing and `AUTH=none` as the alternative.
+- `AUTH=none`: no Keycloak at all. `keycloak.json` is not read even where it is present, `SESSION_SECRET` is not needed, and the login and logout paths and the directory endpoints do not exist. Every reader holds the roles `READER_ROLES` lists (see [Permissions](docs-permissions.md)), and preferences live in the reader's browser. This is meant for the [WYSIWYG container](docs-wysiwyg.md) and for a site that only publishes.
+
+Any other value refuses the start. So does `AUTH=none` together with `EXAM_MODULE=on`, because the exam module has to know who a reader is. The school's deployment states `AUTH=keycloak` in `deploy/docker-compose.yml`, and `test/deployment-config.test.js` fails if it says anything else.
+
+Under `AUTH=keycloak` the preferences come from the account and from nowhere else. A `safelearn_config` or `safelearn_last` cookie, as an instance without sign-in writes them, is ignored there and left alone: it neither changes what a session is shown nor is it deleted.
+
 ## Keycloak Setup
 In order for this setup to work correctly, you'll have to have a Keycloak-client (private with secret) and standard-authorization-flow enabled (should be enabled anyway).
 ```yml

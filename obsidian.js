@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from "uuid";
 import { JSDOM } from "jsdom";
 import { hasSomeRoles } from "./utils.js";
 import { getPermissionContext } from "./permission-context.js";
+import { withoutIdentity } from "./auth-mode.js";
 import { i18nOf } from "./i18n/server.js";
 import { createFormat } from "./i18n/format.js";
 import { languageNames, languages, locales } from "./i18n/t.js";
@@ -2446,9 +2447,50 @@ export async function mayServeAttachment(req, attachment) {
   if (!candidates || candidates.size === 0) {
     return false;
   }
+  if (withoutIdentity()) {
+    return sharedAttachmentDecision(req, attachment, candidates);
+  }
+  return decideAttachment(req, attachment, candidates);
+}
+
+function decideAttachment(req, attachment, candidates) {
   return firstTrue(
     Array.from(candidates, (fullPath) => referencesVisibly(req, fullPath, attachment))
   );
+}
+
+/**
+ * Decisions of an instance without an identity provider, keyed by attachment
+ * and view, valid for `sharedDecisionsEpoch`.
+ *
+ * There every reader holds the same roles, so a decision depends on the
+ * attachment and on the three view preferences alone, and one reader's answer
+ * is every reader's with the same view. Kept for the whole process instead of
+ * in a session, which such an instance does not have: bounded by attachments
+ * times eight views however many readers come, and dropped as a whole when the
+ * epoch moves on, as a grant is.
+ */
+const sharedDecisions = new Map();
+let sharedDecisionsEpoch = grantEpoch;
+
+async function sharedAttachmentDecision(req, attachment, candidates) {
+  if (sharedDecisionsEpoch !== grantEpoch) {
+    sharedDecisions.clear();
+    sharedDecisionsEpoch = grantEpoch;
+  }
+  // The three values as the gates in utils.js read them, so a cookie cannot
+  // spread one view over many keys.
+  const { vt, ve, va } = (await getPermissionContext(req)).preferences;
+  const key = `${vt == 0 ? 0 : 1}${ve == 1 ? 1 : 0}${va == 1 ? 1 : 0}:${attachment}`;
+  if (sharedDecisions.has(key)) {
+    return sharedDecisions.get(key);
+  }
+  const epoch = grantEpoch;
+  const decision = await decideAttachment(req, attachment, candidates);
+  if (epoch === grantEpoch && sharedDecisionsEpoch === epoch) {
+    sharedDecisions.set(key, decision);
+  }
+  return decision;
 }
 
 /**
@@ -2942,11 +2984,16 @@ function choiceGroup(label, setter, choices, chosen) {
 
 async function getTopdownMenu(req) {
   const { t, lang, loc } = await i18nOf(req);
+  // Without an identity provider nobody is signed in, so there is nothing to
+  // sign out of, and /logout is not served.
+  const logout = withoutIdentity()
+    ? ""
+    : `<button class="sl-button-accent" style="margin-left: 0px;" onclick="window.location.href='/logout'">${lucideIcon(
+        "LogOut"
+      )}<span style="margin-left: 6px; margin-right: 6px; position: relative; top: -2px;">${t("app.menu.logout")}</span></button>`;
   return `
   <div style="padding: 0px; margin: 0px;">
-    <button class="sl-button-accent" style="margin-left: 0px;" onclick="window.location.href='/logout'">${lucideIcon(
-      "LogOut"
-    )}<span style="margin-left: 6px; margin-right: 6px; position: relative; top: -2px;">${t("app.menu.logout")}</span></button>
+    ${logout}
     <button class="sl-button" onclick="toggleLightDark()">${lucideIcon(
       "SunMoon"
     )}<span style="margin-left: 6px; margin-right: 6px; position: relative; top: -2px;">${t("app.menu.lightDark")}</span></button>

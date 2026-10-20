@@ -394,6 +394,201 @@ export function applicationOutput() {
   return server ? server.output.join("") : "";
 }
 
+// ################### Instances without an identity provider ###################
+
+/**
+ * The port instances without an identity provider listen on
+ * (`SAFELEARN_TEST_ANONYMOUS_PORT`, default 8090). Nothing redirects to it, so
+ * the realm needs no entry for it; it only has to stay clear of 8080, the
+ * WYSIWYG container's 8081 and the exam-module instance's 8089. One such
+ * instance runs at a time.
+ */
+const anonymousPort = Number(process.env.SAFELEARN_TEST_ANONYMOUS_PORT || 8090);
+
+/** The instance `startAnonymous` started and has not stopped yet, or null. */
+let anonymousServer = null;
+
+/**
+ * The environment an instance without an identity provider is started with:
+ * whatever the caller names over a baseline that a developer's shell or `.env`
+ * cannot change underneath the checks. Every variable this change reads is
+ * passed explicitly - as empty where it is meant to be absent - because dotenv
+ * never overrides a variable that is already set, not even an empty one. No
+ * `SESSION_SECRET` either, since such an instance has to start without one.
+ */
+function anonymousEnvironment(port, env) {
+  return {
+    ...process.env,
+    NEXT_PUBLIC_PORT: String(port),
+    NEXT_PUBLIC_SERVER_URL: `http://localhost:${port}`,
+    AUTH: "none",
+    READER_ROLES: "",
+    EXAM_MODULE: "",
+    SESSION_SECRET: "",
+    ...env,
+  };
+}
+
+/** Spawns `app.js` from the working tree. */
+function spawnApplication({ cwd = projectRoot, env }) {
+  const output = [];
+  const child = spawn(process.execPath, [path.join(projectRoot, "app.js")], {
+    cwd,
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stdout.on("data", (chunk) => output.push(chunk.toString()));
+  child.stderr.on("data", (chunk) => output.push(chunk.toString()));
+  const exited = new Promise((resolve) => child.once("exit", (code, signal) => resolve({ code, signal })));
+  return { child, output, exited };
+}
+
+/** Whether `url` answers at all, a redirect included. */
+async function answersAt(url, timeoutMs) {
+  try {
+    await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(timeoutMs) });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Ends a spawned instance, by SIGTERM and after five seconds by SIGKILL. */
+async function stopSpawned(spawned) {
+  const { child, exited } = spawned;
+  if (child.exitCode === null && child.signalCode === null) {
+    child.kill("SIGTERM");
+    const hard = setTimeout(() => child.kill("SIGKILL"), 5000);
+    await exited;
+    clearTimeout(hard);
+  }
+}
+
+/**
+ * Starts an instance from the working tree without an identity provider
+ * (`AUTH=none`), whose readers hold `readerRoles` (a list, or the raw
+ * `READER_ROLES` string), and hands back a reader: a browser page in a context
+ * of its own that has opened the start page directly, without any login.
+ *
+ * The answer is `{ url, reader(), output(), stop() }`. `reader()` opens one more
+ * reader in a fresh browser context, holding no cookie for the instance, so a
+ * check can compare two browsers. Each reader is shaped like a session -
+ * `{ role, page, context, baseUrl, close }` - so `render` and `setPreferences`
+ * take it as they take a session.
+ *
+ * Fails, with the instance's output, when it does not answer within the
+ * startup timeout or the start page shows anything but application content.
+ */
+export async function startAnonymous({ readerRoles = [], env = {} } = {}) {
+  if (anonymousServer) {
+    throw new Error("An instance without an identity provider is already running; stop it first.");
+  }
+  const url = `http://localhost:${anonymousPort}`;
+  if (await answersAt(url, 3000)) {
+    throw new Error(
+      `Something already answers on ${url}. Stop it, or point SAFELEARN_TEST_ANONYMOUS_PORT at a free port.`
+    );
+  }
+  const roles = Array.isArray(readerRoles) ? readerRoles.join(",") : String(readerRoles);
+  const spawned = spawnApplication({ env: anonymousEnvironment(anonymousPort, { READER_ROLES: roles, ...env }) });
+  anonymousServer = spawned;
+
+  let exit = null;
+  spawned.exited.then((result) => (exit = result));
+  const deadline = Date.now() + startupTimeoutMs;
+  let ready = false;
+  while (Date.now() < deadline && !exit) {
+    if (await answersAt(`${url}/`, 3000)) {
+      ready = true;
+      break;
+    }
+    await delay(250);
+  }
+  if (!ready) {
+    await stopSpawned(spawned);
+    anonymousServer = null;
+    const ended = exit ? ` It exited with code ${exit.code}, signal ${exit.signal}.` : "";
+    throw new Error(
+      `SafeLearn without an identity provider did not answer on ${url} within ${startupTimeoutMs} ms.${ended}\n` +
+        `--- application output ---\n${spawned.output.join("") || "(none)"}\n--- end of application output ---`
+    );
+  }
+
+  const label = roles.length > 0 ? `reader holding ${roles}` : "reader without roles";
+  const reader = async () => {
+    const running = await ensureBrowser();
+    const context = await running.createBrowserContext();
+    openContexts.add(context);
+    const page = await context.newPage();
+    page.setDefaultNavigationTimeout(navigationTimeoutMs);
+    page.setDefaultTimeout(navigationTimeoutMs);
+    await page.goto(`${url}/`, { waitUntil: "domcontentloaded" });
+    const landed = new URL(page.url());
+    if (landed.origin !== url) {
+      await closeSession(context);
+      throw new Error(`The start page of ${url} sent the ${label} to ${page.url()}, which is not the instance.`);
+    }
+    try {
+      await page.waitForSelector("#markdown-content", { timeout: navigationTimeoutMs });
+    } catch {
+      await closeSession(context);
+      throw new Error(
+        `The start page of ${url} showed the ${label} no application content. The page ended up at ${page.url()}.`
+      );
+    }
+    return { role: label, page, context, baseUrl: url, close: () => closeSession(context) };
+  };
+
+  return {
+    url,
+    reader,
+    output: () => spawned.output.join(""),
+    async stop() {
+      await stopSpawned(spawned);
+      if (anonymousServer === spawned) anonymousServer = null;
+    },
+  };
+}
+
+/**
+ * Starts `app.js` with `env` (merged over the baseline of `startAnonymous`, so
+ * pass `AUTH` explicitly) in `cwd`, and resolves once the process has ended on
+ * its own with a non-zero exit code, to everything it printed. Fails when it is
+ * still running after the startup timeout or ever answers HTTP: a refused start
+ * that serves anything is no refusal.
+ */
+export async function expectRefusedStart(env, { cwd = projectRoot } = {}) {
+  const url = `http://localhost:${anonymousPort}`;
+  if (await answersAt(url, 3000)) {
+    throw new Error(`Something already answers on ${url}; a refused start could not be told from it.`);
+  }
+  const spawned = spawnApplication({ cwd, env: anonymousEnvironment(anonymousPort, env) });
+  let exit = null;
+  spawned.exited.then((result) => (exit = result));
+  const deadline = Date.now() + startupTimeoutMs;
+  while (Date.now() < deadline && !exit) {
+    if (await answersAt(url, 1000)) {
+      await stopSpawned(spawned);
+      throw new Error(
+        `SafeLearn started with ${JSON.stringify(env)} answered on ${url}, and it should have refused to start.\n` +
+          `--- application output ---\n${spawned.output.join("")}\n--- end of application output ---`
+      );
+    }
+    await delay(250);
+  }
+  if (!exit) {
+    await stopSpawned(spawned);
+    throw new Error(`SafeLearn started with ${JSON.stringify(env)} neither served nor ended within ${startupTimeoutMs} ms.`);
+  }
+  if (exit.code === 0 || exit.code === null) {
+    throw new Error(
+      `SafeLearn started with ${JSON.stringify(env)} ended with code ${exit.code}, signal ${exit.signal}, ` +
+        `rather than refusing with a non-zero exit code.`
+    );
+  }
+  return spawned.output.join("");
+}
+
 // ################### Browser ###################
 
 async function ensureBrowser() {
@@ -755,6 +950,10 @@ export async function shutdown() {
   for (const context of [...openContexts]) await closeSession(context);
   await closeBrowser();
   await stopServer();
+  if (anonymousServer) {
+    await stopSpawned(anonymousServer);
+    anonymousServer = null;
+  }
 }
 
 // ################### Roles ###################
@@ -870,8 +1069,12 @@ export async function accountLookups(session) {
 
 // ################### Preferences ###################
 
-/** The preference block the application is rendering this session with. */
-async function effectivePreferences(session) {
+/**
+ * The preference block the application is rendering this session with: the
+ * account's, for a session, and the browser's cookie, for a reader of an
+ * instance without an identity provider.
+ */
+export async function effectivePreferences(session) {
   return session.page.evaluate(async (url) => {
     try {
       const response = await fetch(url, { credentials: "include" });
@@ -883,7 +1086,7 @@ async function effectivePreferences(session) {
     } catch {
       return null;
     }
-  }, `${applicationUrl}/userattributes`);
+  }, `${session.baseUrl ?? applicationUrl}/userattributes`);
 }
 
 /**
@@ -923,7 +1126,7 @@ export async function setPreferences(session, values = {}) {
         return { error: String(error) };
       }
     },
-    `${applicationUrl}/userattributes`,
+    `${session.baseUrl ?? applicationUrl}/userattributes`,
     wanted
   );
   if (written?.error) {
@@ -1005,7 +1208,7 @@ export async function render(session, pagePath, { view = "page" } = {}) {
   }
 
   const address =
-    `${applicationUrl}${encodeSegments(pagePath)}` +
+    `${session.baseUrl ?? applicationUrl}${encodeSegments(pagePath)}` +
     (requested.query ? `?${requested.query}` : "");
   await session.page.goto(address, { waitUntil: "domcontentloaded" });
 
@@ -1173,6 +1376,14 @@ function killChildren() {
   if (child && child.exitCode === null && child.signalCode === null) {
     try {
       child.kill("SIGKILL");
+    } catch {
+      // The process is already gone.
+    }
+  }
+  const anonymousChild = anonymousServer?.child;
+  if (anonymousChild && anonymousChild.exitCode === null && anonymousChild.signalCode === null) {
+    try {
+      anonymousChild.kill("SIGKILL");
     } catch {
       // The process is already gone.
     }

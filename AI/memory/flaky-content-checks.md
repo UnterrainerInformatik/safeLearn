@@ -14,5 +14,7 @@ Measured 2026-10-17 while building exam-module P0, across seven full `test/conte
 
 - 2026-10-20 (exam-questions-follow-pool): `test/exam.test.js` run alone gives 145/146 with the one failure moving between checks: "the Exams page hides the student's results while they write…" (also red on unchanged HEAD in a worktree), "the sheet: the left four columns keep their place…" and "New question is offered with all categories shown…" (red on HEAD). Not reproducible per check.
 
+- 2026-10-20 (publishing-without-keycloak): in the full `npm test` the exam check "the buttons to the pool and the online tests are on every teacher page…" failed once with `Node is either not clickable or not an Element`; `test/exam.test.js` run alone right after it passed it (145/146, only the known Exams-page check red).
+
 **Why:** a red run with only these two is not evidence against a change.
 **How to apply:** if only these fail, re-run the content suite once before investigating; if one fails reproducibly, compare against HEAD in a `git worktree` (symlink `node_modules`, copy `keycloak.json` and `.env`) before blaming the change. See [[browser-verification]].

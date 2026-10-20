@@ -56,14 +56,18 @@
       ]
     },
     "test/checks/views.js": {
-      "what": "The #exam, #practice and #answer pseudo-roles, driven through the ve and va preferences.",
+      "what": "The #exam, #practice and #answer pseudo-roles, driven through the ve and va preferences. That a session takes its view preferences from the account alone: a forged safelearn_config/safelearn_last cookie of the mode without an identity provider changes neither the page, nor the / redirect, nor the stored preferences, and is never set or cleared by the response; ?ve=1&vt=1 in the query changes nothing. That every presentation of a page - page, ?reveal, ?document and print - carries the same permitted content for a student, a teacher in the student view and a teacher.",
       "guards": [
         "utils.js",
         "obsidian.js",
-        "app.js"
+        "app.js",
+        "permission-context.js",
+        "reader-preferences.js",
+        "auth-mode.js"
       ],
       "corpus": [
-        "md/test-exam-practice-question.md"
+        "md/test-exam-practice-question.md",
+        "md/test-perms.md"
       ]
     },
     "test/checks/rendering.js": {
@@ -310,7 +314,7 @@
       "corpus": []
     },
     "test/deployment-config.test.js": {
-      "what": "That every environment variable the application reads reaches a deployed instance through one of the two channels a deployment has - the image's own .env, written by the workflow and baked in by the Dockerfile, or the container's environment, written to deploy/.env and interpolated by docker-compose.yml - and that neither channel is wired up only halfway. Added after DIRECTORY_SERVICE_CLIENT_ID/_SECRET were read by the directory-search endpoint for two changes while nothing in the pipeline set them. That the exam module's switch EXAM_MODULE and the school's periods SCHOOL_PERIODS travel by the container's environment and not in the image, that the Dockerfile ships exam/, that EXAM_DB_PATH (the harness's own database) reaches no deployed instance, that the WYSIWYG templates run without the module (neither variable set) and mount no data volume, and that no static mount reaches the data directory, and that the Dockerfile ships i18n/, which every instance imports.",
+      "what": "That every environment variable the application reads reaches a deployed instance through one of the two channels a deployment has - the image's own .env, written by the workflow and baked in by the Dockerfile, or the container's environment, written to deploy/.env and interpolated by docker-compose.yml - and that neither channel is wired up only halfway. Added after DIRECTORY_SERVICE_CLIENT_ID/_SECRET were read by the directory-search endpoint for two changes while nothing in the pipeline set them. That the exam module's switch EXAM_MODULE and the school's periods SCHOOL_PERIODS travel by the container's environment and not in the image, that the Dockerfile ships exam/, that EXAM_DB_PATH (the harness's own database) reaches no deployed instance, that the WYSIWYG templates run without the module (neither variable set) and mount no data volume, and that no static mount reaches the data directory, and that the Dockerfile ships i18n/, which every instance imports. That the deployed instance passes AUTH=keycloak to its container as a literal, sets AUTH nowhere else and passes no READER_ROLES, and that READER_ROLES is optional because its absence grants no role.",
       "guards": [
         ".github/workflows/docs-local.yml",
         "deploy/docker-compose.yml",
@@ -320,7 +324,10 @@
         "exam/db.js",
         "exam/index.js",
         "wysiwyg-container-linux/docker-compose.yml",
-        "wysiwyg-container-windows/docker-compose.yml"
+        "wysiwyg-container-windows/docker-compose.yml",
+        "auth-mode.js",
+        "wysiwyg-container-linux/.env",
+        "wysiwyg-container-windows/.env"
       ],
       "corpus": []
     },
@@ -536,6 +543,29 @@
         "exam/migrations/008-question-import.sql"
       ],
       "corpus": []
+    },
+    "test/anonymous.test.js": {
+      "what": "An instance without an identity provider (AUTH=none), started from the working tree, no Keycloak needed: without reader roles every restricted block and file of the test corpus is absent (tree and direct path), unrestricted pages are reachable without a login, the login paths and the directory endpoints answer like an unserved path with or without a bearer token, no logout control is rendered and no session cookie is set, a forged exam-view cookie still gets the practice variant, and an attachment referenced only inside a teacher block is refused. With READER_ROLES=teacher: a fresh reader starts in the student view, the teacher view shows teacher content but not other classes' or a person's by name, the page's own teacher switch hides and restores it, the exam switch moves between exam and practice, a second browser keeps its own preferences, start with the last page redirects, a malformed preference cookie renders with the defaults, the teacher attachment follows the teacher view, every presentation (page, reveal, document, print) carries the same content, and a bookmarked presentation opens in a fresh browser. Refused starts: AUTH=off, AUTH=none with EXAM_MODULE=on, and no AUTH without keycloak.json.",
+      "guards": [
+        "test/harness.js",
+        "app.js",
+        "auth-mode.js",
+        "reader-preferences.js",
+        "permission-context.js",
+        "middlewares/keycloak-middleware.js",
+        "obsidian.js",
+        "obsidian-page.js",
+        "utils.js"
+      ],
+      "corpus": [
+        "md/test-perms.md",
+        "md/test-fileperms-teachers.md",
+        "md/test-fileperms-4bhif-5bhif-2ahif.md",
+        "md/test-fileperms-nobody.md",
+        "md/test-search-teacher-file.md",
+        "md/test-exam-practice-question.md",
+        "md/test-attachments.md"
+      ]
     }
   }
 }

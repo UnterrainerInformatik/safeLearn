@@ -8,6 +8,11 @@ services:
       - "${WEBSERVER_PORT}:${INTERNAL_PORT}"
     environment:
       - TZ=Europe/Vienna
+      # Sign-in through Keycloak. Stated as a literal rather than read from
+      # deploy/.env, so a line missing there cannot change it; the deployment
+      # checks fail if this says anything else (test/deployment-config.test.js).
+      # AUTH=none would publish every unrestricted page to anyone.
+      - AUTH=keycloak
       # Signs the session cookies. The container will not start without it.
       - SESSION_SECRET=${SESSION_SECRET}
       # The dedicated Keycloak client GET /api/admin/directory/search

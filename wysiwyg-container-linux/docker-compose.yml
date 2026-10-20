@@ -10,8 +10,13 @@ services:
       - NEXT_PUBLIC_SERVER_URL=${PUBLIC_SERVER_URL}
       - NEXT_PUBLIC_START_PAGE=${PUBLIC_START_PAGE}
       - NEXT_AUTOSCAN=${AUTOSCAN}
-      # Signs the session cookies. The container will not start without it.
+      # "none" by default (.env): no sign-in, every reader holds READER_ROLES.
+      - AUTH=${AUTH}
+      - READER_ROLES=${READER_ROLES}
+      # Only for AUTH=keycloak: signs the session cookies.
       - SESSION_SECRET=${SESSION_SECRET}
     volumes:
       - ${LOCAL_DEV_MD_DIR}:/app/md
-      - ./keycloak.json:/app/keycloak.json
+      # Only for AUTH=keycloak. Left commented out otherwise: mounting a file
+      # that does not exist makes Docker create a directory in its place.
+      # - ./keycloak.json:/app/keycloak.json
