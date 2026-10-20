@@ -7,7 +7,7 @@ Both pieces of data already exist in process and are read-only:
 
 The web app's teacher check for pages lives in the exam module (`exam/gate.js`: `actsAsTeacher` = `hasSomeRoles(req, ["teacher"], true)` plus `identityOf(req)`), but that module is loaded only with `EXAM_MODULE=on`. Pages outside the corpus are rendered with `wrapInPage(html, startPage, req, { title, wide })`. The settings menu is `getTopdownMenu(req)` in `obsidian.js`; it already branches on `hasSomeRoles(req, ["teacher"], true)` for the exam switch.
 
-`publishing-without-keycloak` (open) splits route registration into `registerRoutes(app, identity)` and adds `AUTH=none`, where every reader holds `READER_ROLES` and has no session.
+`publishing-without-keycloak` (archived 2026-10-20) split route registration into `registerRoutes(app, identity)` in `app.js` and added `AUTH=none`, where every reader holds `READER_ROLES` and has no session. Routes that need an identity provider sit in its `if (identity.mode === "keycloak")` branch (today the two bearer directory routes); `obsidian.js` asks `withoutIdentity()` from `auth-mode.js` where the menu differs (the logout button).
 
 ## Goals / Non-Goals
 
@@ -55,7 +55,7 @@ The directory page reads the status once, and while `fetching` is true repeats e
 
 ### D7: Tier 1
 
-The routes are registered inside the identity branch. Once `publishing-without-keycloak` lands, that is `registerRoutes`' `keycloak` path only; `none` mode never calls `registerAdminRoutes`, and `getTopdownMenu` checks the identity as well as the role, so `READER_ROLES=teacher` does not draw the section. Even if the routes were registered, the gate would refuse them in tier 1, because `identityOf` is null without a session. Whichever of the two changes is applied second wires this; tasks name both orders.
+`registerAdminRoutes` is called only when `identity.mode === "keycloak"`, but not inside the existing branch: that branch runs ahead of `app.use(checkAuthenticated)`, and these routes belong after it. So a second `if (identity.mode === "keycloak")` sits right before the exam module's mount, ahead of the catch-all. `none` mode never registers the routes, and `getTopdownMenu` draws the section only when `!withoutIdentity()` and the gate passes, so `READER_ROLES=teacher` does not draw it. Even if the routes were registered, the gate would refuse them in tier 1, because `identityOf` is null without a session.
 
 ### D8: Page layout
 

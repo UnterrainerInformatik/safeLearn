@@ -19,6 +19,9 @@ COPY i18n/ /app/i18n
 # The exam module. Loaded only when EXAM_MODULE=on; shipped either way, so one
 # image serves every deployment.
 COPY exam/ /app/exam
+# The administration pages for teachers. app.js imports them on every instance,
+# so an image without them does not start.
+COPY admin/ /app/admin
 
 # Copy package.json app directory.
 COPY package.json /app

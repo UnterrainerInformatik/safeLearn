@@ -6,6 +6,7 @@ import { JSDOM } from "jsdom";
 import { hasSomeRoles } from "./utils.js";
 import { getPermissionContext } from "./permission-context.js";
 import { withoutIdentity } from "./auth-mode.js";
+import { actsAsTeacherWithIdentity } from "./admin/gate.js";
 import { i18nOf } from "./i18n/server.js";
 import { createFormat } from "./i18n/format.js";
 import { languageNames, languages, locales } from "./i18n/t.js";
@@ -2377,8 +2378,8 @@ function rebuildAttachmentIndex(indexEntries) {
 
 /**
  * The attachments no page referenced at the last scan, sorted, relative to `md/`,
- * with the time of that scan. For a later teacher admin page; nothing serves it
- * yet.
+ * with the time of that scan. Read by the teachers' page
+ * `/admin/attachments` (`teacher-admin-pages`).
  */
 export function unreferencedAttachments() {
   return unreferencedReport;
@@ -2982,6 +2983,25 @@ function choiceGroup(label, setter, choices, chosen) {
     </div>`;
 }
 
+/**
+ * The settings menu's Administration section (`teacher-admin-pages`), one
+ * button per page, for a session the pages themselves would let in - the same
+ * gate, so no button leads to a page that is not shown. Never drawn without an
+ * identity provider, where the pages are not registered.
+ */
+async function getAdminMenuSection(req, t) {
+  if (withoutIdentity() || !(await actsAsTeacherWithIdentity(req))) return "";
+  const button = (href, icon, text) =>
+    `<button type="button" class="sl-button" data-admin-page="${escapeHtmlAttribute(href)}" onclick="window.location.href='${escapeHtmlAttribute(href)}'">${lucideIcon(
+      icon
+    )}<span>${escapeHtmlAttribute(text)}</span></button>`;
+  return `<div class="sl-menu-admin" role="group" aria-label="${escapeHtmlAttribute(t("app.admin.section"))}">
+      <span class="sl-menu-admin-label">${escapeHtmlAttribute(t("app.admin.section"))}</span>
+      ${button("/admin/attachments", "Paperclip", t("app.admin.attachments.title"))}
+      ${button("/admin/directory", "Users", t("app.admin.directory.title"))}
+    </div>`;
+}
+
 async function getTopdownMenu(req) {
   const { t, lang, loc } = await i18nOf(req);
   // Without an identity provider nobody is signed in, so there is nothing to
@@ -3071,6 +3091,7 @@ async function getTopdownMenu(req) {
       locales.map((value) => [value, createFormat(value).date("2026-10-20")]),
       loc
     )}
+    ${await getAdminMenuSection(req, t)}
     <div style="padding: 0px; margin: 0px; margin-left: 0px; margin-top: 25px; margin-bottom: -10px; text-align: left; display: flex;">
       <button class="sl-button" style="height: 32px; margin: 0px;" onclick="openAsPresentation(true, false)">${lucideIcon(
         "Printer"

@@ -37,6 +37,7 @@ import "./checks/presentation.js";
 import "./checks/search.js";
 import "./checks/search-keyboard.js";
 import "./checks/directory-search.js";
+import "./checks/admin-pages.js";
 import "./checks/session-lifecycle.js";
 import "./checks/attachments.js";
 import "./checks/pdf-embeds.js";

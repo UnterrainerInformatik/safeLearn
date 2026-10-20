@@ -11,6 +11,7 @@ import { getPermissionContext } from "./permission-context.js";
 import { establishAuthMode, withoutIdentity } from "./auth-mode.js";
 import { readerPreferences } from "./reader-preferences.js";
 import { languages } from "./i18n/t.js";
+import { registerAdminRoutes } from "./admin/index.js";
 import {
   verifyCallerIdentity,
   searchDirectory,
@@ -704,6 +705,16 @@ async function registerRoutes(app, identity) {
       app.listen(process.env.NEXT_PUBLIC_PORT, "0.0.0.0");
     });
   });
+
+  // The administration pages for teachers (`teacher-admin-pages`), behind the
+  // same authentication as everything above and before the catch-all. Not in
+  // the identity provider's branch at the top, which runs ahead of
+  // checkAuthenticated. Without an identity provider nobody is a teacher with
+  // a name, so the routes are not registered and every one of them lands in
+  // the catch-all.
+  if (identity.mode === "keycloak") {
+    registerAdminRoutes(app, { startPage: getStartPage });
+  }
 
   // The exam module's routes, behind the same authentication as everything
   // above. Its client assets under /exam/assets/ are served by its own router,

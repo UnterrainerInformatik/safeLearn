@@ -1,5 +1,41 @@
 {
   "app": {
+    "admin": {
+      "attachments": {
+        "copied": "Kopiert, ein Pfad pro Zeile.",
+        "copyByHand": "Der Browser verweigert die Zwischenablage. Die Pfade sind unten markiert; kopiere sie von Hand.",
+        "copyPaths": "Pfade kopieren",
+        "count_one": "{n} Anhang wird von keiner Seite referenziert.",
+        "count_other": "{n} Anhänge werden von keiner Seite referenziert.",
+        "noScan": "Der Bestand wurde noch nicht gescannt. Lade diese Seite gleich noch einmal.",
+        "none": "Kein Anhang ist unreferenziert: jeder wird von einer Seite referenziert.",
+        "scannedAt": "Letzter Scan: {time}",
+        "title": "Nicht referenzierte Anhänge",
+        "topFolder": "Oberster Ordner"
+      },
+      "directory": {
+        "builtAt": "Erstellt",
+        "entries": "Einträge",
+        "fetch": "Zustand",
+        "fetchHeading": "Abruf",
+        "fetchIdle": "läuft nicht",
+        "fetchRunning": "läuft",
+        "heldHeading": "Gehaltene Daten",
+        "nothingHeld": "Es werden keine Verzeichnisdaten gehalten.",
+        "phase": "Phase",
+        "phaseCounting": "Konten werden gezählt",
+        "phaseEntries": "Konten werden gelesen",
+        "phaseRoles": "Rollen werden aufgelöst",
+        "progress": "Fortschritt",
+        "progressDone": "{done}",
+        "progressOf": "{done} von {total}",
+        "skipped": "Übersprungene Datensätze",
+        "startedAt": "Gestartet",
+        "title": "Verzeichnis-Status"
+      },
+      "failed": "Diese Seite konnte nicht gelesen werden. Zum erneuten Versuch neu laden.",
+      "section": "Administration"
+    },
     "embed": {
       "loading": "Lädt…",
       "unavailable": "Element des Prüfungsmoduls {kind}: nur auf einer Instanz mit der Prüfungsdatenbank verfügbar."

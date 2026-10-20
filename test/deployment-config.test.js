@@ -70,8 +70,9 @@ const testOnly = new Map([
 
 /**
  * The files the `Dockerfile` copies into the image and the application runs:
- * the root `*.js` files, `middlewares/` and the exam module's server side in
- * `exam/` (its `client/` runs in the browser and reads no environment). Deliberately not `test/` or
+ * the root `*.js` files, `middlewares/`, and the server sides of the exam
+ * module in `exam/` and of the administration pages in `admin/` (their
+ * `client/` runs in the browser and reads no environment). Deliberately not `test/` or
  * `tools/` — a variable only a test or a local tool reads is not something a
  * deployment owes anybody.
  */
@@ -80,6 +81,7 @@ function applicationSources() {
     { dir: projectRoot, prefix: "" },
     { dir: path.join(projectRoot, "middlewares"), prefix: "middlewares/" },
     { dir: path.join(projectRoot, "exam"), prefix: "exam/" },
+    { dir: path.join(projectRoot, "admin"), prefix: "admin/" },
   ];
   const sources = [];
   for (const { dir, prefix } of roots) {
@@ -247,6 +249,16 @@ test("the image ships the interface catalogs", () => {
     readFileSync(path.join(projectRoot, "Dockerfile"), "utf8"),
     /^COPY i18n\/ \/app\/i18n$/m,
     "the Dockerfile has to copy i18n/ into the image"
+  );
+});
+
+test("the image ships the administration pages", () => {
+  // app.js imports admin/ on every instance (teacher-admin-pages); an image
+  // without it does not start.
+  assert.match(
+    readFileSync(path.join(projectRoot, "Dockerfile"), "utf8"),
+    /^COPY admin\/ \/app\/admin$/m,
+    "the Dockerfile has to copy admin/ into the image"
   );
 });
 

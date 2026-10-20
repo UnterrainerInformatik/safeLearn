@@ -24,7 +24,7 @@ import assert from "node:assert/strict";
 import { afterEach, describe, mock, test } from "node:test";
 
 import { getPermissionContext } from "../permission-context.js";
-import { hasSomeRoles } from "../utils.js";
+import { hasSomeRoles, identityOf } from "../utils.js";
 import { resolveFileVisibility } from "../obsidian.js";
 
 const originalFetch = global.fetch;
@@ -297,5 +297,24 @@ describe("the reference time a request compares windows against", () => {
     const next = await resolveFileVisibility(teacherSession(), openUntil(closesAt));
     assert.equal(next.visible, false);
     assert.equal(next.reason, "outside-window");
+  });
+});
+
+describe("the identity a request is recorded under", () => {
+  test("is the username, trimmed and lowercased, never the Keycloak id", () => {
+    const req = { user: { sub: "0000-1111", accessTokenDecoded: { preferred_username: " SDent " } } };
+    assert.equal(identityOf(req), "sdent");
+  });
+
+  test("falls back to the session user's own username", () => {
+    assert.equal(identityOf({ user: { preferred_username: "TCher" } }), "tcher");
+  });
+
+  test("is null without a session or without a username", () => {
+    assert.equal(identityOf({}), null);
+    assert.equal(identityOf(undefined), null);
+    assert.equal(identityOf({ user: { accessTokenDecoded: {} } }), null);
+    assert.equal(identityOf({ user: { accessTokenDecoded: { preferred_username: "   " } } }), null);
+    assert.equal(identityOf({ user: { accessTokenDecoded: { preferred_username: 42 } } }), null);
   });
 });

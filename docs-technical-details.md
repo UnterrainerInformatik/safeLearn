@@ -91,3 +91,9 @@ Reports what state the directory data is in, and how far along any fetch of it h
 * `entries`, `builtAt` and `skipped` describe the data currently held: how many entries, when it was actually built (not when it was last adopted from disk), and how many records had to be skipped while building it. `entries` and `builtAt` are `null` when nothing is held at all. `skipped` is a count only — the records behind it are named in the server's log, never in an answer.
 
 The same `403` as the search endpoint, for the same reasons.
+
+### GET /admin/api/directory/status
+The same report, behind the browser session instead of a bearer token, for the teachers' page **Directory status** (`/admin/directory`, opened from the settings menu's Administration section). Both routes call the same function, so they answer the same payload at the same moment. A session acting as a teacher - an admin passes too - is answered; any other session, a teacher in student view included, gets a bare `403 { "error": "Forbidden" }`, and a request without a session is sent to the login like every other protected request. Not registered with `AUTH=none`.
+
+### GET /admin/api/attachments
+`{ "scannedAt": "<ISO time of the last scan>", "count": 2, "paths": ["assets/old.pdf", "ex/Solution.java"] }`: the attachments no page referenced at the last scan, sorted, relative to `md/` - exactly what the scan logs and the attachment gate refuses. Read by the teachers' page **Unreferenced attachments** (`/admin/attachments`), behind the same gate as the session status route above.

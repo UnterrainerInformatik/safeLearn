@@ -1,0 +1,148 @@
+/* The administration pages for teachers (`teacher-admin-pages`) and their
+   section in the settings menu. Colours are translucent over the inherited
+   text colour, as in exam.css, so one rule reads in both themes; dark mode
+   only adjusts edges and the error colour. */
+
+/* The menu section: its label, then one button per page, each on its own line. */
+.sl-menu-admin {
+  margin-top: 18px;
+  margin-left: 4px;
+}
+
+.sl-menu-admin-label {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.sl-menu-admin .sl-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 0 0;
+  white-space: nowrap;
+}
+
+/* The pages. */
+
+.sl-admin {
+  max-width: 100%;
+}
+
+.sl-admin-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-bottom: 1em;
+}
+
+.sl-admin-summary p {
+  margin: 0.2em 0;
+}
+
+.sl-admin-scanned {
+  font-size: 0.9em;
+  opacity: 0.75;
+}
+
+.sl-admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.sl-admin-actions .sl-button {
+  margin: 0;
+}
+
+.sl-admin-copy-status {
+  font-size: 0.9em;
+  opacity: 0.8;
+}
+
+.sl-admin-copy-fallback {
+  box-sizing: border-box;
+  width: 100%;
+  margin-bottom: 1em;
+  font-family: monospace;
+  font-size: 0.85em;
+  color: inherit;
+  background: transparent;
+  border: 1px solid rgba(27, 31, 35, 0.3);
+  border-radius: 6px;
+}
+
+#markdown-content.dark-mode .sl-admin-copy-fallback {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.sl-admin-folder {
+  margin: 0.8em 0;
+  padding: 6px 12px;
+  border: 1px solid rgba(27, 31, 35, 0.15);
+  border-radius: 6px;
+}
+
+#markdown-content.dark-mode .sl-admin-folder {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.sl-admin-folder-name {
+  margin: 0.2em 0;
+  font-size: 1em;
+  overflow-wrap: anywhere;
+}
+
+/* A long path wraps within its row instead of widening the page. */
+.sl-admin-paths {
+  margin: 0.2em 0;
+  padding-left: 1.2em;
+  font-family: monospace;
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
+}
+
+.sl-admin h2 {
+  font-size: 1.1em;
+}
+
+.sl-admin-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 16px;
+  margin: 0.5em 0 1em 0;
+}
+
+.sl-admin-facts dt {
+  font-weight: bold;
+}
+
+.sl-admin-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.sl-admin-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.sl-admin-progress progress {
+  width: min(240px, 100%);
+}
+
+.sl-admin-empty {
+  opacity: 0.8;
+}
+
+.sl-admin-error {
+  color: #c0392b;
+}
+
+#markdown-content.dark-mode .sl-admin-error {
+  color: #ff7b72;
+}

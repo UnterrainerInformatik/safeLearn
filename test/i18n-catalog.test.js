@@ -54,6 +54,7 @@ function sourceFiles() {
       }
     }
   };
+  walk("admin");
   walk("exam");
   walk("i18n");
   // Comments describe calls (`t(key, params)`) without making them. Emptied

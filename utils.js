@@ -1,6 +1,21 @@
 import { getPermissionContext, normalizeRole } from "./permission-context.js";
 
 /**
+ * The directory username a request is recorded under, lowercased: the
+ * token's `preferred_username`, which for a federated account is the LDAP
+ * `sAMAccountName`. Never the Keycloak user id, which changes when an account
+ * is deleted and re-imported. Null when the session carries none - always so
+ * without an identity provider, where nobody has a session.
+ */
+export function identityOf(req) {
+  const raw =
+    req?.user?.accessTokenDecoded?.preferred_username ?? req?.user?.preferred_username ?? null;
+  if (typeof raw !== "string") return null;
+  const username = raw.trim().toLowerCase();
+  return username.length > 0 ? username : null;
+}
+
+/**
  * hasSomeRoles(req, ["teacher", "student", "admin", "gluppy"])
  */
 export async function hasSomeRoles(req, clientRoles, allowOverride = false) {

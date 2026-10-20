@@ -1,5 +1,41 @@
 {
   "app": {
+    "admin": {
+      "attachments": {
+        "copied": "Copied, one path per line.",
+        "copyByHand": "The browser refused the clipboard. The paths are selected below; copy them by hand.",
+        "copyPaths": "Copy paths",
+        "count_one": "{n} attachment is referenced by no page.",
+        "count_other": "{n} attachments are referenced by no page.",
+        "noScan": "The corpus has not been scanned yet. Reload this page in a moment.",
+        "none": "No attachment is unreferenced: every one is referenced by a page.",
+        "scannedAt": "Last scan: {time}",
+        "title": "Unreferenced attachments",
+        "topFolder": "Top folder"
+      },
+      "directory": {
+        "builtAt": "Built",
+        "entries": "Entries",
+        "fetch": "State",
+        "fetchHeading": "Fetch",
+        "fetchIdle": "not running",
+        "fetchRunning": "running",
+        "heldHeading": "Held data",
+        "nothingHeld": "No directory data is held.",
+        "phase": "Phase",
+        "phaseCounting": "counting the accounts",
+        "phaseEntries": "reading the accounts",
+        "phaseRoles": "resolving the roles",
+        "progress": "Progress",
+        "progressDone": "{done}",
+        "progressOf": "{done} of {total}",
+        "skipped": "Skipped records",
+        "startedAt": "Started",
+        "title": "Directory status"
+      },
+      "failed": "This page could not be read. Reload it to try again.",
+      "section": "Administration"
+    },
     "embed": {
       "loading": "Loading…",
       "unavailable": "Exam module element {kind}: only available on an instance with the exam database."

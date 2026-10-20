@@ -8,21 +8,11 @@
  * switching the view back restores everything without a new login.
  */
 
-import { hasSomeRoles } from "../utils.js";
+import { hasSomeRoles, identityOf } from "../utils.js";
 
-/**
- * The directory username the module records a person under, lowercased: the
- * token's `preferred_username`, which for a federated account is the LDAP
- * `sAMAccountName`. Never the Keycloak user id, which changes when an account
- * is deleted and re-imported. Null when the session carries none.
- */
-export function identityOf(req) {
-  const raw =
-    req?.user?.accessTokenDecoded?.preferred_username ?? req?.user?.preferred_username ?? null;
-  if (typeof raw !== "string") return null;
-  const username = raw.trim().toLowerCase();
-  return username.length > 0 ? username : null;
-}
+// The identity rule lives beside `hasSomeRoles`, so the admin pages share it
+// without depending on this module (teacher-admin-pages, design D1).
+export { identityOf };
 
 /** Whether the request acts as a teacher, after the student-view downgrade. */
 export function actsAsTeacher(req) {

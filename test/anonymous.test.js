@@ -48,6 +48,8 @@ const publicAttachment = "/md/assets/test-attachment-public.png";
 const loginPaths = ["/test", "/auth/callback", "/logout", "/logout/callback"];
 const directoryPaths = ["/api/admin/directory/search?q=teacher", "/api/admin/directory/status"];
 const unservedPath = "/no-route-is-registered-here-7d1f";
+/** The administration pages and their data routes (`teacher-admin-pages`), absent without an identity provider. */
+const adminPaths = ["/admin/attachments", "/admin/directory", "/admin/api/attachments", "/admin/api/directory/status"];
 
 /** The preference cookie a forged request carries, URL-encoded as the server writes it. */
 const forgedConfig = (block) => `safelearn_config=${encodeURIComponent(JSON.stringify(block))}`;
@@ -184,6 +186,19 @@ describe("without an identity provider, with teacher as the reader role", () => 
 
   after(async () => {
     await instance?.stop();
+  });
+
+  test("the menu draws no Administration section and the administration routes are answered like a path nothing serves", async () => {
+    await setPreferences(reader, { vt: 1 });
+    await render(reader, permissionsPage);
+    assert.equal(await reader.page.$(".sl-menu-admin"), null, "the menu should offer no Administration section");
+    const unserved = await requestUnfollowed(instance.url, unservedPath);
+    for (const reference of adminPaths) {
+      const answer = await requestUnfollowed(instance.url, reference);
+      assert.equal(answer.status, unserved.status, `${reference} should answer as an unserved path does`);
+      assert.equal(answer.location, unserved.location, `${reference} should lead where an unserved path leads`);
+      assert.ok(!/json/i.test(answer.contentType ?? ""), `${reference} should return no data`);
+    }
   });
 
   test("a fresh reader starts in the student view: the defaults narrow", async () => {

@@ -25,6 +25,7 @@
         "test/checks/navigation.js",
         "test/checks/presentation.js",
         "test/checks/directory-search.js",
+        "test/checks/admin-pages.js",
         "test/checks/session-lifecycle.js",
         "test/checks/deployment-surface.js",
         "test/checks/attachments.js",
@@ -215,6 +216,27 @@
       ],
       "corpus": []
     },
+    "test/checks/admin-pages.js": {
+      "what": "The administration pages for teachers: a teacher's settings menu offers the Administration section and each of its buttons opens its page; /admin/attachments lists exactly the paths the server logged as unreferenced for this run, grouped by folder and sorted within each, with the logged count and the scan time in the reader's format, and Copy paths puts them on the clipboard one per line with a confirmation beside the button; /admin/api/directory/status answers the same report as the bearer route for the same teacher, /admin/directory shows it, and opening the page starts no fetch. A student and a teacher in student view get no section, the catch-all answer for both pages and the page assets, and a bare 403 for both data routes; switching back to the teacher view restores all of it. German texts on the menu and both pages, and no sideways scroll at 390px.",
+      "guards": [
+        "admin/index.js",
+        "admin/gate.js",
+        "admin/client/attachments.js",
+        "admin/client/directory.js",
+        "admin/client/i18n.js",
+        "css/admin.css",
+        "obsidian.js",
+        "app.js",
+        "utils.js",
+        "middlewares/directory-service.js",
+        "i18n/en.json",
+        "i18n/de.json",
+        "test/harness.js"
+      ],
+      "corpus": [
+        "md/test-md-file.md"
+      ]
+    },
     "test/checks/search.js": {
       "what": "What a search may return and what it may never reveal: that a term occurring only in a file whose first line restricts it, only in a restricted block, only in a block addressed to another person by name, or only across the seam a removed block leaves behind, comes back as nothing - and as the same nothing a term that is in no file at all comes back as. That the joined document really does contain the seam term, so the seam check is about a seam. That the same session running the same query before and after the teacher/student toggle sees its results change exactly as the rendered page does. That a file restricted after the last scan is not returned and one relaxed after it is, driven by editing the corpus while the application runs. That an answer carries the results and nothing else - no total, no mark for what was left out - and that every occurrence it reports is an occurrence the session can count on the page it is served. That following a result lands on its heading, that a repeated heading lands on the occurrence the search found, and that a hand-written target naming a heading the session may not see leaves the page at its top. That a query below the minimum length is refused, that a request carrying no session is refused, that matching is substring and case-insensitive, that a name or heading match outranks a body match, and that a whole query costs the identity provider at most one account lookup. That neither switch a reader may set for themselves opens the exam variant to them: a student that turns the exam view on, and a teacher that turns it on while in the student view, are told nothing about the `@@@ #exam` block, and every session is offered exactly one of the exam and practice variants across both roles and both settings. That `#answer` is a view and not a restriction - `va` alone decides it, for a student exactly as for a teacher - stated here so it is not mistaken for one. And that a block whose window has closed is found by nobody, the teacher session included, since a closed window is the one directive `admin` does not short-circuit, in both the block form the segment filter decides and the whole-file form `resolveFileVisibility` decides.",
       "guards": [
@@ -294,7 +316,7 @@
       "corpus": []
     },
     "test/permission-context.test.js": {
-      "what": "That a request resolves its permission context once: many checks of one request cause one account lookup, concurrent checks started before the first resolves cause one, and a request evaluating no directive causes none. That the downgraded check and the check beside it do not affect each other in either order, that a role inherited from Object.prototype - constructor, __proto__ - is granted to nobody, that a failed lookup settles the whole request on the default preferences with its roles intact and is logged once, and that every directive of one request is decided against the same reference time even when a window closes mid-request. Stubs fetch; needs no live realm, no browser, no login.",
+      "what": "That a request resolves its permission context once: many checks of one request cause one account lookup, concurrent checks started before the first resolves cause one, and a request evaluating no directive causes none. That the downgraded check and the check beside it do not affect each other in either order, that a role inherited from Object.prototype - constructor, __proto__ - is granted to nobody, that a failed lookup settles the whole request on the default preferences with its roles intact and is logged once, and that every directive of one request is decided against the same reference time even when a window closes mid-request. That identityOf answers the lowercased username, never the Keycloak id, and null without one. Stubs fetch; needs no live realm, no browser, no login.",
       "guards": [
         "permission-context.js",
         "utils.js",
@@ -314,7 +336,7 @@
       "corpus": []
     },
     "test/deployment-config.test.js": {
-      "what": "That every environment variable the application reads reaches a deployed instance through one of the two channels a deployment has - the image's own .env, written by the workflow and baked in by the Dockerfile, or the container's environment, written to deploy/.env and interpolated by docker-compose.yml - and that neither channel is wired up only halfway. Added after DIRECTORY_SERVICE_CLIENT_ID/_SECRET were read by the directory-search endpoint for two changes while nothing in the pipeline set them. That the exam module's switch EXAM_MODULE and the school's periods SCHOOL_PERIODS travel by the container's environment and not in the image, that the Dockerfile ships exam/, that EXAM_DB_PATH (the harness's own database) reaches no deployed instance, that the WYSIWYG templates run without the module (neither variable set) and mount no data volume, and that no static mount reaches the data directory, and that the Dockerfile ships i18n/, which every instance imports. That the deployed instance passes AUTH=keycloak to its container as a literal, sets AUTH nowhere else and passes no READER_ROLES, and that READER_ROLES is optional because its absence grants no role.",
+      "what": "That every environment variable the application reads reaches a deployed instance through one of the two channels a deployment has - the image's own .env, written by the workflow and baked in by the Dockerfile, or the container's environment, written to deploy/.env and interpolated by docker-compose.yml - and that neither channel is wired up only halfway. Added after DIRECTORY_SERVICE_CLIENT_ID/_SECRET were read by the directory-search endpoint for two changes while nothing in the pipeline set them. That the exam module's switch EXAM_MODULE and the school's periods SCHOOL_PERIODS travel by the container's environment and not in the image, that the Dockerfile ships exam/, that EXAM_DB_PATH (the harness's own database) reaches no deployed instance, that the WYSIWYG templates run without the module (neither variable set) and mount no data volume, and that no static mount reaches the data directory, and that the Dockerfile ships i18n/, which every instance imports. That the deployed instance passes AUTH=keycloak to its container as a literal, sets AUTH nowhere else and passes no READER_ROLES, and that READER_ROLES is optional because its absence grants no role. That the Dockerfile copies admin/, which app.js imports on every instance.",
       "guards": [
         ".github/workflows/docs-local.yml",
         "deploy/docker-compose.yml",
@@ -327,7 +349,8 @@
         "wysiwyg-container-windows/docker-compose.yml",
         "auth-mode.js",
         "wysiwyg-container-linux/.env",
-        "wysiwyg-container-windows/.env"
+        "wysiwyg-container-windows/.env",
+        "admin/index.js"
       ],
       "corpus": []
     },
@@ -545,7 +568,7 @@
       "corpus": []
     },
     "test/anonymous.test.js": {
-      "what": "An instance without an identity provider (AUTH=none), started from the working tree, no Keycloak needed: without reader roles every restricted block and file of the test corpus is absent (tree and direct path), unrestricted pages are reachable without a login, the login paths and the directory endpoints answer like an unserved path with or without a bearer token, no logout control is rendered and no session cookie is set, a forged exam-view cookie still gets the practice variant, and an attachment referenced only inside a teacher block is refused. With READER_ROLES=teacher: a fresh reader starts in the student view, the teacher view shows teacher content but not other classes' or a person's by name, the page's own teacher switch hides and restores it, the exam switch moves between exam and practice, a second browser keeps its own preferences, start with the last page redirects, a malformed preference cookie renders with the defaults, the teacher attachment follows the teacher view, every presentation (page, reveal, document, print) carries the same content, and a bookmarked presentation opens in a fresh browser. Refused starts: AUTH=off, AUTH=none with EXAM_MODULE=on, and no AUTH without keycloak.json.",
+      "what": "An instance without an identity provider (AUTH=none), started from the working tree, no Keycloak needed: without reader roles every restricted block and file of the test corpus is absent (tree and direct path), unrestricted pages are reachable without a login, the login paths and the directory endpoints answer like an unserved path with or without a bearer token, no logout control is rendered and no session cookie is set, a forged exam-view cookie still gets the practice variant, and an attachment referenced only inside a teacher block is refused. With READER_ROLES=teacher: a fresh reader starts in the student view, the teacher view shows teacher content but not other classes' or a person's by name, the page's own teacher switch hides and restores it, the exam switch moves between exam and practice, a second browser keeps its own preferences, start with the last page redirects, a malformed preference cookie renders with the defaults, the teacher attachment follows the teacher view, every presentation (page, reveal, document, print) carries the same content, and a bookmarked presentation opens in a fresh browser. Refused starts: AUTH=off, AUTH=none with EXAM_MODULE=on, and no AUTH without keycloak.json. With READER_ROLES=teacher the menu draws no Administration section and the four administration routes answer like an unserved path.",
       "guards": [
         "test/harness.js",
         "app.js",
@@ -555,7 +578,8 @@
         "middlewares/keycloak-middleware.js",
         "obsidian.js",
         "obsidian-page.js",
-        "utils.js"
+        "utils.js",
+        "admin/index.js"
       ],
       "corpus": [
         "md/test-perms.md",
