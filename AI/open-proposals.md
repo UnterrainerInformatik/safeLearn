@@ -112,13 +112,3 @@ Leitlinien von Gerald für alle Einträge hier:
 
 Die Bestandsaufnahme mit Datei:Zeile stammt aus einem Audit über `exam/client/*.js`, `exam/bar.js` und `css/exam.css`.
 
-## Live-Ansicht: "bound to browser" statt "Release to another browser" (Change `exam-live-bound-browser`)
-In der Live-Ansicht (`client/live.js`) gibt es pro Schüler, der gerade schreibt, den Button **Release to another browser**. Er hebt die Bindung des Versuchs an den Browser auf, in dem er gestartet wurde, damit der Schüler auf einem anderen Gerät weiterschreiben kann. Das versteht man ohne Erklärung nicht.
-
-**Gerald, 2026-10-18:**
-- Eine neue Spalte **bound to browser** zeigt den Browser-String (User-Agent) des gebundenen Browsers.
-- Aus Platzgründen nur gekürzt, etwa Browser, Version und Betriebssystem. Den vollen String zeigt ein Mouseover (`title`) oder ein Klick-Icon, damit es auch auf Touch-Geräten geht.
-- Der Button heißt **Unbind browser** und braucht **keine** Bestätigung. Damit fällt er aus "Bestätigungen vereinheitlichen" heraus.
-
-Voraussetzung: Der User-Agent muss beim Binden mitgespeichert werden. Heute liegt pro Versuch nur der Hash des Geräte-Geheimnisses in der DB (`attempt`). Das braucht eine Migration, und Versuche, die vorher gebunden wurden, zeigen "unknown". Ob abgewiesene Browser ("n refused") ihren String ebenfalls zeigen sollen, ist noch offen. Für die Lehrkraft wäre das ein Hinweis, mit welchem Gerät jemand es versucht hat.
-
