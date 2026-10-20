@@ -3116,6 +3116,9 @@ describe("the question editor", () => {
     await page.keyboard.press("Escape");
     await openMenu(categoryId);
     assert.deepEqual(await entries(), ["new-question", "add", "rename"], "a category with questions: no Delete");
+    const texts = await page.$$eval(".sl-exam-tree-menu:not([hidden]) > *", (items) => items.map((item) => item.textContent));
+    assert.deepEqual(texts, ["New question", "New subcategory…", "Rename…"], "only its entries, no stray text");
+    assert.doesNotMatch(await page.$eval(".sl-exam-tree-menu", (menu) => menu.textContent), /null/);
     await page.mouse.click(1, 1);
     assert.equal(await page.$(".sl-exam-tree-menu:not([hidden])"), null, "a click outside closes the menu");
     await openMenu(b.id);
@@ -3126,6 +3129,44 @@ describe("the question editor", () => {
     await page.click(bin);
     await page.waitForFunction((selector) => !document.querySelector(selector), { timeout: 10000 }, rowOf(b.id));
     assert.deepEqual(await treeOf([b.nameDe]), [], "B is gone");
+  });
+
+  test("tree: New question in the menu looks like the other entries, in both themes, and opens the editor", async () => {
+    const page = teacher.page;
+    await openPoolTree();
+    /** The look of New question and New subcategory… in the open menu. */
+    const looks = () =>
+      page.$$eval(inMenu(":is(.sl-exam-tree-new-question, .sl-exam-tree-add)"), (items) =>
+        items.map((item) => {
+          const style = getComputedStyle(item);
+          return { tag: item.localName, color: style.color, decoration: style.textDecorationLine };
+        })
+      );
+    const setDark = (dark) =>
+      page.evaluate((on) => {
+        for (const element of document.querySelectorAll("body, #markdown-content")) element.classList.toggle("dark-mode", on);
+      }, dark);
+    try {
+      for (const dark of [false, true]) {
+        await setDark(dark);
+        await openMenu(categoryId);
+        const [newQuestion, newSubcategory] = await looks();
+        const theme = dark ? "dark" : "light";
+        assert.equal(newQuestion.tag, "button", `${theme}: New question is a button`);
+        assert.equal(newQuestion.color, newSubcategory.color, `${theme}: the same colour as New subcategory…`);
+        assert.equal(newQuestion.decoration, "none", `${theme}: no underline`);
+        assert.equal(newQuestion.decoration, newSubcategory.decoration);
+        await page.keyboard.press("Escape");
+      }
+    } finally {
+      await setDark(false);
+    }
+
+    await openMenu(categoryId);
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), page.click(inMenu(".sl-exam-tree-new-question"))]);
+    const opened = new URL(page.url());
+    assert.equal(opened.pathname, "/exam/pool/questions/new");
+    assert.equal(opened.searchParams.get("category"), String(categoryId));
   });
 
   test("tree: a long name deep in the tree keeps its menu button in the panel, and the menu works by keyboard", async () => {

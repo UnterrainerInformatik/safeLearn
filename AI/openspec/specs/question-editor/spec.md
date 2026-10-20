@@ -223,7 +223,7 @@ Every move that can be made by dragging SHALL also be possible by keyboard. A fo
 
 ### Requirement: Categories are created, renamed and deleted at the node
 
-Each category of the browser's tree SHALL offer one menu button at the start of its row, before its name, that opens a small menu of what can be done with the category: a new question in it, a new subcategory, renaming it and, only while the category is empty, deleting it. The menu button SHALL stay visible and usable however long the category's name is and however deep it is nested. A new subcategory SHALL be created in a small popup in the tree, with the German and the English name. The end of the tree SHALL offer the same for a top-level category. A double click on a category's name, or Rename in its menu, SHALL open the same popup filled with the category's names to rename it. The popup SHALL have a way to cancel. Delete SHALL be confirmed by the module's two-click confirmation, and a category that is not empty SHALL NOT offer it. The menu SHALL be operable by keyboard and SHALL close with Escape or a click outside it. A refusal SHALL be shown in the popup or at the category it concerns.
+Each category of the browser's tree SHALL offer one menu button at the start of its row, before its name, that opens a small menu of what can be done with the category: a new question in it, a new subcategory, renaming it and, only while the category is empty, deleting it. The menu SHALL hold these entries and nothing else, and all its entries SHALL look alike, none of them as a link. The menu button SHALL stay visible and usable however long the category's name is and however deep it is nested. A new subcategory SHALL be created in a small popup in the tree, with the German and the English name. The end of the tree SHALL offer the same for a top-level category. A double click on a category's name, or Rename in its menu, SHALL open the same popup filled with the category's names to rename it. The popup SHALL have a way to cancel. Delete SHALL be confirmed by the module's two-click confirmation, and a category that is not empty SHALL NOT offer it. The menu SHALL be operable by keyboard and SHALL close with Escape or a click outside it. A refusal SHALL be shown in the popup or at the category it concerns.
 
 #### Scenario: A new subcategory
 
@@ -253,4 +253,9 @@ Each category of the browser's tree SHALL offer one menu button at the start of 
 #### Scenario: A category that holds questions
 
 - **WHEN** a teacher opens the menu of a category that holds a question
-- **THEN** the menu offers no Delete
+- **THEN** the menu offers no Delete, and its text is exactly New question, New subcategory… and Rename…
+
+#### Scenario: New question looks like the other entries
+
+- **WHEN** a teacher opens the menu of a category, in the light or the dark theme
+- **THEN** New question has the same colour and no underline, like New subcategory…, and choosing it opens the editor for a new question in that category

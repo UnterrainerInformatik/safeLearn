@@ -306,11 +306,14 @@ export class CategoryTree {
           action: () => this.act(node.id, () => examApi(`/pool/categories/${node.id}`, { method: "DELETE" })),
         })
       : null;
+    // replaceChildren, unlike h(), turns a missing Delete into the text "null"
     this.menu.replaceChildren(
-      h("a", { role: "menuitem", tabIndex: -1, class: "sl-exam-tree-menu-item sl-exam-tree-new-question", href: this.newQuestionAddress(node.id) }, t("exam.tree.menuNewQuestion")),
-      entry("sl-exam-tree-add", t("exam.tree.menuNewSubcategory"), () => this.openPopup(row, node, null)),
-      entry("sl-exam-tree-rename", t("exam.tree.menuRename"), () => this.openPopup(row, null, node)),
-      this.menuDelete
+      ...[
+        entry("sl-exam-tree-new-question", t("exam.tree.menuNewQuestion"), () => location.assign(this.newQuestionAddress(node.id))),
+        entry("sl-exam-tree-add", t("exam.tree.menuNewSubcategory"), () => this.openPopup(row, node, null)),
+        entry("sl-exam-tree-rename", t("exam.tree.menuRename"), () => this.openPopup(row, null, node)),
+        this.menuDelete,
+      ].filter(Boolean)
     );
     this.menu.setAttribute("aria-label", t("exam.tree.actions", { name: node.nameDe }));
     this.menu.hidden = false;

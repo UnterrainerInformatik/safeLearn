@@ -1639,8 +1639,7 @@ li[role="treeitem"]:focus > .sl-exam-tree-row .sl-exam-tree-menu-button,
 
 /* Its entries read as a list, Delete among them, not as buttons. */
 .sl-exam-tree-menu-item,
-.sl-exam-tree-menu .sl-exam-tree-menu-item.sl-exam-action,
-#markdown-content a.sl-exam-tree-menu-item {
+.sl-exam-tree-menu .sl-exam-tree-menu-item.sl-exam-action {
   display: block;
   margin: 0;
   padding: 4px 10px;
@@ -1672,8 +1671,7 @@ li[role="treeitem"]:focus > .sl-exam-tree-row .sl-exam-tree-menu-button,
 
 .sl-exam-tree-menu-item:hover,
 .sl-exam-tree-menu-item:focus,
-.sl-exam-tree-menu .sl-exam-tree-menu-item.sl-exam-action:hover,
-#markdown-content a.sl-exam-tree-menu-item:hover {
+.sl-exam-tree-menu .sl-exam-tree-menu-item.sl-exam-action:hover {
   outline: none;
   background: rgba(27, 31, 35, 0.08);
   text-decoration: none;
