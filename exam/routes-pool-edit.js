@@ -67,7 +67,7 @@ export function registerPoolEditRoutes(router, { db, handle, startPage }) {
   api("post", "/pool/questions/:id/retire", (req) => retireQuestion(db, idParam(req.params.id)));
   api("post", "/pool/questions/:id/revive", (req) => reviveQuestion(db, idParam(req.params.id)));
   api("post", "/pool/questions/:id/category", (req) => moveQuestion(db, idParam(req.params.id), req.body ?? {}));
-  api("delete", "/pool/questions/:id", (req) => deleteQuestion(db, idParam(req.params.id)));
+  api("delete", "/pool/questions/:id", (req) => deleteQuestion(db, idParam(req.params.id), { tests: req.body?.tests }));
   api("post", "/pool/categories", (req) => createCategory(db, req.body ?? {}));
   api("put", "/pool/categories/:id", (req) => updateCategory(db, idParam(req.params.id), req.body ?? {}));
   api("delete", "/pool/categories/:id", (req) => deleteCategory(db, idParam(req.params.id)));

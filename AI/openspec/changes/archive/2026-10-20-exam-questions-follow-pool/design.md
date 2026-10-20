@@ -67,14 +67,16 @@ The same orphan sweep runs after `deleteTest`, `removeWrittenQuestion` and every
 
 `removeWrittenQuestion` is now keyed by `test_question.id` instead of the pool question id, so it also works on a row whose question has been deleted. Its route becomes `DELETE /tests/:id/questions/:testQuestion`, and the client sends `question.id`. The image links it drops are those of the images the removed row's texts reference (`/exam/api/images/(\d+)`), unless another row of the test still references them.
 
-### D6: Migration 010 and foreign keys off
+### D6: Migration 011 and foreign keys off
 
-`010-questions-follow-pool.sql` rebuilds three tables using SQLite's documented procedure (new table, copy, drop, rename, recreate indexes):
+`011-questions-follow-pool.sql` (010 is the year change, archived after this proposal) rebuilds three tables using SQLite's documented procedure (new table, copy, drop, rename, recreate indexes):
 - `image`: `question_id INTEGER REFERENCES question (id) ON DELETE SET NULL`, now nullable. `UNIQUE (question_id, sha256)` stays, and `NULL`s do not collide.
 - `test_question`: `question_id INTEGER REFERENCES question (id) ON DELETE SET NULL`, now nullable. `UNIQUE (test_id, question_id)` stays.
 - `question_usage`: `question_id … REFERENCES question (id) ON DELETE CASCADE`.
 
 Dropping `test_question` while `foreign_keys = ON` would cascade into `test_answer` and fail on `attempt_question`. So the runner learns one rule: a migration whose first line is `-- foreign_keys: off` runs with `PRAGMA foreign_keys = OFF` set before `BEGIN`. `PRAGMA foreign_key_check` must return no rows before `COMMIT`, otherwise the migration is rolled back. `foreign_keys = ON` is restored in a `finally`. The pre-migration backup (`backupBeforeMigration`) is taken as for every migration. All row ids are copied unchanged, so every reference stays valid.
+
+**Closed years (decided with Gerald on 2026-10-20, during implementation).** Migration 010 guards `test_question`, `test_answer` and `question_usage` of a closed year with triggers that abort every update and delete. Deleting a question used in a closed year's test fires them through `ON DELETE SET NULL` and `ON DELETE CASCADE`. The rebuilt tables get their triggers back with one exception each: a `test_question` row may change `question_id` to `NULL` and nothing else when that question no longer exists, and a `question_usage` row may be deleted when its question no longer exists. The snapshot content, attempts and grades of a closed year stay untouched. `test_answer`'s triggers read `test_question` and would block its rename, so they are dropped first and recreated unchanged.
 
 *Alternative: a soft delete (`question.deleted_at`).* Rejected: every pool read would have to filter on it. A category holding only deleted questions could not be deleted, because of the foreign key. And the deleted questions' images would stay for good.
 
@@ -89,13 +91,13 @@ Dropping `test_question` while `foreign_keys = ON` would cascade into `test_answ
 
 - [A pool write path forgets to refresh, and a test not yet begun drifts from the pool.] → The guard test in D1 lists the allowed writers. The refresh lives in one function that `writeContent` calls, not in each caller.
 - [A sitting opens between the editor's display of `pendingTests` and the save.] → No harm: the save refreshes only the tests that are still not begun at commit time. The editor's line is informative, not a confirmation. Only deletion needs a confirmed set, and it gets one (D5).
-- [Migration 010 runs with foreign keys off.] → It only rebuilds the tables and copies rows with their ids. `foreign_key_check` must pass before commit, and the backup is taken first. Tests run the migration on a database filled through the API of migration 009, and compare every row before and after.
+- [Migration 011 runs with foreign keys off.] → It only rebuilds the tables and copies rows with their ids. `foreign_key_check` must pass before commit, and the backup is taken first. Tests run the migration on a database filled through the API of migration 010, and compare every row before and after.
 - [A teacher deletes a question by mistake, and the tests not yet begun lose it.] → The confirmation names every affected test. Taking back means re-creating the question and choosing it again for those tests, the same as after any deletion today. The written tests are never affected.
 - [Refreshing re-links `test_image` for the whole test on every save.] → A test has a few dozen images at most, and a save reaches a handful of tests. That is negligible next to the save itself.
 
 ## Migration Plan
 
-1. Deploy the image with migration 010. The runner backs up, rebuilds and checks. Existing tests keep their copies unchanged.
+1. Deploy the image with migration 011. The runner backs up, rebuilds and checks. Existing tests keep their copies unchanged.
 2. Existing tests not yet begun are not re-copied at deploy time. They catch up at the next save of each question, or when a teacher changes their selection. Before the deploy, compare the copy of every test not yet begun with the pool on production, using only aggregates (test id, number of differing questions). If anything differs, show Gerald the list and let him decide whether to re-copy those tests, rather than overwriting them silently. Mostly there will be no difference, because teachers used the editor's "update this test" offer (exam-question-editor D8).
 3. Rollback: restore the pre-migration backup with the previous image. Deletions made in between are lost along with everything else written since.
 

@@ -3,10 +3,11 @@
  * a question in both languages, images uploaded for it, retiring, reviving and
  * deleting it, and the category tree.
  *
- * Saving changes the pool only. A test keeps the snapshot it was assembled
- * with (exam-online-tests design D2), and an image a snapshot shows is never
- * changed or deleted here; a test not yet written takes up an edit only when
- * a teacher asks for it through `updateTest` (exam-question-editor design D8).
+ * Saving changes the pool and, in the same transaction, every test not yet
+ * begun that holds the question (exam-questions-follow-pool design D1). A
+ * begun test keeps its snapshot, and an image it shows is never changed or
+ * deleted here. Deleting a question takes it out of the tests not yet begun;
+ * begun ones keep their copy (design D5).
  *
  * Plain SQL over the module's database, synchronous like `DatabaseSync`; who
  * may ask for what is the router's business.
@@ -18,6 +19,7 @@ import { ConflictError, englishText, inTransaction, InvalidInputError, NotFoundE
 import { categoryAndBelow, getQuestion, plainText } from "./pool.js";
 import { imagePath, questionTypes } from "./pool-import.js";
 import { cleanStoredHtml, trueFalseText } from "./stored-html.js";
+import { dropFromTest, pendingTestsWith, refreshCopy, sweepOrphanImages } from "./tests.js";
 
 /** The largest image an upload accepts, and how long an unsaved one is kept. */
 export const uploadLimitBytes = 2 * 1024 * 1024;
@@ -182,8 +184,10 @@ export function questionProblems(db, input, questionId = null) {
  * Stores the texts and answers of `input` as the question `questionId`'s,
  * inside the caller's transaction: texts cleaned, staged uploads turned into
  * the question's images (an identical one it has already is reused), answers
- * replaced, and the question's images that no text references and no test
- * shows removed.
+ * replaced, the copy in every test not yet begun brought up to it, and the
+ * question's images that no text references and no begun test shows removed.
+ * Every write of a question's content goes through here (or creates a
+ * question no test holds yet), so no test not yet begun falls behind the pool.
  */
 function writeContent(db, questionId, input) {
   const insertImage = db.prepare(
@@ -219,12 +223,16 @@ function writeContent(db, questionId, input) {
 
   const removeUpload = db.prepare("DELETE FROM image_upload WHERE token = ?");
   for (const token of usedUploads) removeUpload.run(token);
+  const question = questionRow(db, questionId);
+  for (const test of pendingTestsWith(db, questionId)) refreshCopy(db, test.id, question);
   removeUnreferencedImages(db, questionId);
 }
 
 /**
  * Deletes the images of a question that none of its texts references any
- * more, except those a test's snapshot shows: they stay, served to that test.
+ * more, except those a begun test's snapshot shows: they stay, served to that
+ * test. Tests not yet begun have been brought up to the question already, so
+ * none of them links such an image any more.
  */
 function removeUnreferencedImages(db, questionId) {
   const texts = [
@@ -256,27 +264,9 @@ function normalizedInput(input) {
   };
 }
 
-/**
- * The tests that hold the question in a snapshot and have not been written
- * yet: the ones the editor offers to bring up to the saved version.
- */
-export function unwrittenTestsWith(db, questionId) {
-  return db
-    .prepare(
-      `SELECT t.id, t.name, co.id AS courseId, co.subject, cl.name AS className
-       FROM test t
-       JOIN course co ON co.id = t.course_id
-       JOIN class cl ON cl.id = co.class_id
-       WHERE EXISTS (SELECT 1 FROM test_question tq WHERE tq.test_id = t.id AND tq.question_id = ?)
-         AND NOT EXISTS (SELECT 1 FROM attempt a WHERE a.test_id = t.id)
-       ORDER BY t.created_at, t.id`
-    )
-    .all(questionId);
-}
-
-/** What a save answers: the question as the editor reads it, and the unwritten tests holding it. */
+/** What a save answers: the question as the editor reads it. */
 function saved(db, questionId) {
-  return { question: getQuestion(db, questionId), unwrittenTests: unwrittenTestsWith(db, questionId) };
+  return { question: getQuestion(db, questionId) };
 }
 
 /**
@@ -345,7 +335,10 @@ export function markReviewed(db, id) {
   return getQuestion(db, id);
 }
 
-/** Retires a question: not offered for new tests, its tests and usage untouched. */
+/**
+ * Retires a question: not offered for new tests, its tests and usage
+ * untouched. A test not yet begun keeps it, and it follows edits there.
+ */
 export function retireQuestion(db, id) {
   return setRetired(db, id, 1);
 }
@@ -362,17 +355,20 @@ function setRetired(db, id, retired) {
 }
 
 /**
- * Deletes a question no test has ever contained, with its answers and images.
- * A used one is refused with retiring offered instead (design D6).
+ * Deletes a question with its answers and usage records (design D5): it is
+ * taken out of every test not yet begun - as many as `tests` confirms, or the
+ * deletion is refused - while a begun test keeps its copy, which lets go of
+ * the question, and the images that copy shows. The question's other images
+ * go.
  */
-export function deleteQuestion(db, id) {
+export function deleteQuestion(db, id, { tests } = {}) {
   questionRow(db, id);
   return inTransaction(db, () => {
-    const used =
-      db.prepare("SELECT 1 FROM question_usage WHERE question_id = ? LIMIT 1").get(id) ||
-      db.prepare("SELECT 1 FROM test_question WHERE question_id = ? LIMIT 1").get(id);
-    if (used) throw new ConflictError("exam.errors.pool.usedCannotDelete");
+    const pending = pendingTestsWith(db, id);
+    if (pending.length !== (tests ?? 0)) throw new ConflictError("exam.errors.pool.deleteTestsChanged");
+    for (const test of pending) dropFromTest(db, test.id, id);
     db.prepare("DELETE FROM question WHERE id = ?").run(id);
+    sweepOrphanImages(db);
     return { deleted: id };
   });
 }

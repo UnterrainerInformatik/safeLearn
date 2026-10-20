@@ -115,6 +115,64 @@ describe("the database file", () => {
     }
   });
 
+  test("a migration marked foreign_keys: off rebuilds a referenced table and turns them on again", () => {
+    const dbPath = path.join(temporaryDir(), "exam.sqlite");
+    const migrations = [
+      {
+        version: 1,
+        name: "001-a.sql",
+        sql: "CREATE TABLE parent (id INTEGER PRIMARY KEY); CREATE TABLE child (parent_id INTEGER REFERENCES parent (id) ON DELETE CASCADE);",
+      },
+      {
+        version: 2,
+        name: "002-rebuild.sql",
+        sql: [
+          "-- foreign_keys: off",
+          "CREATE TABLE new_parent (id INTEGER PRIMARY KEY, name TEXT);",
+          "INSERT INTO new_parent (id) SELECT id FROM parent;",
+          "DROP TABLE parent;",
+          "ALTER TABLE new_parent RENAME TO parent;",
+        ].join("\n"),
+      },
+    ];
+    const db = new DatabaseSync(dbPath);
+    try {
+      db.exec("PRAGMA foreign_keys = ON");
+      migrate(db, dbPath, migrations.slice(0, 1));
+      db.exec("INSERT INTO parent VALUES (1); INSERT INTO child VALUES (1);");
+      migrate(db, dbPath, migrations);
+      assert.equal(schemaVersion(db), 2);
+      assert.equal(db.prepare("SELECT COUNT(*) AS n FROM child").get().n, 1, "dropping the parent did not cascade");
+      assert.equal(db.prepare("PRAGMA foreign_keys").get().foreign_keys, 1);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("a foreign_keys: off migration that leaves a broken reference is rolled back", () => {
+    const dbPath = path.join(temporaryDir(), "exam.sqlite");
+    const migrations = [
+      {
+        version: 1,
+        name: "001-a.sql",
+        sql: "CREATE TABLE parent (id INTEGER PRIMARY KEY); CREATE TABLE child (parent_id INTEGER REFERENCES parent (id));",
+      },
+      { version: 2, name: "002-orphan.sql", sql: "-- foreign_keys: off\nDELETE FROM parent;" },
+    ];
+    const db = new DatabaseSync(dbPath);
+    try {
+      db.exec("PRAGMA foreign_keys = ON");
+      migrate(db, dbPath, migrations.slice(0, 1));
+      db.exec("INSERT INTO parent VALUES (1); INSERT INTO child VALUES (1);");
+      assert.throws(() => migrate(db, dbPath, migrations), /002-orphan\.sql failed: 1 broken foreign key reference\(s\) in child/);
+      assert.equal(schemaVersion(db), 1);
+      assert.equal(db.prepare("SELECT COUNT(*) AS n FROM parent").get().n, 1, "the deletion was rolled back");
+      assert.equal(db.prepare("PRAGMA foreign_keys").get().foreign_keys, 1);
+    } finally {
+      db.close();
+    }
+  });
+
   test("a database from a newer image is refused and left untouched", () => {
     const dbPath = path.join(temporaryDir(), "exam.sqlite");
     const newer = new DatabaseSync(dbPath);

@@ -1,6 +1,6 @@
 ---
 name: flaky-content-checks
-description: Two content-suite checks fail by timing, also on an unchanged tree - deployment-surface's reload backoff and legibility's 390px viewport
+description: Checks that fail by timing, also on an unchanged tree - content suite (reload backoff, 390px viewport) and several exam harness checks
 metadata:
   type: project
 ---
@@ -11,6 +11,8 @@ Measured 2026-10-17 while building exam-module P0, across seven full `test/conte
 - `legibility.js` "a narrow viewport gets the layout written for it…" reported `scrollWidth 497` instead of 390 in some runs and passed in others with the same page; measured slightly later it is 390. Timing of the layout right after reveal, not a real overflow.
 
 - 2026-10-18 (exam-ui-consistency phase 1): the reload-backoff check failed **3 of 3** runs, once on HEAD with the working tree stashed (same gap pattern). So on some days it is reproducible, not just occasional; a HEAD comparison via `git stash` is enough.
+
+- 2026-10-20 (exam-questions-follow-pool): `test/exam.test.js` run alone gives 145/146 with the one failure moving between checks: "the Exams page hides the student's results while they write…" (also red on unchanged HEAD in a worktree), "the sheet: the left four columns keep their place…" and "New question is offered with all categories shown…" (red on HEAD). Not reproducible per check.
 
 **Why:** a red run with only these two is not evidence against a change.
 **How to apply:** if only these fail, re-run the content suite once before investigating; if one fails reproducibly, compare against HEAD in a `git worktree` (symlink `node_modules`, copy `keycloak.json` and `.env`) before blaming the change. See [[browser-verification]].

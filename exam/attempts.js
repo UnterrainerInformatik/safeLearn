@@ -276,6 +276,10 @@ export function startAttempt(db, username, testId, at = now(), { userAgent = nul
     )
     .get(testId, username, at, at);
   if (!sitting) throw new NotFoundError("exam.errors.attempts.noOpenTest");
+  // A test whose last question was deleted from the pool before it began.
+  if (db.prepare("SELECT 1 FROM test_question WHERE test_id = ? LIMIT 1").get(testId) === undefined) {
+    throw new ConflictError("exam.errors.attempts.noQuestions");
+  }
   const secret = randomToken();
   const attemptId = inTransaction(db, () => {
     const questions = db.prepare("SELECT id FROM test_question WHERE test_id = ? ORDER BY position").all(testId);

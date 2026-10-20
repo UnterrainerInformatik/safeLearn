@@ -185,7 +185,8 @@
       "correctOnes": "Correct ones",
       "createCategoryFirst": "Create one first.",
       "createQuestion": "Create question",
-      "deleteArmed": "Click again to delete the question with its answers and images",
+      "deleteArmedNoTests": "Click again to delete the question; no planned test holds it",
+      "deleteArmedTests": "Click again to delete the question and take it out of {tests}",
       "deleteFailed": "The question could not be deleted.",
       "englishAnswer": "English answer",
       "englishText": "English question text",
@@ -194,16 +195,15 @@
       "germanText": "German question text",
       "germanTitle": "German title",
       "openCurrent": "Open the current version in a new tab",
+      "pendingTests": "This save also changes: {tests}",
       "remove": "Remove",
       "removeAnswer": "Remove answer {n}",
       "retire": "Retire",
-      "retireInstead": "Retire it instead",
       "retired": "Retired.",
       "retiredNotice": "This question is retired: it is not offered for new tests. Its tests and usage stay as they are.",
       "revive": "Revive",
       "revived": "Revived: offered for new tests again.",
       "saveFailed": "The question could not be saved. Please try again.",
-      "saved": "Saved.",
       "statementFalse": "false",
       "statementIs": "The statement is",
       "statementTrue": "true",
@@ -213,11 +213,7 @@
         "multichoiceset": "Several correct answers"
       },
       "typeLabel": "Type",
-      "unwrittenExplained": "They keep the version they were assembled with until you update them.",
-      "unwrittenHeading": "Tests not yet written with this question",
-      "updateFailed": "The test could not be updated.",
-      "updateTest": "Update this test",
-      "updated": "Updated."
+      "writtenKeepVersion": "Tests already written keep their version."
     },
     "errors": {
       "attempts": {
@@ -226,6 +222,7 @@
         "noAttempt": "There is no such attempt.",
         "noOpenTest": "No such test is open for you.",
         "noQuestion": "There is no such question in this attempt.",
+        "noQuestions": "This test has no questions and cannot be started. Please tell your teacher.",
         "noSuchRecord": "There is no such record.",
         "noTest": "There is no such test.",
         "notAnAnswer": "That is not an answer of this question.",
@@ -369,6 +366,7 @@
         "changedMeanwhile": "This question was changed in the meantime by someone else. Your input is still here; open the current version to compare.",
         "chooseCategory": "Choose an existing category.",
         "chooseType": "Choose the question's type.",
+        "deleteTestsChanged": "The planned tests holding this question have changed. Check them and delete again.",
         "imageTooLarge": "An image may be at most 2 MB.",
         "imageType": "This is not an image the pool keeps: only PNG, JPEG, GIF and WebP.",
         "noCategory": "There is no such category.",
@@ -388,8 +386,7 @@
         "titleTooLongEn": "The English title is longer than {limit} characters.",
         "trueFalseAnswers": "A true/false question has exactly the two answers true and false.",
         "trueFalseMark": "Mark whether the statement is true or false.",
-        "twoAnswers": "A question needs at least two answers.",
-        "usedCannotDelete": "This question was part of a test and cannot be deleted. Retire it instead."
+        "twoAnswers": "A question needs at least two answers."
       },
       "tests": {
         "attemptsChanged": "The number of attempts of this sitting has changed. Reload the page and confirm again.",
@@ -406,6 +403,7 @@
         "makeupParticipants": "A make-up is written by the students chosen for it.",
         "name": "A test needs a name of at most 80 characters.",
         "noPoolQuestion": "There is no question {id} in the pool.",
+        "noQuestions": "This test has no questions. Choose questions before scheduling a sitting.",
         "noSitting": "There is no such sitting.",
         "noTest": "There is no such test.",
         "notOnRoster_one": "{names} is not on the class's roster.",
@@ -764,6 +762,7 @@
       "minutesPerAttemptLabel": "Minutes per attempt",
       "nameLabel": "Name of the test",
       "newTest": "New test",
+      "noQuestions": "This test has no questions.",
       "noSittingYet": "No sitting yet.",
       "noTestYet": "No online test yet.",
       "noYear": "There is no school year yet.",

@@ -194,7 +194,8 @@ class PoolView extends ExamElement {
             event.preventDefault();
             this.assemble(async () => {
               const test = await examApi(`/tests/${target.value}`);
-              const questionIds = test.questions.map((question) => question.questionId);
+              // A copy whose pool question was deleted cannot be chosen again.
+              const questionIds = test.questions.map((question) => question.questionId).filter((id) => id !== null);
               for (const id of this.chosen) if (!questionIds.includes(id)) questionIds.push(id);
               return examApi(`/tests/${test.id}`, { method: "PUT", body: { questionIds } });
             });

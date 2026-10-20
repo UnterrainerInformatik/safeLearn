@@ -2788,12 +2788,12 @@ describe("the question editor", () => {
     await fetchAs(teacher, `/exam/api/tests/${test.id}`, { method: "DELETE" });
   });
 
-  test("retire, revive and delete: a used question stays and is only retired, a fresh one goes with its images", async () => {
+  test("retire, revive and delete: a retired question stays in its tests, a deletion confirms its planned tests, a fresh one goes with its images", async () => {
     const used = await newQuestion({ nameDe: "Benutzt", nameEn: "Used" });
     const test = await testOf("Editor: usage", [used.id]);
     const refused = await fetchAs(teacher, `/exam/api/pool/questions/${used.id}`, { method: "DELETE" });
-    assert.equal(refused.status, 409);
-    assert.match(refused.json.error, /Retire it instead/);
+    assert.equal(refused.status, 409, "the planned test holding it was not confirmed");
+    assert.match(refused.json.error, /planned tests holding this question have changed/);
     const snapshot = (await fetchAs(teacher, `/exam/api/tests/${test.id}`)).json.questions;
     const retired = await fetchAs(teacher, `/exam/api/pool/questions/${used.id}/retire`, { method: "POST" });
     assert.equal(retired.json.retired, true);
@@ -3237,33 +3237,98 @@ describe("the question editor", () => {
     await teacher.page.waitForSelector(".sl-exam-pool-tree", { timeout: 20000 });
   });
 
-  test("an unwritten test takes up an edit only on request, with the same questions in the same order", async () => {
+  test("the editor names the planned test a save changes, and after saving the test's page shows the edit", async () => {
     const question = await newQuestion({ nameDe: "Nachziehen", nameEn: "Take up" });
     const other = await newQuestion({ nameDe: "Daneben", nameEn: "Beside" });
-    const unwritten = await testOf("Editor: next week", [other.id, question.id]);
+    const planned = await testOf("Editor: next week", [other.id, question.id]);
     const written = await testOf("Editor: last week", [question.id], { written: true });
 
     await teacher.page.goto(`${applicationUrl}/exam/pool/questions/${question.id}`, { waitUntil: "domcontentloaded" });
     await teacher.page.waitForSelector(".sl-exam-editor sl-rich-text .sl-rich-text-area", { timeout: 20000 });
+    const reach = await teacher.page.$eval(".sl-exam-editor-reach", (element) => ({
+      pending: element.querySelector("[data-reach=pending]")?.textContent ?? null,
+      written: element.querySelector("[data-reach=written]")?.textContent ?? null,
+    }));
+    assert.match(reach.pending, /^This save also changes: Editor: next week \(/, "the planned test is named before saving");
+    assert.doesNotMatch(reach.pending, /last week/, "the written one is not");
+    assert.equal(reach.written, "Tests already written keep their version.");
+
     await teacher.page.click(".sl-exam-editor-en .sl-rich-text-area");
     await teacher.page.evaluate(() => {
-      document.querySelectorAll(".sl-exam-editor-row:not(.sl-exam-editor-answer) sl-rich-text")[1].value = "<p>What is correct?</p>";
+      const texts = document.querySelectorAll(".sl-exam-editor-row:not(.sl-exam-editor-answer) sl-rich-text");
+      texts[0].value = "<p>Was ist korrekt?</p>";
+      texts[1].value = "<p>What is correct?</p>";
     });
-    await teacher.page.click(".sl-exam-editor-actions button[type=submit]");
-    await teacher.page.waitForSelector(".sl-exam-editor-tests li", { timeout: 10000 });
-    const offered = await teacher.page.$$eval(".sl-exam-editor-tests button", (buttons) => buttons.map((b) => Number(b.dataset.test)));
-    assert.deepEqual(offered, [unwritten.id], "only the unwritten test is offered");
+    await Promise.all([
+      teacher.page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 }),
+      teacher.page.click(".sl-exam-editor-actions button[type=submit]"),
+    ]);
+    assert.equal(new URL(teacher.page.url()).pathname, "/exam/pool", "a save returns to the pool");
     const texts = async (id) => (await fetchAs(teacher, `/exam/api/tests/${id}`)).json.questions.map((q) => [q.questionId, q.textEn]);
-    assert.deepEqual(await texts(unwritten.id), [[other.id, "<p>What is right?</p>"], [question.id, "<p>What is right?</p>"]], "not asked: the old text");
-
-    await teacher.page.click(`.sl-exam-editor-tests button[data-test="${unwritten.id}"]`);
-    await teacher.page.waitForFunction(() => /Updated/.test(document.querySelector(".sl-exam-editor-tests [role=status]").textContent), { timeout: 10000 });
-    assert.deepEqual(await texts(unwritten.id), [[other.id, "<p>What is right?</p>"], [question.id, "<p>What is correct?</p>"]], "taken up, same order");
+    assert.deepEqual(await texts(planned.id), [[other.id, "<p>What is right?</p>"], [question.id, "<p>What is correct?</p>"]], "taken up at once, same order");
     assert.deepEqual(await texts(written.id), [[question.id, "<p>What is right?</p>"]], "the written test keeps its text");
 
-    const late = await fetchAs(teacher, `/exam/api/tests/${written.id}`, { method: "PUT", body: { questionIds: [question.id] } });
-    assert.equal(late.status, 409, "a test written in the meantime is refused");
-    await fetchAs(teacher, `/exam/api/tests/${unwritten.id}`, { method: "DELETE" });
+    await teacher.page.goto(`${applicationUrl}/exam/tests/${planned.id}`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(".sl-exam-test-questions > li", { timeout: 20000 });
+    // The course is held in German, so its page shows the German text.
+    assert.match(await teacher.page.$eval(".sl-exam-test-questions", (list) => list.textContent), /Was ist korrekt\?/, "the test's page shows the edit");
+    await fetchAs(teacher, `/exam/api/tests/${planned.id}`, { method: "DELETE" });
+  });
+
+  test("deleting a question a written test holds, after confirming, leaves that test's page as it was", async () => {
+    const question = await newQuestion({ nameDe: "Geschrieben", nameEn: "Written" });
+    const other = await newQuestion({ nameDe: "Bleibt", nameEn: "Stays" });
+    const written = await testOf("Editor: written, then deleted", [question.id, other.id], { written: true });
+    const shown = async () => {
+      await teacher.page.goto(`${applicationUrl}/exam/tests/${written.id}`, { waitUntil: "domcontentloaded" });
+      await teacher.page.waitForSelector(".sl-exam-test-questions > li", { timeout: 20000 });
+      return teacher.page.$eval(".sl-exam-test-questions", (list) => list.outerHTML);
+    };
+    const before = await shown();
+
+    await teacher.page.goto(`${applicationUrl}/exam/pool/questions/${question.id}`, { waitUntil: "domcontentloaded" });
+    const button = ".sl-exam-editor-lifecycle [data-action=delete]";
+    await teacher.page.waitForSelector(button, { timeout: 20000 });
+    await teacher.page.click(button);
+    assert.equal(await teacher.page.$eval(button, (b) => b.textContent), "Click again to delete the question; no planned test holds it");
+    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 }), teacher.page.click(button)]);
+    assert.equal((await fetchAs(teacher, `/exam/api/pool/questions/${question.id}`)).status, 404, "gone from the pool");
+    assert.equal(await shown(), before, "the written test's page is unchanged");
+  });
+
+  test("a test whose only question was deleted says so, and its schedule form is closed, at 1280 and 390 px", async () => {
+    const question = await newQuestion({ nameDe: "Einzige", nameEn: "Only one" });
+    const test = await testOf("Editor: emptied", [question.id]);
+    const deleted = await fetchAs(teacher, `/exam/api/pool/questions/${question.id}`, { method: "DELETE", body: { tests: 1 } });
+    assert.equal(deleted.status, 200, JSON.stringify(deleted.json));
+    const page = teacher.page;
+    const before = page.viewport();
+    try {
+      for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+        await page.setViewport(viewport);
+        await page.goto(`${applicationUrl}/exam/tests/${test.id}`, { waitUntil: "domcontentloaded" });
+        await page.waitForSelector(".sl-exam-test-empty", { timeout: 20000 });
+        const state = await page.evaluate(() => {
+          const notice = document.querySelector(".sl-exam-test-empty");
+          const box = notice.getBoundingClientRect();
+          return {
+            text: notice.textContent,
+            visible: box.width > 0 && box.height > 0,
+            fits: notice.scrollWidth <= notice.clientWidth + 1 && box.right <= document.documentElement.clientWidth + 1,
+            questions: document.querySelectorAll(".sl-exam-test-questions > li").length,
+            schedule: document.querySelector(".sl-exam-sitting-form button[type=submit]")?.disabled ?? null,
+          };
+        });
+        assert.deepEqual(state, { text: "This test has no questions.", visible: true, fits: true, questions: 0, schedule: true }, `${viewport.width}px`);
+      }
+    } finally {
+      await page.setViewport(before ?? { width: 1280, height: 800 });
+    }
+    await page.goto(`${applicationUrl}/exam/tests?course=${course.id}`, { waitUntil: "domcontentloaded" });
+    const row = `tr[data-test="${test.id}"]`;
+    await page.waitForSelector(row, { timeout: 20000 });
+    assert.deepEqual(await page.$eval(`${row} td:nth-child(2)`, (cell) => [cell.textContent, cell.classList.contains("sl-embed-error")]), ["0", true], "the course's list warns of 0 questions");
+    await fetchAs(teacher, `/exam/api/tests/${test.id}`, { method: "DELETE" });
   });
 });
 

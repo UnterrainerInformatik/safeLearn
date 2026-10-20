@@ -78,18 +78,57 @@ export function migrate(db, dbPath, migrations = readMigrations()) {
     backupBeforeMigration(db, dbPath, current);
   }
   for (const migration of pending) {
-    db.exec("BEGIN");
-    try {
-      db.exec(migration.sql);
-      // PRAGMA takes no bound parameters; the version is a number we produced.
-      db.exec(`PRAGMA user_version = ${migration.version}`);
-      db.exec("COMMIT");
-    } catch (error) {
-      db.exec("ROLLBACK");
-      throw new Error(`Migration ${migration.name} failed: ${error.message}`, { cause: error });
-    }
+    if (foreignKeysOff(migration)) migrateWithoutForeignKeys(db, migration);
+    else applyMigration(db, migration);
   }
   return { from: current, to: target };
+}
+
+/**
+ * Whether a migration asks to run with foreign keys off: its first line is
+ * `-- foreign_keys: off`. Only a migration that rebuilds a table needs it
+ * (exam-questions-follow-pool design D6).
+ */
+function foreignKeysOff(migration) {
+  return /^-- foreign_keys: off[ \t]*(\r?\n|$)/.test(migration.sql);
+}
+
+/** One migration in one transaction; `check` runs last, before the commit. */
+function applyMigration(db, migration, check = () => {}) {
+  db.exec("BEGIN");
+  try {
+    db.exec(migration.sql);
+    check();
+    // PRAGMA takes no bound parameters; the version is a number we produced.
+    db.exec(`PRAGMA user_version = ${migration.version}`);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw new Error(`Migration ${migration.name} failed: ${error.message}`, { cause: error });
+  }
+}
+
+/**
+ * A migration that rebuilds tables, with foreign keys off: SQLite's rebuild
+ * drops a table that others reference, which would cascade or fail with them
+ * on. The pragma has no effect inside a transaction, so it is set before
+ * `BEGIN`. Every reference has to hold again before the commit, or the
+ * migration is rolled back; the setting is restored either way.
+ */
+function migrateWithoutForeignKeys(db, migration) {
+  const before = db.prepare("PRAGMA foreign_keys").get().foreign_keys;
+  db.exec("PRAGMA foreign_keys = OFF");
+  try {
+    applyMigration(db, migration, () => {
+      const broken = db.prepare("PRAGMA foreign_key_check").all();
+      if (broken.length > 0) {
+        const tables = [...new Set(broken.map((row) => row.table))].join(", ");
+        throw new Error(`${broken.length} broken foreign key reference(s) in ${tables}`);
+      }
+    });
+  } finally {
+    db.exec(`PRAGMA foreign_keys = ${before ? "ON" : "OFF"}`);
+  }
 }
 
 /** A database written by a newer image than this one. It is left untouched. */

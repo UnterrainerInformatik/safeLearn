@@ -185,7 +185,8 @@
       "correctOnes": "Richtige",
       "createCategoryFirst": "Zuerst eine anlegen.",
       "createQuestion": "Frage anlegen",
-      "deleteArmed": "Noch einmal klicken, um die Frage mit ihren Antworten und Bildern zu löschen",
+      "deleteArmedNoTests": "Noch einmal klicken, um die Frage zu löschen; kein geplanter Test enthält sie",
+      "deleteArmedTests": "Noch einmal klicken, um die Frage zu löschen und aus {tests} zu entfernen",
       "deleteFailed": "Die Frage konnte nicht gelöscht werden.",
       "englishAnswer": "Englische Antwort",
       "englishText": "Englischer Fragetext",
@@ -194,16 +195,15 @@
       "germanText": "Deutscher Fragetext",
       "germanTitle": "Deutscher Titel",
       "openCurrent": "Die aktuelle Fassung in einem neuen Tab öffnen",
+      "pendingTests": "Diese Speicherung ändert auch: {tests}",
       "remove": "Entfernen",
       "removeAnswer": "Antwort {n} entfernen",
       "retire": "Ausmustern",
-      "retireInstead": "Stattdessen ausmustern",
       "retired": "Ausgemustert.",
       "retiredNotice": "Diese Frage ist ausgemustert: Sie wird für neue Tests nicht angeboten. Ihre Tests und Verwendungen bleiben, wie sie sind.",
       "revive": "Wieder aufnehmen",
       "revived": "Wieder aufgenommen: wird für neue Tests wieder angeboten.",
       "saveFailed": "Die Frage konnte nicht gespeichert werden. Bitte noch einmal versuchen.",
-      "saved": "Gespeichert.",
       "statementFalse": "falsch",
       "statementIs": "Die Aussage ist",
       "statementTrue": "richtig",
@@ -213,11 +213,7 @@
         "multichoiceset": "Mehrere richtige Antworten"
       },
       "typeLabel": "Art",
-      "unwrittenExplained": "Sie behalten die Fassung, mit der sie zusammengestellt wurden, bis sie aktualisiert werden.",
-      "unwrittenHeading": "Noch nicht geschriebene Tests mit dieser Frage",
-      "updateFailed": "Der Test konnte nicht aktualisiert werden.",
-      "updateTest": "Diesen Test aktualisieren",
-      "updated": "Aktualisiert."
+      "writtenKeepVersion": "Bereits geschriebene Tests behalten ihre Fassung."
     },
     "errors": {
       "attempts": {
@@ -226,6 +222,7 @@
         "noAttempt": "Diesen Versuch gibt es nicht.",
         "noOpenTest": "Dieser Test ist für dich nicht geöffnet.",
         "noQuestion": "Diese Frage gibt es in diesem Versuch nicht.",
+        "noQuestions": "Dieser Test hat keine Fragen und kann nicht begonnen werden. Bitte der Lehrkraft Bescheid geben.",
         "noSuchRecord": "Diesen Eintrag gibt es nicht.",
         "noTest": "Diesen Test gibt es nicht.",
         "notAnAnswer": "Das ist keine Antwort dieser Frage.",
@@ -369,6 +366,7 @@
         "changedMeanwhile": "Diese Frage wurde inzwischen von jemand anderem geändert. Deine Eingaben sind noch da; öffne die aktuelle Fassung zum Vergleichen.",
         "chooseCategory": "Bitte eine bestehende Kategorie wählen.",
         "chooseType": "Bitte den Fragetyp wählen.",
+        "deleteTestsChanged": "Die geplanten Tests mit dieser Frage haben sich geändert. Bitte prüfen und noch einmal löschen.",
         "imageTooLarge": "Ein Bild darf höchstens 2 MB groß sein.",
         "imageType": "Dieses Bild kann der Fragenpool nicht aufnehmen: nur PNG, JPEG, GIF und WebP.",
         "noCategory": "Diese Kategorie gibt es nicht.",
@@ -388,8 +386,7 @@
         "titleTooLongEn": "Der englische Titel ist länger als {limit} Zeichen.",
         "trueFalseAnswers": "Eine Richtig/Falsch-Frage hat genau die zwei Antworten richtig und falsch.",
         "trueFalseMark": "Bitte markieren, ob die Aussage richtig oder falsch ist.",
-        "twoAnswers": "Eine Frage braucht mindestens zwei Antworten.",
-        "usedCannotDelete": "Diese Frage war Teil eines Tests und kann nicht gelöscht werden. Stattdessen außer Dienst stellen."
+        "twoAnswers": "Eine Frage braucht mindestens zwei Antworten."
       },
       "tests": {
         "attemptsChanged": "Die Zahl der Versuche dieses Termins hat sich geändert. Bitte die Seite neu laden und noch einmal bestätigen.",
@@ -406,6 +403,7 @@
         "makeupParticipants": "Einen Nachtermin schreiben die dafür gewählten Schüler.",
         "name": "Ein Test braucht einen Namen mit höchstens 80 Zeichen.",
         "noPoolQuestion": "Es gibt keine Frage {id} im Fragenpool.",
+        "noQuestions": "Dieser Test hat keine Fragen. Vor dem Planen eines Termins Fragen auswählen.",
         "noSitting": "Diesen Termin gibt es nicht.",
         "noTest": "Diesen Test gibt es nicht.",
         "notOnRoster_one": "{names} steht nicht auf der Klassenliste.",
@@ -764,6 +762,7 @@
       "minutesPerAttemptLabel": "Minuten pro Versuch",
       "nameLabel": "Name des Tests",
       "newTest": "Neuer Test",
+      "noQuestions": "Dieser Test hat keine Fragen.",
       "noSittingYet": "Noch kein Termin.",
       "noTestYet": "Noch kein Online-Test.",
       "noYear": "Es gibt noch kein Schuljahr.",

@@ -1,8 +1,8 @@
 /**
  * The question editor (`question-editor`), unit by unit: the migration that
- * adds it, the validation of a question, saving one without touching any
- * test's snapshot, staged uploads, retiring and deleting, and the category
- * tree.
+ * adds it, the validation of a question, saving one - which changes every
+ * test not yet begun and no begun one - staged uploads, retiring and deleting,
+ * and the category tree.
  *
  * No browser, no login, no server: every database lives in a temporary
  * directory removed after the check. The same behaviour against a running
@@ -20,7 +20,8 @@ import { createClass, createCourse, createYear } from "../exam/classes.js";
 import { migrate, openDatabase, readMigrations } from "../exam/db.js";
 import { importPool } from "../exam/pool-import.js";
 import { getQuestion, listQuestions } from "../exam/pool.js";
-import { createTest, testQuestions, updateTest } from "../exam/tests.js";
+import { createSitting, createTest, deleteTest, getTest, testQuestions, updateTest } from "../exam/tests.js";
+import { previewView } from "../exam/attempts.js";
 import {
   createCategory,
   createQuestion,
@@ -184,6 +185,7 @@ function refusal(fn) {
 }
 
 const png = Buffer.from(pixel, "base64");
+const inMinutes = (minutes) => new Date(Date.now() + minutes * 60000).toISOString();
 // A different 1×1 PNG.
 const otherPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==", "base64");
 
@@ -348,11 +350,14 @@ describe("saving a question", () => {
     assert.equal(testQuestions(db, fresh.id)[0].textDe, "<p>Neu: welche Methoden?</p>");
   });
 
-  test("an image a snapshot shows survives its removal from the text; one no test shows is removed", () => {
+  test("replacing an image keeps the old one for a written test and swaps it for a test not yet begun", () => {
     const { db, course: wmc, ids } = seeded();
     const id = ids["Bild de"];
     const imageId = db.prepare("SELECT id FROM image WHERE question_id = ?").get(id).id;
-    createTest(db, wmc.id, { name: "1st test", questionIds: [id] });
+    const written = createTest(db, wmc.id, { name: "1st test", questionIds: [id] });
+    fakeAttempt(db, written.id, "anna");
+    const planned = createTest(db, wmc.id, { name: "2nd test", questionIds: [id] });
+    const shown = (testId) => db.prepare("SELECT image_id FROM test_image WHERE test_id = ? ORDER BY image_id").all(testId).map((row) => row.image_id);
 
     const replaced = editable(db, id);
     const { src } = stageUpload(db, otherPng, "teacher");
@@ -360,11 +365,15 @@ describe("saving a question", () => {
     replaced.textEn = `<p><img src="${src}">en picture</p>`;
     const { question } = saveQuestion(db, id, replaced);
     const images = db.prepare("SELECT id FROM image WHERE question_id = ? ORDER BY id").all(id).map((row) => row.id);
-    assert.equal(images.length, 2, "the old image stays for the test, the new one is the question's");
+    assert.equal(images.length, 2, "the old image stays for the written test, the new one is the question's");
     assert.ok(images.includes(imageId));
     const newId = images.find((other) => other !== imageId);
     assert.equal(question.textDe, `<p><img src="/exam/api/images/${newId}">de picture</p>`, "the upload became the question's image");
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM image_upload").get().n, 0, "the upload is gone from the staging table");
+    assert.deepEqual(shown(written.id), [imageId], "the written test shows the old image");
+    assert.match(testQuestions(db, written.id)[0].textDe, new RegExp(`/exam/api/images/${imageId}"`));
+    assert.deepEqual(shown(planned.id), [newId], "the planned test shows the new one");
+    assert.equal(testQuestions(db, planned.id)[0].textDe, question.textDe);
 
     const plain = editable(db, id);
     plain.textDe = "<p>de without picture</p>";
@@ -373,8 +382,9 @@ describe("saving a question", () => {
     assert.deepEqual(
       db.prepare("SELECT id FROM image WHERE question_id = ?").all(id).map((row) => row.id),
       [imageId],
-      "the image no test shows is removed, the one a test shows stays"
+      "the image no test shows is removed, the one the written test shows stays"
     );
+    assert.deepEqual(shown(planned.id), [], "the planned test shows no image any more");
   });
 
   test("the same uploaded picture twice becomes one image of the question", () => {
@@ -397,29 +407,52 @@ describe("saving a question", () => {
     assert.deepEqual(listQuestions(db, { categoryId: caching }).map((q) => [q.nameDe, q.uses]), [["Wahr de", 0], ["Bild de", 1]]);
   });
 
-  test("the save lists the unwritten tests holding the question, and only those", () => {
+  test("the question names the tests not yet begun that hold it, and only those", () => {
     const { db, course: wmc, ids } = seeded();
-    const unwritten = createTest(db, wmc.id, { name: "Next week", questionIds: [ids["Methoden de"], ids["Wahr de"]] });
+    const planned = createTest(db, wmc.id, { name: "Next week", questionIds: [ids["Methoden de"], ids["Wahr de"]] });
+    createSitting(db, planned.id, { opensAt: inMinutes(60 * 24 * 7), closesAt: inMinutes(60 * 24 * 7 + 50), durationMinutes: 15 });
     const written = createTest(db, wmc.id, { name: "Last week", questionIds: [ids["Methoden de"]] });
     fakeAttempt(db, written.id, "anna");
+    const opened = createTest(db, wmc.id, { name: "Today", questionIds: [ids["Methoden de"]] });
+    const sitting = createSitting(db, opened.id, { opensAt: inMinutes(60), closesAt: inMinutes(120), durationMinutes: 15 });
+    db.prepare("UPDATE sitting SET opens_at = ? WHERE id = ?").run(inMinutes(-1), sitting.id);
     createTest(db, wmc.id, { name: "Other", questionIds: [ids["Wahr de"]] });
-    const { unwrittenTests } = saveQuestion(db, ids["Methoden de"], editable(db, ids["Methoden de"]));
-    assert.deepEqual(unwrittenTests.map((t) => t.name), ["Next week"]);
-    assert.equal(unwrittenTests[0].id, unwritten.id);
+
+    const question = getQuestion(db, ids["Methoden de"]);
+    assert.deepEqual(question.pendingTests.map((t) => [t.id, t.name, t.subject, t.className]), [[planned.id, "Next week", "WMC", "4bhif"]]);
+    assert.equal(question.uses, 3, "the usage still lists every test that holds it");
+    const answer = saveQuestion(db, ids["Methoden de"], editable(db, ids["Methoden de"]));
+    assert.deepEqual(Object.keys(answer), ["question"], "the save offers nothing to update");
   });
 
-  test("an unwritten test takes up an edit only when updated, keeping its questions and their order", () => {
+  test("a test not yet begun takes up an edit at once, keeping its questions, their order and its rows", () => {
     const { db, course: wmc, ids } = seeded();
     const order = [ids["Wahr de"], ids["Methoden de"], ids["Bild de"]];
     const test = createTest(db, wmc.id, { name: "Next week", questionIds: order });
+    const rows = testQuestions(db, test.id).map((q) => [q.id, q.position]);
     const input = editable(db, ids["Methoden de"]);
     input.textEn = "<p>fixed typo</p>";
+    input.answers[2].correct = true;
     saveQuestion(db, ids["Methoden de"], input);
-    assert.equal(testQuestions(db, test.id)[1].textEn, "<p>en idempotent</p>", "not asked: the old text");
-    updateTest(db, test.id, { questionIds: testQuestions(db, test.id).map((q) => q.questionId) });
     const after = testQuestions(db, test.id);
     assert.deepEqual(after.map((q) => q.questionId), order);
+    assert.deepEqual(after.map((q) => [q.id, q.position]), rows, "the copy is changed in place");
     assert.equal(after[1].textEn, "<p>fixed typo</p>");
+    assert.deepEqual(after[1].answers.map((a) => a.correct), [true, true, true]);
+    assert.equal(getTest(db, test.id).questions[1].textEn, "<p>fixed typo</p>", "the test's page");
+    assert.ok(previewView(db, test.id).questions.some((q) => q.text === "<p>fixed typo</p>"), "and its preview");
+  });
+
+  test("an edit after the sitting has opened does not reach the test, even with no attempt yet", () => {
+    const { db, course: wmc, ids } = seeded();
+    const test = createTest(db, wmc.id, { name: "Today", questionIds: [ids["Methoden de"]] });
+    const sitting = createSitting(db, test.id, { opensAt: inMinutes(60), closesAt: inMinutes(120), durationMinutes: 15 });
+    db.prepare("UPDATE sitting SET opens_at = ? WHERE id = ?").run(inMinutes(-1), sitting.id);
+    const before = poolAndSnapshots(db);
+    const input = editable(db, ids["Methoden de"]);
+    input.textEn = "<p>too late</p>";
+    saveQuestion(db, ids["Methoden de"], input);
+    for (const table of ["test_question", "test_answer", "test_image"]) assert.deepEqual(poolAndSnapshots(db)[table], before[table], `${table} is unchanged`);
   });
 });
 
@@ -500,12 +533,11 @@ describe("uploads", () => {
 });
 
 describe("retiring, reviving and deleting", () => {
-  test("a used question cannot be deleted; retired, its tests and usage stay, and it is refused in assembly until revived", () => {
+  test("a retired question stays in its tests and follows edits there, is refused in new tests until revived, and a test may keep it", () => {
     const { db, course: wmc, ids } = seeded();
     const id = ids["Methoden de"];
     createTest(db, wmc.id, { name: "1st", questionIds: [id] });
-    createTest(db, wmc.id, { name: "2nd", questionIds: [id, ids["Wahr de"]] });
-    assert.throws(() => deleteQuestion(db, id), (error) => error instanceof ConflictError && /Retire it instead/.test(error.message));
+    const second = createTest(db, wmc.id, { name: "2nd", questionIds: [id, ids["Wahr de"]] });
     const before = poolAndSnapshots(db);
     const retired = retireQuestion(db, id);
     assert.equal(retired.retired, true);
@@ -514,6 +546,12 @@ describe("retiring, reviving and deleting", () => {
     assert.ok(!listQuestions(db).some((q) => q.id === id), "hidden from the browser");
     assert.ok(listQuestions(db, { includeRetired: true }).some((q) => q.id === id), "shown when asked for");
     assert.throws(() => createTest(db, wmc.id, { name: "3rd", questionIds: [id] }), /is retired/);
+    updateTest(db, second.id, { questionIds: [ids["Wahr de"], id] });
+    assert.deepEqual(testQuestions(db, second.id).map((q) => q.questionId), [ids["Wahr de"], id], "a test may keep a retired question it holds");
+    const input = editable(db, id);
+    input.textEn = "<p>still followed</p>";
+    saveQuestion(db, id, input);
+    assert.equal(testQuestions(db, second.id)[1].textEn, "<p>still followed</p>");
     assert.equal(reviveQuestion(db, id).retired, false);
     createTest(db, wmc.id, { name: "3rd", questionIds: [id] });
   });
@@ -532,17 +570,17 @@ describe("retiring, reviving and deleting", () => {
       textDe: `<p><img src="${stageUpload(db, otherPng, "teacher").src}"></p>`,
     });
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM image WHERE question_id = ?").get(question.id).n, 1);
-    deleteQuestion(db, question.id);
+    assert.deepEqual(getQuestion(db, question.id).pendingTests, []);
+    deleteQuestion(db, question.id, { tests: 0 });
     for (const table of ["question", "answer", "image"]) {
       const column = table === "question" ? "id" : "question_id";
       assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${column} = ?`).get(question.id).n, 0, `no ${table} left`);
     }
   });
 
-  test("a question whose only test was deleted unwritten can be deleted", async () => {
+  test("a question whose only test was deleted unwritten can be deleted", () => {
     const { db, course: wmc, ids } = seeded();
     const test = createTest(db, wmc.id, { name: "1st", questionIds: [ids["Methoden de"]] });
-    const { deleteTest } = await import("../exam/tests.js");
     deleteTest(db, test.id);
     deleteQuestion(db, ids["Methoden de"]);
   });

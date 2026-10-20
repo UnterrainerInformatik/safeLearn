@@ -132,8 +132,8 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
         res.json(await fn(req));
       })
     );
-  adminApi("delete", "/tests/:id/questions/:question", (req) =>
-    announced(removeWrittenQuestion(db, idParam(req.params.id), idParam(req.params.question), scoreAttempt))
+  adminApi("delete", "/tests/:id/questions/:testQuestion", (req) =>
+    announced(removeWrittenQuestion(db, idParam(req.params.id), idParam(req.params.testQuestion), scoreAttempt))
   );
   adminApi("delete", "/attempts/:id", (req) => announced(deleteAttempt(db, idParam(req.params.id))));
 

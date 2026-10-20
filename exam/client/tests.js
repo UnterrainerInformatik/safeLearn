@@ -130,7 +130,9 @@ class TestList extends ExamElement {
                     "tr",
                     { "data-test": String(test.id) },
                     h("td", {}, h("a", { href: `/exam/tests/${test.id}` }, test.name)),
-                    h("td", {}, String(test.questions)),
+                    test.questions === 0
+                      ? h("td", { class: "sl-embed-error", title: t("exam.tests.noQuestions") }, "0")
+                      : h("td", {}, String(test.questions)),
                     h(
                       "td",
                       {},
@@ -223,13 +225,14 @@ class TestDetail extends ExamElement {
               : t("exam.tests.writtenNote")
           )
         : null,
+      test.questions.length === 0 ? h("p", { class: "sl-exam-test-empty", role: "status" }, t("exam.tests.noQuestions")) : null,
       h(
         "ol",
         { class: "sl-exam-test-questions" },
         test.questions.map((question) =>
           h(
             "li",
-            { "data-question": String(question.questionId), lang: course.language },
+            { "data-question": String(question.id), lang: course.language },
             h("h3", {}, en ? question.nameEn : question.nameDe),
             storedMarkup(en ? question.textEn : question.textDe, "sl-exam-pool-text"),
             h(
@@ -258,7 +261,7 @@ class TestDetail extends ExamElement {
                       class: "sl-exam-test-remove sl-exam-admin",
                       label: t("exam.tests.removeQuestion"),
                       armed: t("exam.tests.removeQuestionArmed"),
-                      action: () => this.removeWrittenQuestion(question.questionId),
+                      action: () => this.removeWrittenQuestion(question.id),
                     })
                   : null
           )
@@ -353,9 +356,11 @@ class TestDetail extends ExamElement {
     }
     const first = test.sittings.find((candidate) => !candidate.makeup) ?? null;
     const makeup = sitting ? sitting.makeup : first !== null;
+    // A test without questions cannot be scheduled; the server refuses it too.
+    const empty = test.questions.length === 0;
     if (!sitting && makeup && !openMakeup) {
       this.sittingForm.replaceChildren(
-        h("p", {}, h("button", { type: "button", class: "sl-exam-action sl-exam-sitting-makeup", onClick: () => this.drawSittingForm(test, null, false, true) }, t("exam.tests.scheduleMakeup")))
+        h("p", {}, h("button", { type: "button", class: "sl-exam-action sl-exam-sitting-makeup", disabled: empty, onClick: () => this.drawSittingForm(test, null, false, true) }, t("exam.tests.scheduleMakeup")))
       );
       return;
     }
@@ -437,7 +442,7 @@ class TestDetail extends ExamElement {
           )
         : h("label", {}, whole, ` ${t("exam.tests.wholeClass")}`),
       people,
-      h("p", {}, h("button", { type: "submit", class: "sl-exam-primary" }, sitting ? t("exam.tests.save") : t("exam.tests.schedule")), sitting || makeup ? [" ", h("button", { type: "button", class: "sl-exam-action", onClick: () => this.drawSittingForm(test, null) }, t("exam.tests.cancel"))] : null),
+      h("p", {}, h("button", { type: "submit", class: "sl-exam-primary", disabled: !sitting && empty, title: !sitting && empty ? t("exam.tests.noQuestions") : null }, sitting ? t("exam.tests.save") : t("exam.tests.schedule")), sitting || makeup ? [" ", h("button", { type: "button", class: "sl-exam-action", onClick: () => this.drawSittingForm(test, null) }, t("exam.tests.cancel"))] : null),
       message
     );
     this.sittingForm.replaceChildren(form);
@@ -694,14 +699,18 @@ class TestDetail extends ExamElement {
   }
 
   removeQuestion(questionId) {
-    const questionIds = this.test.questions.map((question) => question.questionId).filter((id) => id !== questionId);
+    // A copy whose pool question was deleted has no id left to choose it by.
+    const questionIds = this.test.questions.map((question) => question.questionId).filter((id) => id !== questionId && id !== null);
     this.change({ questionIds });
   }
 
-  /** An admin's removal from a written test; the server scores the attempts again. */
-  async removeWrittenQuestion(questionId) {
+  /**
+   * An admin's removal from a written test, by the snapshot row - its pool
+   * question may be gone; the server scores the attempts again.
+   */
+  async removeWrittenQuestion(testQuestionId) {
     try {
-      const test = await examApi(`/tests/${this.test.id}/questions/${questionId}`, { method: "DELETE" });
+      const test = await examApi(`/tests/${this.test.id}/questions/${testQuestionId}`, { method: "DELETE" });
       this.show(this.render(test));
     } catch (error) {
       this.message.textContent = refusal(error);

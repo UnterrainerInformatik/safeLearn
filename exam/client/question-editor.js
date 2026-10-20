@@ -10,10 +10,11 @@
  *
  * A refused save shows every problem at its field and keeps the input. A save
  * refused because somebody else saved in between keeps the input too and
- * offers the current version in a new tab. After a save, the tests not yet
- * written that hold the question are listed, each with "Update this test";
- * nothing changes in a test unless that is clicked (exam-question-editor
- * design D8).
+ * offers the current version in a new tab. Above the save button, the editor
+ * names the tests not yet begun that a save changes as well, and says that
+ * written tests keep their version; a save leads back to the pool
+ * (exam-questions-follow-pool design D7). Deleting asks once more, naming
+ * those tests, and is refused if they changed in between.
  *
  * The API refuses every session not acting as a teacher; this element only
  * draws what it answers.
@@ -95,7 +96,8 @@ class QuestionEditor extends ExamElement {
 
     this.problemList = h("ul", { class: "sl-exam-editor-problems sl-embed-error", role: "alert" });
     this.message = h("div", { class: "sl-exam-message", role: "status" });
-    this.after = h("div", { class: "sl-exam-editor-after" });
+    this.reach = h("div", { class: "sl-exam-editor-reach sl-exam-quiet" });
+    this.drawReach();
 
     const row = (label, de, en) =>
       h("div", { class: "sl-exam-editor-row" }, h("div", { class: "sl-exam-editor-label" }, label), h("div", { class: "sl-exam-editor-de", lang: "de" }, de), h("div", { class: "sl-exam-editor-en", lang: "en" }, en));
@@ -122,6 +124,7 @@ class QuestionEditor extends ExamElement {
       row(t("exam.pool.question"), this.textDe, this.textEn),
       this.answerList,
       this.problemList,
+      this.reach,
       h(
         "div",
         { class: "sl-exam-editor-actions" },
@@ -129,8 +132,7 @@ class QuestionEditor extends ExamElement {
         linkButton({ label: t("exam.categories.backToPool"), href: this.backAddress(), class: "sl-exam-editor-back", onClick: (event) => (event.currentTarget.href = this.backAddress()) }),
         stored ? this.lifecycleButtons(stored) : null
       ),
-      this.message,
-      this.after
+      this.message
     );
     this.drawAnswers();
     return h("div", { class: "sl-exam sl-exam-editor" }, form);
@@ -141,17 +143,43 @@ class QuestionEditor extends ExamElement {
     return this.retiredBox;
   }
 
+  /** The tests not yet begun that hold the stored question, as a reader names them. */
+  pendingNames() {
+    return this.stored.pendingTests.map((test) => `${test.name} (${displayClass(test.className)} ${test.subject})`).join(", ");
+  }
+
+  /**
+   * What a save reaches besides the pool: the tests not yet begun that hold
+   * the question, and - when a begun test holds it - that those keep their
+   * version. Nothing for a new question.
+   */
+  drawReach() {
+    const stored = this.stored;
+    const pending = stored?.pendingTests ?? [];
+    const begun = (stored?.usage.length ?? 0) > pending.length;
+    this.reach.replaceChildren(
+      pending.length > 0 ? h("p", { "data-reach": "pending" }, t("exam.editor.pendingTests", { tests: this.pendingNames() })) : null,
+      begun ? h("p", { "data-reach": "written" }, t("exam.editor.writtenKeepVersion")) : null
+    );
+    this.reach.hidden = pending.length === 0 && !begun;
+  }
+
+  /** The delete button, its confirmation naming the tests the question is taken out of. */
+  deleteButton() {
+    return confirmButton({
+      "data-action": "delete",
+      label: t("exam.categories.delete"),
+      armed: this.stored.pendingTests.length > 0 ? t("exam.editor.deleteArmedTests", { tests: this.pendingNames() }) : t("exam.editor.deleteArmedNoTests"),
+      action: () => this.remove(),
+    });
+  }
+
   /** Retire or revive, and delete, for a stored question. */
   lifecycleButtons(stored) {
     this.retire = h("button", { type: "button", class: "sl-exam-action", "data-action": "retire", hidden: stored.retired, onClick: () => this.setRetired(true) }, t("exam.editor.retire"));
     this.revive = h("button", { type: "button", class: "sl-exam-action", "data-action": "revive", hidden: !stored.retired, onClick: () => this.setRetired(false) }, t("exam.editor.revive"));
-    const remove = confirmButton({
-      "data-action": "delete",
-      label: t("exam.categories.delete"),
-      armed: t("exam.editor.deleteArmed"),
-      action: () => this.remove(),
-    });
-    return h("span", { class: "sl-exam-editor-lifecycle" }, this.retire, this.revive, remove);
+    this.removeButton = this.deleteButton();
+    return h("span", { class: "sl-exam-editor-lifecycle" }, this.retire, this.revive, this.removeButton);
   }
 
   /** One answer pair: the correct flag, the German and the English text, and its tools. */
@@ -292,19 +320,12 @@ class QuestionEditor extends ExamElement {
   async save() {
     this.clearProblems();
     this.message.replaceChildren();
-    this.after.replaceChildren();
     this.saveButton.disabled = true;
     try {
       const answer = this.stored
         ? await examApi(`/pool/questions/${this.stored.id}`, { method: "PUT", body: this.input() })
         : await examApi("/pool/questions", { method: "POST", body: this.input() });
-      if (!this.stored || answer.unwrittenTests.length === 0) {
-        window.location.assign(poolAddress(answer.question.categoryId, this.params.course));
-        return;
-      }
-      this.stored = answer.question;
-      this.message.textContent = t("exam.editor.saved");
-      this.offerTests(answer.unwrittenTests);
+      window.location.assign(poolAddress(answer.question.categoryId, this.params.course));
     } catch (error) {
       if (error instanceof ExamApiError && error.status === 422) {
         this.showProblems(error.problems ?? [{ field: null, message: error.message }]);
@@ -321,52 +342,6 @@ class QuestionEditor extends ExamElement {
     }
   }
 
-  /** The unwritten tests holding the question, each with the offer to take up the saved version. */
-  offerTests(tests) {
-    this.after.replaceChildren(
-      h("h2", {}, t("exam.editor.unwrittenHeading")),
-      h("p", { class: "sl-exam-quiet" }, t("exam.editor.unwrittenExplained")),
-      h(
-        "ul",
-        { class: "sl-exam-editor-tests" },
-        tests.map((test) => {
-          const status = h("span", { class: "sl-exam-quiet", role: "status" });
-          const button = h(
-            "button",
-            {
-              type: "button",
-              class: "sl-exam-action",
-              "data-test": String(test.id),
-              onClick: async () => {
-                button.disabled = true;
-                status.textContent = "";
-                try {
-                  const current = await examApi(`/tests/${test.id}`);
-                  await examApi(`/tests/${test.id}`, { method: "PUT", body: { questionIds: current.questions.map((question) => question.questionId) } });
-                  status.textContent = ` ${t("exam.editor.updated")}`;
-                } catch (error) {
-                  button.disabled = false;
-                  status.classList.add("sl-embed-error");
-                  status.textContent = ` ${error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.editor.updateFailed")}`;
-                }
-              },
-            },
-            t("exam.editor.updateTest")
-          );
-          return h(
-            "li",
-            {},
-            h("a", { href: `/exam/tests/${test.id}` }, test.name),
-            ` (${displayClass(test.className)} ${test.subject}) `,
-            button,
-            status
-          );
-        })
-      ),
-      h("p", {}, linkButton({ label: t("exam.categories.backToPool"), href: this.backAddress() }))
-    );
-  }
-
   async setRetired(retired) {
     this.message.replaceChildren();
     try {
@@ -380,17 +355,25 @@ class QuestionEditor extends ExamElement {
     }
   }
 
+  /**
+   * Deletes the question, confirming as many tests not yet begun as the
+   * confirmation named. If they changed meanwhile, the question is read again,
+   * so the next confirmation names them as they are; the input stays.
+   */
   async remove() {
     this.message.replaceChildren();
     try {
-      await examApi(`/pool/questions/${this.stored.id}`, { method: "DELETE" });
+      await examApi(`/pool/questions/${this.stored.id}`, { method: "DELETE", body: { tests: this.stored.pendingTests.length } });
       window.location.assign(this.backAddress());
     } catch (error) {
-      const used = error instanceof ExamApiError && error.status === 409;
-      this.message.replaceChildren(
-        h("p", { class: "sl-embed-error" }, error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.editor.deleteFailed")),
-        used && !this.stored.retired ? h("button", { type: "button", class: "sl-exam-action", "data-action": "retire-instead", onClick: () => this.setRetired(true) }, t("exam.editor.retireInstead")) : null
-      );
+      this.message.replaceChildren(h("p", { class: "sl-embed-error" }, error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.editor.deleteFailed")));
+      if (error instanceof ExamApiError && error.status === 409) {
+        this.stored = await examApi(`/pool/questions/${this.stored.id}`);
+        this.drawReach();
+        const button = this.deleteButton();
+        this.removeButton.replaceWith(button);
+        this.removeButton = button;
+      }
     }
   }
 }

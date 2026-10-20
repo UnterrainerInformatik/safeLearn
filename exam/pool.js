@@ -11,6 +11,7 @@
  */
 
 import { NotFoundError } from "./classes.js";
+import { pendingTestsWith } from "./tests.js";
 
 const entities = { "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'", "&nbsp;": " " };
 
@@ -139,9 +140,11 @@ export function listQuestions(db, { categoryId = null, query = "", includeRetire
 /**
  * One question as the preview and the editor show it: both languages, every
  * answer in its original order with its correct flag, the category's path,
- * each test it was used in, with course and date, and the version a save has
- * to name (exam-question-editor design D7), and for an imported question
- * when, by whom and from which file (exam-question-import design D7).
+ * each test that holds it, planned or written, with course and date, the
+ * tests not yet begun that a save changes and a deletion takes it out of
+ * (exam-questions-follow-pool design D7), the version a save has to name
+ * (exam-question-editor design D7), and for an imported question when, by
+ * whom and from which file (exam-question-import design D7).
  */
 export function getQuestion(db, id) {
   const row = db
@@ -176,6 +179,7 @@ export function getQuestion(db, id) {
     answers,
     usage,
     uses: usage.length,
+    pendingTests: pendingTestsWith(db, id),
   };
 }
 

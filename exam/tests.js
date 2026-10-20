@@ -3,11 +3,15 @@
  * the pool for a course, the snapshot of its questions, the sittings it is
  * written in, and the lists of a course's or a school year's tests.
  *
- * A test copies its questions with both languages, answers and correct flags
- * when it is created (exam-online-tests design D2), so editing, retiring or
- * deleting a pool question later never changes a test or a grade derived from
- * one. Images are referenced, not copied; `test_image` keeps the database from
- * dropping one a test shows.
+ * A test holds a copy of its questions with both languages, answers and
+ * correct flags, and everything that shows or grades it reads only that copy.
+ * Until the test begins - its first sitting opens or its first attempt starts
+ * - the copy follows the pool: every pool write that changes a question
+ * refreshes it (exam-questions-follow-pool design D1). From then on the copy
+ * is the snapshot, and editing, retiring or deleting a pool question never
+ * changes the test or a grade derived from it. Images are referenced, not
+ * copied; `test_image` keeps the database from dropping one a test shows, and
+ * an image whose question is gone is removed once no test shows it.
  *
  * Plain SQL over the module's database, synchronous like `DatabaseSync`; who
  * may ask for what is the router's business.
@@ -49,6 +53,37 @@ export function testStarted(db, testId) {
   return db.prepare("SELECT 1 FROM attempt WHERE test_id = ? LIMIT 1").get(testId) !== undefined;
 }
 
+/**
+ * Whether a test has begun at `at`: an attempt exists, or one of its sittings
+ * has opened. From then on its copy is the snapshot (design D2).
+ */
+export function testBegun(db, testId, at = now()) {
+  return (
+    testStarted(db, testId) ||
+    db.prepare("SELECT 1 FROM sitting WHERE test_id = ? AND opens_at <= ? LIMIT 1").get(testId, at) !== undefined
+  );
+}
+
+/**
+ * The tests not yet begun at `at` that hold the pool question `questionId`,
+ * with course and class: the ones a save of the question changes and its
+ * deletion takes it out of.
+ */
+export function pendingTestsWith(db, questionId, at = now()) {
+  return db
+    .prepare(
+      `SELECT t.id, t.name, co.id AS courseId, co.subject, cl.name AS className
+       FROM test t
+       JOIN course co ON co.id = t.course_id
+       JOIN class cl ON cl.id = co.class_id
+       WHERE EXISTS (SELECT 1 FROM test_question tq WHERE tq.test_id = t.id AND tq.question_id = ?)
+         AND NOT EXISTS (SELECT 1 FROM attempt a WHERE a.test_id = t.id)
+         AND NOT EXISTS (SELECT 1 FROM sitting s WHERE s.test_id = t.id AND s.opens_at <= ?)
+       ORDER BY t.created_at, t.id`
+    )
+    .all(questionId, at);
+}
+
 function testRow(db, id) {
   const row = db.prepare("SELECT * FROM test WHERE id = ?").get(id);
   if (!row) throw new NotFoundError("exam.errors.tests.noTest");
@@ -57,9 +92,10 @@ function testRow(db, id) {
 
 /**
  * The pool questions with `questionIds`, in that order: every one known, not
- * retired, and none twice. A test without a question is refused.
+ * retired - unless it is in `keep`, the ones the test already holds - and none
+ * twice. A test without a question is refused.
  */
-function chosenQuestions(db, questionIds) {
+function chosenQuestions(db, questionIds, { keep = [] } = {}) {
   if (!Array.isArray(questionIds) || questionIds.length === 0) {
     throw new InvalidInputError("exam.errors.tests.oneQuestion");
   }
@@ -73,9 +109,95 @@ function chosenQuestions(db, questionIds) {
   return questionIds.map((id) => {
     const question = read.get(id);
     if (!question) throw new InvalidInputError("exam.errors.tests.noPoolQuestion", { id });
-    if (question.retired === 1) throw new InvalidInputError("exam.errors.tests.questionRetired", { name: question.name_de });
+    if (question.retired === 1 && !keep.includes(id)) throw new InvalidInputError("exam.errors.tests.questionRetired", { name: question.name_de });
     return question;
   });
+}
+
+/** The ids of the images the stored `texts` show, by their route. */
+function imageRefs(texts) {
+  return new Set([...texts.join(" ").matchAll(/\/exam\/api\/images\/(\d+)/g)].map((match) => Number(match[1])));
+}
+
+/** Every text of a test's copy, or of one row of it (`testQuestionId`). */
+function copyTexts(db, testId, testQuestionId = null) {
+  const rows = db
+    .prepare("SELECT id, text_de, text_en FROM test_question WHERE test_id = ? AND (? IS NULL OR id = ?)")
+    .all(testId, testQuestionId, testQuestionId);
+  const answers = db.prepare("SELECT text_de, text_en FROM test_answer WHERE test_question_id = ?");
+  return rows.flatMap((row) => [row.text_de, row.text_en, ...answers.all(row.id).flatMap((answer) => [answer.text_de, answer.text_en])]);
+}
+
+/** Links exactly the images a test's copy shows. Only for a test not yet begun. Inside a transaction. */
+function linkImages(db, testId) {
+  db.prepare("DELETE FROM test_image WHERE test_id = ?").run(testId);
+  const link = db.prepare("INSERT INTO test_image (test_id, image_id) SELECT ?, id FROM image WHERE id = ?");
+  for (const imageId of imageRefs(copyTexts(db, testId))) link.run(testId, imageId);
+}
+
+/** Removes the images whose question is gone and which no test shows any more. */
+export function sweepOrphanImages(db) {
+  db.prepare("DELETE FROM image WHERE question_id IS NULL AND NOT EXISTS (SELECT 1 FROM test_image t WHERE t.image_id = image.id)").run();
+}
+
+/** Writes the pool's `question` answers into the copy row `testQuestionId`. Inside a transaction. */
+function copyAnswers(db, testQuestionId, questionId) {
+  const insertAnswer = db.prepare(
+    "INSERT INTO test_answer (test_question_id, position, text_de, text_en, correct) VALUES (?, ?, ?, ?, ?)"
+  );
+  for (const answer of db.prepare("SELECT * FROM answer WHERE question_id = ? ORDER BY position").all(questionId)) {
+    insertAnswer.run(testQuestionId, answer.position, answer.text_de, answer.text_en, answer.correct);
+  }
+}
+
+/**
+ * Brings the copy of the pool `question` in a test not yet begun up to the
+ * pool, in place: the row keeps its id and position, its answers are
+ * replaced, and the test's images are linked again (design D3). Nothing
+ * references the copy yet, since the test has no attempt. Inside a
+ * transaction.
+ */
+export function refreshCopy(db, testId, question) {
+  const row = db.prepare("SELECT id FROM test_question WHERE test_id = ? AND question_id = ?").get(testId, question.id);
+  db.prepare("UPDATE test_question SET type = ?, name_de = ?, name_en = ?, text_de = ?, text_en = ? WHERE id = ?").run(
+    question.type,
+    question.name_de,
+    question.name_en,
+    question.text_de,
+    question.text_en,
+    row.id
+  );
+  db.prepare("DELETE FROM test_answer WHERE test_question_id = ?").run(row.id);
+  copyAnswers(db, row.id, question.id);
+  linkImages(db, testId);
+  sweepOrphanImages(db);
+}
+
+/**
+ * Takes the pool question `questionId` out of a test not yet begun, with its
+ * usage record. The positions after it keep a gap. Inside a transaction.
+ */
+export function dropFromTest(db, testId, questionId) {
+  db.prepare("DELETE FROM test_question WHERE test_id = ? AND question_id = ?").run(testId, questionId);
+  db.prepare("DELETE FROM question_usage WHERE test_id = ? AND question_id = ?").run(testId, questionId);
+  linkImages(db, testId);
+}
+
+/**
+ * Lets a test that is no longer begun - its sittings were set again or
+ * deleted - follow the pool again (design D4): every question it holds takes
+ * the pool's current version, and a copy whose question has been deleted
+ * meanwhile goes. Inside a transaction.
+ */
+export function followPoolIfNotBegun(db, testId, at = now()) {
+  if (testBegun(db, testId, at)) return;
+  const read = db.prepare("SELECT * FROM question WHERE id = ?");
+  for (const row of db.prepare("SELECT id, question_id FROM test_question WHERE test_id = ?").all(testId)) {
+    if (row.question_id === null) db.prepare("DELETE FROM test_question WHERE id = ?").run(row.id);
+    else refreshCopy(db, testId, read.get(row.question_id));
+  }
+  linkImages(db, testId);
+  sweepOrphanImages(db);
 }
 
 /**
@@ -87,11 +209,6 @@ function snapshot(db, test, questions) {
     `INSERT INTO test_question (test_id, question_id, position, type, name_de, name_en, text_de, text_en)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   );
-  const insertAnswer = db.prepare(
-    "INSERT INTO test_answer (test_question_id, position, text_de, text_en, correct) VALUES (?, ?, ?, ?, ?)"
-  );
-  const answersOf = db.prepare("SELECT * FROM answer WHERE question_id = ? ORDER BY position");
-  const linkImages = db.prepare("INSERT OR IGNORE INTO test_image (test_id, image_id) SELECT ?, id FROM image WHERE question_id = ?");
   const recordUsage = db.prepare("INSERT INTO question_usage (question_id, test_id, course_id, used_on) VALUES (?, ?, ?, ?)");
   const usedOn = usageDate(db, test.id);
   questions.forEach((question, index) => {
@@ -105,19 +222,21 @@ function snapshot(db, test, questions) {
       question.text_de,
       question.text_en
     );
-    for (const answer of answersOf.all(question.id)) {
-      insertAnswer.run(Number(lastInsertRowid), answer.position, answer.text_de, answer.text_en, answer.correct);
-    }
-    linkImages.run(test.id, question.id);
+    copyAnswers(db, Number(lastInsertRowid), question.id);
     recordUsage.run(question.id, test.id, test.course_id, usedOn);
   });
+  linkImages(db, test.id);
 }
 
-/** Removes a test's snapshot, its image links and its usage records. Inside a transaction. */
+/**
+ * Removes a test's copy, its image links and its usage records, and the
+ * images only it still showed. Inside a transaction.
+ */
 function dropSnapshot(db, testId) {
   db.prepare("DELETE FROM question_usage WHERE test_id = ?").run(testId);
   db.prepare("DELETE FROM test_image WHERE test_id = ?").run(testId);
   db.prepare("DELETE FROM test_question WHERE test_id = ?").run(testId);
+  sweepOrphanImages(db);
 }
 
 /**
@@ -155,12 +274,15 @@ export function createTest(db, courseId, { name, questionIds } = {}) {
 
 /**
  * Renames a test, or - only while no attempt has started - replaces its
- * questions with a fresh snapshot of `questionIds`.
+ * questions with a fresh copy of `questionIds`. A retired question the test
+ * already holds may stay.
  */
 export function updateTest(db, id, { name, questionIds } = {}) {
   const test = testRow(db, id);
   const trimmed = name === undefined ? test.name : normalizeName(name);
-  const questions = questionIds === undefined ? null : chosenQuestions(db, questionIds);
+  const held = db.prepare("SELECT question_id FROM test_question WHERE test_id = ? AND question_id IS NOT NULL").all(id);
+  const keep = held.map((row) => row.question_id);
+  const questions = questionIds === undefined ? null : chosenQuestions(db, questionIds, { keep });
   return inTransaction(db, () => {
     if (questions !== null) {
       if (testStarted(db, id)) throw new ConflictError("exam.errors.tests.writtenQuestionsFixed");
@@ -191,17 +313,19 @@ export function deleteTest(db, id, { admin = false } = {}) {
 }
 
 /**
- * An admin's correction of a written test: takes the pool question
- * `questionId` out of its snapshot and out of every attempt - their answers to
+ * An admin's correction of a written test: takes the snapshot row
+ * `testQuestionId` out of the test and out of every attempt - their answers to
  * it included - closes the gap it leaves in each attempt's order, and scores
  * every submitted attempt again over the questions left, so the gradebook and
- * the students' results follow. The last question cannot go; delete the test.
+ * the students' results follow. The row's pool question may have been deleted
+ * meanwhile. The last question cannot go; delete the test.
  */
-export function removeWrittenQuestion(db, testId, questionId, rescore) {
+export function removeWrittenQuestion(db, testId, testQuestionId, rescore) {
   testRow(db, testId);
   return inTransaction(db, () => {
-    const question = db.prepare("SELECT id FROM test_question WHERE test_id = ? AND question_id = ?").get(testId, questionId);
+    const question = db.prepare("SELECT id, question_id FROM test_question WHERE test_id = ? AND id = ?").get(testId, testQuestionId);
     if (!question) throw new NotFoundError("exam.errors.tests.questionNotInTest");
+    const shown = imageRefs(copyTexts(db, testId, question.id));
     if (db.prepare("SELECT COUNT(*) AS n FROM test_question WHERE test_id = ?").get(testId).n === 1) {
       throw new ConflictError("exam.errors.tests.keepOneQuestion");
     }
@@ -222,8 +346,12 @@ export function removeWrittenQuestion(db, testId, questionId, rescore) {
       settle.run(attempt.id);
     }
     db.prepare("DELETE FROM test_question WHERE id = ?").run(question.id);
-    db.prepare("DELETE FROM question_usage WHERE test_id = ? AND question_id = ?").run(testId, questionId);
-    db.prepare("DELETE FROM test_image WHERE test_id = ? AND image_id IN (SELECT id FROM image WHERE question_id = ?)").run(testId, questionId);
+    db.prepare("DELETE FROM question_usage WHERE test_id = ? AND question_id = ?").run(testId, question.question_id);
+    // The images only the removed row showed; another row's stay linked.
+    const stillShown = imageRefs(copyTexts(db, testId));
+    const unlink = db.prepare("DELETE FROM test_image WHERE test_id = ? AND image_id = ?");
+    for (const imageId of shown) if (!stillShown.has(imageId)) unlink.run(testId, imageId);
+    sweepOrphanImages(db);
     const count = db.prepare("SELECT COUNT(*) AS n FROM attempt_question WHERE attempt_id = ?");
     const store = db.prepare("UPDATE attempt SET question_count = ?, score = CASE WHEN submitted_at IS NULL THEN NULL ELSE ? END WHERE id = ?");
     for (const attempt of attempts) {
@@ -452,6 +580,9 @@ function firstSitting(db, testId) {
  */
 export function createSitting(db, testId, { opensAt, closesAt, durationMinutes, participants = null } = {}) {
   const test = testRow(db, testId);
+  if (db.prepare("SELECT 1 FROM test_question WHERE test_id = ? LIMIT 1").get(testId) === undefined) {
+    throw new ConflictError("exam.errors.tests.noQuestions");
+  }
   const first = firstSitting(db, testId);
   const makeup = first !== null;
   if (makeup && (participants === null || participants === undefined)) {
@@ -556,7 +687,8 @@ export function extendSitting(db, id, { minutes } = {}, at = now()) {
  * since. Every attempt of the sitting goes with its answers; only an `admin`
  * may delete any, and only as many as `attempts` confirms. Make-ups stay as
  * they are; the usage date and the gradebook column follow the earliest
- * sitting.
+ * sitting. A test left with no attempt and no opened sitting follows the
+ * pool again (`followPoolIfNotBegun`).
  */
 export function rescheduleSitting(db, id, { opensAt, closesAt, attempts } = {}, { admin = false } = {}, at = now()) {
   const row = sittingRow(db, id);
@@ -582,11 +714,16 @@ export function rescheduleSitting(db, id, { opensAt, closesAt, attempts } = {}, 
     const take = db.prepare("INSERT INTO sitting_participant (sitting_id, username) VALUES (?, ?)");
     for (const username of usernames) take.run(id, username);
     refreshUsageDate(db, row.test_id);
+    followPoolIfNotBegun(db, row.test_id, at);
     return { ...getSitting(db, id), deleted };
   });
 }
 
-/** Deletes a sitting that has not opened yet. A first sitting goes only after its make-ups. */
+/**
+ * Deletes a sitting that has not opened yet. A first sitting goes only after
+ * its make-ups. A test left with no attempt and no opened sitting follows the
+ * pool again.
+ */
 export function deleteSitting(db, id) {
   const row = sittingRow(db, id);
   requireNotOpened(row);
@@ -596,6 +733,7 @@ export function deleteSitting(db, id) {
   inTransaction(db, () => {
     db.prepare("DELETE FROM sitting WHERE id = ?").run(id);
     refreshUsageDate(db, row.test_id);
+    followPoolIfNotBegun(db, row.test_id);
   });
   return { deleted: id };
 }

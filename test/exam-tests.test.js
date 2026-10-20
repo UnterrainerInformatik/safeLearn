@@ -41,6 +41,7 @@ import {
 import {
   checkDevice,
   correctShares,
+  previewView,
   deleteAttempt,
   DeviceRefusedError,
   finalizeDue,
@@ -55,6 +56,7 @@ import {
   writingView,
 } from "../exam/attempts.js";
 import { studentMaySeeImage } from "../exam/pool.js";
+import { deleteQuestion, saveQuestion } from "../exam/pool-edit.js";
 import { liveParticipant, liveSnapshot } from "../exam/live.js";
 import { browserLabel, parseUserAgent } from "../exam/user-agent.js";
 
@@ -204,6 +206,43 @@ describe("the migration to bound browsers", () => {
     assert.deepEqual(migrate(db, dbPath, readMigrations().slice(0, 9)), { from: 8, to: 9 });
     assert.deepEqual(rows("attempt"), before.attempt.map((row) => ({ ...row, device_user_agent: null })));
     assert.deepEqual(rows("refused_device"), before.refused_device.map((row) => ({ ...row, user_agent: null })));
+  });
+});
+
+describe("the migration to tests that follow the pool", () => {
+  test("a database at schema 10 with a planned and a written test migrates with every row unchanged", () => {
+    const dbPath = temporaryPath();
+    const db = new DatabaseSync(dbPath);
+    openDatabases.push(db);
+    db.exec("PRAGMA foreign_keys = ON");
+    migrate(db, dbPath, readMigrations().slice(0, 10));
+    importPool(db, poolXml("de"), poolXml("en"));
+    const year = createYear(db, { name: "2026/27", startsOn: "2026-09-07", summerStartsOn: "2027-02-15", endsOn: "2027-07-02" });
+    const klass = createClass(db, year.id, { name: "4bhif", students: [{ username: "anna" }, { username: "ben" }] });
+    const course = createCourse(db, klass.id, { subject: "WMC", language: "en" });
+    const ids = listQuestions(db).map((q) => q.id);
+    const planned = createTest(db, course.id, { name: "Planned", questionIds: ids.slice(0, 2) });
+    createSitting(db, planned.id, { opensAt: inMinutes(60), closesAt: inMinutes(120), durationMinutes: 15 });
+    const written = createTest(db, course.id, { name: "Written", questionIds: ids });
+    const sitting = createSitting(db, written.id, { opensAt: inMinutes(60), closesAt: inMinutes(120), durationMinutes: 15 });
+    db.prepare("UPDATE sitting SET opens_at = ? WHERE id = ?").run(inMinutes(-1), sitting.id);
+    const { attemptId } = startAttempt(db, "anna", written.id);
+    const view = writingView(db, attemptRow(db, attemptId));
+    saveAnswer(db, attemptRow(db, attemptId), 1, [view.questions[0].answers[0].token]);
+    submitAttempt(db, attemptRow(db, attemptId));
+    startAttempt(db, "ben", written.id);
+
+    const tables = ["image", "test_question", "question_usage", "test_image", "test_answer", "attempt_question", "attempt_token", "response"];
+    const rows = (table) => db.prepare(`SELECT * FROM ${table} ORDER BY 1, 2`).all().map((row) => ({ ...row }));
+    const before = Object.fromEntries(tables.map((table) => [table, rows(table)]));
+    assert.ok(before.image.length > 0 && before.response.length > 0, "the fixture has images and answers to compare");
+
+    assert.deepEqual(migrate(db, dbPath, readMigrations().slice(0, 11)), { from: 10, to: 11 });
+    for (const table of tables) assert.deepEqual(rows(table), before[table], `${table} is unchanged`);
+    assert.equal(db.prepare("PRAGMA foreign_keys").get().foreign_keys, 1);
+    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+    const nullable = (table) => db.prepare(`PRAGMA table_info(${table})`).all().find((column) => column.name === "question_id").notnull === 0;
+    assert.ok(nullable("image") && nullable("test_question"), "a copy and an image may outlive their question");
   });
 });
 
@@ -678,7 +717,7 @@ describe("an admin's corrections of a written test", () => {
     db.prepare("UPDATE attempt SET score = ? WHERE id = ?").run(scoreAttempt(db, anna), anna);
     assert.equal(attemptRow(db, anna).score, 2);
 
-    const after = removeWrittenQuestion(db, test.id, multi.question_id, scoreAttempt);
+    const after = removeWrittenQuestion(db, test.id, multi.id, scoreAttempt);
     assert.equal(after.questions.length, 2);
     assert.deepEqual([attemptRow(db, anna).score, attemptRow(db, anna).question_count], [2, 2], "2 of 2 now");
     assert.deepEqual([attemptRow(db, ben).score, attemptRow(db, ben).question_count], [null, 2], "an open attempt keeps writing, over two");
@@ -695,7 +734,7 @@ describe("an admin's corrections of a written test", () => {
 
   test("the last question of a written test cannot be removed, and a question not in it is not found", () => {
     const { db, test, ids } = written();
-    const inTest = db.prepare("SELECT question_id FROM test_question WHERE test_id = ? ORDER BY position").all(test.id).map((row) => row.question_id);
+    const inTest = db.prepare("SELECT id FROM test_question WHERE test_id = ? ORDER BY position").all(test.id).map((row) => row.id);
     removeWrittenQuestion(db, test.id, inTest[0], scoreAttempt);
     removeWrittenQuestion(db, test.id, inTest[1], scoreAttempt);
     assert.throws(() => removeWrittenQuestion(db, test.id, inTest[2], scoreAttempt), ConflictError);
@@ -805,6 +844,220 @@ describe("rescheduling a sitting that is over", () => {
     assert.equal(getQuestion(db, ids[0]).usage[0].usedOn, "2027-02-23");
     assert.deepEqual(courseOverview(db, course.id, "ws").columns, []);
     assert.deepEqual(courseOverview(db, course.id, "ss").columns.map((column) => [column.name, column.date]), [["Moved", "2027-02-23"]]);
+  });
+});
+
+// ------------------------------------------------- following the pool
+
+/** What the editor sends back for a pool question, with its English text changed to `textEn`. */
+function edited(db, id, textEn) {
+  const q = getQuestion(db, id);
+  return {
+    version: q.version,
+    categoryId: q.categoryId,
+    type: q.type,
+    nameDe: q.nameDe,
+    nameEn: q.nameEn,
+    textDe: q.textDe,
+    textEn,
+    answers: q.answers.map(({ textDe, textEn: answerEn, correct }) => ({ textDe, textEn: answerEn, correct })),
+  };
+}
+
+/** The English texts an attempt shows, in the test's order rather than the attempt's. */
+const textsOf = (db, testId) => getTest(db, testId).questions.map((q) => q.textEn);
+
+describe("a test follows the pool until it begins", () => {
+  test("an edit reaches a test not yet begun: its page, its preview and the attempts written later", () => {
+    const { db, course, ids } = seeded();
+    const test = createTest(db, course.id, { name: "T", questionIds: ids });
+    const sitting = createSitting(db, test.id, { opensAt: inMinutes(60), closesAt: inMinutes(110), durationMinutes: 15 });
+    saveQuestion(db, ids[2], edited(db, ids[2], "<p>corrected</p>"));
+    assert.equal(textsOf(db, test.id)[2], "<p>corrected</p>");
+    assert.ok(previewView(db, test.id).questions.some((q) => q.text === "<p>corrected</p>"));
+    db.prepare("UPDATE sitting SET opens_at = ? WHERE id = ?").run(inMinutes(-1), sitting.id);
+    const { attemptId } = startAttempt(db, "anna", test.id);
+    assert.ok(writingView(db, attemptRow(db, attemptId)).questions.some((q) => q.text === "<p>corrected</p>"), "Anna writes the corrected version");
+  });
+
+  test("an edit after the first attempt reaches neither the test nor a make-up", () => {
+    const { db, test, ids } = running({ participants: ["anna"] });
+    startAttempt(db, "anna", test.id);
+    const before = textsOf(db, test.id);
+    saveQuestion(db, ids[2], edited(db, ids[2], "<p>too late</p>"));
+    assert.deepEqual(textsOf(db, test.id), before);
+    const makeup = createSitting(db, test.id, { opensAt: inMinutes(5), closesAt: inMinutes(60), participants: ["ben"] });
+    db.prepare("UPDATE sitting SET opens_at = ? WHERE id = ?").run(inMinutes(-1), makeup.id);
+    const ben = startAttempt(db, "ben", test.id).attemptId;
+    assert.ok(!writingView(db, attemptRow(db, ben)).questions.some((q) => q.text === "<p>too late</p>"), "the make-up writes the snapshot");
+  });
+
+  test("a sitting set again with all its attempts deleted lets the test follow the pool again", () => {
+    const { db, test, sitting, ids } = running();
+    submitAttempt(db, attemptRow(db, startAttempt(db, "anna", test.id).attemptId));
+    endSitting(db, sitting.id);
+    saveQuestion(db, ids[2], edited(db, ids[2], "<p>edited after the sitting</p>"));
+    assert.notEqual(textsOf(db, test.id)[2], "<p>edited after the sitting</p>");
+    rescheduleSitting(db, sitting.id, { opensAt: inMinutes(60), closesAt: inMinutes(120), attempts: 1 }, { admin: true });
+    assert.equal(textsOf(db, test.id)[2], "<p>edited after the sitting</p>", "the reset test took the pool's version");
+    saveQuestion(db, ids[2], edited(db, ids[2], "<p>and again</p>"));
+    assert.equal(textsOf(db, test.id)[2], "<p>and again</p>", "and follows it until the new sitting opens");
+  });
+
+  test("a make-up set again while the first sitting has attempts keeps the snapshot", () => {
+    const { db, test, sitting, ids } = running({ participants: ["anna"] });
+    submitAttempt(db, attemptRow(db, startAttempt(db, "anna", test.id).attemptId));
+    endSitting(db, sitting.id);
+    const makeup = createSitting(db, test.id, { opensAt: inMinutes(5), closesAt: inMinutes(60), participants: ["ben"] });
+    db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ? WHERE id = ?").run(inMinutes(-30), inMinutes(-1), makeup.id);
+    const before = textsOf(db, test.id);
+    saveQuestion(db, ids[2], edited(db, ids[2], "<p>not for the make-up</p>"));
+    rescheduleSitting(db, makeup.id, { opensAt: inMinutes(60), closesAt: inMinutes(120) });
+    assert.deepEqual(textsOf(db, test.id), before);
+  });
+
+  test("a reset test drops a question deleted from the pool while it was begun", () => {
+    const { db, test, sitting, ids } = running();
+    endSitting(db, sitting.id);
+    deleteQuestion(db, ids[1], { tests: 0 });
+    assert.equal(getTest(db, test.id).questions.length, 3, "the begun test keeps its copy");
+    rescheduleSitting(db, sitting.id, { opensAt: inMinutes(60), closesAt: inMinutes(120) });
+    assert.deepEqual(getTest(db, test.id).questions.map((q) => q.questionId), [ids[0], ids[2]]);
+    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+  });
+
+  test("every write of a question's content runs through writeContent, an allowed creator, or deleteQuestion", () => {
+    // A write that skipped the refresh would leave tests not yet begun behind the pool (design D1).
+    const dir = path.join(import.meta.dirname, "..", "exam");
+    const writes = /\b(UPDATE (question|answer|image)\b[\s\S]*?\bSET\b([^`"]*)|INSERT (OR \w+ )?INTO (question|answer|image)\b|DELETE FROM (question|answer|image)\b)/g;
+    const content = /\b(type|name_de|name_en|text_de|text_en|correct|data|sha256|mime|question_id)\b/;
+    const allowed = {
+      "pool-edit.js": ["writeContent", "removeUnreferencedImages", "insertQuestion", "saveQuestion", "deleteQuestion"],
+      "tests.js": ["sweepOrphanImages"],
+    };
+    const creators = ["pool-import.js", "question-import.js"];
+    const found = [];
+    for (const file of fs.readdirSync(dir).filter((name) => name.endsWith(".js"))) {
+      if (creators.includes(file)) continue;
+      const source = fs.readFileSync(path.join(dir, file), "utf8");
+      for (const match of source.matchAll(writes)) {
+        if (match[2] && !content.test(match[3])) continue;
+        const before = source.slice(0, match.index);
+        const fn = [...before.matchAll(/^(?:export )?function (\w+)/gm)].at(-1)?.[1];
+        if (!(allowed[file] ?? []).includes(fn)) found.push(`${file}: ${fn}: ${match[0].slice(0, 60)}`);
+      }
+    }
+    assert.deepEqual(found, [], "a new path that writes pool content has to refresh the tests not yet begun");
+    const editor = fs.readFileSync(path.join(dir, "pool-edit.js"), "utf8");
+    const body = (name) => editor.slice(editor.indexOf(`function ${name}(`)).split(/\n}\n/)[0];
+    assert.match(body("saveQuestion"), /writeContent\(/, "saveQuestion's own update is followed by writeContent");
+    assert.match(body("writeContent"), /refreshCopy\(/);
+  });
+});
+
+describe("deleting a question from the pool", () => {
+  /** Anna answered and submitted, Ben is still writing: the `running` test, written. */
+  function written() {
+    const seed = running();
+    const anna = startAttempt(seed.db, "anna", seed.test.id).attemptId;
+    for (const [n, tokens] of Object.entries(correctTokens(seed.db, anna))) saveAnswer(seed.db, attemptRow(seed.db, anna), Number(n), tokens);
+    submitAttempt(seed.db, attemptRow(seed.db, anna));
+    const ben = startAttempt(seed.db, "ben", seed.test.id).attemptId;
+    return { ...seed, anna, ben };
+  }
+  const withoutPoolIds = (test) => ({ ...test, questions: test.questions.map(({ questionId, ...question }) => question) });
+
+  test("a written test, its board solution, its attempts, its scores, the gradebook and its images stay as they were", () => {
+    const { db, course, test, anna, ben, ids } = written();
+    const image = db.prepare("SELECT id FROM image WHERE question_id = ?").get(ids[0]).id;
+    const before = {
+      test: withoutPoolIds(getTest(db, test.id)),
+      shares: correctShares(db, test.id),
+      attempts: db.prepare("SELECT * FROM attempt ORDER BY id").all(),
+      gradebook: courseOverview(db, course.id, "ws"),
+      responses: db.prepare("SELECT * FROM response ORDER BY 1, 2").all(),
+    };
+    assert.deepEqual(getQuestion(db, ids[0]).pendingTests, []);
+    deleteQuestion(db, ids[0], { tests: 0 });
+    assert.throws(() => getQuestion(db, ids[0]), NotFoundError, "the question is gone from the pool");
+    assert.deepEqual(withoutPoolIds(getTest(db, test.id)), before.test);
+    assert.equal(getTest(db, test.id).questions.find((q) => q.type === "multichoice").questionId, null, "the copy let go of it");
+    assert.deepEqual(correctShares(db, test.id), before.shares);
+    assert.deepEqual(db.prepare("SELECT * FROM attempt ORDER BY id").all(), before.attempts);
+    assert.deepEqual(db.prepare("SELECT * FROM response ORDER BY 1, 2").all(), before.responses);
+    assert.deepEqual(courseOverview(db, course.id, "ws"), before.gradebook);
+    assert.equal(attemptRow(db, anna).score, 3);
+    assert.ok(studentMaySeeImage(db, "ben", image), "Ben's open attempt still shows the image");
+    assert.equal(db.prepare("SELECT question_id FROM image WHERE id = ?").get(image).question_id, null);
+    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+  });
+
+  test("a question planned in two tests is taken out of both after confirming them, and its usage goes", () => {
+    const { db, course, ids } = seeded();
+    const first = createTest(db, course.id, { name: "First", questionIds: [ids[0], ids[1]] });
+    const second = createTest(db, course.id, { name: "Second", questionIds: [ids[1], ids[2]] });
+    createSitting(db, second.id, { opensAt: inMinutes(60), closesAt: inMinutes(120), durationMinutes: 15 });
+    assert.deepEqual(getQuestion(db, ids[1]).pendingTests.map((t) => t.name), ["First", "Second"]);
+    const rows = () => ["test_question", "test_answer", "test_image", "question_usage", "question", "answer"].map((table) => db.prepare(`SELECT * FROM ${table}`).all());
+    const before = rows();
+    assert.throws(() => deleteQuestion(db, ids[1], { tests: 1 }), (error) => error instanceof ConflictError && /changed/.test(error.message));
+    assert.throws(() => deleteQuestion(db, ids[1]), ConflictError, "none confirmed");
+    assert.deepEqual(rows(), before, "nothing changed");
+    deleteQuestion(db, ids[1], { tests: 2 });
+    assert.deepEqual(getTest(db, first.id).questions.map((q) => q.questionId), [ids[0]]);
+    assert.deepEqual(getTest(db, second.id).questions.map((q) => q.questionId), [ids[2]]);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM question_usage WHERE question_id = ?").get(ids[1]).n, 0);
+    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+  });
+
+  test("a test whose last question is deleted stays, without questions, until it is given some again", () => {
+    const { db, course, ids } = seeded();
+    const test = createTest(db, course.id, { name: "Alone", questionIds: [ids[0]] });
+    const sitting = createSitting(db, test.id, { opensAt: inMinutes(60), closesAt: inMinutes(120), durationMinutes: 15 });
+    deleteQuestion(db, ids[0], { tests: 1 });
+    const empty = getTest(db, test.id);
+    assert.deepEqual([empty.questions, empty.sittings.length], [[], 1], "the sitting stays scheduled");
+    assert.equal(listTests(db, { courseId: course.id }).groups[0].tests[0].questions, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM image").get().n, 0, "the deleted question's image went with it");
+    assert.throws(
+      () => createSitting(db, test.id, { opensAt: inMinutes(200), closesAt: inMinutes(260), participants: ["anna"] }),
+      (error) => error instanceof ConflictError && /no questions/.test(error.message)
+    );
+    db.prepare("UPDATE sitting SET opens_at = ? WHERE id = ?").run(inMinutes(-1), sitting.id);
+    assert.throws(() => startAttempt(db, "anna", test.id), (error) => error instanceof ConflictError && /no questions/.test(error.message));
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM attempt").get().n, 0, "no attempt was written");
+    updateTest(db, test.id, { questionIds: [ids[1], ids[2]] });
+    const { attemptId } = startAttempt(db, "anna", test.id);
+    assert.equal(writingView(db, attemptRow(db, attemptId)).questions.length, 2);
+  });
+
+  test("an admin removes a copy whose pool question has been deleted", () => {
+    const { db, test, ids } = written();
+    deleteQuestion(db, ids[1], { tests: 0 });
+    const orphan = db.prepare("SELECT id FROM test_question WHERE test_id = ? AND question_id IS NULL").get(test.id).id;
+    const after = removeWrittenQuestion(db, test.id, orphan, scoreAttempt);
+    assert.deepEqual(after.questions.map((q) => q.questionId), [ids[0], ids[2]]);
+    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+  });
+
+  test("an image only a deleted test's snapshot showed goes with the test", () => {
+    const { db, test, ids } = written();
+    const image = db.prepare("SELECT id FROM image WHERE question_id = ?").get(ids[0]).id;
+    deleteQuestion(db, ids[0], { tests: 0 });
+    assert.ok(db.prepare("SELECT 1 FROM image WHERE id = ?").get(image), "kept while the test shows it");
+    deleteTest(db, test.id, { admin: true });
+    assert.equal(db.prepare("SELECT 1 FROM image WHERE id = ?").get(image), undefined);
+  });
+
+  test("a question a closed year's test holds is deleted, and the closed year's test stays as it was", () => {
+    const { db, year, test, ids } = written();
+    const before = withoutPoolIds(getTest(db, test.id));
+    db.prepare("UPDATE school_year SET closed_at = ? WHERE id = ?").run(new Date().toISOString(), year.id);
+    deleteQuestion(db, ids[2], { tests: 0 });
+    assert.deepEqual(withoutPoolIds({ ...getTest(db, test.id), course: before.course }), before);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM question_usage WHERE question_id = ?").get(ids[2]).n, 0);
+    assert.throws(() => db.prepare("UPDATE test_question SET text_en = 'x' WHERE test_id = ?").run(test.id), /school year closed/, "anything else is still refused");
+    assert.throws(() => db.prepare("UPDATE test_question SET question_id = NULL WHERE question_id = ?").run(ids[0]), /school year closed/, "and so is letting go of a question that still exists");
   });
 });
 

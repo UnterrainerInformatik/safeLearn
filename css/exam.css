@@ -1445,7 +1445,8 @@ body.sl-exam-screen-page {
   display: none;
 }
 
-.sl-exam-editor-retired {
+.sl-exam-editor-retired,
+.sl-exam-test-empty {
   padding: 4px 10px;
   border-left: 3px solid #bf8700;
 }

@@ -36,5 +36,5 @@ Echter Ablageort: `/mnt/data/source/HTL/safeLearn/AI/memory/`
 - [Toter federationLink löscht beim Lesen](keycloak-dead-federation-link-deletes-on-read.md) — nach einer `usersDn`-Verengung entfernt schon ein `GET` die lokale Kopie; erst sichern, dann umstellen
 - [Keycloak-Bot-Account](keycloak-bot-account.md) — `bot@unterrainer.info`, nur lesend; Passwort in `.env.sh` auf babylon5, Schreibrechte gibt Gerald temporär
 - [Reihenfolge der vier Changes](change-order-2026-10.md) — remove-convert-route → attachment-access-control → exam-module (bis P4, vor 05.02.2027) → publishing-without-keycloak
-- [Wackelige Content-Checks](flaky-content-checks.md) — Reload-Backoff (`deployment-surface`) und 390px-Viewport (`legibility`) scheitern zeitabhängig, auch auf unverändertem HEAD; erst nochmal laufen lassen
+- [Wackelige Checks](flaky-content-checks.md) — Reload-Backoff, 390px-Viewport und einzelne Exam-Harness-Checks (Ergebnisse ausblenden, Sheet-Spalten, New question) scheitern zeitabhängig, auch auf HEAD; erst nochmal laufen lassen
 - [i18n im BabelEdit-Format](i18n-babeledit-json.md) — Übersetzungen als ein JSON-File pro Sprache mit gleichen Keys, damit BabelEdit sie pflegen und erweitern kann
