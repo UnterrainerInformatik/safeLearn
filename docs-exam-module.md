@@ -3,7 +3,9 @@ Here you can find how the exam module is switched on, where it keeps its data, h
 
 [Back](README.md) to the main page.
 
-The module is being built in phases (`AI/exam-module-plan.md`). What exists today is its foundation (the switch, the database, backups, the teacher/student gate, the embedding syntax), classes and courses at `/exam/`, the gradebook, the question pool with its editor, online tests and the board solution. The change of school year - closing a year, starting the next one from it, and deleting the records of students who have left - is not implemented yet; it is the open change `exam-year-change` (`AI/openspec/changes/exam-year-change/`).
+The module is what makes an instance [tier 3](docs-installation.md#tier-3--database): it needs a login through Keycloak (tier 2) and a data directory. It consists of its foundation (the switch, the database, backups, the teacher/student gate, the embedding syntax), classes and courses at `/exam/`, the change of school year, the gradebook, the question pool with its editor, online tests and the board solution.
+
+![A course's gradebook](docs-images/tier3-gradebook.png)
 
 ## The Switch
 The module exists only when the instance's environment says `EXAM_MODULE=on`. Any other value, or none, and the instance is exactly the one it was before the module: its code is not loaded, no database file is opened or created, nothing answers under `/exam/`, and no page links to it.
@@ -82,6 +84,8 @@ Getting the copies off the host is the operator's job, with whatever that host a
 **Rolling back to an older image** is different once a newer image has migrated the database: the older image refuses a database at a schema version it does not know, and the module stays disabled. Every migration is such a step - schema 4 (the gradebook as a sheet, from `exam-navigation-and-grid`), for example. Going back takes the previous image *and* the copy `exam-pre-v<N>-<time>.sqlite` that was written just before the migration, `N` being the version the previous image knows (behind schema 4, `exam-pre-v3-<time>.sqlite`), restored as described above. Whatever was recorded after the migration is not in that copy.
 
 ## The Module Bar
+![The start page of the module with its bar](docs-images/tier3-exam-home.png)
+
 Every teacher page of the module carries a bar directly under the instance's top bar. From left to right it holds **Year** (the school year), **Class**, **Course** and **Gradebook** (the course's gradebook, winter semester or whole year). Each is a dropdown whose choices are what exists under the positions to its left. Choosing a value opens that page, and positions to its right are left empty until you choose them. With nothing chosen, the bar shows the current school year. Each position's name links to its overview: the year to its classes, the class to its roster and courses, the course to its config sheet, the gradebook to the course's sheet.
 
 New records are created from the bar too, left to right, with the `+` beside a position: a new school year at any time, a new class once a year is chosen, a new course once a class is chosen. The same rules as before apply (a class or course that exists already is refused), and the new record is chosen in the bar afterwards.
@@ -134,6 +138,8 @@ Each course has a gradebook, reached from the course's and the class's page (`/e
 - **A student's own results** are on the Exams page (`/exam/my`), below the open tests, or wherever a page places a `safelearn-results` block: per course their results with each column's name and date, the category fractions and the grade. While no override exists that is the proposal; once one does, the student sees the override and no longer the proposal. The year grade appears once the summer semester has begun. No request can name another student: the route answers about the session's own identity only.
 
 ## The Question Pool
+![The question pool with a question's preview](docs-images/tier3-question-pool.png)
+
 All teachers share one pool of multiple-choice questions, browsed at `/exam/pool` (the bar's **Question pool** button). Like everything else here it belongs to teachers: a student, or a teacher in student view, finds no page there, and the API and the images refuse them.
 
 - **A question** has a type - several correct answers, exactly one correct answer, or true/false - its text and each answer in German and in English, a correct flag per answer, a category, and the images it embeds. Every question is worth one point and is graded all-or-nothing, so the hint in the text saying how many answers are correct ("(2 richtige Antworten)") matters and is kept.
@@ -143,6 +149,8 @@ All teachers share one pool of multiple-choice questions, browsed at `/exam/pool
 - **The database is the pool's only source.** It was filled once from the Moodle export, and from then on the module's question editor and the Markdown import (both below) change it. There is no re-import from Moodle and no export, and an import only adds questions.
 
 ### The Question Editor
+![The question editor, both languages side by side](docs-images/tier3-question-editor.png)
+
 Teachers fix and add questions online. **Edit** on a question's preview opens the editor (`/exam/pool/questions/<id>`). **New question**, always beside the search, creates one in the chosen category (`/exam/pool/questions/new?category=<id>`), or, with none chosen, opens the editor with an empty category choice that has to be made before saving; **New question** in a category's ⋯ menu in the tree creates one there. Saving or leaving the editor returns to the browser with the question's category chosen.
 
 - **Both languages side by side**, one row per field: the title, the question text, and each answer as a pair of a German and an English text with one correct flag for both. Answers are added and removed; there is no order to set, since every attempt shuffles them. Type and category are chosen above; a new category there moves the question to the end of it. A true/false question has no answer texts: it only says whether the statement is true, and its answers are always Richtig/Falsch and True/False.
@@ -180,6 +188,10 @@ docker exec <container> node exam/import-moodle-pool.mjs /tmp/de.xml /tmp/en.xml
 `--dry-run` verifies and prints the report without touching the database; `--db <path>` names another database than the module's own. The report holds counts only. On the export as of 2026-10-16 it reads 94 questions in 22 categories (77 with several correct answers, 14 with one, 3 true/false), 9 essays dropped, and 7 images.
 
 ## Online Tests
+| A test's page | The live view | A student writing | After submitting |
+| --- | --- | --- | --- |
+| ![](docs-images/tier3-online-test.png) | ![](docs-images/tier3-live-view.png) | ![](docs-images/tier3-test-student.png) | ![](docs-images/tier3-test-submitted.png) |
+
 Short multiple-choice tests are assembled from the pool, written in safeLearn, and graded on the server. The list of a course's tests is behind the bar's **Online tests** button (`/exam/tests`); each test has a page of its own (`/exam/tests/<id>`). Everything about a test belongs to teachers, except writing it.
 
 - **A test** is assembled in the question browser with a course chosen in the bar (see above). It copies every chosen question - both languages, the answers, the correct flags, the links to its images - so editing or retiring a pool question later changes no test and no grade. Its page shows the questions in the course's language with the correct answers marked. **Try this test as a student sees it**, on the test's page, opens the test in a new window exactly as a student gets it - shuffled, in the course's language, with the first sitting's countdown - but nothing is saved and submitting is switched off; no attempt is started and nothing reaches the gradebook. Only a teacher can open it. **Solution on the board**, also on the test's page, opens the solution as a presentation in a new window (`/exam/tests/<id>/solution`): a title slide, then one slide per question in the test's own order and the course's language, the correct answers marked and the share of the submitted attempts that answered the question correctly - no names, no individual answers; without a submitted attempt the share is left out. A student and a teacher in student view find nothing there. Until somebody has started writing it, a test can be renamed, have questions removed or added, and be deleted with its sittings; afterwards only its name can change.
@@ -195,6 +207,10 @@ Short multiple-choice tests are assembled from the pool, written in safeLearn, a
 - **In the gradebook** every test with a sitting is a column of the online-test category, named by the test and dated by its first sitting. A course without online tests computes exactly as before. A result is changed only by the test itself; a teacher who disagrees overrides the semester grade.
 
 ## Placing An Element In A Page
+| A teacher's view: a note for the test, the gradebook in place | A student's view: the test to start and their own results |
+| --- | --- |
+| ![](docs-images/tier3-embedded.png) | ![](docs-images/tier3-embedded-student.png) |
+
 A page places an element with a fenced block whose info string is `safelearn-<kind>`, with the element's parameters as `key: value` lines:
 
 ````

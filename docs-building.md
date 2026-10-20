@@ -3,6 +3,8 @@ If you'd like to build and install your own instance of this project, you've com
 
 [Back](README.md) to the main page.
 
+The pipeline described here deploys a [tier-2 or tier-3](docs-installation.md#choosing-a-tier) instance: it always signs readers in through Keycloak. For a tier-1 instance — publishing without a login — you need none of this; see [Tier 1](docs-installation.md#tier-1--publishing).
+
 ## Clone the Repository
 - Create a new Repository for your files (private).
 - The main branch has to be named `master` since that's what the build action reacts on

@@ -160,6 +160,8 @@ Those work on normal image-links, like the standard DM ones and the shortcut-lin
 ![[my-img.png|120]]
 ```
 ## PDFs And Other Attachments
+![A PDF shown inline, with the link beneath it](docs-images/reader-pdf-embed.png)
+
 A wiki link or an embed can name any file of the vault, not only a Markdown page or an image. It is found the same way: by its name alone, or by its path where that name exists in more than one folder.
 
 ```markdown

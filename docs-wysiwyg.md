@@ -2,6 +2,8 @@
 If you'd like to run a local container of this server in order to see changes you make on your files on-the-fly, you've come to the right page.
 
 [Back](README.md) to the main page.
+
+The container is a [tier-1](docs-installation.md#tier-1--publishing) instance on your own machine. The same setup, with `READER_ROLES` left empty, also publishes a public site. If your corpus is shared through Nextcloud and mounted on the server, you may not need this container at all: see [Where Your Markdown Lives](docs-installation.md#where-your-markdown-lives).
 ## How to setup your local container
 The container runs in one of two ways, chosen by `AUTH` in its `.env`:
 

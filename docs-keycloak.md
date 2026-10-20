@@ -2,7 +2,7 @@ Here you find information about the keycloak-setup when you're trying to host it
 
 [Back](README.md) to the main page.
 ## Whether Keycloak is needed at all
-`AUTH` decides it, once at start-up:
+Keycloak is what separates [tier 1 from tier 2](docs-installation.md#choosing-a-tier). `AUTH` decides it, once at start-up:
 
 - `AUTH=keycloak`, or `AUTH` not set: everything on this page applies. The instance reads `keycloak.json` from its working directory and needs `SESSION_SECRET`; without either it refuses to start, with a message naming what is missing and `AUTH=none` as the alternative.
 - `AUTH=none`: no Keycloak at all. `keycloak.json` is not read even where it is present, `SESSION_SECRET` is not needed, and the login and logout paths and the directory endpoints do not exist. Every reader holds the roles `READER_ROLES` lists (see [Permissions](docs-permissions.md)), and preferences live in the reader's browser. This is meant for the [WYSIWYG container](docs-wysiwyg.md) and for a site that only publishes.
