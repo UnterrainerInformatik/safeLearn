@@ -11,6 +11,7 @@ Echter Ablageort: `/mnt/data/source/HTL/safeLearn/AI/memory/`
 - [Code-Sprache: Englisch](code-language-english.md) — Code, Bezeichner, Kommentare und Docs immer Englisch; Konversation bleibt Deutsch
 - [Architektur-Referenz](architecture-doc.md) — `AI/architecture.md` hält Tech-Stack, Features, Component-Map, Pipeline, Permissions und Observations
 - [Proposals-Intake](proposals-autostart.md) — `AI/open-proposals.md` (eine Datei, Backlog) wird beim Session-Start **und bei jeder Frage nach neuer Arbeit** gelistet; Change verlinkt per `Source:`-Zeile, Eintrag wird beim Archivieren gelöscht
+- [Back-Backlog](parked-proposals.md) — `AI/parked-proposals.md` hält gemerkte, instanzspezifische Punkte; nie von selbst anbieten, nur auf Nachfrage
 - [Browser-Verifikation](browser-verification.md) — `npm test` fährt eine Puppeteer-Harness, die sich live gegen die geteilten Demo-Accounts der Keycloak-Demo-Realm einloggt
 - [Content-Verifikations-Suite](content-verification-suite.md) — `npm test` prüft den `md/`-Korpus selbst; nach Änderungen an Renderer, Permissions oder Korpus laufen lassen
 - [Plugin-Repo-Link](plugin-repo-link.md) — das Obsidian-Plugin liegt in einem eigenen Repo, erreichbar über den gitignorierten Symlink `AI/plugin`

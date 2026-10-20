@@ -41,6 +41,25 @@ Not only at session start: whenever the user asks a question in the spirit of "w
 - **WHEN** the user asks a question of that kind, in this or a later session
 - **THEN** the assistant reads `AI/open-proposals.md` before answering, and offers any entry found there alongside other pending work
 
+### Requirement: Parked entries are kept but not offered
+
+Entries the user has deliberately set aside — typically instance-specific data issues that safeLearn should build little or nothing for — SHALL live in `AI/parked-proposals.md`, in the same format as the backlog. That file SHALL NOT be surfaced at session start nor offered when the user asks what there is to do; it is read only when the user asks about parked items explicitly.
+
+#### Scenario: The user parks an entry
+
+- **WHEN** the user says a backlog entry should not be proposed anymore but kept
+- **THEN** the entry is moved verbatim from `AI/open-proposals.md` to `AI/parked-proposals.md`
+
+#### Scenario: The user asks what there is to do
+
+- **WHEN** the user asks a question of that kind
+- **THEN** entries in `AI/parked-proposals.md` are not listed or suggested
+
+#### Scenario: The user revives a parked entry
+
+- **WHEN** the user asks for a parked entry to be picked up again
+- **THEN** it is moved back to `AI/open-proposals.md` and follows the normal backlog flow
+
 ### Requirement: A new bug report or idea is added as an entry
 
 Where a bug report or idea comes up — in conversation or otherwise — and is not acted on right away, it SHALL be added to `AI/open-proposals.md` as an entry, under the "Bugs" or "Ideas" section as fits, rather than left to be recalled from the conversation alone.
