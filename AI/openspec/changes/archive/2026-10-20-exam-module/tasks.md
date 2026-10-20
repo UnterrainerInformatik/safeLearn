@@ -67,12 +67,9 @@ Moved to the change `exam-question-editor` on 2026-10-17, together with the spec
 
 ## 8. P5 — Year change
 
-- [ ] 8.1 Close a school year after its end date: read-only for everyone, still readable by its teachers and students
-- [ ] 8.2 Start the next year: offer each class one level up with last year's roster pre-ticked beside the directory's current members; copy courses with language and weights, without entries
-- [ ] 8.3 Retention: setting for the retention period (default two years, decided 2026-10-17, design.md Open Questions); the year change reports counts to be removed and deletes only after confirmation
-- [ ] 8.4 Harness checks: closed year refuses writes; next-year roster proposal; retention deletion only after confirmation
+Moved to the change `exam-year-change` on 2026-10-20, together with the spec `school-year-change`. Its tasks, numbered there, replace the former 8.1–8.4.
 
 ## 9. Wrap-up
 
-- [ ] 9.1 Update `AI/architecture.md` (component map, routes, data, permissions, observations) and `docs-exam-module.md` to the final state
-- [ ] 9.2 Run `npm test` in both module configurations and record the result
+- [x] 9.1 Update `AI/architecture.md` (component map, routes, data, permissions, observations) and `docs-exam-module.md` to the final state
+- [x] 9.2 Run `npm test` in both module configurations and record the result (2026-10-20, `SESSION_SECRET` from the environment, no directory-service credentials; this session changed documentation only. Full `npm test`, which includes `test/exam.test.js` with the module on: 755 tests, 707 pass, 14 fail, 33 cancelled, 1 skipped. The failures are the known ones: the directory-search and roster checks that need `DIRECTORY_SERVICE_CLIENT_ID/_SECRET` (the roster suite's later steps fail or cancel after its first one), "the Exams page hides the student's results while they write" (fails identically on HEAD, see `exam-reschedule-sitting` 3.4), and `section-names`/`invitation-list` finding no `orderForWriting`/`unescapeFormatText` in `AI/plugin/main.ts`.)
