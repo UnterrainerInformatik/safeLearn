@@ -343,14 +343,22 @@ class TestDetail extends ExamElement {
    * otherwise or when the teacher switches to them (`school-periods`,
    * design.md, D7). Rescheduling proposes the next weekday with the sitting's
    * periods - or its clock times - and changes nothing but the window.
+   * A new make-up is seldom needed: its form waits behind a button until
+   * `openMakeup`.
    */
-  drawSittingForm(test, sitting, reschedule = false) {
+  drawSittingForm(test, sitting, reschedule = false, openMakeup = false) {
     if (reschedule) {
       this.rescheduleForm(sitting);
       return;
     }
     const first = test.sittings.find((candidate) => !candidate.makeup) ?? null;
     const makeup = sitting ? sitting.makeup : first !== null;
+    if (!sitting && makeup && !openMakeup) {
+      this.sittingForm.replaceChildren(
+        h("p", {}, h("button", { type: "button", class: "sl-exam-action sl-exam-sitting-makeup", onClick: () => this.drawSittingForm(test, null, false, true) }, t("exam.tests.scheduleMakeup")))
+      );
+      return;
+    }
     const periods = this.periods;
     let windowState;
     if (sitting) {
@@ -429,7 +437,7 @@ class TestDetail extends ExamElement {
           )
         : h("label", {}, whole, ` ${t("exam.tests.wholeClass")}`),
       people,
-      h("p", {}, h("button", { type: "submit", class: "sl-exam-primary" }, sitting ? t("exam.tests.save") : t("exam.tests.schedule")), sitting ? [" ", h("button", { type: "button", class: "sl-exam-action", onClick: () => this.drawSittingForm(test, null) }, t("exam.tests.cancel"))] : null),
+      h("p", {}, h("button", { type: "submit", class: "sl-exam-primary" }, sitting ? t("exam.tests.save") : t("exam.tests.schedule")), sitting || makeup ? [" ", h("button", { type: "button", class: "sl-exam-action", onClick: () => this.drawSittingForm(test, null) }, t("exam.tests.cancel"))] : null),
       message
     );
     this.sittingForm.replaceChildren(form);

@@ -3575,6 +3575,8 @@ describe("the school's periods", () => {
     const [shown] = await windows(teacher.page, `li[data-sitting="${created.json.id}"]`);
     assert.equal(shown.title, null, "no periods");
     assert.match(shown.text, /^\d\d\.\d\d\.\d{4},? 10:00 – 11:45$/, shown.text);
+    assert.equal(await teacher.page.$(".sl-exam-sitting-form form"), null, "a make-up waits behind its button");
+    await teacher.page.click(".sl-exam-sitting-form .sl-exam-sitting-makeup");
     const form = await teacher.page.$eval(".sl-exam-sitting-form form", (form) => ({
       fields: [...form.querySelectorAll("sl-date-input, input[name], select")].map((input) => input.getAttribute("name")),
       toggle: Boolean(form.querySelector(".sl-exam-sitting-mode")),
@@ -3584,6 +3586,8 @@ describe("the school's periods", () => {
     assert.equal(form.fields.includes("fromPeriod"), false);
     assert.equal(form.toggle, false, "no switch");
     assert.equal(form.wrapper, false);
+    await teacher.page.click(".sl-exam-sitting-form form p > button.sl-exam-action");
+    assert.ok(await teacher.page.$(".sl-exam-sitting-form .sl-exam-sitting-makeup"), "cancel folds the make-up away again");
   });
 
   test("in clock times a sitting is scheduled by one date and two times, and an unreadable time is refused", async () => {
