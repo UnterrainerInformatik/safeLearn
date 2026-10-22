@@ -55,7 +55,7 @@ After starting the build-pipeline on Github for the first time after inserting a
 Upon entering any page you'll be prompted to login at the given Keycloak server in order to gain access.
 
 ## The Node Line
-The image is built on `node:24-alpine`, `.nvmrc` says `24`, and `package.json` declares `"engines": { "node": ">=24 <25" }`. Node 24 is the line under long-term maintenance.
+The image is built on `node:26-alpine`, `.nvmrc` says `26`, and `package.json` declares `"engines": { "node": ">=26 <27" }`. Node 26 is the newest line; it enters long-term support at the end of October 2026.
 
 All three name the line rather than a patch. A patch-exact pin is only worth its cost when something updates it, and nothing here does — its practical effect was to hold the image on whatever version was current when the line was written while the security patches for that line went by. Pinning the line keeps the guarantee that matters and lets a rebuild collect the rest.
 

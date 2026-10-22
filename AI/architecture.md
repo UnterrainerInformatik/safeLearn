@@ -24,7 +24,7 @@ Versions are the ranges declared in `package.json`; the resolved column is the v
 
 | Component | Declared | Resolved | Where it is used |
 | --- | --- | --- | --- |
-| Node.js | `engines`: `>=24 <25`; `.nvmrc`: `24` | `Dockerfile`: `node:24-alpine` | ESM throughout (`"type": "module"`); top-level `await` in `app.js`. All three name the line, not a patch |
+| Node.js | `engines`: `>=26 <27`; `.nvmrc`: `26` | `Dockerfile`: `node:26-alpine` | ESM throughout (`"type": "module"`); top-level `await` in `app.js`. All three name the line, not a patch |
 | `express` | `^4.18.3` | 4.22.1 | `app.js` — the entire HTTP surface, plus one `express.static` mount per served location (see section 5) |
 | `express-session` | `^1.18.0` | 1.19.0 | `middlewares/keycloak-middleware.js` — session with the default `MemoryStore`, secret from `SESSION_SECRET` |
 | `dotenv` | `^16.4.5` | 16.6.1 | `app.js` (`config()`); `npm run prod` also preloads it via `-r dotenv/config` |
@@ -65,7 +65,7 @@ PlantUML is an external HTTP service (`NEXT_PUBLIC_PLANTUML_URL`, default `https
 
 ### Tooling
 
-- **Docker** — `Dockerfile` (single stage on `node:24-alpine`, `npm install --omit=dev`, exposes 8080), `deploy/docker-compose.yml`, and two local WYSIWYG compose variants.
+- **Docker** — `Dockerfile` (single stage on `node:26-alpine`, `npm install --omit=dev`, exposes 8080), `deploy/docker-compose.yml`, and two local WYSIWYG compose variants.
 - **GitHub Actions** — `.github/workflows/docs-local.yml`: version bump, multi-arch Docker build and push, optional OpenVPN hop, SSH deploy.
 - **httpYac** — `http/*.http` request collections with `httpyac.config.cjs` (gitignored) and `httpyac.config-template.cjs` as the template.
 - **Puppeteer** — the project's only `devDependency`. `test/harness.js` starts the application, drives the Keycloak OIDC flow per role, and hands back sessions plus the five things content checks need: the session's effective role set, a confirmed preference write, a rendered page addressed by path and view, the page's same-origin references, and the hosts the browser actually contacted while a page loaded. `npm test` runs three files on Node's built-in `node:test` runner: `test/smoke.test.js` (the harness itself), `test/content.test.js` (the content suite, whose by-concern modules live in `test/checks/` so the whole suite runs in one process and logs in twice), and `test/coverage.test.js` (the coverage record, no browser). `test/coverage-map.json` records which check guards which file, `test/coverage.test.js` keeps it honest, and a `PostToolUse` hook names the covering checks when a guarded file is edited. Pages opened for content checks reach only the application and the identity provider — PlantUML and the remote image host are asserted as emitted addresses, never fetched, and the presentation check asserts that a deck emits no such address at all. See `docs-testing.md`.
@@ -342,7 +342,7 @@ The exam module (`exam/gate.js`) asks the same question the content asks for `@@
 
 ### Image
 
-`Dockerfile` is a single stage on `node:24-alpine`. It copies `site/` (the pipeline-generated `.env` and `keycloak.json`), then `md/`, `assets/`, `middlewares/`, `css/`, `exam/`, the manifests and the root `*.js`/`*.css` files, runs `npm install --omit=dev`, exposes 8080 and starts `npm run prod`.
+`Dockerfile` is a single stage on `node:26-alpine`. It copies `site/` (the pipeline-generated `.env` and `keycloak.json`), then `md/`, `assets/`, `middlewares/`, `css/`, `exam/`, the manifests and the root `*.js`/`*.css` files, runs `npm install --omit=dev`, exposes 8080 and starts `npm run prod`.
 
 ### Pipeline
 
@@ -369,7 +369,7 @@ Recorded as found, without judgment on intent and without changes to the code.
 - ~~**Reveal.js is loaded twice over, from two different major versions.** `package.json` declares `reveal.js ^5.0.5` (locked to 5.2.1), but `wrapInReveal` in `obsidian.js` loads Reveal **3.7.0** — CSS, theme, print stylesheets, `reveal.min.js`, the notes plugin and `headjs` — from `cdn.jsdelivr.net`. The npm package is never referenced. The presentation view therefore depends on an external CDN at runtime and on a major version eight years older than the declared one.~~ **Settled** by the change `bundle-reveal-locally`: the presentation view loads the installed 5.2.1 package through two mounts in `app.js`, the configuration was migrated to the 5.x API (`plugins` instead of `dependencies`, `headjs` and the print-stylesheet injector dropped), and no source file names a version any more.
 - ~~**`cors` is declared but never imported.** No `require`/`import` of it exists anywhere outside `node_modules`.~~ **Settled** by the change `close-initial-repairs`: the declaration is gone from `package.json`. A repository-wide search — `wysiwyg-container-linux/`, `wysiwyg-container-windows/` and `http/` included — found no import of it, so removing it could not change behavior; the application renders its own pages against its own session cookie and has no cross-origin caller.
 - ~~**`safe-learn` lists itself** as `"safe-learn": "file:"` in its own `dependencies`.~~ **Settled** by the change `close-initial-repairs`: the entry is gone, so `npm install` no longer resolves the package into its own `node_modules`.
-- ~~**Node version statements disagree**: `.nvmrc` pins `20`, the `Dockerfile` builds on `node:25.6.0-alpine`.~~ **Settled** by the change `close-initial-repairs`: `.nvmrc` says `24`, the `Dockerfile` builds on `node:24-alpine`, and `package.json` declares `"engines": { "node": ">=24 <25" }`. All three name the line under long-term maintenance rather than a patch, so a rebuild collects that line's security patches instead of holding on the version that was current when the file was written. `docs-building.md` states it where the build is described.
+- ~~**Node version statements disagree**: `.nvmrc` pins `20`, the `Dockerfile` builds on `node:25.6.0-alpine`.~~ **Settled** by the change `close-initial-repairs`: `.nvmrc` says `24`, the `Dockerfile` builds on `node:24-alpine`, and `package.json` declares `"engines": { "node": ">=24 <25" }`. All three name the line under long-term maintenance rather than a patch, so a rebuild collects that line's security patches instead of holding on the version that was current when the file was written. `docs-building.md` states it where the build is described. On 2026-10-22 all three moved together to Node 26, the newest line, a week before it enters long-term support.
 - ~~**Google Fonts is loaded in the presentation view** (`fonts.googleapis.com/css?family=Lato`) while the page view serves all fonts locally from `assets/`.~~ **Settled** by the change `bundle-reveal-locally`: the `<link>` is gone and the theme derivation declares Lato at 300, 400 and 700 over `assets/main-fonts/`, the weights the deck asks for. `test/checks/presentation.js` fails the run on any host a deck contacts other than the application and the identity provider, reading the browser's requests rather than the markup — which is how a stylesheet's `@import` would otherwise stay invisible.
 
 ### Security-relevant observations

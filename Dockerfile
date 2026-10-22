@@ -1,4 +1,4 @@
-FROM node:24-alpine
+FROM node:26-alpine
 
 # Make app directory in the container.
 RUN mkdir /app
