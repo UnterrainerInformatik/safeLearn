@@ -124,6 +124,12 @@ describe("format.js", () => {
     assert.equal(deAT.clock("2026-10-20T08:00:05Z"), "10:00:05");
   });
 
+  test("a day without its year follows the format", () => {
+    assert.equal(deAT.dayMonth("2026-09-27"), "27.09.");
+    assert.equal(enGB.dayMonth("2026-09-27"), "27/09");
+    assert.equal(mixed.dayMonth("2026-09-27"), "27.09.");
+  });
+
   test("the weekday follows the language, the day the format", () => {
     assert.equal(deAT.weekdayDay(tenOClock), "Di. 20.10.");
     assert.equal(enGB.weekdayDay(tenOClock), "Tue 20/10");

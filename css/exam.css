@@ -497,20 +497,37 @@ a.sl-exam-button.sl-exam-open:hover,
   vertical-align: top;
 }
 
-.sl-exam-sheet .sl-exam-column-head input {
+/* A column's header is text: its name, day and maximum on lines of their own,
+   with the details in its tooltip. An editable column's header is a button
+   that looks like that text and opens the column's dialog. */
+.sl-exam-sheet .sl-exam-column-head > span,
+.sl-exam-sheet .sl-exam-column-head > a,
+.sl-exam-column-edit > span {
   display: block;
-  font: inherit;
-  font-size: 0.85em;
-  margin: 1px 0;
 }
 
-.sl-exam-sheet .sl-exam-column-head input[type="text"] {
-  width: 8em;
+.sl-exam-sheet .sl-exam-column-name {
+  display: block;
+  max-width: 10em;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-weight: bold;
 }
 
-.sl-exam-sheet .sl-exam-column-head .sl-exam-number {
-  width: 5em;
+.sl-exam-column-edit {
+  display: block;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sl-exam-column-edit:hover .sl-exam-column-name,
+.sl-exam-column-edit:focus-visible .sl-exam-column-name {
+  text-decoration: underline;
 }
 
 /* Names and labels as they were entered. markdown.css capitalises every table
@@ -533,7 +550,8 @@ a.sl-exam-button.sl-exam-open:hover,
   overflow: visible;
 }
 
-.sl-exam-dialog form {
+.sl-exam-dialog form,
+.sl-exam-dialog .sl-exam-column-form {
   display: flex;
   flex-direction: column;
   gap: 8px;

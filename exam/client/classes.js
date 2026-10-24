@@ -21,6 +21,7 @@ import "./date-input.js";
 export const categoryLabels = {
   onlineTests: t("exam.categories.onlineTests"),
   manualTests: t("exam.categories.manualTests"),
+  shortTests: t("exam.categories.shortTests"),
   participation: t("exam.categories.participation"),
   homework: t("exam.categories.homework"),
 };

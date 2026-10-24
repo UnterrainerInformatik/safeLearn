@@ -38,6 +38,7 @@ function asDate(value) {
 }
 
 const dayMonthYear = { day: "2-digit", month: "2-digit", year: "numeric" };
+const dayMonth = { day: "2-digit", month: "2-digit" };
 const hourMinute = { hour: "2-digit", minute: "2-digit", hourCycle: "h23" };
 
 /**
@@ -134,6 +135,8 @@ export function createFormat(locale, lang = "en") {
     time: (value) => dateFormatter("time", locale, value, hourMinute).format(asDate(value)),
     /** "10:00:05", for the live view's clocks. */
     clock: (value) => dateFormatter("clock", locale, value, { ...hourMinute, second: "2-digit" }).format(asDate(value)),
+    /** "20.10." / "20/10": a day of the current school year, without the year. */
+    dayMonth: (value) => dateFormatter("dayMonth", locale, value, dayMonth).format(asDate(value)),
     /** "Di. 20.10." / "Tue 20/10": the weekday in the language, the day in the format. */
     weekdayDay: (value) => {
       const date = asDate(value);
@@ -142,7 +145,7 @@ export function createFormat(locale, lang = "en") {
       const weekday = dateFormatter("weekday", weekdayLocale, value, { weekday: "short", day: "2-digit", month: "2-digit" })
         .formatToParts(date)
         .find((part) => part.type === "weekday").value;
-      const day = dateFormatter("dayMonth", locale, value, { day: "2-digit", month: "2-digit" }).format(date);
+      const day = dateFormatter("dayMonth", locale, value, dayMonth).format(date);
       return `${weekday} ${day}`;
     },
     /** "Oktober 2026" / "October 2026": a calendar's heading, in the language. */

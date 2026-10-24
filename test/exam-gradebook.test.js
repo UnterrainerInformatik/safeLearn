@@ -75,7 +75,7 @@ const seededScale = [
 ];
 
 const year = { name: "2026/27", startsOn: "2026-09-07", summerStartsOn: "2027-02-15", endsOn: "2027-07-02" };
-const weights = { onlineTests: 40, manualTests: 30, participation: 15, homework: 15 };
+const weights = { onlineTests: 40, manualTests: 30, shortTests: 0, participation: 15, homework: 15 };
 
 const close = (actual, expected, message) =>
   assert.ok(Math.abs(actual - expected) < 1e-9, `${message ?? "the fraction"} is ${actual}, not ${expected}`);
@@ -126,6 +126,17 @@ describe("grading functions", () => {
     const categories = { onlineTests: { fraction: 0.8 }, manualTests: { fraction: 0.7 }, participation: { fraction: 0.9 } };
     const expected = (40 * 0.8 + 30 * 0.7 + 15 * 0.9) / 85;
     assert.ok(Math.abs(weightedMean(categories, weights) - expected) < 1e-12);
+  });
+
+  test("a quiz weighs less than a test: 60 % manual tests and 40 % short tests over 12/24 and 6/6 is 0.7", () => {
+    const entries = [
+      { category: entryCategory.test, value: 12 / 24, date: "2026-11-03" },
+      { category: entryCategory.shorttest, value: 6 / 6, date: "2026-11-10" },
+    ];
+    const quizWeights = { onlineTests: 0, manualTests: 60, shortTests: 40, participation: 0, homework: 0 };
+    const proposed = proposal(entries, { semester: "ws", year, weights: quizWeights, scale: seededScale });
+    assert.deepEqual(Object.keys(proposed.categories).sort(), ["manualTests", "shortTests"]);
+    close(proposed.fraction, 0.7);
   });
 
   test("no category, or only categories that weigh nothing, means no proposal", () => {
@@ -307,6 +318,86 @@ describe("existing entries become columns", () => {
   });
 });
 
+describe("short tests join the categories", () => {
+  test("migrating from schema 9 keeps every id, result and proposal, and gives every course a short-test weight of 0 %", () => {
+    const dbPath = temporaryPath();
+    const db = new DatabaseSync(dbPath);
+    openDatabases.push(db);
+    db.exec("PRAGMA foreign_keys = ON");
+    migrate(db, dbPath, readMigrations().slice(0, 9));
+    db.exec(`
+      INSERT INTO school_year (id, name, starts_on, summer_starts_on, ends_on, is_current) VALUES (1, '2026/27', '2026-09-07', '2027-02-15', '2027-07-02', 1);
+      INSERT INTO class (id, school_year_id, name) VALUES (1, 1, '4bhif');
+      INSERT INTO student (username) VALUES ('anna'), ('ben');
+      INSERT INTO roster_entry (class_id, username, joined_at) VALUES (1, 'anna', 'x'), (1, 'ben', 'x');
+      INSERT INTO course (id, class_id, subject, weights) VALUES
+        (1, 1, 'WMC', '{"onlineTests":40,"manualTests":30,"participation":15,"homework":15}'),
+        (2, 1, 'NVS', '{}'),
+        (3, 1, 'POS', '{"onlineTests":10,"manualTests":40}');
+      INSERT INTO assessment (id, course_id, kind, name, held_on, max_points, created_at) VALUES
+        (3, 1, 'test', '1st test', '2026-11-03', 24, 'x'),
+        (7, 1, 'plusminus', '2026-11-04', '2026-11-04', NULL, 'x'),
+        (8, 2, 'homework', 'Essay', '2027-03-01', NULL, 'x'),
+        (9, 3, 'test', 'Quiz', '2026-12-01', 6, 'x'),
+        (12, 3, 'homework', 'Lab', '2026-12-02', NULL, 'x');
+      INSERT INTO manual_entry (id, assessment_id, username, value, points, created_at, updated_at) VALUES
+        (10, 3, 'anna', 0.75, 18, 'x', 'x'),
+        (11, 3, 'ben', 0.25, 6, 'x', 'x'),
+        (20, 7, 'anna', 1, NULL, 'x', 'x'),
+        (21, 8, 'ben', 0.9, NULL, 'x', 'x'),
+        (30, 9, 'anna', 0.5, 3, 'x', 'x'),
+        (31, 12, 'anna', 1, NULL, 'x', 'x');
+    `);
+    const scale = readScale(db);
+    // Until now a key missing from the stored weights read as 25.
+    const oldDefaults = { onlineTests: 25, manualTests: 25, participation: 25, homework: 25 };
+    const storedWeights = (id) => JSON.parse(db.prepare("SELECT weights FROM course WHERE id = ?").get(id).weights);
+    const before = {};
+    for (const [courseId, username] of [[1, "anna"], [1, "ben"], [2, "ben"], [3, "anna"]]) {
+      const entries = db
+        .prepare("SELECT e.value, a.kind, a.held_on FROM manual_entry e JOIN assessment a ON a.id = e.assessment_id WHERE a.course_id = ? AND e.username = ?")
+        .all(courseId, username)
+        .map((row) => ({ category: entryCategory[row.kind], value: row.value, date: row.held_on }));
+      for (const semester of ["ws", "ss"]) {
+        before[`${courseId}/${username}/${semester}`] = proposal(entries, { semester, year, weights: { ...oldDefaults, ...storedWeights(courseId) }, scale });
+      }
+    }
+    const rows = (sql) => db.prepare(sql).all().map((row) => ({ ...row }));
+    const columnsBefore = rows("SELECT * FROM assessment ORDER BY id");
+    const resultsBefore = rows("SELECT * FROM manual_entry ORDER BY id");
+
+    assert.deepEqual(migrate(db, dbPath), { from: 9, to: readMigrations().length });
+
+    assert.deepEqual(rows("SELECT * FROM assessment ORDER BY id"), columnsBefore, "every column keeps its id and values");
+    assert.deepEqual(rows("SELECT * FROM manual_entry ORDER BY id"), resultsBefore, "every result keeps its id and values");
+    assert.deepEqual(
+      [1, 2, 3].map(storedWeights),
+      [
+        { onlineTests: 40, manualTests: 30, participation: 15, homework: 15, shortTests: 0 },
+        { onlineTests: 25, manualTests: 25, participation: 25, homework: 25, shortTests: 0 },
+        { onlineTests: 10, manualTests: 40, participation: 25, homework: 25, shortTests: 0 },
+      ],
+      "the weights a course read are written down, short tests at 0 %"
+    );
+    for (const [key, proposed] of Object.entries(before)) {
+      const [courseId, username, semester] = key.split("/");
+      const record = studentRecord(db, Number(courseId), username).semesters[semester];
+      assert.deepEqual(record.categories, proposed.categories, `${key}: the categories`);
+      if (semester === "ws") assert.equal(record.proposal?.fraction ?? null, proposed.fraction, `${key}: the proposal`);
+    }
+
+    assert.deepEqual(
+      db.prepare("PRAGMA foreign_key_list(manual_entry)").all().map((key) => key.table).sort(),
+      ["assessment", "student"],
+      "the results reference the new column table"
+    );
+    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+    const indexes = rows("SELECT name FROM sqlite_master WHERE type = 'index' AND name IN ('assessment_course', 'manual_entry_username') ORDER BY name");
+    assert.deepEqual(indexes.map((index) => index.name), ["assessment_course", "manual_entry_username"]);
+    assert.equal(createColumn(db, 1, { kind: "shorttest", name: "Quiz", date: "2026-11-10", maxPoints: 6 }).category, "shortTests", "the new kind is taken");
+  });
+});
+
 describe("columns and their results", () => {
   test("a paper test as a column: points out of its maximum, in the manual-test category", () => {
     const { db, course } = gradebookFixture();
@@ -315,6 +406,23 @@ describe("columns and their results", () => {
     const [entry] = studentRecord(db, course.id, "anna").entries;
     assert.deepEqual([entry.value, entry.points, entry.maxPoints, entry.category, entry.date, entry.name], [17 / 24, 17, 24, "manualTests", "2026-11-03", "1st test"]);
     assert.equal(entry.grade, 3, "17/24 is 70.8 %, a 3");
+  });
+
+  test("a short test as a column: in points or in percent, in the short-test category and not the manual-test one", () => {
+    const { db, course } = gradebookFixture();
+    const quiz = column(db, course, { kind: "shorttest", name: "Quiz 1", date: "2026-11-10", maxPoints: 6 }, [["anna", { points: 5 }]]);
+    assert.deepEqual([quiz.kind, quiz.category, quiz.maxPoints], ["shorttest", "shortTests", 6]);
+    column(db, course, { kind: "shorttest", name: "Quiz 2", date: "2026-11-17" }, [["anna", { percent: 50 }]]);
+    const anna = studentRecord(db, course.id, "anna");
+    assert.deepEqual(
+      anna.entries.map((e) => [e.name, e.category, e.value, e.points, e.maxPoints]),
+      [
+        ["Quiz 1", "shortTests", 5 / 6, 5, 6],
+        ["Quiz 2", "shortTests", 0.5, null, null],
+      ]
+    );
+    assert.deepEqual(Object.keys(anna.semesters.ws.categories), ["shortTests"], "nothing counts as a manual test");
+    close(anna.semesters.ws.categories.shortTests.fraction, (5 / 6 + 0.5) / 2);
   });
 
   test("a column without a name is named by its date; participation takes + or −, a column without a maximum percent", () => {
@@ -433,7 +541,7 @@ describe("proposals, overrides and the course overview", () => {
     column(db, course, { kind: "test", date: "2026-12-01" }, [["anna", { percent: 40 }]]);
     assert.equal(studentRecord(db, course.id, "anna").semesters.ws.proposal.grade, 3, "a new result is reflected at once");
 
-    updateCourse(db, course.id, { weights: { onlineTests: 0, manualTests: 10, participation: 90, homework: 0 } });
+    updateCourse(db, course.id, { weights: { onlineTests: 0, manualTests: 10, shortTests: 0, participation: 90, homework: 0 } });
     assert.equal(studentRecord(db, course.id, "anna").semesters.ws.proposal.grade, 1, "so are new weights");
 
     const set = setSemesterGrade(db, course.id, "anna", "ws", { override: 2, comment: "strong oral exam", commentVisible: false });

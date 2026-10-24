@@ -173,9 +173,10 @@ export function courseColumns(db, courseId, semester = null) {
 }
 
 /**
- * Adds a column to a course: a manual test, a participation round or a
- * homework, with a name, a date inside the school year and, for a test or a
- * homework, optionally a maximum. Without a maximum its results are percent.
+ * Adds a column to a course: a manual test, a short test, a participation
+ * round or a homework, with a name, a date inside the school year and, for a
+ * test, a short test or a homework, optionally a maximum. Without a maximum its
+ * results are percent.
  */
 export function createColumn(db, courseId, input) {
   const course = getCourse(db, courseId);

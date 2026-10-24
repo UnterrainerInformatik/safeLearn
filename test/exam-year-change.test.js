@@ -106,7 +106,7 @@ function filledYear(db) {
   importPool(db, poolXml("de"), poolXml("en"));
   const year = createYear(db, year2026);
   const klass = createClass(db, year.id, { name: "4bhif", students: [{ username: "anna" }, { username: "ben" }] });
-  const course = createCourse(db, klass.id, { subject: "WMC", language: "en", weights: { onlineTests: 40, manualTests: 30, participation: 15, homework: 15 } });
+  const course = createCourse(db, klass.id, { subject: "WMC", language: "en", weights: { onlineTests: 40, manualTests: 30, shortTests: 0, participation: 15, homework: 15 } });
   const column = createColumn(db, course.id, { kind: "test", name: "1st test", date: "2026-11-03", maxPoints: 24 });
   setResult(db, column.id, "anna", { points: 18 });
   setResult(db, column.id, "ben", { points: 6 });
@@ -301,7 +301,7 @@ describe("starting the next year", () => {
     const third = createClass(db, last.id, { name: "3ahif", students: [{ username: "anna", givenName: "Anna" }, { username: "ben" }, { username: "carla" }] });
     removeFromRoster(db, third.id, "carla");
     const fifth = createClass(db, last.id, { name: "5ahif", students: [{ username: "dora" }] });
-    const course = createCourse(db, third.id, { subject: "WMC", language: "en", weights: { onlineTests: 40, manualTests: 30, participation: 15, homework: 15 }, winterShare: 40 });
+    const course = createCourse(db, third.id, { subject: "WMC", language: "en", weights: { onlineTests: 40, manualTests: 30, shortTests: 0, participation: 15, homework: 15 }, winterShare: 40 });
     const column = createColumn(db, course.id, { kind: "test", name: "T", date: "2026-11-03" });
     setResult(db, column.id, "anna", { percent: 70 });
     createTest(db, course.id, { name: "Quiz", questionIds: importedQuestions(db) });

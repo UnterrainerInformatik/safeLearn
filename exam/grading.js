@@ -20,6 +20,7 @@ export const semesters = Object.freeze(["ws", "ss"]);
 /** The category each kind of manual entry counts towards. */
 export const entryCategory = Object.freeze({
   test: "manualTests",
+  shorttest: "shortTests",
   plusminus: "participation",
   homework: "homework",
 });

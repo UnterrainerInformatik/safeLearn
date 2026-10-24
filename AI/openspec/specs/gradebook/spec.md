@@ -44,16 +44,16 @@ A teacher SHALL be able to record, for a student of a course, a manual result of
 
 ### Requirement: The semester proposal is the scale applied to the weighted mean of category fractions
 
-For each student of a course and each semester, the gradebook SHALL compute one fraction per category (online tests, manual tests, participation, homework) as the mean of that category's entries, then the mean of those category fractions weighted by the course's config sheet, and SHALL map the result through the grading scale. A category without entries SHALL be left out and the remaining weights SHALL be renormalized. A student without any entry SHALL have no proposal. The winter-semester proposal SHALL use the entries dated in the winter semester. The summer-semester proposal is the grade for the whole year; how it combines the winter semester's result with the summer semester's own entries is defined by `year-grade` (change `exam-navigation-and-grid`).
+For each student of a course and each semester, the gradebook SHALL compute one fraction per category (online tests, manual tests, short tests, participation, homework) as the mean of that category's entries, then the mean of those category fractions weighted by the course's config sheet, and SHALL map the result through the grading scale. A category without entries SHALL be left out and the remaining weights SHALL be renormalized. A student without any entry SHALL have no proposal. The winter-semester proposal SHALL use the entries dated in the winter semester. The summer-semester proposal is the grade for the whole year; how it combines the winter semester's result with the summer semester's own entries is defined by `year-grade` (change `exam-navigation-and-grid`).
 
 #### Scenario: All categories present
 
-- **WHEN** the weights are 40/30/15/15 and the category fractions are 0.80, 0.70, 0.90, 1.00
+- **WHEN** the weights are 40/30/0/15/15 and the fractions of online tests, manual tests, participation and homework are 0.80, 0.70, 0.90, 1.00
 - **THEN** the weighted mean is 0.815 and the proposal is grade 2
 
 #### Scenario: A category is empty
 
-- **WHEN** the weights are 40/30/15/15 and the student has no homework entry
+- **WHEN** the weights are 40/30/0/15/15 and the student has no short-test and no homework entry
 - **THEN** the proposal is computed from the other three categories with their weights scaled to sum to 100 %
 
 #### Scenario: The proposal follows new entries

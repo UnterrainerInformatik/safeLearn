@@ -97,8 +97,14 @@ export function readableMessage(item, { t, format }) {
  * The gradebook's categories, in the order a config sheet lists them, and the
  * weights a new course starts with until a teacher sets its own.
  */
-export const weightCategories = Object.freeze(["onlineTests", "manualTests", "participation", "homework"]);
-export const defaultWeights = Object.freeze({ onlineTests: 25, manualTests: 25, participation: 25, homework: 25 });
+export const weightCategories = Object.freeze(["onlineTests", "manualTests", "shortTests", "participation", "homework"]);
+export const defaultWeights = Object.freeze({
+  onlineTests: 20,
+  manualTests: 20,
+  shortTests: 20,
+  participation: 20,
+  homework: 20,
+});
 
 export const languages = Object.freeze(["de", "en"]);
 

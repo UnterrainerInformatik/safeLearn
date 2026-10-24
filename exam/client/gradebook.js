@@ -18,18 +18,19 @@ import { viennaLocal } from "./periods.js";
 import { act, displayClass, displayPerson, messageLine } from "./classes.js";
 import { confirmButton, defineExamElement, ExamElement, examApi, format, h, linkButton, markRows, readOnlyFor, saveOnChange, stickyColumns, t } from "./frame.js";
 
-const categories = ["onlineTests", "manualTests", "participation", "homework"];
+const categories = ["onlineTests", "manualTests", "shortTests", "participation", "homework"];
 
 /** The categories by name, in the reader's language. */
 const categoryLabels = {
   onlineTests: t("exam.categories.onlineTests"),
   manualTests: t("exam.categories.manualTests"),
+  shortTests: t("exam.categories.shortTests"),
   participation: t("exam.categories.participation"),
   homework: t("exam.categories.homework"),
 };
 
 /** The kind a category's `+` adds a column of. Online tests have no `+`: their columns are the tests. */
-const addableKinds = { manualTests: "test", participation: "plusminus", homework: "homework" };
+const addableKinds = { manualTests: "test", shortTests: "shorttest", participation: "plusminus", homework: "homework" };
 
 const semesterLabels = { ws: t("exam.gradebook.semester.ws"), ss: t("exam.gradebook.semester.ss") };
 
@@ -110,6 +111,31 @@ function defaultDate(year, semester) {
   if (date < from) return from;
   if (date > to) return to;
   return date;
+}
+
+/** True for a column added without a name, which is named by its ISO date. */
+function namedByDate(column) {
+  return column.name === column.date;
+}
+
+/**
+ * A column's header as lines of text: its name, its day without the year and
+ * its maximum. A column named by its date shows that day once, as its name.
+ */
+function columnLines(column) {
+  const day = format.dayMonth(column.date);
+  return [
+    h("span", { class: "sl-exam-column-name" }, namedByDate(column) ? day : column.name),
+    namedByDate(column) ? null : h("span", {}, day),
+    column.maxPoints === null ? null : h("span", {}, `/${format.number(column.maxPoints)}`),
+  ];
+}
+
+/** A column's details for hovering over its header: name, full date, and maximum or percent. */
+function columnTitle(column) {
+  const scoring =
+    column.kind === "plusminus" ? null : column.maxPoints === null ? t("exam.gradebook.inPercent") : t("exam.gradebook.outOfMax", { max: format.number(column.maxPoints) });
+  return [namedByDate(column) ? null : column.name, displayDate(column.date), scoring].filter(Boolean).join("\n");
 }
 
 function courseTitle(course) {
@@ -221,13 +247,17 @@ class GradebookView extends ExamElement {
     ));
   }
 
-  /** The leading columns, left to right: the year view adds the winter grade it builds on. */
+  /**
+   * The leading columns' headings, left to right, each with its long form for
+   * hovering: the year view adds the winter grade it builds on.
+   */
   leading(semester) {
-    const student = t("exam.gradebook.student");
-    const proposal = t("exam.gradebook.proposal");
-    const override = t("exam.gradebook.teacherOverride");
-    const grade = t("exam.gradebook.actualGrade");
-    return semester === "ss" ? [student, t("exam.gradebook.winter"), proposal, override, grade] : [student, proposal, override, grade];
+    const student = { label: t("exam.gradebook.student") };
+    const proposal = { label: t("exam.gradebook.proposal"), title: t("exam.gradebook.proposalLong") };
+    const override = { label: t("exam.gradebook.teacherOverride"), title: t("exam.gradebook.teacherOverrideLong") };
+    const grade = { label: t("exam.gradebook.actualGrade"), title: t("exam.gradebook.actualGradeLong") };
+    const winter = { label: t("exam.gradebook.winter") };
+    return semester === "ss" ? [student, winter, proposal, override, grade] : [student, proposal, override, grade];
   }
 
   /**
@@ -241,14 +271,14 @@ class GradebookView extends ExamElement {
     const headRow = h(
       "tr",
       {},
-      leading.map((label, index) => h("th", { rowspan: "2", "data-sticky": String(index) }, label)),
+      leading.map(({ label, title }, index) => h("th", { rowspan: "2", "data-sticky": String(index), class: "sl-exam-leading-head", title }, label)),
       groups.map((group) =>
         h(
           "th",
           { colspan: String(Math.max(1, group.columns.length)), class: "sl-exam-category" },
           t("exam.gradebook.categoryWeight", { category: categoryLabels[group.category], weight: course.weights[group.category] }),
           editable && addableKinds[group.category]
-            ? h("button", { type: "button", class: "sl-exam-add", title: t("exam.gradebook.addColumnTo", { category: categoryLabels[group.category] }), "aria-label": t("exam.gradebook.addColumnTo", { category: categoryLabels[group.category] }), onclick: () => this.addColumn(course, semester, group.category) }, "+")
+            ? h("button", { type: "button", class: "sl-exam-add", title: t("exam.gradebook.addColumnTo", { category: categoryLabels[group.category] }), "aria-label": t("exam.gradebook.addColumnTo", { category: categoryLabels[group.category] }), onclick: () => this.columnDialog(course, semester, null, group.category) }, "+")
             : null
         )
       )
@@ -258,8 +288,8 @@ class GradebookView extends ExamElement {
       {},
       groups.map((group) =>
         group.columns.length
-          ? group.columns.map((column) => this.columnHead(course, column, editable))
-          : h("th", { class: "sl-exam-column-head sl-exam-quiet" }, addableKinds[group.category] ? t("exam.gradebook.noColumns") : t("exam.gradebook.noTests"))
+          ? group.columns.map((column) => this.columnHead(course, column, editable, semester))
+          : h("th", { class: "sl-exam-column-head sl-exam-quiet", title: addableKinds[group.category] ? t("exam.gradebook.noColumns") : t("exam.gradebook.noTests") }, "–")
       )
     );
     const ordered = groups.flatMap((group) => group.columns);
@@ -274,83 +304,31 @@ class GradebookView extends ExamElement {
   }
 
   /**
-   * A column's header: its name, date and maximum, editable in place, and its
-   * delete button. An online test's column is the test's: its name links to
-   * the test, and nothing in it is edited or deleted here.
+   * A column's header: its name, its day and its maximum as text, with the
+   * full details on hover. An editable column's header is a button that opens
+   * the column's dialog. An online test's column is the test's: its name links
+   * to the test, and nothing in it is edited or deleted here.
    */
-  columnHead(course, column, editable) {
+  columnHead(course, column, editable, semester) {
+    const head = { class: "sl-exam-column-head", "data-column": String(column.id), title: columnTitle(column) };
     if (column.readOnly) {
-      return h(
-        "th",
-        { class: "sl-exam-column-head sl-exam-column-online", "data-column": String(column.id) },
-        h("a", { href: `/exam/tests/${column.testId}` }, h("strong", {}, column.name)),
-        h("br"),
-        displayDate(column.date),
-        h("br"),
-        `/ ${format.number(column.maxPoints)}`
-      );
+      const [name, ...rest] = columnLines(column);
+      return h("th", { ...head, class: "sl-exam-column-head sl-exam-column-online" }, h("a", { href: `/exam/tests/${column.testId}` }, name), rest);
     }
-    if (!editable) {
-      return h(
-        "th",
-        { class: "sl-exam-column-head" },
-        h("strong", {}, column.name),
-        h("br"),
-        displayDate(column.date),
-        column.maxPoints !== null ? [h("br"), `/ ${format.number(column.maxPoints)}`] : null
-      );
-    }
-    const put = (body) => examApi(`/assessments/${column.id}`, { method: "PUT", body });
-    const name = saveOnChange(h("input", { type: "text", value: column.name, "aria-label": t("exam.gradebook.columnName") }), {
-      save: (value) => put({ name: value }),
-    });
-    // The module's date field: it sends `change` only for a valid new date in
-    // the school year, and marks anything else at itself.
-    const date = saveOnChange(h("sl-date-input", { value: column.date, min: course.year.startsOn, max: course.year.endsOn, "aria-label": t("exam.gradebook.columnDate") }), {
-      check: (value) => (value ? null : t("exam.gradebook.dateMissing")),
-      save: (value) => put({ date: value }),
-      // A new date may move the column, or out of this semester.
-      onSaved: () => this.reload(),
-    });
-    const max =
-      column.kind === "plusminus"
-        ? null
-        : saveOnChange(
-            h("input", {
-              type: "text",
-              inputmode: "decimal",
-              class: "sl-exam-number",
-              value: column.maxPoints === null ? "" : numberText(column.maxPoints),
-              placeholder: t("exam.gradebook.maxPlaceholder"),
-              "aria-label": t("exam.gradebook.maxPoints"),
-            }),
-            {
-              check: (value) => (value.trim() === "" || !Number.isNaN(parseNumber(value)) ? null : t("exam.gradebook.maxRefused")),
-              save: (value) => put({ maxPoints: value.trim() === "" ? null : parseNumber(value) }),
-              // Every result of the column is recomputed.
-              onSaved: () => this.reload(),
-            }
-          );
-    const remove = (event) => {
-      act(event.target, this.line, async () => {
-        await examApi(`/assessments/${column.id}`, { method: "DELETE" });
-        await this.reload();
-      });
-    };
+    if (!editable) return h("th", { ...head, "data-column": null }, columnLines(column));
     return h(
       "th",
-      { class: "sl-exam-column-head", "data-column": String(column.id) },
-      name,
-      date,
-      max,
-      confirmButton({
-        class: "sl-exam-delete",
-        title: t("exam.gradebook.deleteColumn"),
-        "aria-label": t("exam.gradebook.deleteNamedColumn", { name: column.name }),
-        label: "×",
-        armed: column.results > 0 ? t("exam.gradebook.deleteColumnArmed", { count: column.results }) : t("exam.gradebook.deleteEmptyColumnArmed"),
-        action: remove,
-      })
+      head,
+      h(
+        "button",
+        {
+          type: "button",
+          class: "sl-exam-column-edit",
+          "aria-label": t("exam.gradebook.editNamedColumn", { name: column.name }),
+          onclick: () => this.columnDialog(course, semester, column, column.category),
+        },
+        columnLines(column)
+      )
     );
   }
 
@@ -525,43 +503,119 @@ class GradebookView extends ExamElement {
     next.select();
   }
 
-  /** The `+` of a category: a column's name, date and, where the category has one, maximum. */
-  addColumn(course, semester, category) {
-    const kind = addableKinds[category];
+  /**
+   * A column's dialog: its name, date and, where the category has one,
+   * maximum. Opened by the `+` of a category (`column` null), it adds a column
+   * on submit. Opened by a column's header, it saves each field as it changes
+   * and offers to delete the column; closing it after a save reloads the
+   * sheet, since a new date may move the column, or out of this semester, and
+   * a new maximum recomputes its results.
+   */
+  columnDialog(course, semester, column, category) {
+    const kind = column ? column.kind : addableKinds[category];
     const [from, to] = semesterRange(course.year, semester);
     const line = messageLine();
-    const name = h("input", { type: "text", name: "name", placeholder: t("exam.gradebook.namePlaceholder"), "aria-label": t("exam.gradebook.name") });
-    const proposed = defaultDate(course.year, semester);
-    const date = h("sl-date-input", { name: "date", required: true, min: course.year.startsOn, max: course.year.endsOn, value: proposed, "aria-label": t("exam.gradebook.date") });
-    const max = kind === "plusminus" ? null : h("input", { type: "text", name: "maxPoints", inputmode: "decimal", class: "sl-exam-number", placeholder: t("exam.gradebook.percentPlaceholder"), "aria-label": t("exam.gradebook.maxPoints") });
     const dialog = h("dialog", { class: "sl-exam-dialog sl-exam" });
-    const form = h(
-      "form",
-      {
-        onsubmit: (event) => {
-          event.preventDefault();
-          const maxPoints = max && max.value.trim() !== "" ? parseNumber(max.value) : null;
-          if (Number.isNaN(maxPoints)) {
-            line.report(t("exam.gradebook.maxIsPoints"), true);
-            return;
-          }
-          act(form.querySelector("button[type=submit]"), line, async () => {
-            await examApi(`/courses/${course.id}/assessments`, { method: "POST", body: { kind, name: name.value, date: date.value, maxPoints } });
-            dialog.close();
-            await this.reload();
+    let saved = false;
+    // A field whose `change` fires as the dialog closes saves after it.
+    const afterSave = () => {
+      saved = true;
+      if (!dialog.open) this.reload();
+    };
+    const put = (body) => examApi(`/assessments/${column.id}`, { method: "PUT", body });
+
+    const name = h("input", { type: "text", name: "name", value: column?.name ?? "", placeholder: t("exam.gradebook.namePlaceholder"), "aria-label": t("exam.gradebook.name") });
+    const proposed = column ? column.date : defaultDate(course.year, semester);
+    const date = h("sl-date-input", { name: "date", required: true, min: course.year.startsOn, max: course.year.endsOn, value: proposed, "aria-label": t("exam.gradebook.date") });
+    const max =
+      kind === "plusminus"
+        ? null
+        : h("input", {
+            type: "text",
+            name: "maxPoints",
+            inputmode: "decimal",
+            class: "sl-exam-number",
+            value: !column || column.maxPoints === null ? "" : numberText(column.maxPoints),
+            placeholder: t("exam.gradebook.percentPlaceholder"),
+            "aria-label": t("exam.gradebook.maxPoints"),
           });
-        },
-      },
-      h("h3", {}, t("exam.gradebook.newColumn", { category: categoryLabels[category] })),
+    const fields = [
+      h("h3", {}, column ? t("exam.gradebook.editColumn", { category: categoryLabels[category] }) : t("exam.gradebook.newColumn", { category: categoryLabels[category] })),
       h("label", {}, `${t("exam.gradebook.name")} `, name),
       h("label", {}, `${t("exam.gradebook.date")} `, date),
-      proposed < from || proposed > to ? null : h("span", { class: "sl-exam-quiet" }, `${semesterLabels[semester]}: ${displayDate(from)} – ${displayDate(to)}`),
+      column || proposed < from || proposed > to ? null : h("span", { class: "sl-exam-quiet" }, `${semesterLabels[semester]}: ${displayDate(from)} – ${displayDate(to)}`),
       max ? h("label", {}, `${t("exam.gradebook.outOf")} `, max, ` ${t("exam.gradebook.points")}`) : null,
-      h("p", {}, h("button", { type: "submit", class: "sl-exam-primary" }, t("exam.gradebook.addColumn")), " ", h("button", { type: "button", class: "sl-exam-action", onclick: () => dialog.close() }, t("exam.common.cancel"))),
-      line
-    );
-    dialog.append(form);
-    dialog.addEventListener("close", () => dialog.remove());
+    ];
+    const cancel = (label, className) => h("button", { type: "button", class: `sl-exam-action ${className}`, onclick: () => dialog.close() }, label);
+
+    if (column) {
+      saveOnChange(name, { save: (value) => put({ name: value }), onSaved: afterSave });
+      // The module's date field: it sends `change` only for a valid new date in
+      // the school year, and marks anything else at itself.
+      saveOnChange(date, {
+        check: (value) => (value ? null : t("exam.gradebook.dateMissing")),
+        save: (value) => put({ date: value }),
+        onSaved: afterSave,
+      });
+      if (max) {
+        saveOnChange(max, {
+          check: (value) => (value.trim() === "" || !Number.isNaN(parseNumber(value)) ? null : t("exam.gradebook.maxRefused")),
+          save: (value) => put({ maxPoints: value.trim() === "" ? null : parseNumber(value) }),
+          onSaved: afterSave,
+        });
+      }
+      const remove = (event) => {
+        act(event.target, line, async () => {
+          await examApi(`/assessments/${column.id}`, { method: "DELETE" });
+          saved = true;
+          dialog.close();
+        });
+      };
+      dialog.append(
+        h("div", { class: "sl-exam-column-form" }, fields),
+        h("p", { class: "sl-exam-quiet" }, t("exam.classes.savedAsChanged")),
+        h(
+          "p",
+          {},
+          cancel(t("exam.gradebook.close"), "sl-exam-column-close"),
+          " ",
+          confirmButton({
+            class: "sl-exam-delete-column",
+            label: t("exam.gradebook.deleteColumn"),
+            armed: column.results > 0 ? t("exam.gradebook.deleteColumnArmed", { count: column.results }) : t("exam.gradebook.deleteEmptyColumnArmed"),
+            action: remove,
+          })
+        ),
+        line
+      );
+    } else {
+      const form = h(
+        "form",
+        {
+          onsubmit: (event) => {
+            event.preventDefault();
+            const maxPoints = max && max.value.trim() !== "" ? parseNumber(max.value) : null;
+            if (Number.isNaN(maxPoints)) {
+              line.report(t("exam.gradebook.maxIsPoints"), true);
+              return;
+            }
+            act(form.querySelector("button[type=submit]"), line, async () => {
+              await examApi(`/courses/${course.id}/assessments`, { method: "POST", body: { kind, name: name.value, date: date.value, maxPoints } });
+              saved = true;
+              dialog.close();
+            });
+          },
+        },
+        fields,
+        h("p", {}, h("button", { type: "submit", class: "sl-exam-primary" }, t("exam.gradebook.addColumn")), " ", cancel(t("exam.common.cancel"), "sl-exam-column-cancel")),
+        line
+      );
+      dialog.append(form);
+    }
+    dialog.addEventListener("close", () => {
+      dialog.remove();
+      if (saved) this.reload();
+    });
     this.append(dialog);
     dialog.showModal();
     name.focus();

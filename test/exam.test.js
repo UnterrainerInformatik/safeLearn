@@ -369,7 +369,7 @@ describe("classes and courses", () => {
     });
     assert.equal(duplicate.status, 409);
 
-    const weights = { onlineTests: 50, manualTests: 30, participation: 10, homework: 10 };
+    const weights = { onlineTests: 50, manualTests: 30, shortTests: 0, participation: 10, homework: 10 };
     const saved = await fetchAs(teacher, `/exam/api/courses/${created.json.id}`, { method: "PUT", body: { weights } });
     assert.deepEqual(saved.json.weights, weights);
     const wrong = await fetchAs(teacher, `/exam/api/courses/${created.json.id}`, {
@@ -519,6 +519,22 @@ describe("the gradebook", () => {
   /** The selector of a student's field in a column of the sheet. */
   const field = (column, username) => `input.sl-exam-cell[data-assessment="${column.id}"][data-student="${username}"]`;
 
+  /** Opens a column's dialog by choosing its header in the sheet. */
+  async function openColumnDialog(column) {
+    const head = `th[data-column="${column.id}"] button.sl-exam-column-edit`;
+    await teacher.page.waitForSelector(head, { timeout: 20000 });
+    await teacher.page.click(head);
+    await teacher.page.waitForSelector("dialog[open] input[name=name]", { timeout: 5000 });
+  }
+
+  /** A column's header in the sheet: its lines of text and its tooltip. */
+  function columnHeader(column) {
+    return teacher.page.$eval(`th[data-column="${column.id}"]`, (th) => ({
+      lines: [...th.querySelectorAll(".sl-exam-column-edit > span")].map((line) => line.textContent),
+      title: th.title,
+    }));
+  }
+
   /** Replaces a field's value as a teacher would - select it, type, leave it - and waits for the save. */
   async function enter(selector, text) {
     const page = teacher.page;
@@ -568,7 +584,7 @@ describe("the gradebook", () => {
     klass = created.json;
     const gb = await fetchAs(teacher, `/exam/api/classes/${klass.id}/courses`, {
       method: "POST",
-      body: { subject: "GB", language: "de", weights: { onlineTests: 40, manualTests: 30, participation: 15, homework: 15 } },
+      body: { subject: "GB", language: "de", weights: { onlineTests: 40, manualTests: 30, shortTests: 0, participation: 15, homework: 15 } },
     });
     assert.equal(gb.status, 200, JSON.stringify(gb.json));
     course = gb.json;
@@ -741,16 +757,18 @@ describe("the gradebook", () => {
     assert.equal((await heading()).span, 1, "one manual test so far");
     assert.equal(
       await teacher.page.evaluate(() => document.querySelectorAll(".sl-exam-sheet .sl-exam-category button.sl-exam-add").length),
-      3,
-      "a + for manual tests, participation and homework, none for online tests"
+      4,
+      "a + for manual tests, short tests, participation and homework, none for online tests"
     );
     assert.deepEqual(
       await teacher.page.evaluate(() => {
         const cell = [...document.querySelectorAll(".sl-exam-sheet .sl-exam-category")].find((th) => th.textContent.startsWith("Online tests ("));
-        return cell ? [...document.querySelectorAll(".sl-exam-sheet .sl-exam-column-head")].map((th) => th.textContent).filter((text) => text === "no tests yet").length : null;
+        return cell
+          ? [...document.querySelectorAll(".sl-exam-sheet .sl-exam-column-head")].filter((th) => th.textContent === "–" && th.title === "no tests yet").length
+          : null;
       }),
       1,
-      "online tests keep their heading with the weight before any test is written"
+      "online tests keep their heading with the weight before any test is written, in a narrow placeholder"
     );
 
     await teacher.page.click('button.sl-exam-add[aria-label="Add a column to Manual tests"]');
@@ -759,7 +777,7 @@ describe("the gradebook", () => {
     await teacher.page.type("dialog[open] input[name=maxPoints]", "20");
     await teacher.page.click("dialog[open] button[type=submit]");
     await teacher.page.waitForFunction(
-      () => [...document.querySelectorAll(".sl-exam-column-head input[type=text]")].some((input) => input.value === "2nd test"),
+      () => [...document.querySelectorAll(".sl-exam-column-edit .sl-exam-column-name")].some((name) => name.textContent === "2nd test"),
       { timeout: 10000 }
     );
     assert.equal((await heading()).span, 2, "the heading spans both manual tests");
@@ -771,7 +789,7 @@ describe("the gradebook", () => {
     assert.deepEqual(columns.map((c) => c.category), ["manualTests", "manualTests", "participation", "homework"], "grouped by category in the config sheet's order");
   });
 
-  test("the sheet: deleting a column asks by a second click on its ×, never by a browser dialog", async () => {
+  test("the sheet: deleting a column from its dialog asks by a second click, never by a browser dialog", async () => {
     const column = await addColumn({ kind: "test", name: "To be deleted", date: year.startsOn, maxPoints: 10 });
     assert.equal((await putResult(column, other, { points: 5 })).status, 200);
     const dialogs = [];
@@ -782,8 +800,9 @@ describe("the gradebook", () => {
     teacher.page.on("dialog", onDialog);
     try {
       await openSheet();
-      const button = `th[data-column="${column.id}"] .sl-exam-delete`;
-      await teacher.page.waitForSelector(button, { timeout: 20000 });
+      await openColumnDialog(column);
+      const button = "dialog[open] .sl-exam-delete-column";
+      assert.equal(await teacher.page.$eval(button, (b) => b.textContent), "Delete this column");
       await teacher.page.click(button);
       assert.equal(await teacher.page.$eval(button, (b) => b.textContent), "Click again to delete it and its 1 result");
       const exists = async () => (await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=ws`)).json.columns.some((c) => c.id === column.id);
@@ -939,12 +958,22 @@ describe("the gradebook", () => {
 
     await openSheet("ss");
     const seen = await teacher.page.evaluate((who) => ({
-      leading: [...document.querySelectorAll(".sl-exam-sheet thead th[data-sticky]")].map((th) => th.textContent),
+      leading: [...document.querySelectorAll(".sl-exam-sheet thead th[data-sticky]")].map((th) => [th.textContent, th.title]),
       winter: document.querySelector(`tr[data-student="${who}"] .sl-exam-winter`).textContent,
       proposal: document.querySelector(`tr[data-student="${who}"] .sl-exam-proposal`).textContent,
-      columns: [...document.querySelectorAll('.sl-exam-column-head input[aria-label="Column name"]')].map((input) => input.value),
+      columns: [...document.querySelectorAll(".sl-exam-column-edit .sl-exam-column-name")].map((name) => name.textContent),
     }), username);
-    assert.deepEqual(seen.leading, ["Student", "Winter", "Calculated proposal", "Teacher override", "Actual grade"]);
+    assert.deepEqual(
+      seen.leading,
+      [
+        ["Student", ""],
+        ["Winter", ""],
+        ["Proposal", "Calculated proposal"],
+        ["Override", "Teacher override"],
+        ["Grade", "Actual grade"],
+      ],
+      "short headings, with their long form on hover"
+    );
     assert.equal(seen.winter, "1 (override)");
     assert.ok(seen.proposal.startsWith("2 ("), seen.proposal);
     assert.deepEqual(seen.columns, ["summer test"], "the summer semester's columns only");
@@ -956,7 +985,7 @@ describe("the gradebook", () => {
   });
 
   test("the config sheet saves its weights as they change, only while they add up to 100 %", async () => {
-    const original = { onlineTests: 40, manualTests: 30, participation: 15, homework: 15 };
+    const original = { onlineTests: 40, manualTests: 30, shortTests: 0, participation: 15, homework: 15 };
     await teacher.page.goto(`${applicationUrl}/exam/courses/${course.id}`, { waitUntil: "domcontentloaded" });
     await teacher.page.waitForSelector(".sl-exam-config input");
     const setWeight = async (label, value) => {
@@ -976,6 +1005,104 @@ describe("the gradebook", () => {
       assert.deepEqual(await stored(), { ...original, manualTests: 40, participation: 5 }, "saved once they are back at 100 %");
     } finally {
       await fetchAs(teacher, `/exam/api/courses/${course.id}`, { method: "PUT", body: { weights: original } });
+    }
+  });
+
+  test("the sheet: a column's header is text, with its full date and maximum on hover, and a round named by its date shows it once", async () => {
+    const date = year.startsOn;
+    const [y, m, d] = date.split("-");
+    const quiz = await addColumn({ kind: "test", name: "Header check", date, maxPoints: 24 });
+    const round = await addColumn({ kind: "plusminus", date });
+    const percent = await addColumn({ kind: "homework", name: "In percent", date });
+    await setPreferences(teacher, { lang: "en", loc: "en-GB" });
+    try {
+      await openSheet();
+      assert.deepEqual(await columnHeader(quiz), { lines: ["Header check", `${d}/${m}`, "/24"], title: `Header check\n${d}/${m}/${y}\nout of 24 points` });
+      assert.deepEqual(await columnHeader(round), { lines: [`${d}/${m}`], title: `${d}/${m}/${y}` }, "the date once, not the ISO name above it");
+      assert.deepEqual(await columnHeader(percent), { lines: ["In percent", `${d}/${m}`], title: `In percent\n${d}/${m}/${y}\nin percent` });
+      assert.equal(
+        await teacher.page.$eval(`th[data-column="${quiz.id}"]`, (th) => th.querySelectorAll("input, sl-date-input").length),
+        0,
+        "no field in a header"
+      );
+    } finally {
+      await setPreferences(teacher, {});
+      for (const column of [quiz, round, percent]) await fetchAs(teacher, `/exam/api/assessments/${column.id}`, { method: "DELETE" });
+    }
+  });
+
+  test("the sheet: a column's dialog renames it and changes its maximum as they change, and refuses a maximum below a result", async () => {
+    const column = await addColumn({ kind: "test", name: "Rename me", date: year.startsOn, maxPoints: 24 });
+    assert.equal((await putResult(column, other, { points: 20 })).status, 200);
+    const stored = async () => (await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=ws`)).json.columns.find((c) => c.id === column.id);
+    const page = teacher.page;
+    /** Replaces the text of the dialog's field `name`, leaves it and waits for its save. */
+    const retype = async (name, text) => {
+      const selector = `dialog[open] input[name=${name}]`;
+      await page.focus(selector);
+      await page.evaluate((s) => document.querySelector(s).select(), selector);
+      await page.keyboard.type(text);
+      await page.keyboard.press("Tab");
+      await settled(selector);
+      return page.$eval(selector, (input) => ({ saved: input.classList.contains("is-saved"), refused: input.classList.contains("is-refused"), reason: input.title }));
+    };
+    try {
+      await openSheet();
+      await openColumnDialog(column);
+      assert.equal(await page.$eval("dialog[open] input[name=maxPoints]", (input) => input.value), "24");
+
+      assert.equal((await retype("name", "Rename me (group A)")).saved, true, "the name is saved as it changes");
+      assert.equal((await stored()).name, "Rename me (group A)");
+
+      const refused = await retype("maxPoints", "18");
+      assert.equal(refused.refused, true, "a maximum below a result is refused at the field");
+      assert.match(refused.reason, /20/, `with the reason: ${refused.reason}`);
+      assert.equal((await stored()).maxPoints, 24, "and the column keeps its maximum");
+
+      assert.equal((await retype("maxPoints", "30")).saved, true);
+      assert.equal((await stored()).maxPoints, 30);
+      assert.deepEqual((await overviewRow(other)).results[column.id], { value: 20 / 30, points: 20 }, "the result follows the new maximum");
+
+      await page.click("dialog[open] .sl-exam-column-close");
+      await page.waitForFunction(
+        (id) => document.querySelector(`th[data-column="${id}"] .sl-exam-column-name`)?.textContent === "Rename me (group A)",
+        { timeout: 10000 },
+        column.id
+      );
+      assert.equal(await page.$("dialog[open]"), null, "the dialog is closed");
+      assert.deepEqual((await columnHeader(column)).lines.at(-1), "/30", "the sheet shows the new maximum");
+    } finally {
+      await fetchAs(teacher, `/exam/api/assessments/${column.id}`, { method: "DELETE" });
+    }
+  });
+
+  test("the sheet: a short test is added through its own +, stands between manual tests and participation, and counts in its category", async () => {
+    const page = teacher.page;
+    let quiz;
+    try {
+      await openSheet();
+      await page.click('button.sl-exam-add[aria-label="Add a column to Short tests"]');
+      await page.waitForSelector("dialog[open] input[name=name]");
+      assert.equal(await page.$eval("dialog[open] h3", (h3) => h3.textContent), "New column: Short tests");
+      await page.type("dialog[open] input[name=name]", "Quiz 1");
+      await page.type("dialog[open] input[name=maxPoints]", "6");
+      await page.click("dialog[open] button[type=submit]");
+      await page.waitForFunction(
+        () => [...document.querySelectorAll(".sl-exam-column-edit .sl-exam-column-name")].some((name) => name.textContent === "Quiz 1"),
+        { timeout: 10000 }
+      );
+      quiz = (await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=ws`)).json.columns.find((c) => c.name === "Quiz 1");
+      assert.deepEqual([quiz.kind, quiz.category, quiz.maxPoints], ["shorttest", "shortTests", 6]);
+
+      const order = await page.evaluate(() => [...document.querySelectorAll(".sl-exam-sheet .sl-exam-category")].map((th) => th.textContent.replace(/ \(.*$/, "")));
+      assert.deepEqual(order.slice(0, 5), ["Online tests", "Manual tests", "Short tests", "Participation", "Homework"], "the config sheet's order");
+
+      await enter(field(quiz, other), "5");
+      const row = await overviewRow(other);
+      assert.deepEqual(row.results[quiz.id], { value: 5 / 6, points: 5 });
+      assert.equal(row.categories.shortTests.fraction, 5 / 6, "in the short-test category");
+    } finally {
+      if (quiz) await fetchAs(teacher, `/exam/api/assessments/${quiz.id}`, { method: "DELETE" });
     }
   });
 });
@@ -1915,8 +2042,8 @@ describe("online tests: writing", () => {
       fields: td.querySelectorAll("input, select, textarea").length,
     }));
     assert.deepEqual(cell, { text: "2/2", fields: 0 }, "shown, and nothing to type into");
-    const head = await teacher.page.$eval(`th[data-column="${column.id}"]`, (th) => ({ link: th.querySelector("a")?.getAttribute("href"), delete: Boolean(th.querySelector(".sl-exam-delete")) }));
-    assert.deepEqual(head, { link: `/exam/tests/${written.id}`, delete: false });
+    const head = await teacher.page.$eval(`th[data-column="${column.id}"]`, (th) => ({ link: th.querySelector("a")?.getAttribute("href"), edit: Boolean(th.querySelector("button")) }));
+    assert.deepEqual(head, { link: `/exam/tests/${written.id}`, edit: false }, "it links to the test, and nothing in it opens a dialog");
 
     // The arrow keys pass over the online columns: they are the sheet's first,
     // so left from the first manual field stays there, and right goes on.
@@ -4672,12 +4799,25 @@ describe("the interface in the reader's language and format", () => {
     await teacher.page.waitForSelector(".sl-exam-sheet", { timeout: 20000 });
   }
 
-  /** The column's date field in the sheet: its value and what its text field shows. */
+  /** The column's date field in its open dialog: its value and what its text field shows. */
   const columnDate = () =>
-    teacher.page.$eval(`.sl-exam-column-head[data-column="${column.id}"] sl-date-input`, (field) => ({
+    teacher.page.$eval("dialog[open] sl-date-input", (field) => ({
       value: field.value,
       shown: field.querySelector(".sl-date-input-text").value,
     }));
+
+  /** The column's header in the sheet: its lines of text and its tooltip. */
+  const columnHeader = () =>
+    teacher.page.$eval(`th[data-column="${column.id}"]`, (th) => ({
+      lines: [...th.querySelectorAll(".sl-exam-column-edit > span")].map((line) => line.textContent),
+      title: th.title,
+    }));
+
+  /** Opens the column's dialog from its header. */
+  async function openColumnDialog() {
+    await teacher.page.click(`th[data-column="${column.id}"] button.sl-exam-column-edit`);
+    await teacher.page.waitForSelector("dialog[open] sl-date-input", { timeout: 5000 });
+  }
 
   /** Focuses the text field at `selector` with its whole text selected, so typing replaces it. */
   async function replaceText(selector) {
@@ -4759,10 +4899,14 @@ describe("the interface in the reader's language and format", () => {
     await openGradebook();
     assert.equal(await teacher.page.evaluate(() => document.documentElement.lang), "en");
     assert.equal(await teacher.page.$eval(".sl-exam-bar-page[data-page='tests']", (a) => a.textContent.trim()), "Online tests");
+    assert.deepEqual(await columnHeader(), { lines: ["Language check", "20.10.", "/10"], title: "Language check\n20.10.2026\nout of 10 points" });
+    await openColumnDialog();
     assert.deepEqual(await columnDate(), { value: "2026-10-20", shown: "20.10.2026" });
 
     await setPreferences(teacher, { loc: "en-GB" });
     await openGradebook();
+    assert.deepEqual(await columnHeader(), { lines: ["Language check", "20/10", "/10"], title: "Language check\n20/10/2026\nout of 10 points" });
+    await openColumnDialog();
     assert.deepEqual(await columnDate(), { value: "2026-10-20", shown: "20/10/2026" });
     assert.deepEqual(
       await teacher.page.$$eval(".sl-menu-choice [aria-pressed='true']", (buttons) => buttons.map((button) => button.textContent.trim())),
@@ -4773,15 +4917,15 @@ describe("the interface in the reader's language and format", () => {
   test("a date is entered by typing, by the keyboard in the calendar, and an unreadable one is refused at the field", async () => {
     await setPreferences(teacher, { lang: "en", loc: "de-AT" });
     await openGradebook();
-    const field = `.sl-exam-column-head[data-column="${column.id}"] sl-date-input`;
+    await openColumnDialog();
+    const field = "dialog[open] sl-date-input";
     const typed = `${field} .sl-date-input-text`;
 
     await replaceText(typed);
     await teacher.page.keyboard.type("21.10.2026");
     await teacher.page.keyboard.press("Tab");
     await waitFor(() => storedDate() === "2026-10-21", "the typed date is saved");
-    // A new date redraws the sheet; the field is found anew once it shows it.
-    await waitFor(async () => (await columnDate().catch(() => null))?.shown === "21.10.2026", "the sheet shows the saved date");
+    await waitFor(async () => (await columnDate().catch(() => null))?.shown === "21.10.2026", "the dialog shows the saved date");
 
     await teacher.page.focus(`${field} .sl-date-input-toggle`);
     await teacher.page.keyboard.press("Enter");
@@ -4796,7 +4940,7 @@ describe("the interface in the reader's language and format", () => {
     assert.equal(await teacher.page.evaluate(() => document.activeElement?.dataset.day), "2026-10-29", "a day right, a week down");
     await teacher.page.keyboard.press("Enter");
     await waitFor(() => storedDate() === "2026-10-29", "Enter takes the focused day and it is saved");
-    await waitFor(async () => (await columnDate().catch(() => null))?.shown === "29.10.2026", "the sheet shows the picked date");
+    await waitFor(async () => (await columnDate().catch(() => null))?.shown === "29.10.2026", "the dialog shows the picked date");
 
     await replaceText(typed);
     await teacher.page.keyboard.type("32.10.2026");
@@ -4811,6 +4955,10 @@ describe("the interface in the reader's language and format", () => {
     assert.match(refused.message, /20\.10\.2026/, "the reason beside the field shows the format");
     await new Promise((resolve) => setTimeout(resolve, 500));
     assert.equal(storedDate(), "2026-10-29", "nothing is saved");
+
+    // Closing the dialog after a save draws the sheet anew, with the saved date.
+    await teacher.page.click("dialog[open] .sl-exam-column-close");
+    await waitFor(async () => (await columnHeader().catch(() => null))?.lines[1] === "29.10.", "the header shows the saved date");
 
     // Back to the column's own date, for anything after this.
     await fetchAs(teacher, `/exam/api/assessments/${column.id}`, { method: "PUT", body: { date: "2026-10-20" } });
