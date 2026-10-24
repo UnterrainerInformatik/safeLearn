@@ -39,6 +39,25 @@ export function displayPerson(person) {
   return name || person.username;
 }
 
+/**
+ * What marks a course's Matura candidate (`exam-participant-role`): the class
+ * that colours the cell or the name, and `text` on hover. `candidateNote`
+ * says the same to assistive technology, so the colour is never the only
+ * carrier.
+ */
+export function candidateMark(text = t("exam.participant.candidate")) {
+  return { class: "sl-exam-participant", title: text };
+}
+
+export function candidateNote(text = t("exam.participant.candidate")) {
+  return h("span", { class: "sl-exam-visually-hidden" }, ` (${text})`);
+}
+
+/** A person's name as `displayPerson` writes it, coloured and labelled when they are a candidate. */
+export function personName(person, candidate = person?.examParticipant === true) {
+  return candidate ? h("span", candidateMark(), displayPerson(person), candidateNote()) : displayPerson(person);
+}
+
 export function displayDate(iso) {
   return iso ? format.date(iso) : "";
 }
@@ -139,7 +158,7 @@ function conventionalTable(table) {
 }
 
 /** What the directory's state means for the teacher, or null when it is ready. */
-function directoryNotice(state) {
+export function directoryNotice(state) {
   if (state === "unavailable") {
     return t("exam.classes.directoryUnavailable");
   }
@@ -593,12 +612,19 @@ class ClassView extends ExamElement {
         }
         await this.reload();
       });
+    // A Matura candidate of any of the class's courses, with those subjects on hover.
+    const subjects = new Map(klass.courses.map((course) => [course.subject.toLowerCase(), course.subject]));
+    const nameCell = (entry) => {
+      if (!entry.examParticipantIn?.length) return h("td", {}, displayPerson(entry));
+      const text = t("exam.participant.candidateIn", { subjects: entry.examParticipantIn.map((subject) => subjects.get(subject) ?? subject).join(", ") });
+      return h("td", candidateMark(text), displayPerson(entry), candidateNote(text));
+    };
     const rows = (entries, removable) =>
       entries.map((entry) =>
         h(
           "tr",
           { class: entry.leftAt ? "sl-exam-left" : null },
-          h("td", {}, displayPerson(entry)),
+          nameCell(entry),
           h("td", {}, entry.username),
           h("td", {}, entry.leftAt ? t("exam.classes.leftOn", { date: displayDate(entry.leftAt) }) : t("exam.classes.since", { date: displayDate(entry.joinedAt) })),
           h("td", {}, removable

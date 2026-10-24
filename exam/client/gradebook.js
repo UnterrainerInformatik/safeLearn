@@ -15,7 +15,7 @@
 
 import { parseNumber as parseTyped } from "../../i18n/format.js";
 import { viennaLocal } from "./periods.js";
-import { act, displayClass, displayPerson, messageLine } from "./classes.js";
+import { act, candidateNote, directoryNotice, displayClass, displayPerson, messageLine, personName } from "./classes.js";
 import { confirmButton, defineExamElement, ExamElement, examApi, format, h, linkButton, markRows, readOnlyFor, saveOnChange, stickyColumns, t } from "./frame.js";
 
 const categories = ["onlineTests", "manualTests", "shortTests", "participation", "homework"];
@@ -250,23 +250,28 @@ class GradebookView extends ExamElement {
    * The leading columns' headings, left to right, each with its long form for
    * hovering: the year view adds the winter grade it builds on.
    */
-  leading(semester) {
+  leading(semester, toggle) {
     const student = { label: t("exam.gradebook.student") };
+    const candidate = { label: t("exam.participant.column"), title: t("exam.participant.columnLong") };
     const proposal = { label: t("exam.gradebook.proposal"), title: t("exam.gradebook.proposalLong") };
     const override = { label: t("exam.gradebook.teacherOverride"), title: t("exam.gradebook.teacherOverrideLong") };
     const grade = { label: t("exam.gradebook.actualGrade"), title: t("exam.gradebook.actualGradeLong") };
     const winter = { label: t("exam.gradebook.winter") };
-    return semester === "ss" ? [student, winter, proposal, override, grade] : [student, proposal, override, grade];
+    const names = toggle ? [student, candidate] : [student];
+    return semester === "ss" ? [...names, winter, proposal, override, grade] : [...names, proposal, override, grade];
   }
 
   /**
    * The sheet: the leading columns, then the categories as headings spanning
    * their columns, each column's name, date and maximum below, and a field
    * per student and column. `editable` is false for those who left the roster.
+   * An editable sheet has the Matura toggle beside the name, unless this
+   * instance has no directory to write to (`exam-participant-role`).
    */
   sheet(overview, groups, rows, editable) {
     const { course, semester } = overview;
-    const leading = this.leading(semester);
+    const toggle = editable && overview.participants?.state !== undefined && overview.participants.state !== "unavailable";
+    const leading = this.leading(semester, toggle);
     const headRow = h(
       "tr",
       {},
@@ -295,7 +300,7 @@ class GradebookView extends ExamElement {
     const body = h(
       "tbody",
       {},
-      rows.map((row, rowIndex) => this.studentRow(overview, groups, ordered, row, rowIndex, editable))
+      rows.map((row, rowIndex) => this.studentRow(overview, groups, ordered, row, rowIndex, editable, toggle))
     );
     const table = h("table", { class: "sl-exam-table sl-exam-sheet sl-exam-gradebook", "data-columns": String(ordered.length) }, h("thead", {}, headRow, columnRow), body);
     if (editable) table.addEventListener("keydown", (event) => this.arrowKey(table, event));
@@ -337,7 +342,7 @@ class GradebookView extends ExamElement {
   }
 
   /** One student's row: the leading cells, then one field per column. */
-  studentRow(overview, groups, ordered, row, rowIndex, editable) {
+  studentRow(overview, groups, ordered, row, rowIndex, editable, toggle) {
     const { course, semester } = overview;
     const proposalCell = h("td", { class: "sl-exam-proposal" });
     const winterCell = semester === "ss" ? h("td", { class: "sl-exam-winter" }) : null;
@@ -371,8 +376,19 @@ class GradebookView extends ExamElement {
       overrideCell = h("td", { title: row.comment ?? "" }, row.override === null ? "" : String(row.override), row.comment ? [" ", this.commentToggle(row)] : "");
     }
 
+    const nameCell = h("td", {}, h("a", { href: `/exam/courses/${course.id}/students/${encodeURIComponent(row.username)}?semester=${semester}` }, displayPerson(row)));
+    const markName = (held) => {
+      nameCell.classList.toggle("sl-exam-participant", held);
+      if (held) nameCell.title = t("exam.participant.candidate");
+      else nameCell.removeAttribute("title");
+      nameCell.querySelector(".sl-exam-visually-hidden")?.remove();
+      if (held) nameCell.firstChild.append(candidateNote());
+    };
+    markName(row.examParticipant === true);
+
     const leadingCells = [
-      h("td", {}, h("a", { href: `/exam/courses/${course.id}/students/${encodeURIComponent(row.username)}?semester=${semester}` }, displayPerson(row))),
+      nameCell,
+      toggle ? h("td", { class: "sl-exam-participant-cell" }, this.participantToggle(overview, row, markName)) : null,
       winterCell,
       proposalCell,
       overrideCell,
@@ -386,6 +402,37 @@ class GradebookView extends ExamElement {
         : h("td", {})
     );
     return h("tr", { class: row.leftAt ? "sl-exam-left" : null, "data-student": row.username }, leadingCells, fieldCells);
+  }
+
+  /**
+   * The Matura toggle of one student: grants or withdraws the course's role
+   * (`exam-participant-role`). It keeps showing what Keycloak holds - a refused
+   * change leaves it as it was and says why beside the sheet. Disabled while
+   * the directory holds nothing yet, with the reason on hover.
+   */
+  participantToggle(overview, row, markName) {
+    const waiting = overview.participants.state === "ready" ? null : directoryNotice(overview.participants.state);
+    const toggle = h(
+      "button",
+      {
+        type: "button",
+        class: "sl-exam-action sl-exam-participant-toggle",
+        "aria-pressed": String(row.examParticipant === true),
+        "aria-label": t("exam.participant.toggleFor", { person: displayPerson(row) }),
+        title: waiting ?? t("exam.participant.toggleFor", { person: displayPerson(row) }),
+        disabled: waiting !== null,
+        "data-student": row.username,
+        onClick: () =>
+          act(toggle, this.line, async () => {
+            const held = toggle.getAttribute("aria-pressed") !== "true";
+            const answer = await examApi(`/courses/${overview.course.id}/participants/${encodeURIComponent(row.username)}`, { method: "PUT", body: { held } });
+            toggle.setAttribute("aria-pressed", String(answer.held));
+            markName(answer.held);
+          }),
+      },
+      "M"
+    );
+    return toggle;
   }
 
   /**
@@ -636,7 +683,12 @@ class GradebookStudent extends ExamElement {
   render(record) {
     const { course, student } = record;
     const heading = document.querySelector("#markdown-content h1");
-    if (heading) heading.textContent = `${displayPerson(student)} – ${courseTitle(course)}`;
+    if (heading) {
+      heading.textContent = `${displayPerson(student)} – ${courseTitle(course)}`;
+      // A Matura candidate's name stands out here too (`exam-participant-role`).
+      heading.classList.toggle("sl-exam-participant", student.examParticipant === true);
+      if (student.examParticipant) heading.append(candidateNote());
+    }
     return readOnlyFor(course.year, h(
       "div",
       { class: "sl-exam" },
@@ -658,9 +710,9 @@ class GradebookStudent extends ExamElement {
     return h(
       "p",
       { class: "sl-exam-actions sl-exam-student-neighbours" },
-      previous ? linkButton({ label: `← ${displayPerson(previous)}`, href: studentAddress(previous), class: "sl-exam-student-previous", title: t("exam.gradebook.previousStudent") }) : null,
+      previous ? linkButton({ label: ["← ", personName(previous)], href: studentAddress(previous), class: "sl-exam-student-previous", title: t("exam.gradebook.previousStudent") }) : null,
       linkButton({ label: t("exam.gradebook.backToSheet"), href: `/exam/courses/${course.id}/gradebook${query}`, class: "sl-exam-student-back" }),
-      next ? linkButton({ label: `${displayPerson(next)} →`, href: studentAddress(next), class: "sl-exam-student-next", title: t("exam.gradebook.nextStudent") }) : null
+      next ? linkButton({ label: [personName(next), " →"], href: studentAddress(next), class: "sl-exam-student-next", title: t("exam.gradebook.nextStudent") }) : null
     );
   }
 

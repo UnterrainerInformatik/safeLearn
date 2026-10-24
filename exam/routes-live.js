@@ -14,6 +14,7 @@
 
 import { getSitting } from "./tests.js";
 import { listen, liveParticipant, liveSnapshot } from "./live.js";
+import { flagParticipant, participantHolders } from "./participants.js";
 import { NotFoundError } from "./classes.js";
 import { requireTeacher, sessionNow, teacherPage } from "./gate.js";
 import { teacherShell } from "./bar.js";
@@ -34,12 +35,19 @@ function idParam(value) {
 
 const heartbeatMs = 25000;
 
+/** A snapshot with the course's Matura candidates marked (exam-participant-role D5). */
+function markedSnapshot(db, sittingId, at) {
+  const snapshot = liveSnapshot(db, sittingId, at);
+  const holders = participantHolders(snapshot.course.subject);
+  return { ...snapshot, participants: snapshot.participants.map((participant) => flagParticipant(participant, holders)) };
+}
+
 export function registerLiveRoutes(router, { db, handle, startPage }) {
   router.get(
     "/api/sittings/:id/live",
     requireTeacher,
     handle(async (req, res) => {
-      res.json(liveSnapshot(db, idParam(req.params.id)));
+      res.json(markedSnapshot(db, idParam(req.params.id)));
     })
   );
 
@@ -48,7 +56,7 @@ export function registerLiveRoutes(router, { db, handle, startPage }) {
     requireTeacher,
     handle(async (req, res) => {
       const sittingId = idParam(req.params.id);
-      const snapshot = liveSnapshot(db, sittingId);
+      const snapshot = markedSnapshot(db, sittingId);
       let stop = () => {};
       let heartbeat = null;
       const stream = openEventStream(req, res, {
@@ -83,12 +91,16 @@ export function registerLiveRoutes(router, { db, handle, startPage }) {
       stop = listen(sittingId, (event) =>
         checked(() => {
           const at = new Date().toISOString();
+          const snapshot = liveSnapshot(db, sittingId, at);
           stream.send("change", {
             type: event.type,
             serverTime: at,
-            sitting: liveSnapshot(db, sittingId, at).sitting,
+            sitting: snapshot.sitting,
             // A change of the window itself (ended, extended) concerns no one participant.
-            participant: event.username === null ? null : liveParticipant(db, sittingId, event.username, at),
+            participant:
+              event.username === null
+                ? null
+                : flagParticipant(liveParticipant(db, sittingId, event.username, at), participantHolders(snapshot.course.subject)),
           });
         })
       );

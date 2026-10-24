@@ -27,7 +27,7 @@
  */
 
 import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, linkButton, t } from "./frame.js";
-import { displayClass, displayPerson } from "./classes.js";
+import { candidateMark, candidateNote, displayClass, displayPerson } from "./classes.js";
 import { displayWindow } from "./tests.js";
 
 const stateLabels = {
@@ -110,34 +110,11 @@ const streamRetryMs = 60000;
 const resortMs = 10000;
 
 /**
- * How the participants are ordered: by name as the server sends them; by
- * status, not started first and submitted last; by the share in focus,
- * lowest first; or by the net time out of focus, longest first. Those not
- * started come last in both focus orders. Ties keep the order by name.
+ * The participants are always ordered the same way: by status, not started
+ * first and submitted last; within a status by the net time out of focus,
+ * longest first; and then by name, as the server sends them.
  */
 const statusRank = { "not started": 0, writing: 1, submitted: 2 };
-const sortKeys = {
-  name: () => 0,
-  status: (participant) => statusRank[participant.status],
-  share: (participant, figures) => (figures ? figures.share : Infinity),
-  away: (participant, figures) => (figures ? -figures.awayMs : Infinity),
-};
-const sortLabels = {
-  name: () => t("exam.live.sortName"),
-  status: () => t("exam.live.sortStatus"),
-  share: () => t("exam.live.sortShare"),
-  away: () => t("exam.live.sortAway"),
-};
-const sortStorageKey = "sl-exam-live-sort";
-
-function storedSort() {
-  try {
-    const value = localStorage.getItem(sortStorageKey);
-    return value in sortKeys ? value : "name";
-  } catch {
-    return "name";
-  }
-}
 
 class LiveView extends ExamElement {
   disconnectedCallback() {
@@ -172,7 +149,6 @@ class LiveView extends ExamElement {
       if (this.sortHeld && event.target.closest?.("button")) setTimeout(() => this.sort());
     });
     this.summary = h("p", { class: "sl-exam-live-summary" });
-    this.sortBy = storedSort();
     this.draw(snapshot);
     if (this.params.screen === "1") this.pollOnly();
     else if (!this.streaming) this.connect();
@@ -206,7 +182,7 @@ class LiveView extends ExamElement {
       "div",
       { class: "sl-exam sl-exam-live" },
       head,
-      h("div", { class: "sl-exam-live-summary-line" }, this.summary, this.sortControl()),
+      this.summary,
       h(
         "table",
         { class: "sl-exam-table sl-exam-live-table" },
@@ -219,30 +195,8 @@ class LiveView extends ExamElement {
     return view;
   }
 
-  /** The choice of order, kept in this browser. */
-  sortControl() {
-    const select = h(
-      "select",
-      {
-        class: "sl-exam-live-sort",
-        "aria-label": t("exam.live.sortBy"),
-        onchange: (event) => {
-          this.sortBy = event.target.value;
-          try {
-            localStorage.setItem(sortStorageKey, this.sortBy);
-          } catch {
-            // Without storage the choice lasts as long as the page.
-          }
-          this.sort();
-        },
-      },
-      Object.entries(sortLabels).map(([value, label]) => h("option", { value, selected: value === this.sortBy }, label()))
-    );
-    return h("label", { class: "sl-exam-live-sort-line" }, `${t("exam.live.sortBy")} `, select);
-  }
-
   /**
-   * Puts the rows in the chosen order, moving them rather than drawing them
+   * Puts the rows in order, moving them rather than drawing them
    * anew. Not while the mouse is on a button in the table: the button would
    * move away under the click.
    */
@@ -250,10 +204,9 @@ class LiveView extends ExamElement {
     if (!this.participants || !this.body || this.params.screen === "1") return;
     this.sortHeld = Boolean(this.body.querySelector("button:hover"));
     if (this.sortHeld) return;
-    const key = sortKeys[this.sortBy] ?? sortKeys.name;
     const ordered = [...this.participants.values()]
-      .map((participant) => ({ participant, value: key(participant, this.focusFigures(participant)) }))
-      .sort((a, b) => a.value - b.value || this.order.get(a.participant.username) - this.order.get(b.participant.username))
+      .map((participant) => ({ participant, rank: statusRank[participant.status], away: this.focusFigures(participant)?.awayMs ?? 0 }))
+      .sort((a, b) => a.rank - b.rank || b.away - a.away || this.order.get(a.participant.username) - this.order.get(b.participant.username))
       .map(({ participant }) => this.rows.get(participant.username))
       .filter(Boolean);
     if (ordered.some((row, index) => this.body.children[index] !== row)) this.body.append(...ordered);
@@ -385,7 +338,8 @@ class LiveView extends ExamElement {
     const tr = h(
       "tr",
       { "data-username": username, "data-status": participant.status },
-      h("td", {}, displayPerson(participant)),
+      // A Matura candidate of the course stands out (`exam-participant-role`); the class's screen shows no names at all.
+      participant.examParticipant ? h("td", candidateMark(), displayPerson(participant), candidateNote()) : h("td", {}, displayPerson(participant)),
       h("td", { class: "sl-exam-live-status" }, statusLabels[participant.status]()),
       h("td", { class: "sl-exam-live-left" }, participant.remainingMs === null ? "" : clock(participant.remainingMs)),
       this.focusCell(participant),

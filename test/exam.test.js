@@ -863,7 +863,7 @@ describe("the gradebook", () => {
     assert.deepEqual(marked, [other], "only the second row is marked");
   });
 
-  test("the sheet: the left four columns keep their place while the sheet scrolls sideways", async () => {
+  test("the sheet: the leading columns keep their place while the sheet scrolls sideways", async () => {
     await openSheet();
     const lefts = () =>
       teacher.page.evaluate(() => ({
@@ -879,7 +879,7 @@ describe("the gradebook", () => {
       return wrapper.scrollWidth > wrapper.clientWidth;
     });
     const before = await lefts();
-    assert.equal(before.sticky.length, 4, "name, proposal, override and grade");
+    assert.equal(before.sticky.length, 5, "name, the Matura toggle, proposal, override and grade");
     const scrolled = await teacher.page.evaluate(() => {
       const wrapper = document.querySelector(".sl-exam-scroll");
       wrapper.scrollLeft = 200;
@@ -967,6 +967,7 @@ describe("the gradebook", () => {
       seen.leading,
       [
         ["Student", ""],
+        ["Matura", "Matura candidate in this subject"],
         ["Winter", ""],
         ["Proposal", "Calculated proposal"],
         ["Override", "Teacher override"],
@@ -2609,37 +2610,40 @@ describe("online tests: the live view", () => {
     assert.equal(await shownAs(1, 60000), " · left 1×, 1 min");
   });
 
-  test("the live view sorts by name, by status, by share and by time out of focus, holds still under the mouse on a button, and keeps the choice", async () => {
+  test("the live view orders by status, then by time out of focus, then by name, and holds still under the mouse on a button", async () => {
     await openLive("Live sorting");
     const username = student.username.toLowerCase();
-    const byName = await teacher.page.$$eval("sl-exam-live tbody tr", (rows) => rows.map((row) => row.dataset.username));
+    const rows = () => teacher.page.$$eval("sl-exam-live tbody tr", (all) => all.map((row) => row.dataset.username));
+    const byName = await rows();
     assert.ok(byName.length > 1, "more than one participant");
+    assert.equal(await teacher.page.$("sl-exam-live select"), null, "no choice of order");
     await fetchAs(student, `/exam/api/tests/${written.id}/attempt`, { method: "POST" });
     await teacher.page.waitForFunction((u) => document.querySelector(`sl-exam-live tr[data-username="${u}"]`)?.dataset.status === "writing", { timeout: 5000 }, username);
-    const order = async (value) => {
-      await teacher.page.select(".sl-exam-live-sort", value);
-      return teacher.page.$$eval("sl-exam-live tbody tr", (rows) => rows.map((row) => row.dataset.username));
-    };
     const others = byName.filter((u) => u !== username);
-    assert.deepEqual(await order("status"), [...others, username], "not started first, writing after");
-    assert.deepEqual(await order("share"), [username, ...others], "those not started last");
-    assert.deepEqual(await order("away"), [username, ...others]);
+    await teacher.page.waitForFunction((u) => document.querySelector("sl-exam-live tbody tr:last-child")?.dataset.username === u, { timeout: 2000 }, username);
+    assert.deepEqual(await rows(), [...others, username], "not started first, writing after");
+    // Among those not started, the longer away comes first; ties keep the order by name.
+    const [first, second] = others;
+    if (second) {
+      await teacher.page.evaluate((u) => {
+        const view = document.querySelector("sl-exam-live");
+        Object.assign(view.participants.get(u), { startedAt: new Date(Date.now() - 60000).toISOString(), focusMs: 30000, away: false });
+        view.sort();
+      }, second);
+      assert.deepEqual((await rows()).slice(0, 2), [second, first], "longer out of focus first");
+      await teacher.page.evaluate(() => document.querySelector("sl-exam-live").poll());
+    }
     // With the mouse on Unbind the rows stay put, and follow once it leaves.
     await teacher.page.hover(`sl-exam-live tr[data-username="${username}"] .sl-exam-live-release`);
-    const rows = () => teacher.page.$$eval("sl-exam-live tbody tr", (all) => all.map((row) => row.dataset.username));
-    await teacher.page.$eval(".sl-exam-live-sort", (select) => {
-      select.value = "status";
-      select.dispatchEvent(new Event("change"));
-    });
-    assert.deepEqual(await rows(), [username, ...others], "held while the mouse is on a button");
+    await teacher.page.evaluate((u) => {
+      const view = document.querySelector("sl-exam-live");
+      Object.assign(view.participants.get(u), { status: "not started", startedAt: null });
+      view.sort();
+    }, username);
+    assert.deepEqual(await rows(), [...others, username], "held while the mouse is on a button");
     await teacher.page.mouse.move(0, 0);
-    await teacher.page.waitForFunction((u) => document.querySelector("sl-exam-live tbody tr:last-child")?.dataset.username === u, { timeout: 2000 }, username);
-    assert.deepEqual(await rows(), [...others, username], "sorted once it leaves");
-    await teacher.page.select(".sl-exam-live-sort", "away");
-    await teacher.page.reload({ waitUntil: "domcontentloaded" });
-    await teacher.page.waitForFunction(() => document.querySelector("sl-exam-live")?.dataset.mode === "stream", { timeout: 20000 });
-    assert.equal(await teacher.page.$eval(".sl-exam-live-sort", (select) => select.value), "away", "kept in this browser");
-    assert.deepEqual(await order("name"), byName);
+    await teacher.page.waitForFunction((u) => document.querySelector("sl-exam-live tbody tr:last-child")?.dataset.username !== u, { timeout: 2000 }, username);
+    assert.deepEqual(await rows(), byName, "sorted once it leaves");
   });
 
   test("a teacher who switches to the student view gets refused, and the view says why", async () => {
@@ -2661,6 +2665,188 @@ describe("online tests: the live view", () => {
       await setPreferences(elsewhere, {});
       await other.close();
     }
+  });
+});
+
+describe("Matura candidates", () => {
+  const other = "mc-other-student";
+  let student;
+  let teacher;
+  let username;
+  let klass;
+  let course;
+  let otherCourse;
+  let written;
+  let sitting;
+  let demoClass;
+
+  /** Grants or withdraws the course's role through the API. */
+  const setHeld = (session, held, who = username, target = course) =>
+    fetchAs(session, `/exam/api/courses/${target.id}/participants/${encodeURIComponent(who)}`, { method: "PUT", body: { held } });
+
+  /** The course's sheet through the API, once the directory holds the realm. */
+  async function readySheet(target = course) {
+    const deadline = Date.now() + 90000;
+    for (;;) {
+      const answer = await fetchAs(teacher, `/exam/api/courses/${target.id}/gradebook?semester=ws`);
+      assert.equal(answer.status, 200, JSON.stringify(answer.json));
+      assert.notEqual(answer.json.participants.state, "unavailable", "the instance has no directory-service credentials (DIRECTORY_SERVICE_CLIENT_ID/_SECRET in .env)");
+      if (answer.json.participants.state === "ready") return answer.json;
+      assert.ok(Date.now() < deadline, "the directory should be loaded within 90 s");
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+  }
+
+  const sheetRow = async (target = course) => (await readySheet(target)).students.find((row) => row.username === username);
+
+  /** The sheet's name cell and toggle of the shared student, as the page shows them. */
+  const sheetName = () =>
+    teacher.page.evaluate((who) => {
+      const row = document.querySelector(`.sl-exam-sheet tr[data-student="${who}"]`);
+      const toggle = row?.querySelector("button.sl-exam-participant-toggle");
+      const cell = row?.querySelector("td");
+      return {
+        highlighted: cell?.classList.contains("sl-exam-participant") ?? null,
+        label: cell?.textContent ?? null,
+        pressed: toggle?.getAttribute("aria-pressed") ?? null,
+        background: cell ? getComputedStyle(cell).backgroundColor : null,
+      };
+    }, username);
+
+  async function openSheet(target = course) {
+    await teacher.page.goto(`${applicationUrl}/exam/courses/${target.id}/gradebook?semester=ws`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(".sl-exam-sheet", { timeout: 20000 });
+  }
+
+  before(async () => {
+    student = await sharedSession("student");
+    teacher = await sharedSession("teacher");
+    await setPreferences(student, {});
+    await setPreferences(teacher, {});
+    username = student.username.toLowerCase();
+    const year = (await fetchAs(teacher, "/exam/api/years")).json.current;
+    const created = await fetchAs(teacher, `/exam/api/years/${year.id}/classes`, { method: "POST", body: { name: "9XMC", students: [username, other] } });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    klass = created.json;
+    course = (await fetchAs(teacher, `/exam/api/classes/${klass.id}/courses`, { method: "POST", body: { subject: "MC", language: "de" } })).json;
+    otherCourse = (await fetchAs(teacher, `/exam/api/classes/${klass.id}/courses`, { method: "POST", body: { subject: "MX", language: "de" } })).json;
+    const questions = (await fetchAs(teacher, "/exam/api/pool/questions")).json;
+    written = (await fetchAs(teacher, `/exam/api/courses/${course.id}/tests`, { method: "POST", body: { name: "MC candidates", questionIds: questions.map((q) => q.id) } })).json;
+    // Tomorrow, so no student's open tests change; the live view opens before a sitting does.
+    const opensAt = new Date(Date.now() + 24 * 3600000);
+    sitting = (
+      await fetchAs(teacher, `/exam/api/tests/${written.id}/sittings`, {
+        method: "POST",
+        body: { opensAt: opensAt.toISOString(), closesAt: new Date(opensAt.getTime() + 3600000).toISOString(), durationMinutes: 15, participants: [username] },
+      })
+    ).json;
+    await readySheet();
+    // A run that ended early may have left the role granted: start from none.
+    assert.equal((await setHeld(teacher, false)).status, 200);
+    const classes = (await fetchAs(teacher, "/exam/api/directory/classes")).json.classes;
+    for (const name of classes) {
+      const answer = await fetchAs(teacher, `/exam/api/directory/classes/${name}`);
+      if (answer.json.candidates.some((candidate) => candidate.username === username)) {
+        demoClass = name;
+        break;
+      }
+    }
+  });
+
+  // Every mapping this suite granted is withdrawn, and what it created in the run's database goes.
+  after(async () => {
+    if (!teacher) return;
+    if (course) await setHeld(teacher, false);
+    if (otherCourse) await setHeld(teacher, false, username, otherCourse);
+    if (written) await fetchAs(teacher, `/exam/api/tests/${written.id}`, { method: "DELETE" });
+    for (const target of [course, otherCourse]) if (target) await fetchAs(teacher, `/exam/api/courses/${target.id}`, { method: "DELETE" });
+    if (klass) await fetchAs(teacher, `/exam/api/classes/${klass.id}`, { method: "DELETE" });
+  });
+
+  test("the role's name comes from the subject, and nobody holds it to begin with", async () => {
+    const sheet = await readySheet();
+    assert.equal(sheet.participants.role, "examparticipant-mc");
+    assert.ok(sheet.students.every((row) => row.examParticipant !== true), "no candidate yet");
+  });
+
+  test("a teacher marks a candidate in the sheet: the toggle is pressed and the name highlighted, at once and after a reload", async () => {
+    await openSheet();
+    assert.deepEqual(
+      { highlighted: (await sheetName()).highlighted, pressed: (await sheetName()).pressed },
+      { highlighted: false, pressed: "false" }
+    );
+    const plain = (await sheetName()).background;
+    const answered = teacher.page.waitForResponse((response) => response.url().includes(`/participants/${username}`) && response.request().method() === "PUT", { timeout: 30000 });
+    await teacher.page.click(`.sl-exam-sheet tr[data-student="${username}"] button.sl-exam-participant-toggle`);
+    const response = await answered;
+    assert.equal(response.status(), 200, await response.text());
+    await teacher.page.waitForFunction((who) => document.querySelector(`.sl-exam-sheet tr[data-student="${who}"] button.sl-exam-participant-toggle`)?.getAttribute("aria-pressed") === "true", { timeout: 10000 }, username);
+    const marked = await sheetName();
+    assert.equal(marked.highlighted, true, "the name cell is highlighted at once");
+    assert.notEqual(marked.background, plain, "in a colour of its own");
+    assert.match(marked.label, /Matura/, "and says so to a screen reader");
+    assert.equal((await sheetRow()).examParticipant, true, "the sheet's answer marks them");
+
+    await openSheet();
+    assert.deepEqual({ highlighted: (await sheetName()).highlighted, pressed: (await sheetName()).pressed }, { highlighted: true, pressed: "true" }, "after a reload too");
+    const otherRow = await teacher.page.$eval(`.sl-exam-sheet tr[data-student="${other}"] td`, (cell) => cell.classList.contains("sl-exam-participant"));
+    assert.equal(otherRow, false, "nobody else is highlighted");
+  });
+
+  test("the candidate stands out on the student pages, in the test's participants, in the live view and on the roster - not in another subject", async () => {
+    const record = (await fetchAs(teacher, `/exam/api/courses/${course.id}/students/${username}`)).json;
+    assert.equal(record.student.examParticipant, true);
+    const neighbour = (await fetchAs(teacher, `/exam/api/courses/${course.id}/students/${other}`)).json;
+    assert.equal([neighbour.previous, neighbour.next].find((entry) => entry?.username === username)?.examParticipant, true, "the link to them from a neighbour too");
+    await teacher.page.goto(`${applicationUrl}/exam/courses/${course.id}/students/${other}`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(".sl-exam-student-neighbours a", { timeout: 20000 });
+    assert.equal(await teacher.page.$$eval(".sl-exam-student-neighbours a .sl-exam-participant", (marks) => marks.length), 1, "the neighbour link's name is coloured");
+
+    await teacher.page.goto(`${applicationUrl}/exam/tests/${written.id}`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(`[data-sitting="${sitting.id}"]`, { timeout: 20000 });
+    assert.equal(await teacher.page.$$eval(`[data-sitting="${sitting.id}"] .sl-exam-participant`, (marks) => marks.length), 1, "the sitting's participants mark them");
+
+    const snapshot = (await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/live`)).json;
+    assert.equal(snapshot.participants.find((p) => p.username === username)?.examParticipant, true);
+    await teacher.page.goto(`${applicationUrl}/exam/sittings/${sitting.id}/live`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(`sl-exam-live tr[data-username="${username}"]`, { timeout: 20000 });
+    assert.equal(await teacher.page.$eval(`sl-exam-live tr[data-username="${username}"] td`, (cell) => cell.classList.contains("sl-exam-participant")), true, "the live view's name cell");
+
+    const roster = (await fetchAs(teacher, `/exam/api/classes/${klass.id}`)).json.roster;
+    assert.deepEqual(roster.find((entry) => entry.username === username).examParticipantIn, ["mc"], "the roster names the subject, and only that one");
+    await teacher.page.goto(`${applicationUrl}/exam/classes/${klass.id}`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(".sl-exam-roster td.sl-exam-participant", { timeout: 20000 });
+    assert.match(await teacher.page.$eval(".sl-exam-roster td.sl-exam-participant", (cell) => cell.title), /MC/, "with the subject on hover");
+
+    assert.notEqual((await sheetRow(otherCourse)).examParticipant, true, "another subject of the same class does not mark them");
+  });
+
+  test("withdrawing takes the role away and leaves the student's other roles as they were", async () => {
+    await openSheet();
+    const answered = teacher.page.waitForResponse((response) => response.url().includes(`/participants/${username}`) && response.request().method() === "PUT", { timeout: 30000 });
+    await teacher.page.click(`.sl-exam-sheet tr[data-student="${username}"] button.sl-exam-participant-toggle`);
+    assert.equal((await answered).status(), 200);
+    await teacher.page.waitForFunction((who) => document.querySelector(`.sl-exam-sheet tr[data-student="${who}"] button.sl-exam-participant-toggle`)?.getAttribute("aria-pressed") === "false", { timeout: 10000 }, username);
+    assert.equal((await sheetName()).highlighted, false);
+    assert.notEqual((await sheetRow()).examParticipant, true, "the answer no longer marks them");
+    if (demoClass) {
+      const still = (await fetchAs(teacher, `/exam/api/directory/classes/${demoClass}`)).json.candidates.some((candidate) => candidate.username === username);
+      assert.ok(still, `the student is still a member of ${demoClass}`);
+    }
+  });
+
+  test("no student, no teacher in student view and no username off the roster gets the role", async () => {
+    assert.equal((await setHeld(student, true)).status, 403, "a student is refused");
+    await setPreferences(teacher, { vt: 0 });
+    try {
+      assert.equal((await setHeld(teacher, true)).status, 403, "a teacher in student view is refused");
+    } finally {
+      await setPreferences(teacher, {});
+    }
+    const stranger = await setHeld(teacher, true, "nobody-on-this-roster");
+    assert.equal(stranger.status, 400, JSON.stringify(stranger.json));
+    assert.equal((await setHeld(teacher, "yes")).status, 400, "held is true or false");
+    assert.notEqual((await sheetRow()).examParticipant, true, "nothing changed");
   });
 });
 

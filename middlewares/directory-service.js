@@ -9,6 +9,11 @@
  * confidential client (`DIRECTORY_SERVICE_CLIENT_ID`/`_SECRET`, service
  * accounts enabled, holding `view-users` and `view-events`) that never sees
  * the caller's identity.
+ *
+ * The same client writes exactly one kind of thing: a course's exam-participant
+ * role, granted from the gradebook (`setClientRoleHeld`, below). That needs
+ * `manage-users` and, to create the role on a first grant, `manage-clients`;
+ * an instance without them still reads, and says so on a write.
  */
 
 import fs from "fs";
@@ -295,6 +300,9 @@ function setDirectoryFetchPhase(phase, done = 0, total = null) {
 let directoryUsersBuiltAt = null;
 let directoryUsersSkipped = [];
 
+/** Keycloak's user count the held data was built from, for rewriting the disk cache after a role write. */
+let directoryUsersCount = null;
+
 /**
  * The state of the directory data and of any fetch running over it — what
  * `GET /api/admin/directory/status` answers with, and what a search that
@@ -495,11 +503,14 @@ export function readDirectoryDiskCache() {
   }
 }
 
-/** `skipped` (default none) carries forward any records `bisectFailingRange` gave up identifying below. */
-export function writeDirectoryDiskCache(users, count, skipped = []) {
+/**
+ * `skipped` (default none) carries forward any records `bisectFailingRange` gave up identifying below.
+ * `cachedAt` (default now) is when the data was built: a patch of held data keeps the time it was built at.
+ */
+export function writeDirectoryDiskCache(users, count, skipped = [], cachedAt = Date.now()) {
   try {
     fs.mkdirSync(path.dirname(directoryCacheFilePath), { recursive: true });
-    fs.writeFileSync(directoryCacheFilePath, JSON.stringify({ count, cachedAt: Date.now(), users, skipped }));
+    fs.writeFileSync(directoryCacheFilePath, JSON.stringify({ count, cachedAt, users, skipped }));
   } catch (error) {
     console.error("Directory search: failed to write the disk cache (next restart will refetch from scratch):", error);
   }
@@ -846,6 +857,7 @@ async function runDirectoryFetch(getToken) {
     directoryUsersCachedAt = Date.now();
     directoryUsersBuiltAt = disk.cachedAt;
     directoryUsersSkipped = disk.skipped;
+    directoryUsersCount = disk.count;
     return disk.users;
   }
 
@@ -936,6 +948,7 @@ async function runDirectoryFetch(getToken) {
   directoryUsersCachedAt = Date.now();
   directoryUsersBuiltAt = directoryUsersCachedAt;
   directoryUsersSkipped = skipped;
+  directoryUsersCount = serverCount;
   writeDirectoryDiskCache(cache, serverCount, skipped);
   clearDirectoryFetchProgress();
   console.log(
@@ -1127,4 +1140,141 @@ export async function searchDirectory(query) {
   }
 
   return { ready: true, results: matches };
+}
+
+// ################### Writing one client role (exam-participant-role) ###################
+
+/**
+ * A write Keycloak refused with 403: the directory-service identity holds only
+ * read rights. `step` says which right is missing - `create` the role
+ * (`manage-clients`), `map` it onto a user (`manage-users`) - so the teacher
+ * is told about the missing setup rather than about a generic failure.
+ */
+export class DirectoryWriteRightsError extends Error {
+  constructor(step) {
+    super(`The directory-service client lacks the Keycloak rights to ${step === "create" ? "create a client role" : "assign a client role"}.`);
+    this.step = step;
+  }
+}
+
+/** The application client's internal id, once per process; it never changes while the client exists. */
+let applicationClientIdPromise = null;
+
+async function adminRequest(getToken, method, relativePath, body, label) {
+  const token = await getToken();
+  return withDeadline(
+    fetch(`${adminApiBaseUrl()}${relativePath}`, {
+      method,
+      headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(directoryApiTimeoutMs),
+    }),
+    directoryApiTimeoutMs,
+    label
+  );
+}
+
+async function adminJson(response, label) {
+  if (!response.ok) throw new Error(`Keycloak admin ${label} answered with status ${response.status}`);
+  return response.json();
+}
+
+function applicationClientId(getToken) {
+  applicationClientIdPromise ??= (async () => {
+    const resource = readKeycloakConfig().resource;
+    const response = await adminRequest(getToken, "GET", `clients?clientId=${encodeURIComponent(resource)}`, undefined, "client lookup");
+    if (response.status === 403) throw new DirectoryWriteRightsError("map");
+    const [found] = await adminJson(response, "client lookup");
+    if (!found?.id) throw new Error(`Keycloak knows no client ${resource}`);
+    return found.id;
+  })().catch((error) => {
+    applicationClientIdPromise = null;
+    throw error;
+  });
+  return applicationClientIdPromise;
+}
+
+/** The client role `name` as `{ id, name }`, or null while it does not exist. */
+async function readClientRole(getToken, clientId, name) {
+  const response = await adminRequest(getToken, "GET", `clients/${clientId}/roles/${encodeURIComponent(name)}`, undefined, "client role lookup");
+  if (response.status === 404) return null;
+  if (response.status === 403) throw new DirectoryWriteRightsError("map");
+  const role = await adminJson(response, "client role lookup");
+  return { id: role.id, name: role.name };
+}
+
+/** Creates the client role `name`; a 409 means a concurrent grant created it first, which is just as good. */
+async function createClientRole(getToken, clientId, name, description) {
+  const response = await adminRequest(getToken, "POST", `clients/${clientId}/roles`, { name, description }, "client role creation");
+  if (response.status === 403) throw new DirectoryWriteRightsError("create");
+  if (!response.ok && response.status !== 409) throw new Error(`Keycloak admin client role creation answered with status ${response.status}`);
+}
+
+/**
+ * The Keycloak id of `username`: from the held directory where it has them,
+ * otherwise by one exact lookup - never by paging `GET users`, which imports
+ * from the LDAP federation as it goes.
+ */
+async function userIdOf(getToken, username) {
+  const held = directoryUsersCache?.find((user) => user.username?.trim().toLowerCase() === username);
+  if (held?.id) return held.id;
+  const response = await adminRequest(getToken, "GET", `users?username=${encodeURIComponent(username)}&exact=true`, undefined, "user lookup");
+  const [found] = await adminJson(response, "user lookup");
+  if (!found?.id) throw new Error(`Keycloak knows no user ${username}`);
+  return found.id;
+}
+
+/**
+ * The held entry of `username` with `roleName` added or taken away, and the
+ * disk cache rewritten, so every view shows the change on its next load
+ * rather than after the next full fetch (design D4). The cache keeps the time
+ * its data was built at, not now: a change somebody else made in the realm
+ * since then must still count as newer than the cache. The write itself is an
+ * admin event too, so the next freshness check refetches - harmless, and the
+ * patched entry is what that fetch finds.
+ */
+function patchHeldRole(username, roleName, held) {
+  const entry = directoryUsersCache?.find((user) => user.username?.trim().toLowerCase() === username);
+  if (!entry) return;
+  const others = (entry.clientRoleNames ?? []).filter((name) => name.trim().toLowerCase() !== roleName);
+  entry.clientRoleNames = held ? [...others, roleName] : others;
+  if (directoryUsersCount !== null) writeDirectoryDiskCache(directoryUsersCache, directoryUsersCount, directoryUsersSkipped, directoryUsersBuiltAt);
+}
+
+/**
+ * Grants (`held` true) or withdraws the application client's role `roleName`
+ * for `username`, creating the role on a first grant and doing nothing to a
+ * role that does not exist on a withdrawal. Answers `{ held }`, the state
+ * Keycloak now holds. A refusal for want of rights throws
+ * `DirectoryWriteRightsError`; anything else throws as it comes.
+ *
+ * `getToken` is a parameter for the same reason `startDirectoryRefresh` takes
+ * one: a test drives this against a stubbed `fetch`.
+ */
+export async function setClientRoleHeld(username, roleName, held, getToken = getDirectoryServiceToken) {
+  const key = username.trim().toLowerCase();
+  const name = roleName.trim().toLowerCase();
+  const clientId = await applicationClientId(getToken);
+  let role = await readClientRole(getToken, clientId, name);
+  if (!role && !held) {
+    patchHeldRole(key, name, false);
+    return { held: false };
+  }
+  if (!role) {
+    await createClientRole(getToken, clientId, name, "Marks the Matura candidates of a subject; granted from the exam module's gradebook.");
+    role = await readClientRole(getToken, clientId, name);
+    if (!role) throw new Error(`Keycloak created no client role ${name}`);
+  }
+  const userId = await userIdOf(getToken, key);
+  const response = await adminRequest(
+    getToken,
+    held ? "POST" : "DELETE",
+    `users/${userId}/role-mappings/clients/${clientId}`,
+    [role],
+    "client role mapping"
+  );
+  if (response.status === 403) throw new DirectoryWriteRightsError("map");
+  if (!response.ok) throw new Error(`Keycloak admin client role mapping answered with status ${response.status}`);
+  patchHeldRole(key, name, held);
+  return { held };
 }

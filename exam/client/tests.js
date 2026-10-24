@@ -17,7 +17,7 @@
 
 import { parseTime } from "../../i18n/format.js";
 import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, linkButton, markRows, readOnlyFor, t } from "./frame.js";
-import { displayClass, displayPerson } from "./classes.js";
+import { displayClass, personName } from "./classes.js";
 import { openCreatorOf } from "./bar.js";
 import { defaultPeriods, matchWindow, nextWeekday, periodTimes, viennaInstant, viennaLocal, windowFor } from "./periods.js";
 
@@ -188,6 +188,20 @@ class TestDetail extends ExamElement {
     return test;
   }
 
+  /**
+   * The names of `usernames`, comma-separated, a Matura candidate of the
+   * test's course marked (`exam-participant-role`); a username off the roster
+   * as it is.
+   */
+  participantNames(usernames) {
+    const subject = this.test.course.subject.toLowerCase();
+    const entries = new Map(this.roster.map((entry) => [entry.username, entry]));
+    return usernames.flatMap((username, index) => {
+      const entry = entries.get(username);
+      return [index ? ", " : null, entry ? personName(entry, entry.examParticipantIn?.includes(subject) === true) : username];
+    });
+  }
+
   render(test) {
     this.test = test;
     this.message = h("p", { class: "sl-exam-message", role: "status" });
@@ -279,7 +293,6 @@ class TestDetail extends ExamElement {
    * only, since they are deleted.
    */
   sittingsSection(test) {
-    const names = new Map(this.roster.map((entry) => [entry.username, displayPerson(entry)]));
     const list =
       test.sittings.length === 0
         ? h("p", { class: "sl-exam-quiet" }, t("exam.tests.noSittingYet"))
@@ -294,7 +307,7 @@ class TestDetail extends ExamElement {
                 displayWindow(sitting, this.periods),
                 `, ${t("exam.tests.minutesPerAttempt", { minutes: Math.round(sitting.durationS / 60) })} · ${stateLabels[sitting.state]()} · `,
                 sitting.makeup || sitting.participants.length < this.roster.length
-                  ? sitting.participants.map((username) => names.get(username) ?? username).join(", ")
+                  ? this.participantNames(sitting.participants)
                   : t("exam.tests.wholeClassLower"),
                 sittingLinks(sitting),
                 sitting.state === "scheduled"
@@ -401,7 +414,7 @@ class TestDetail extends ExamElement {
             {},
             h("input", { type: "checkbox", name: "participant", value: entry.username, checked: chosen.has(entry.username) }),
             " ",
-            displayPerson(entry)
+            this.participantNames([entry.username])
           )
         )
       )
@@ -456,7 +469,6 @@ class TestDetail extends ExamElement {
    */
   rescheduleForm(sitting) {
     const windowEditor = this.windowEditor(this.proposedWindow(sitting, nextWeekday(viennaLocal(new Date()).date)));
-    const names = new Map(this.roster.map((entry) => [entry.username, displayPerson(entry)]));
     const save = async () => {
       try {
         await examApi(`/sittings/${sitting.id}/reschedule`, { method: "POST", body: { ...windowEditor.current(), attempts: sitting.attempts } });
@@ -492,7 +504,7 @@ class TestDetail extends ExamElement {
         h("dt", {}, t("exam.tests.minutesPerAttemptLabel")),
         h("dd", {}, String(Math.round(sitting.durationS / 60))),
         h("dt", {}, t("exam.tests.participants")),
-        h("dd", {}, sitting.participants.map((username) => names.get(username) ?? username).join(", "))
+        h("dd", {}, this.participantNames(sitting.participants))
       ),
       h("p", { class: "sl-exam-quiet" }, t("exam.tests.rescheduleNote")),
       h("p", {}, submit, " ", h("button", { type: "button", class: "sl-exam-action", onClick: () => this.drawSittingForm(this.test, null) }, t("exam.tests.cancel")))

@@ -1186,19 +1186,6 @@ a.sl-exam-button.sl-exam-open:hover,
   font-weight: 600;
 }
 
-/* The counts, and beside them the choice of order. */
-.sl-exam-live-summary-line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.4em 1.5em;
-  margin: 1em 0;
-}
-
-.sl-exam-live-summary-line .sl-exam-live-summary {
-  margin: 0;
-}
-
 /* The live view's head: whether the sitting is live, its window, the
    server's time. */
 
@@ -2188,4 +2175,42 @@ sl-date-input .sl-date-input-grid button.is-disabled {
 
 .sl-exam-next-courses label {
   white-space: nowrap;
+}
+
+/* A course's Matura candidates (`exam-participant-role`): in a table the cell
+   with the name gets the background, elsewhere the name gets the colour. Above
+   the sticky cells' own background, so a scrolled sheet keeps it. Never the
+   only carrier: the name also says so to assistive technology. */
+#markdown-content {
+  --sl-exam-participant-bg: #efe3fb;
+  --sl-exam-participant-fg: #5b2a86;
+}
+
+#markdown-content.dark-mode {
+  --sl-exam-participant-bg: #3d2656;
+  --sl-exam-participant-fg: #e2c8ff;
+}
+
+#markdown-content td.sl-exam-participant,
+#markdown-content.dark-mode td.sl-exam-participant {
+  background-color: var(--sl-exam-participant-bg);
+}
+
+#markdown-content .sl-exam-participant:not(td) {
+  color: var(--sl-exam-participant-fg);
+  font-weight: 600;
+}
+
+/* The gradebook's toggle beside the name: a module button, narrow, in the
+   candidates' colours while pressed. */
+#markdown-content .sl-exam-action.sl-exam-participant-toggle {
+  min-width: 2.2em;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+#markdown-content .sl-exam-action.sl-exam-participant-toggle[aria-pressed="true"] {
+  border-color: var(--sl-exam-participant-fg);
+  background-color: var(--sl-exam-participant-fg);
+  color: var(--sl-exam-participant-bg);
 }

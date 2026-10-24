@@ -27,6 +27,7 @@ import { getCourse, InvalidInputError, NotFoundError } from "./classes.js";
 import { semesters } from "./grading.js";
 import { identityOf, requireTeacher, teacherPage } from "./gate.js";
 import { contextFromQuery, teacherShell } from "./bar.js";
+import { flagParticipant, participantHolders, participantSetup, setParticipant } from "./participants.js";
 
 /** A record id from the path or query; anything but a positive integer names nothing. */
 function idParam(value) {
@@ -74,11 +75,33 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
     return course;
   });
 
+  // Both answers mark the course's Matura candidates (exam-participant-role D5).
   api("get", "/courses/:id/gradebook", (req) => {
     const id = idParam(req.params.id);
-    return courseOverview(db, id, semesterParam(req.query.semester, getCourse(db, id)));
+    const overview = courseOverview(db, id, semesterParam(req.query.semester, getCourse(db, id)));
+    const holders = participantHolders(overview.course.subject);
+    return {
+      ...overview,
+      participants: participantSetup(overview.course),
+      students: overview.students.map((row) => flagParticipant(row, holders)),
+      left: overview.left.map((row) => flagParticipant(row, holders)),
+    };
   });
-  api("get", "/courses/:id/students/:username", (req) => studentRecord(db, idParam(req.params.id), req.params.username));
+  api("get", "/courses/:id/students/:username", (req) => {
+    const record = studentRecord(db, idParam(req.params.id), req.params.username);
+    const holders = participantHolders(record.course.subject);
+    return {
+      ...record,
+      student: flagParticipant(record.student, holders),
+      previous: flagParticipant(record.previous, holders),
+      next: flagParticipant(record.next, holders),
+    };
+  });
+  // Grants or withdraws the course's exam-participant role; the role's name
+  // comes from the course, never from the request (exam-participant-role D3).
+  api("put", "/courses/:id/participants/:username", (req) =>
+    setParticipant(db, idParam(req.params.id), req.params.username, req.body?.held)
+  );
   api("put", "/courses/:id/grades/:username/:semester", (req) =>
     setSemesterGrade(db, idParam(req.params.id), req.params.username, req.params.semester, req.body ?? {})
   );

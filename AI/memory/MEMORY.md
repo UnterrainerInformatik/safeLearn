@@ -39,3 +39,4 @@ Echter Ablageort: `/mnt/data/source/HTL/safeLearn/AI/memory/`
 - [Wackelige Checks](flaky-content-checks.md) — Reload-Backoff, 390px-Viewport und einzelne Exam-Harness-Checks (Ergebnisse ausblenden, Sheet-Spalten, New question) scheitern zeitabhängig, auch auf HEAD; erst nochmal laufen lassen
 - [i18n im BabelEdit-Format](i18n-babeledit-json.md) — Übersetzungen als ein JSON-File pro Sprache mit gleichen Keys, damit BabelEdit sie pflegen und erweitern kann
 - [Obsidian-Pfad für test:obsidian](obsidian-app-path.md) — `SAFELEARN_OBSIDIAN_APP=/usr/bin/obsidian` setzen und `AI/plugin` vorher auf origin/master ziehen, sonst Dutzende Fehlalarme
+- [Directory-Service darf schreiben](directory-service-write-rights.md) — seit 2026-10-24 manage-users + manage-clients an unterrainer und Demo-Realm, für den examparticipant-Umschalter

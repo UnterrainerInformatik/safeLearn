@@ -794,3 +794,145 @@ describe("searchDirectory", () => {
     );
   });
 });
+
+// ################### Writing one client role (exam-participant-role) ###################
+
+/**
+ * Stubs the admin-API calls `setClientRoleHeld` makes against a realm whose
+ * application client holds the roles in `roles` (a Map name → id). Every
+ * request is recorded as `METHOD path`, so a check can tell what was written.
+ * `refuse` maps such a request to the status Keycloak answers it with instead.
+ */
+function stubRoleWrites({ roles = new Map(), refuse = {} } = {}) {
+  const requests = [];
+  global.fetch = async (url, { method = "GET", body } = {}) => {
+    const requested = new URL(url);
+    const where = requested.pathname.replace(/^.*\/admin\/realms\/[^/]+\//, "");
+    const key = `${method} ${where}`;
+    requests.push({ key, body: body === undefined ? undefined : JSON.parse(body) });
+    if (refuse[key]) return { ok: false, status: refuse[key], json: async () => ({}) };
+    if (key === "GET clients") return { ok: true, status: 200, json: async () => [{ id: "client-1", clientId: requested.searchParams.get("clientId") }] };
+    const roleMatch = where.match(/^clients\/client-1\/roles\/(.+)$/);
+    if (method === "GET" && roleMatch) {
+      const name = decodeURIComponent(roleMatch[1]);
+      return roles.has(name)
+        ? { ok: true, status: 200, json: async () => ({ id: roles.get(name), name }) }
+        : { ok: false, status: 404, json: async () => ({}) };
+    }
+    if (key === "POST clients/client-1/roles") {
+      const { name } = JSON.parse(body);
+      if (roles.has(name)) return { ok: false, status: 409, json: async () => ({}) };
+      roles.set(name, `role-${name}`);
+      return { ok: true, status: 201, json: async () => ({}) };
+    }
+    if (key === "GET users") return { ok: true, status: 200, json: async () => [{ id: `id-${requested.searchParams.get("username")}` }] };
+    if (/^users\/[^/]+\/role-mappings\/clients\/client-1$/.test(where)) return { ok: true, status: 204, json: async () => ({}) };
+    throw new Error(`unexpected request ${key}`);
+  };
+  return requests;
+}
+
+describe("setClientRoleHeld", () => {
+  test("maps an existing role onto the user without creating it", async () => {
+    const service = await freshDirectoryService();
+    const requests = stubRoleWrites({ roles: new Map([["examparticipant-wmc", "role-wmc"]]) });
+
+    const answer = await service.setClientRoleHeld("Alice", "examparticipant-wmc", true, async () => "token");
+
+    assert.deepEqual(answer, { held: true });
+    assert.ok(!requests.some((request) => request.key === "POST clients/client-1/roles"), "an existing role must not be created again");
+    const mapping = requests.find((request) => request.key === "POST users/id-alice/role-mappings/clients/client-1");
+    assert.ok(mapping, `the role should have been mapped onto the user: ${requests.map((request) => request.key).join(", ")}`);
+    assert.deepEqual(mapping.body, [{ id: "role-wmc", name: "examparticipant-wmc" }]);
+  });
+
+  test("creates a missing role on a grant, then maps it", async () => {
+    const service = await freshDirectoryService();
+    const roles = new Map();
+    const requests = stubRoleWrites({ roles });
+
+    await service.setClientRoleHeld("alice", "examparticipant-pos", true, async () => "token");
+
+    assert.ok(roles.has("examparticipant-pos"), "the first grant should have created the role");
+    const mapping = requests.find((request) => request.key === "POST users/id-alice/role-mappings/clients/client-1");
+    assert.deepEqual(mapping?.body, [{ id: "role-examparticipant-pos", name: "examparticipant-pos" }]);
+  });
+
+  test("withdraws a role that does not exist without creating it or touching the user", async () => {
+    const service = await freshDirectoryService();
+    const roles = new Map();
+    const requests = stubRoleWrites({ roles });
+
+    const answer = await service.setClientRoleHeld("alice", "examparticipant-pos", false, async () => "token");
+
+    assert.deepEqual(answer, { held: false });
+    assert.equal(roles.size, 0, "a withdrawal must never create the role");
+    assert.ok(!requests.some((request) => request.key.includes("role-mappings")), "nothing should have been mapped or unmapped");
+  });
+
+  test("answers a 403 on the mapping as missing write rights, not as a generic failure", async () => {
+    const service = await freshDirectoryService();
+    stubRoleWrites({
+      roles: new Map([["examparticipant-wmc", "role-wmc"]]),
+      refuse: { "DELETE users/id-alice/role-mappings/clients/client-1": 403 },
+    });
+
+    await assert.rejects(
+      service.setClientRoleHeld("alice", "examparticipant-wmc", false, async () => "token"),
+      (error) => error instanceof service.DirectoryWriteRightsError && error.step === "map"
+    );
+  });
+
+  test("answers a 403 on creating the role as missing write rights to create it", async () => {
+    const service = await freshDirectoryService();
+    stubRoleWrites({ refuse: { "POST clients/client-1/roles": 403 } });
+
+    await assert.rejects(
+      service.setClientRoleHeld("alice", "examparticipant-wmc", true, async () => "token"),
+      (error) => error instanceof service.DirectoryWriteRightsError && error.step === "create"
+    );
+  });
+
+  test("treats a 409 on creating the role as success: a concurrent grant created it", async () => {
+    const service = await freshDirectoryService();
+    const roles = new Map();
+    const requests = stubRoleWrites({ roles });
+    // The role appears between the lookup and the creation, as with a second teacher's grant in flight.
+    const stubbed = global.fetch;
+    let lookedUp = false;
+    global.fetch = async (url, options = {}) => {
+      if ((options.method ?? "GET") === "GET" && url.includes("/roles/") && !lookedUp) {
+        lookedUp = true;
+        const answer = await stubbed(url, options);
+        roles.set("examparticipant-wmc", "role-concurrent");
+        return answer;
+      }
+      return stubbed(url, options);
+    };
+
+    const answer = await service.setClientRoleHeld("alice", "examparticipant-wmc", true, async () => "token");
+
+    assert.deepEqual(answer, { held: true });
+    const mapping = requests.find((request) => request.key === "POST users/id-alice/role-mappings/clients/client-1");
+    assert.deepEqual(mapping?.body, [{ id: "role-concurrent", name: "examparticipant-wmc" }]);
+  });
+
+  test("patches the held directory entry, so the change shows before the next full fetch", async () => {
+    const service = await freshDirectoryService();
+    stubWholeRealm([{ id: "kc-alice", username: "alice", firstName: "Alice", lastName: "A" }]);
+    await service.startDirectoryRefresh(async () => "token");
+    const requests = stubRoleWrites({ roles: new Map([["examparticipant-wmc", "role-wmc"]]) });
+
+    await service.setClientRoleHeld("alice", "examparticipant-wmc", true, async () => "token");
+
+    assert.ok(requests.some((request) => request.key === "POST users/kc-alice/role-mappings/clients/client-1"), "the held entry's id should be used, with no user lookup");
+    assert.ok(!requests.some((request) => request.key === "GET users"), "a user the directory holds is never looked up");
+    assert.equal(service.heldDirectoryPeople()[0].roles["examparticipant-wmc"], true);
+    const disk = readDirectoryDiskCache();
+    assert.ok(disk.users[0].clientRoleNames.includes("examparticipant-wmc"), "the disk cache should carry the change too");
+    assert.equal(disk.cachedAt, service.getDirectoryStatus().builtAt, "a patch keeps the time the data was built, so a change made since still counts as newer");
+
+    await service.setClientRoleHeld("alice", "examparticipant-wmc", false, async () => "token");
+    assert.equal(service.heldDirectoryPeople()[0].roles["examparticipant-wmc"], undefined);
+  });
+});

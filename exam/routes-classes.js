@@ -46,6 +46,7 @@ import {
 import { requireTeacher, teacherPage } from "./gate.js";
 import { teacherShell } from "./bar.js";
 import { directoryServiceConfigured, heldDirectoryPeople } from "../middlewares/directory-service.js";
+import { rosterWithParticipations } from "./participants.js";
 
 /** A record id from the path; anything but a positive integer names nothing. */
 function idParam(value) {
@@ -144,7 +145,11 @@ export function registerClassRoutes(router, { db, handle, startPage, retentionYe
     const students = resolveStudents(req.body?.students ?? [], people);
     return createClass(db, yearId, { name: req.body?.name, students });
   });
-  api("get", "/classes/:id", (req) => getClass(db, idParam(req.params.id)));
+  // The roster says who is a Matura candidate in which of the class's courses (exam-participant-role D5).
+  api("get", "/classes/:id", (req) => {
+    const klass = getClass(db, idParam(req.params.id));
+    return { ...klass, roster: rosterWithParticipations(db, klass.id, klass.roster) };
+  });
   api("put", "/classes/:id", (req) => renameClass(db, idParam(req.params.id), req.body ?? {}));
   api("delete", "/classes/:id", (req) => deleteClass(db, idParam(req.params.id)));
 

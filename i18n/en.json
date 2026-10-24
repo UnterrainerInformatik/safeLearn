@@ -377,6 +377,12 @@
       "noSuchImage": "There is no such image.",
       "noSuchRecord": "There is no such record.",
       "noSuchUpload": "There is no such upload.",
+      "participants": {
+        "held": "Say whether the student is a Matura candidate: held is true or false.",
+        "missingCreateRights": "Keycloak refused to create this subject's Matura role: the directory-service client needs manage-clients, or the role has to be created by hand (see docs-keycloak.md).",
+        "missingRights": "Keycloak refused to change the Matura role: the directory-service client needs manage-users (see docs-keycloak.md).",
+        "unavailable": "This instance has no access to the directory, so Matura candidates cannot be marked here."
+      },
       "pool": {
         "answerImageNotUploaded": "Answer {answer} embeds an image that was not uploaded.",
         "answerImageOtherQuestion": "Answer {answer} embeds an image of another question.",
@@ -656,11 +662,6 @@
       "released": "{name} can go on in another browser now.",
       "serverTime": "Server time",
       "showFullBrowser": "Show the full browser string",
-      "sortAway": "Net time out of focus",
-      "sortBy": "Sort by",
-      "sortName": "Name",
-      "sortShare": "Share in focus",
-      "sortStatus": "Status",
       "stateOpen": "Live",
       "stateOver": "Over",
       "stateScheduled": "Not open yet",
@@ -694,6 +695,13 @@
       "student": "Student",
       "tests": "Online tests",
       "tryTest": "Try: {name}"
+    },
+    "participant": {
+      "candidate": "Matura candidate",
+      "candidateIn": "Matura candidate in {subjects}",
+      "column": "Matura",
+      "columnLong": "Matura candidate in this subject",
+      "toggleFor": "{person} is a Matura candidate"
     },
     "periods": {
       "lesson": "lesson {n}",

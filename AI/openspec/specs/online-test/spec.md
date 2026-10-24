@@ -265,12 +265,12 @@ While an attempt is open, the page SHALL report to the server each time it loses
 
 A teacher SHALL be able to open a sitting's live view before it opens, and during the sitting SHALL see, per participant: not started, writing (with remaining time), submitted; focus losses; and refused devices. The view SHALL be pushed to the teacher's browser as changes happen, over a stream that requires the teacher's authenticated session and is separate from the unauthenticated hot-reload channel. Exam data SHALL NOT be sent over the hot-reload channel. The stream SHALL be re-checked against the session while it is open and SHALL end when the session no longer acts as a teacher. When the stream cannot be kept open, the view SHALL keep updating by fetching snapshots, without reloading the page.
 
-The teacher SHALL be able to order the participants by name (the default), by status (not started first, then writing, submitted last), by the share of their attempt in focus (lowest first), or by their net time out of focus (longest first). Both focus orders SHALL put those not started last. The order SHALL follow the figures as they change, but SHALL NOT move the rows while the mouse is on a button in the table, and SHALL be kept in the teacher's browser.
+The participants SHALL always be ordered by status (not started first, then writing, submitted last), within a status by their net time out of focus (longest first), and then by name. There SHALL be no choice of order. The order SHALL follow the figures as they change, but SHALL NOT move the rows while the mouse is on a button in the table.
 
 #### Scenario: Ordered by focus
 
-- **WHEN** a teacher orders the live view by share in focus while one student writes and the others have not started
-- **THEN** the writing student is listed first and those not started after them in the order by name
+- **WHEN** two students write, one of them away from the page for longer, and the others have not started
+- **THEN** those not started are listed first by name, then the student away longer, then the other
 
 #### Scenario: Opened before the sitting
 
