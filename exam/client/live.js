@@ -107,6 +107,37 @@ function span(ms) {
 
 const pollMs = 5000;
 const streamRetryMs = 60000;
+const resortMs = 10000;
+
+/**
+ * How the participants are ordered: by name as the server sends them; by
+ * status, not started first and submitted last; or by the share or the net
+ * time in focus, lowest first, with those not started at the end. Ties keep
+ * the order by name.
+ */
+const statusRank = { "not started": 0, writing: 1, submitted: 2 };
+const sortKeys = {
+  name: () => 0,
+  status: (participant) => statusRank[participant.status],
+  share: (participant, figures) => (figures ? figures.share : Infinity),
+  net: (participant, figures) => (figures ? figures.netMs : Infinity),
+};
+const sortLabels = {
+  name: () => t("exam.live.sortName"),
+  status: () => t("exam.live.sortStatus"),
+  share: () => t("exam.live.sortShare"),
+  net: () => t("exam.live.sortNet"),
+};
+const sortStorageKey = "sl-exam-live-sort";
+
+function storedSort() {
+  try {
+    const value = localStorage.getItem(sortStorageKey);
+    return value in sortKeys ? value : "name";
+  } catch {
+    return "name";
+  }
+}
 
 class LiveView extends ExamElement {
   disconnectedCallback() {
@@ -137,10 +168,14 @@ class LiveView extends ExamElement {
     this.screenLink = linkButton({ label: t("exam.live.classScreenLink"), href: `/exam/sittings/${snapshot.sitting.id}/screen`, newWindow: true, class: "sl-exam-live-screen-link" });
     this.body = h("tbody", {});
     this.summary = h("p", { class: "sl-exam-live-summary" });
+    this.sortBy = storedSort();
     this.draw(snapshot);
     if (this.params.screen === "1") this.pollOnly();
     else if (!this.streaming) this.connect();
     if (!this.ticker) this.ticker = setInterval(() => this.tick(), 1000);
+    // Shares and net times drift between changes; the order follows them
+    // now and then, not every second, so a row stays put under the cursor.
+    if (!this.resorter) this.resorter = setInterval(() => this.sort(), resortMs);
     const { sitting, test, course } = snapshot;
     const head = h(
       "div",
@@ -168,6 +203,7 @@ class LiveView extends ExamElement {
       { class: "sl-exam sl-exam-live" },
       head,
       this.summary,
+      this.sortControl(),
       h(
         "table",
         { class: "sl-exam-table sl-exam-live-table" },
@@ -178,6 +214,40 @@ class LiveView extends ExamElement {
     );
     this.tick();
     return view;
+  }
+
+  /** The choice of order, kept in this browser. */
+  sortControl() {
+    const select = h(
+      "select",
+      {
+        class: "sl-exam-live-sort",
+        "aria-label": t("exam.live.sortBy"),
+        onchange: (event) => {
+          this.sortBy = event.target.value;
+          try {
+            localStorage.setItem(sortStorageKey, this.sortBy);
+          } catch {
+            // Without storage the choice lasts as long as the page.
+          }
+          this.sort();
+        },
+      },
+      Object.entries(sortLabels).map(([value, label]) => h("option", { value, selected: value === this.sortBy }, label()))
+    );
+    return h("p", { class: "sl-exam-actions sl-exam-live-sort-line" }, h("label", {}, `${t("exam.live.sortBy")} `, select));
+  }
+
+  /** Puts the rows in the chosen order, moving them rather than drawing them anew. */
+  sort() {
+    if (!this.participants || !this.body || this.params.screen === "1") return;
+    const key = sortKeys[this.sortBy] ?? sortKeys.name;
+    const ordered = [...this.participants.values()]
+      .map((participant) => ({ participant, value: key(participant, this.focusFigures(participant)) }))
+      .sort((a, b) => a.value - b.value || this.order.get(a.participant.username) - this.order.get(b.participant.username))
+      .map(({ participant }) => this.rows.get(participant.username))
+      .filter(Boolean);
+    if (ordered.some((row, index) => this.body.children[index] !== row)) this.body.append(...ordered);
   }
 
   /** The projector's view: the same state, clock and counts, large, and no names. */
@@ -281,7 +351,9 @@ class LiveView extends ExamElement {
     this.sitting = snapshot.sitting;
     this.received = performance.now();
     this.participants = new Map(snapshot.participants.map((participant) => [participant.username, { ...participant, at: performance.now() }]));
+    this.order = new Map(snapshot.participants.map((participant, index) => [participant.username, index]));
     this.body.replaceChildren(...snapshot.participants.map((participant) => this.row(participant.username)));
+    this.sort();
     this.summarize();
   }
 
@@ -358,19 +430,30 @@ class LiveView extends ExamElement {
     return cell;
   }
 
-  fillFocus(cell, participant) {
-    if (participant.startedAt === null) {
-      cell.replaceChildren("–");
-      return;
-    }
+  /**
+   * What is known of a participant's focus now: the time away, the share of
+   * the attempt in focus and the net time in focus. Nothing before they start.
+   */
+  focusFigures(participant) {
+    if (participant.startedAt === null) return null;
     const sinceReceived = performance.now() - participant.at;
     const awayMs = participant.focusMs + (participant.away ? sinceReceived : 0);
     const end = participant.submittedAt ? Date.parse(participant.submittedAt) : this.serverNow();
     const elapsed = end - Date.parse(participant.startedAt);
     const share = elapsed <= 0 ? 1 : Math.min(1, Math.max(0, 1 - awayMs / elapsed));
+    return { awayMs, share, netMs: Math.max(0, elapsed - awayMs) };
+  }
+
+  fillFocus(cell, participant) {
+    if (participant.startedAt === null) {
+      cell.replaceChildren("–");
+      return;
+    }
+    const { awayMs, netMs, share } = this.focusFigures(participant);
     const level = focusLevel(share);
     const percent = format.percent(Math.floor(share * 1000) / 1000, 1);
     cell.dataset.level = level;
+    cell.title = t("exam.live.netInFocus", { time: span(netMs) });
     cell.replaceChildren(
       h(
         "span",
@@ -389,8 +472,10 @@ class LiveView extends ExamElement {
     this.participants.set(participant.username, { ...participant, at: performance.now() });
     const old = this.rows.get(participant.username);
     const fresh = this.row(participant.username);
+    if (!this.order.has(participant.username)) this.order.set(participant.username, this.order.size);
     if (old) old.replaceWith(fresh);
     else this.body.append(fresh);
+    this.sort();
     this.summarize();
   }
 
@@ -549,6 +634,8 @@ class LiveView extends ExamElement {
     this.stopPolling();
     clearInterval(this.ticker);
     this.ticker = null;
+    clearInterval(this.resorter);
+    this.resorter = null;
   }
 }
 

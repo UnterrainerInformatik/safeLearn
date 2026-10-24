@@ -2609,6 +2609,27 @@ describe("online tests: the live view", () => {
     assert.equal(await shownAs(1, 60000), " · left 1×, 1 min");
   });
 
+  test("the live view sorts by name, by status, by share and by net time in focus, and keeps the choice", async () => {
+    await openLive("Live sorting");
+    const username = student.username.toLowerCase();
+    const byName = await teacher.page.$$eval("sl-exam-live tbody tr", (rows) => rows.map((row) => row.dataset.username));
+    assert.ok(byName.length > 1, "more than one participant");
+    await fetchAs(student, `/exam/api/tests/${written.id}/attempt`, { method: "POST" });
+    await teacher.page.waitForFunction((u) => document.querySelector(`sl-exam-live tr[data-username="${u}"]`)?.dataset.status === "writing", { timeout: 5000 }, username);
+    const order = async (value) => {
+      await teacher.page.select(".sl-exam-live-sort", value);
+      return teacher.page.$$eval("sl-exam-live tbody tr", (rows) => rows.map((row) => row.dataset.username));
+    };
+    const others = byName.filter((u) => u !== username);
+    assert.deepEqual(await order("status"), [...others, username], "not started first, writing after");
+    assert.deepEqual(await order("share"), [username, ...others], "those not started last");
+    assert.deepEqual(await order("net"), [username, ...others]);
+    await teacher.page.reload({ waitUntil: "domcontentloaded" });
+    await teacher.page.waitForFunction(() => document.querySelector("sl-exam-live")?.dataset.mode === "stream", { timeout: 20000 });
+    assert.equal(await teacher.page.$eval(".sl-exam-live-sort", (select) => select.value), "net", "kept in this browser");
+    assert.deepEqual(await order("name"), byName);
+  });
+
   test("a teacher who switches to the student view gets refused, and the view says why", async () => {
     await openLive("Live student view");
     // Switched in another tab, so the live view's page stays open.
