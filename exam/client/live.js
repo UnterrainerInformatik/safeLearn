@@ -111,22 +111,22 @@ const resortMs = 10000;
 
 /**
  * How the participants are ordered: by name as the server sends them; by
- * status, not started first and submitted last; or by the share or the net
- * time in focus, lowest first, with those not started at the end. Ties keep
- * the order by name.
+ * status, not started first and submitted last; by the share in focus,
+ * lowest first; or by the net time out of focus, longest first. Those not
+ * started come last in both focus orders. Ties keep the order by name.
  */
 const statusRank = { "not started": 0, writing: 1, submitted: 2 };
 const sortKeys = {
   name: () => 0,
   status: (participant) => statusRank[participant.status],
   share: (participant, figures) => (figures ? figures.share : Infinity),
-  net: (participant, figures) => (figures ? figures.netMs : Infinity),
+  away: (participant, figures) => (figures ? -figures.awayMs : Infinity),
 };
 const sortLabels = {
   name: () => t("exam.live.sortName"),
   status: () => t("exam.live.sortStatus"),
   share: () => t("exam.live.sortShare"),
-  net: () => t("exam.live.sortNet"),
+  away: () => t("exam.live.sortAway"),
 };
 const sortStorageKey = "sl-exam-live-sort";
 
@@ -177,7 +177,7 @@ class LiveView extends ExamElement {
     if (this.params.screen === "1") this.pollOnly();
     else if (!this.streaming) this.connect();
     if (!this.ticker) this.ticker = setInterval(() => this.tick(), 1000);
-    // Shares and net times drift between changes; the order follows them
+    // Shares and times away drift between changes; the order follows them
     // now and then, not every second, so a row stays put under the cursor.
     if (!this.resorter) this.resorter = setInterval(() => this.sort(), resortMs);
     const { sitting, test, course } = snapshot;
@@ -206,8 +206,7 @@ class LiveView extends ExamElement {
       "div",
       { class: "sl-exam sl-exam-live" },
       head,
-      this.summary,
-      this.sortControl(),
+      h("div", { class: "sl-exam-live-summary-line" }, this.summary, this.sortControl()),
       h(
         "table",
         { class: "sl-exam-table sl-exam-live-table" },
@@ -239,7 +238,7 @@ class LiveView extends ExamElement {
       },
       Object.entries(sortLabels).map(([value, label]) => h("option", { value, selected: value === this.sortBy }, label()))
     );
-    return h("p", { class: "sl-exam-actions sl-exam-live-sort-line" }, h("label", {}, `${t("exam.live.sortBy")} `, select));
+    return h("label", { class: "sl-exam-live-sort-line" }, `${t("exam.live.sortBy")} `, select);
   }
 
   /**
