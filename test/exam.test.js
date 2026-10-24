@@ -777,7 +777,7 @@ describe("the gradebook", () => {
     await teacher.page.type("dialog[open] input[name=maxPoints]", "20");
     await teacher.page.click("dialog[open] button[type=submit]");
     await teacher.page.waitForFunction(
-      () => [...document.querySelectorAll(".sl-exam-column-edit .sl-exam-column-name")].some((name) => name.textContent === "2nd test"),
+      () => [...document.querySelectorAll("th.sl-exam-column-head")].some((th) => th.title.split("\n")[0] === "2nd test"),
       { timeout: 10000 }
     );
     assert.equal((await heading()).span, 2, "the heading spans both manual tests");
@@ -961,7 +961,7 @@ describe("the gradebook", () => {
       leading: [...document.querySelectorAll(".sl-exam-sheet thead th[data-sticky]")].map((th) => [th.textContent, th.title]),
       winter: document.querySelector(`tr[data-student="${who}"] .sl-exam-winter`).textContent,
       proposal: document.querySelector(`tr[data-student="${who}"] .sl-exam-proposal`).textContent,
-      columns: [...document.querySelectorAll(".sl-exam-column-edit .sl-exam-column-name")].map((name) => name.textContent),
+      columns: [...document.querySelectorAll("th.sl-exam-column-head:has(> .sl-exam-column-edit)")].map((th) => th.title.split("\n")[0]),
     }), username);
     assert.deepEqual(
       seen.leading,
@@ -1008,7 +1008,7 @@ describe("the gradebook", () => {
     }
   });
 
-  test("the sheet: a column's header is text, with its full date and maximum on hover, and a round named by its date shows it once", async () => {
+  test("the sheet: a column's header is its day and maximum, with its name, full date and maximum on hover, and the whole cell opens its dialog", async () => {
     const date = year.startsOn;
     const [y, m, d] = date.split("-");
     const quiz = await addColumn({ kind: "test", name: "Header check", date, maxPoints: 24 });
@@ -1017,9 +1017,30 @@ describe("the gradebook", () => {
     await setPreferences(teacher, { lang: "en", loc: "en-GB" });
     try {
       await openSheet();
-      assert.deepEqual(await columnHeader(quiz), { lines: ["Header check", `${d}/${m}`, "/24"], title: `Header check\n${d}/${m}/${y}\nout of 24 points` });
+      assert.deepEqual(await columnHeader(quiz), { lines: [`${d}/${m}`, "/24"], title: `Header check\n${d}/${m}/${y}\nout of 24 points` }, "the name on hover, not in the header");
       assert.deepEqual(await columnHeader(round), { lines: [`${d}/${m}`], title: `${d}/${m}/${y}` }, "the date once, not the ISO name above it");
-      assert.deepEqual(await columnHeader(percent), { lines: ["In percent", `${d}/${m}`], title: `In percent\n${d}/${m}/${y}\nin percent` });
+      assert.deepEqual(await columnHeader(percent), { lines: [`${d}/${m}`], title: `In percent\n${d}/${m}/${y}\nin percent` });
+      assert.equal(
+        await teacher.page.$eval(`th[data-column="${quiz.id}"] button`, (button) => button.getAttribute("aria-label")),
+        "Edit the column Header check",
+        "the name is in the button's accessible label"
+      );
+
+      // The participation round has one line beside the test's two: its
+      // button still fills the cell, and the cell's empty bottom-right corner
+      // opens the round's dialog.
+      const boxes = await teacher.page.$eval(`th[data-column="${round.id}"]`, (th) => {
+        const cell = th.getBoundingClientRect();
+        const button = th.querySelector("button").getBoundingClientRect();
+        const test = document.querySelector("th.sl-exam-column-head:has(> .sl-exam-column-edit) .sl-exam-column-day + span")?.closest("th").getBoundingClientRect();
+        return { cell: [cell.left, cell.top, cell.right, cell.bottom], button: [button.left, button.top, button.right, button.bottom], testHeight: test?.height };
+      });
+      boxes.button.forEach((edge, index) => assert.ok(Math.abs(edge - boxes.cell[index]) <= 1, `the button fills the cell: ${boxes.button} in ${boxes.cell}`));
+      assert.ok(Math.abs(boxes.cell[3] - boxes.cell[1] - boxes.testHeight) <= 1, "the round's cell is as tall as a test's");
+      await teacher.page.mouse.click(boxes.cell[2] - 3, boxes.cell[3] - 3);
+      await teacher.page.waitForSelector("dialog[open] input[name=name]", { timeout: 5000 });
+      assert.equal(await teacher.page.$eval("dialog[open] h3", (h3) => h3.textContent), "Edit column: Participation (+/−)");
+      await teacher.page.click("dialog[open] .sl-exam-column-close");
       assert.equal(
         await teacher.page.$eval(`th[data-column="${quiz.id}"]`, (th) => th.querySelectorAll("input, sl-date-input").length),
         0,
@@ -1028,6 +1049,62 @@ describe("the gradebook", () => {
     } finally {
       await setPreferences(teacher, {});
       for (const column of [quiz, round, percent]) await fetchAs(teacher, `/exam/api/assessments/${column.id}`, { method: "DELETE" });
+    }
+  });
+
+  test("the sheet: the column dialog for + and for a column follows light and dark mode", async () => {
+    const column = await addColumn({ kind: "homework", name: "Dark check", date: year.startsOn, maxPoints: 10 });
+    const page = teacher.page;
+    const setDark = (dark) =>
+      page.evaluate((on) => {
+        for (const element of document.querySelectorAll("body, #markdown-content")) element.classList.toggle("dark-mode", on);
+      }, dark);
+    /** The open dialog's and its name field's colours, with whether each background is dark. */
+    const colours = () =>
+      page.evaluate(() => {
+        const brightness = (colour) => {
+          const [r, g, b] = colour.match(/[\d.]+/g).map(Number);
+          return (r * 299 + g * 587 + b * 114) / 1000;
+        };
+        const look = (element) => {
+          const style = getComputedStyle(element);
+          return { background: style.backgroundColor, color: style.color, dark: brightness(style.backgroundColor) < 128, lightText: brightness(style.color) >= 128 };
+        };
+        return { dialog: look(document.querySelector("dialog[open]")), input: look(document.querySelector("dialog[open] input[name=name]")) };
+      });
+    const openers = {
+      "+": async () => {
+        await page.click('button.sl-exam-add[aria-label="Add a column to Homework"]');
+        await page.waitForSelector("dialog[open] input[name=name]", { timeout: 5000 });
+        return "dialog[open] .sl-exam-column-cancel";
+      },
+      "a column": async () => {
+        await openColumnDialog(column);
+        return "dialog[open] .sl-exam-column-close";
+      },
+    };
+    try {
+      await openSheet();
+      for (const [which, open] of Object.entries(openers)) {
+        const seen = {};
+        for (const dark of [false, true]) {
+          await setDark(dark);
+          const close = await open();
+          seen[dark ? "dark" : "light"] = await colours();
+          await page.click(close);
+          await page.waitForFunction(() => !document.querySelector("dialog[open]"), { timeout: 5000 });
+        }
+        for (const part of ["dialog", "input"]) {
+          const { light, dark } = { light: seen.light[part], dark: seen.dark[part] };
+          assert.deepEqual([light.dark, light.lightText], [false, false], `${which}, light: the ${part} is light with dark text (${light.background}, ${light.color})`);
+          assert.deepEqual([dark.dark, dark.lightText], [true, true], `${which}, dark: the ${part} is dark with light text (${dark.background}, ${dark.color})`);
+          assert.notEqual(light.background, dark.background, `${which}: the ${part}'s background differs between the modes`);
+          assert.notEqual(light.color, dark.color, `${which}: the ${part}'s text colour differs between the modes`);
+        }
+      }
+    } finally {
+      await setDark(false);
+      await fetchAs(teacher, `/exam/api/assessments/${column.id}`, { method: "DELETE" });
     }
   });
 
@@ -1065,7 +1142,7 @@ describe("the gradebook", () => {
 
       await page.click("dialog[open] .sl-exam-column-close");
       await page.waitForFunction(
-        (id) => document.querySelector(`th[data-column="${id}"] .sl-exam-column-name`)?.textContent === "Rename me (group A)",
+        (id) => document.querySelector(`th[data-column="${id}"]`)?.title.split("\n")[0] === "Rename me (group A)",
         { timeout: 10000 },
         column.id
       );
@@ -1088,7 +1165,7 @@ describe("the gradebook", () => {
       await page.type("dialog[open] input[name=maxPoints]", "6");
       await page.click("dialog[open] button[type=submit]");
       await page.waitForFunction(
-        () => [...document.querySelectorAll(".sl-exam-column-edit .sl-exam-column-name")].some((name) => name.textContent === "Quiz 1"),
+        () => [...document.querySelectorAll("th.sl-exam-column-head")].some((th) => th.title.split("\n")[0] === "Quiz 1"),
         { timeout: 10000 }
       );
       quiz = (await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=ws`)).json.columns.find((c) => c.name === "Quiz 1");
@@ -2042,8 +2119,12 @@ describe("online tests: writing", () => {
       fields: td.querySelectorAll("input, select, textarea").length,
     }));
     assert.deepEqual(cell, { text: "2/2", fields: 0 }, "shown, and nothing to type into");
-    const head = await teacher.page.$eval(`th[data-column="${column.id}"]`, (th) => ({ link: th.querySelector("a")?.getAttribute("href"), edit: Boolean(th.querySelector("button")) }));
-    assert.deepEqual(head, { link: `/exam/tests/${written.id}`, edit: false }, "it links to the test, and nothing in it opens a dialog");
+    const head = await teacher.page.$eval(`th[data-column="${column.id}"]`, (th) => ({
+      link: th.querySelector("a")?.getAttribute("href"),
+      linked: [...th.children].map((child) => child.localName).join() === "a" && Boolean(th.querySelector("a > .sl-exam-column-day")),
+      edit: Boolean(th.querySelector("button")),
+    }));
+    assert.deepEqual(head, { link: `/exam/tests/${written.id}`, linked: true, edit: false }, "its date links to the test, and nothing in it opens a dialog");
 
     // The arrow keys pass over the online columns: they are the sheet's first,
     // so left from the first manual field stays there, and right goes on.
@@ -2070,10 +2151,11 @@ describe("online tests: writing", () => {
       await teacher.page.goto(`${applicationUrl}/exam/courses/${course.id}/gradebook?semester=ws`, { waitUntil: "domcontentloaded" });
       await teacher.page.waitForSelector(`th[data-column="${column.id}"] a`, { timeout: 20000 });
       const shown = await teacher.page.$eval(`th[data-column="${column.id}"]`, (th) => ({
-        name: th.querySelector("a").innerText,
+        name: th.title.split("\n")[0],
+        label: th.querySelector("a").getAttribute("aria-label"),
         transform: getComputedStyle(th).textTransform,
       }));
-      assert.deepEqual(shown, { name: quiz, transform: "none" });
+      assert.deepEqual(shown, { name: quiz, label: `Open the test ${quiz}`, transform: "none" });
     } finally {
       await fetchAs(teacher, `/exam/api/tests/${written.id}`, { method: "PUT", body: { name: "Writing" } });
     }
@@ -4899,13 +4981,13 @@ describe("the interface in the reader's language and format", () => {
     await openGradebook();
     assert.equal(await teacher.page.evaluate(() => document.documentElement.lang), "en");
     assert.equal(await teacher.page.$eval(".sl-exam-bar-page[data-page='tests']", (a) => a.textContent.trim()), "Online tests");
-    assert.deepEqual(await columnHeader(), { lines: ["Language check", "20.10.", "/10"], title: "Language check\n20.10.2026\nout of 10 points" });
+    assert.deepEqual(await columnHeader(), { lines: ["20.10.", "/10"], title: "Language check\n20.10.2026\nout of 10 points" });
     await openColumnDialog();
     assert.deepEqual(await columnDate(), { value: "2026-10-20", shown: "20.10.2026" });
 
     await setPreferences(teacher, { loc: "en-GB" });
     await openGradebook();
-    assert.deepEqual(await columnHeader(), { lines: ["Language check", "20/10", "/10"], title: "Language check\n20/10/2026\nout of 10 points" });
+    assert.deepEqual(await columnHeader(), { lines: ["20/10", "/10"], title: "Language check\n20/10/2026\nout of 10 points" });
     await openColumnDialog();
     assert.deepEqual(await columnDate(), { value: "2026-10-20", shown: "20/10/2026" });
     assert.deepEqual(
@@ -4958,7 +5040,7 @@ describe("the interface in the reader's language and format", () => {
 
     // Closing the dialog after a save draws the sheet anew, with the saved date.
     await teacher.page.click("dialog[open] .sl-exam-column-close");
-    await waitFor(async () => (await columnHeader().catch(() => null))?.lines[1] === "29.10.", "the header shows the saved date");
+    await waitFor(async () => (await columnHeader().catch(() => null))?.lines[0] === "29.10.", "the header shows the saved date");
 
     // Back to the column's own date, for anything after this.
     await fetchAs(teacher, `/exam/api/assessments/${column.id}`, { method: "PUT", body: { date: "2026-10-20" } });

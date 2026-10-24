@@ -119,14 +119,13 @@ function namedByDate(column) {
 }
 
 /**
- * A column's header as lines of text: its name, its day without the year and
- * its maximum. A column named by its date shows that day once, as its name.
+ * A column's header as lines of text: its day without the year and its
+ * maximum. The name is left to the header's tooltip and accessible label, so
+ * the column is as narrow as its result fields.
  */
 function columnLines(column) {
-  const day = format.dayMonth(column.date);
   return [
-    h("span", { class: "sl-exam-column-name" }, namedByDate(column) ? day : column.name),
-    namedByDate(column) ? null : h("span", {}, day),
+    h("span", { class: "sl-exam-column-day" }, format.dayMonth(column.date)),
     column.maxPoints === null ? null : h("span", {}, `/${format.number(column.maxPoints)}`),
   ];
 }
@@ -304,16 +303,21 @@ class GradebookView extends ExamElement {
   }
 
   /**
-   * A column's header: its name, its day and its maximum as text, with the
-   * full details on hover. An editable column's header is a button that opens
-   * the column's dialog. An online test's column is the test's: its name links
-   * to the test, and nothing in it is edited or deleted here.
+   * A column's header: its day and its maximum as text, with the name and
+   * the full details on hover. An editable column's header is a button that
+   * fills the cell and opens the column's dialog. An online test's column is
+   * the test's: its day links to the test, and nothing in it is edited or
+   * deleted here.
    */
   columnHead(course, column, editable, semester) {
     const head = { class: "sl-exam-column-head", "data-column": String(column.id), title: columnTitle(column) };
     if (column.readOnly) {
-      const [name, ...rest] = columnLines(column);
-      return h("th", { ...head, class: "sl-exam-column-head sl-exam-column-online" }, h("a", { href: `/exam/tests/${column.testId}` }, name), rest);
+      const [day, ...rest] = columnLines(column);
+      return h(
+        "th",
+        { ...head, class: "sl-exam-column-head sl-exam-column-online" },
+        h("a", { href: `/exam/tests/${column.testId}`, "aria-label": t("exam.gradebook.openTest", { name: column.name }) }, day, rest)
+      );
     }
     if (!editable) return h("th", { ...head, "data-column": null }, columnLines(column));
     return h(

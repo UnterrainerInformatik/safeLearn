@@ -536,6 +536,7 @@
       "noTests": "no tests yet",
       "numberRefused": "Enter a number.",
       "openAsPage": "Open as a page",
+      "openTest": "Open the test {name}",
       "outOf": "Out of",
       "outOfMax": "out of {max} points",
       "overridden": "{grade} (override)",
