@@ -167,6 +167,10 @@ class LiveView extends ExamElement {
     this.windowActions = this.windowControls(snapshot.sitting);
     this.screenLink = linkButton({ label: t("exam.live.classScreenLink"), href: `/exam/sittings/${snapshot.sitting.id}/screen`, newWindow: true, class: "sl-exam-live-screen-link" });
     this.body = h("tbody", {});
+    // A sort held back while the mouse was on a button follows once it leaves.
+    this.body.addEventListener("pointerout", (event) => {
+      if (this.sortHeld && event.target.closest?.("button")) setTimeout(() => this.sort());
+    });
     this.summary = h("p", { class: "sl-exam-live-summary" });
     this.sortBy = storedSort();
     this.draw(snapshot);
@@ -238,9 +242,15 @@ class LiveView extends ExamElement {
     return h("p", { class: "sl-exam-actions sl-exam-live-sort-line" }, h("label", {}, `${t("exam.live.sortBy")} `, select));
   }
 
-  /** Puts the rows in the chosen order, moving them rather than drawing them anew. */
+  /**
+   * Puts the rows in the chosen order, moving them rather than drawing them
+   * anew. Not while the mouse is on a button in the table: the button would
+   * move away under the click.
+   */
   sort() {
     if (!this.participants || !this.body || this.params.screen === "1") return;
+    this.sortHeld = Boolean(this.body.querySelector("button:hover"));
+    if (this.sortHeld) return;
     const key = sortKeys[this.sortBy] ?? sortKeys.name;
     const ordered = [...this.participants.values()]
       .map((participant) => ({ participant, value: key(participant, this.focusFigures(participant)) }))

@@ -265,7 +265,7 @@ While an attempt is open, the page SHALL report to the server each time it loses
 
 A teacher SHALL be able to open a sitting's live view before it opens, and during the sitting SHALL see, per participant: not started, writing (with remaining time), submitted; focus losses; and refused devices. The view SHALL be pushed to the teacher's browser as changes happen, over a stream that requires the teacher's authenticated session and is separate from the unauthenticated hot-reload channel. Exam data SHALL NOT be sent over the hot-reload channel. The stream SHALL be re-checked against the session while it is open and SHALL end when the session no longer acts as a teacher. When the stream cannot be kept open, the view SHALL keep updating by fetching snapshots, without reloading the page.
 
-The teacher SHALL be able to order the participants by name (the default), by status (not started first, then writing, submitted last), by the share of their attempt in focus, or by their net time in focus (the time of the attempt so far minus the time away). Both focus orders SHALL put the lowest first and those not started last. The order SHALL follow the figures as they change and SHALL be kept in the teacher's browser.
+The teacher SHALL be able to order the participants by name (the default), by status (not started first, then writing, submitted last), by the share of their attempt in focus, or by their net time in focus (the time of the attempt so far minus the time away). Both focus orders SHALL put the lowest first and those not started last. The order SHALL follow the figures as they change, but SHALL NOT move the rows while the mouse is on a button in the table, and SHALL be kept in the teacher's browser.
 
 #### Scenario: Ordered by focus
 

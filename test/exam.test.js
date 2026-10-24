@@ -2609,7 +2609,7 @@ describe("online tests: the live view", () => {
     assert.equal(await shownAs(1, 60000), " · left 1×, 1 min");
   });
 
-  test("the live view sorts by name, by status, by share and by net time in focus, and keeps the choice", async () => {
+  test("the live view sorts by name, by status, by share and by net time in focus, holds still under the mouse on a button, and keeps the choice", async () => {
     await openLive("Live sorting");
     const username = student.username.toLowerCase();
     const byName = await teacher.page.$$eval("sl-exam-live tbody tr", (rows) => rows.map((row) => row.dataset.username));
@@ -2624,6 +2624,18 @@ describe("online tests: the live view", () => {
     assert.deepEqual(await order("status"), [...others, username], "not started first, writing after");
     assert.deepEqual(await order("share"), [username, ...others], "those not started last");
     assert.deepEqual(await order("net"), [username, ...others]);
+    // With the mouse on Unbind the rows stay put, and follow once it leaves.
+    await teacher.page.hover(`sl-exam-live tr[data-username="${username}"] .sl-exam-live-release`);
+    const rows = () => teacher.page.$$eval("sl-exam-live tbody tr", (all) => all.map((row) => row.dataset.username));
+    await teacher.page.$eval(".sl-exam-live-sort", (select) => {
+      select.value = "status";
+      select.dispatchEvent(new Event("change"));
+    });
+    assert.deepEqual(await rows(), [username, ...others], "held while the mouse is on a button");
+    await teacher.page.mouse.move(0, 0);
+    await teacher.page.waitForFunction((u) => document.querySelector("sl-exam-live tbody tr:last-child")?.dataset.username === u, { timeout: 2000 }, username);
+    assert.deepEqual(await rows(), [...others, username], "sorted once it leaves");
+    await teacher.page.select(".sl-exam-live-sort", "net");
     await teacher.page.reload({ waitUntil: "domcontentloaded" });
     await teacher.page.waitForFunction(() => document.querySelector("sl-exam-live")?.dataset.mode === "stream", { timeout: 20000 });
     assert.equal(await teacher.page.$eval(".sl-exam-live-sort", (select) => select.value), "net", "kept in this browser");
