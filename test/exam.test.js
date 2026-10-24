@@ -1027,15 +1027,21 @@ describe("the gradebook", () => {
       );
 
       // The participation round has one line beside the test's two: its
-      // button still fills the cell, and the cell's empty bottom-right corner
-      // opens the round's dialog.
+      // button covers the cell, and the cell's empty bottom-right corner
+      // opens the round's dialog. The test's two lines stay inside its cell.
       const boxes = await teacher.page.$eval(`th[data-column="${round.id}"]`, (th) => {
         const cell = th.getBoundingClientRect();
-        const button = th.querySelector("button").getBoundingClientRect();
-        const test = document.querySelector("th.sl-exam-column-head:has(> .sl-exam-column-edit) .sl-exam-column-day + span")?.closest("th").getBoundingClientRect();
-        return { cell: [cell.left, cell.top, cell.right, cell.bottom], button: [button.left, button.top, button.right, button.bottom], testHeight: test?.height };
+        const testCell = document.querySelector("th.sl-exam-column-head:has(> .sl-exam-column-edit) .sl-exam-column-day + span")?.closest("th");
+        const corner = document.elementFromPoint(cell.right - 3, cell.bottom - 3);
+        return {
+          cell: [cell.left, cell.top, cell.right, cell.bottom],
+          hit: corner === th.querySelector("button"),
+          testHeight: testCell?.getBoundingClientRect().height,
+          testOverflow: testCell ? testCell.querySelector("button").getBoundingClientRect().bottom - testCell.getBoundingClientRect().bottom : null,
+        };
       });
-      boxes.button.forEach((edge, index) => assert.ok(Math.abs(edge - boxes.cell[index]) <= 1, `the button fills the cell: ${boxes.button} in ${boxes.cell}`));
+      assert.ok(boxes.hit, "the cell's corner is the button");
+      assert.ok(boxes.testOverflow <= 0, `the test's maximum stays inside its header: ${boxes.testOverflow}px over`);
       assert.ok(Math.abs(boxes.cell[3] - boxes.cell[1] - boxes.testHeight) <= 1, "the round's cell is as tall as a test's");
       await teacher.page.mouse.click(boxes.cell[2] - 3, boxes.cell[3] - 3);
       await teacher.page.waitForSelector("dialog[open] input[name=name]", { timeout: 5000 });

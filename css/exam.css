@@ -499,11 +499,11 @@ a.sl-exam-button.sl-exam-open:hover,
 
 /* A column's header is text: its day and maximum on lines of their own, with
    the name and the details in its tooltip. An editable column's header is a
-   button that looks like that text and opens the column's dialog; it and an
-   online test's link fill the whole cell, so pointing anywhere in it marks and
-   chooses the column. The cell's padding moves onto them, and the cell's
-   `height: 1px` lets their percentage height resolve: the row still grows to
-   its tallest cell. */
+   button that looks like that text and opens the column's dialog. An empty
+   `::after` stretched over the cell makes it and an online test's link cover
+   the whole cell, so pointing anywhere in it marks and chooses the column.
+   (A cell with `height: 1px` and a child at `height: 100%` does this in
+   Chromium only: Firefox keeps the row at 1px and the text runs out of it.) */
 .sl-exam-sheet .sl-exam-column-head > span,
 .sl-exam-column-edit > span,
 .sl-exam-column-online a > span {
@@ -512,19 +512,20 @@ a.sl-exam-button.sl-exam-open:hover,
 
 #markdown-content .sl-exam-sheet th.sl-exam-column-head:has(> .sl-exam-column-edit),
 #markdown-content .sl-exam-sheet th.sl-exam-column-online {
-  height: 1px;
-  padding: 0;
+  position: relative;
 }
 
 .sl-exam-column-edit,
 .sl-exam-sheet .sl-exam-column-online a {
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  box-sizing: border-box;
-  width: 100%;
-  height: 100%;
-  padding: 3px 6px;
+  display: block;
+  padding: 0;
+}
+
+.sl-exam-column-edit::after,
+.sl-exam-sheet .sl-exam-column-online a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
 }
 
 .sl-exam-column-edit {
