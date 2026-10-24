@@ -381,6 +381,7 @@
         "held": "Say whether the student is a Matura candidate: held is true or false.",
         "missingCreateRights": "Keycloak refused to create this subject's Matura role: the directory-service client needs manage-clients, or the role has to be created by hand (see docs-keycloak.md).",
         "missingRights": "Keycloak refused to change the Matura role: the directory-service client needs manage-users (see docs-keycloak.md).",
+        "notMaturaClass": "Only a fifth-year class sits the Matura, so only there can a student be marked as a Matura candidate.",
         "unavailable": "This instance has no access to the directory, so Matura candidates cannot be marked here."
       },
       "pool": {

@@ -381,6 +381,7 @@
         "held": "Gib an, ob die Schülerin oder der Schüler zur Matura antritt: held ist true oder false.",
         "missingCreateRights": "Keycloak lässt die Matura-Rolle dieses Fachs nicht anlegen: Der Directory-Service-Client braucht manage-clients, oder die Rolle muss von Hand angelegt werden (siehe docs-keycloak.md).",
         "missingRights": "Keycloak lässt die Matura-Rolle nicht ändern: Der Directory-Service-Client braucht manage-users (siehe docs-keycloak.md).",
+        "notMaturaClass": "Zur Matura tritt nur eine 5. Klasse an, darum lassen sich nur dort Maturantinnen und Maturanten markieren.",
         "unavailable": "Diese Instanz hat keinen Zugriff auf das Verzeichnis, darum lassen sich Maturantinnen und Maturanten hier nicht markieren."
       },
       "pool": {

@@ -266,11 +266,12 @@ class GradebookView extends ExamElement {
    * their columns, each column's name, date and maximum below, and a field
    * per student and column. `editable` is false for those who left the roster.
    * An editable sheet has the Matura toggle beside the name, unless this
-   * instance has no directory to write to (`exam-participant-role`).
+   * instance has no directory to write to or the class is below the fifth
+   * year (`exam-participant-role`).
    */
   sheet(overview, groups, rows, editable) {
     const { course, semester } = overview;
-    const toggle = editable && overview.participants?.state !== undefined && overview.participants.state !== "unavailable";
+    const toggle = editable && overview.participants?.state !== undefined && !["unavailable", "notMaturaClass"].includes(overview.participants.state);
     const leading = this.leading(semester, toggle);
     const headRow = h(
       "tr",

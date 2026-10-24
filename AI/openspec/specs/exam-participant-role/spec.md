@@ -5,14 +5,33 @@ Lets the teacher of a course mark and unmark a student as one of the course's Ma
 
 ## Requirements
 
-### Requirement: A course's exam-participant role is named after its subject
+### Requirement: A course's exam-participant role is named after its subject and language
 
-The role that marks a course's Matura candidates SHALL be the client role `examparticipant-<subject>` on the application's own Keycloak client, where `<subject>` is the course's subject in lower case. Two courses with the same subject in different classes SHALL share the role; which class a holder belongs to SHALL come from the class roster, not from the role.
+The role that marks a course's Matura candidates SHALL be the client role `examparticipant-<subject>-<language>` on the application's own Keycloak client, where `<subject>` is the course's subject in lower case and `<language>` the course's language (`de` or `en`). Two courses with the same subject and language in different classes SHALL share the role, and courses of the same subject in different languages SHALL NOT; which class a holder belongs to SHALL come from the class roster, not from the role.
 
-#### Scenario: Role name from the subject
+#### Scenario: Role name from the subject and language
 
-- **WHEN** a course's subject is `WMC`
-- **THEN** its exam-participant role is `examparticipant-wmc`
+- **WHEN** a course's subject is `WMC` and its language is English
+- **THEN** its exam-participant role is `examparticipant-wmc-en`
+
+#### Scenario: Another language, another role
+
+- **WHEN** a course's subject is `WMC` and its language is German
+- **THEN** its exam-participant role is `examparticipant-wmc-de`
+
+### Requirement: Only a fifth-year class has Matura candidates
+
+Only a course of a fifth-year class - a class whose name starts with `5`, such as `5ahif` - SHALL have Matura candidates. Below the fifth year the gradebook SHALL NOT offer the toggle, a request to grant or withdraw the role SHALL be refused without changing any role mapping, and no view SHALL highlight a student as a candidate of that class's courses.
+
+#### Scenario: Fifth-year class
+
+- **WHEN** a teacher opens the gradebook of a course of class `5ahif`
+- **THEN** the sheet offers the Matura toggle
+
+#### Scenario: Lower class
+
+- **WHEN** a teacher opens the gradebook of a course of class `4ahif`, or a request asks to grant that course's role
+- **THEN** the sheet offers no toggle, the request is refused, and no role mapping changes
 
 ### Requirement: The gradebook grants and withdraws the role per student
 
@@ -21,12 +40,12 @@ The course gradebook SHALL show, for each student on the course's roster, a togg
 #### Scenario: Granting the role
 
 - **WHEN** a teacher switches the toggle on for a student in the gradebook of course `WMC`
-- **THEN** the student holds the client role `examparticipant-wmc` in Keycloak, and the toggle shows it as held
+- **THEN** the student holds the client role `examparticipant-wmc-de` in Keycloak, and the toggle shows it as held
 
 #### Scenario: Withdrawing the role
 
 - **WHEN** a teacher switches the toggle off for a student who holds the role
-- **THEN** the student no longer holds `examparticipant-wmc`, and other roles of the student are unchanged
+- **THEN** the student no longer holds `examparticipant-wmc-de`, and other roles of the student are unchanged
 
 #### Scenario: Somebody not on the roster
 
@@ -44,8 +63,8 @@ When the course's exam-participant role does not exist on the application's clie
 
 #### Scenario: First candidate of a new subject
 
-- **WHEN** a teacher grants the role of a course whose subject has never had candidates
-- **THEN** the role `examparticipant-<subject>` exists on the client afterwards and the student holds it
+- **WHEN** a teacher grants the role of a course whose subject and language have never had candidates
+- **THEN** the role `examparticipant-<subject>-<language>` exists on the client afterwards and the student holds it
 
 ### Requirement: An instance without write rights says so
 
@@ -71,15 +90,15 @@ Wherever the exam module shows a student in the context of a course - the gradeb
 
 #### Scenario: Highlighted in the gradebook
 
-- **WHEN** a teacher opens the gradebook of `WMC` and one student holds `examparticipant-wmc`
+- **WHEN** a teacher opens the gradebook of `WMC` and one student holds `examparticipant-wmc-de`
 - **THEN** that student's name cell has the highlight colour and the others do not
 
 #### Scenario: Highlighted in the live view
 
 - **WHEN** a teacher opens the live view of a sitting of a `WMC` test
-- **THEN** the name cell of a student holding `examparticipant-wmc` is highlighted
+- **THEN** the name cell of a student holding `examparticipant-wmc-de` is highlighted
 
 #### Scenario: Other subject not highlighted
 
-- **WHEN** a student holds `examparticipant-wmc` and a teacher opens the gradebook of `POS` of the same class
+- **WHEN** a student holds `examparticipant-wmc-de` and a teacher opens the gradebook of `POS` of the same class
 - **THEN** that student is not highlighted there

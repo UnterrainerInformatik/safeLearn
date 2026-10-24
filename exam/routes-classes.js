@@ -148,7 +148,7 @@ export function registerClassRoutes(router, { db, handle, startPage, retentionYe
   // The roster says who is a Matura candidate in which of the class's courses (exam-participant-role D5).
   api("get", "/classes/:id", (req) => {
     const klass = getClass(db, idParam(req.params.id));
-    return { ...klass, roster: rosterWithParticipations(db, klass.id, klass.roster) };
+    return { ...klass, roster: rosterWithParticipations(db, klass) };
   });
   api("put", "/classes/:id", (req) => renameClass(db, idParam(req.params.id), req.body ?? {}));
   api("delete", "/classes/:id", (req) => deleteClass(db, idParam(req.params.id)));

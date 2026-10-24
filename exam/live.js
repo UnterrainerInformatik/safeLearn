@@ -147,7 +147,7 @@ export function liveSnapshot(db, sittingId, at = now()) {
       state: sittingState({ opensAt: sitting.opens_at, closesAt: sitting.closes_at }, at),
     },
     test: { id: test.id, name: test.name },
-    course: { id: course.id, subject: course.subject, className: course.className },
+    course: { id: course.id, subject: course.subject, language: course.language, className: course.className },
     participants: participantRows(db, sittingId).map((row) => participantFrom(row, attempts.get(row.username), refused.get(row.username) ?? noRefusals, at)),
   };
 }

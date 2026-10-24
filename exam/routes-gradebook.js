@@ -79,7 +79,7 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
   api("get", "/courses/:id/gradebook", (req) => {
     const id = idParam(req.params.id);
     const overview = courseOverview(db, id, semesterParam(req.query.semester, getCourse(db, id)));
-    const holders = participantHolders(overview.course.subject);
+    const holders = participantHolders(overview.course);
     return {
       ...overview,
       participants: participantSetup(overview.course),
@@ -89,7 +89,7 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
   });
   api("get", "/courses/:id/students/:username", (req) => {
     const record = studentRecord(db, idParam(req.params.id), req.params.username);
-    const holders = participantHolders(record.course.subject);
+    const holders = participantHolders(record.course);
     return {
       ...record,
       student: flagParticipant(record.student, holders),

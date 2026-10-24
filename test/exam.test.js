@@ -879,7 +879,8 @@ describe("the gradebook", () => {
       return wrapper.scrollWidth > wrapper.clientWidth;
     });
     const before = await lefts();
-    assert.equal(before.sticky.length, 5, "name, the Matura toggle, proposal, override and grade");
+    // The demo class is below the fifth year, so the sheet has no Matura toggle (the Matura candidates suite covers it).
+    assert.equal(before.sticky.length, 4, "name, proposal, override and grade");
     const scrolled = await teacher.page.evaluate(() => {
       const wrapper = document.querySelector(".sl-exam-scroll");
       wrapper.scrollLeft = 200;
@@ -967,7 +968,6 @@ describe("the gradebook", () => {
       seen.leading,
       [
         ["Student", ""],
-        ["Matura", "Matura candidate in this subject"],
         ["Winter", ""],
         ["Proposal", "Calculated proposal"],
         ["Override", "Teacher override"],
@@ -2725,7 +2725,7 @@ describe("Matura candidates", () => {
     await setPreferences(teacher, {});
     username = student.username.toLowerCase();
     const year = (await fetchAs(teacher, "/exam/api/years")).json.current;
-    const created = await fetchAs(teacher, `/exam/api/years/${year.id}/classes`, { method: "POST", body: { name: "9XMC", students: [username, other] } });
+    const created = await fetchAs(teacher, `/exam/api/years/${year.id}/classes`, { method: "POST", body: { name: "5XMC", students: [username, other] } });
     assert.equal(created.status, 200, JSON.stringify(created.json));
     klass = created.json;
     course = (await fetchAs(teacher, `/exam/api/classes/${klass.id}/courses`, { method: "POST", body: { subject: "MC", language: "de" } })).json;
@@ -2765,7 +2765,7 @@ describe("Matura candidates", () => {
 
   test("the role's name comes from the subject, and nobody holds it to begin with", async () => {
     const sheet = await readySheet();
-    assert.equal(sheet.participants.role, "examparticipant-mc");
+    assert.equal(sheet.participants.role, "examparticipant-mc-de");
     assert.ok(sheet.students.every((row) => row.examParticipant !== true), "no candidate yet");
   });
 
@@ -2847,6 +2847,27 @@ describe("Matura candidates", () => {
     assert.equal(stranger.status, 400, JSON.stringify(stranger.json));
     assert.equal((await setHeld(teacher, "yes")).status, 400, "held is true or false");
     assert.notEqual((await sheetRow()).examParticipant, true, "nothing changed");
+  });
+
+  test("below the fifth year nobody is a candidate: no toggle, and a grant is refused", async () => {
+    const year = (await fetchAs(teacher, "/exam/api/years")).json.current;
+    const lower = (await fetchAs(teacher, `/exam/api/years/${year.id}/classes`, { method: "POST", body: { name: "4XMC", students: [username, other] } })).json;
+    try {
+      const lowerCourse = (await fetchAs(teacher, `/exam/api/classes/${lower.id}/courses`, { method: "POST", body: { subject: "MC", language: "de" } })).json;
+      try {
+        const sheet = (await fetchAs(teacher, `/exam/api/courses/${lowerCourse.id}/gradebook?semester=ws`)).json;
+        assert.equal(sheet.participants.state, "notMaturaClass");
+        const refused = await setHeld(teacher, true, username, lowerCourse);
+        assert.equal(refused.status, 409, JSON.stringify(refused.json));
+        assert.match(refused.json.error, /fifth-year|5\. Klasse/);
+        await openSheet(lowerCourse);
+        assert.equal(await teacher.page.$$eval(".sl-exam-participant-toggle", (toggles) => toggles.length), 0, "the sheet has no Matura toggle");
+      } finally {
+        await fetchAs(teacher, `/exam/api/courses/${lowerCourse.id}`, { method: "DELETE" });
+      }
+    } finally {
+      await fetchAs(teacher, `/exam/api/classes/${lower.id}`, { method: "DELETE" });
+    }
   });
 });
 

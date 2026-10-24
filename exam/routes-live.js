@@ -38,7 +38,7 @@ const heartbeatMs = 25000;
 /** A snapshot with the course's Matura candidates marked (exam-participant-role D5). */
 function markedSnapshot(db, sittingId, at) {
   const snapshot = liveSnapshot(db, sittingId, at);
-  const holders = participantHolders(snapshot.course.subject);
+  const holders = participantHolders(snapshot.course);
   return { ...snapshot, participants: snapshot.participants.map((participant) => flagParticipant(participant, holders)) };
 }
 
@@ -100,7 +100,7 @@ export function registerLiveRoutes(router, { db, handle, startPage }) {
             participant:
               event.username === null
                 ? null
-                : flagParticipant(liveParticipant(db, sittingId, event.username, at), participantHolders(snapshot.course.subject)),
+                : flagParticipant(liveParticipant(db, sittingId, event.username, at), participantHolders(snapshot.course)),
           });
         })
       );
