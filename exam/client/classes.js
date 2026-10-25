@@ -22,6 +22,8 @@ export const categoryLabels = {
   onlineTests: t("exam.categories.onlineTests"),
   manualTests: t("exam.categories.manualTests"),
   shortTests: t("exam.categories.shortTests"),
+  presentations: t("exam.categories.presentations"),
+  projects: t("exam.categories.projects"),
   participation: t("exam.categories.participation"),
   homework: t("exam.categories.homework"),
 };
@@ -777,14 +779,25 @@ class CourseView extends ExamElement {
       sum.textContent = total() === 100 ? t("exam.classes.weightsComplete") : t("exam.classes.weightsIncomplete", { sum: total() });
       sum.classList.toggle("sl-embed-error", total() !== 100);
     };
+    // A category at 0 % is hidden from the sheet with its columns; the note
+    // says how many, so nobody takes them for deleted (design, Risks).
+    const hidden = Object.fromEntries(course.categories.map((category) => [category, h("span", { class: "sl-exam-quiet sl-exam-hidden-columns" })]));
+    const updateHidden = () => {
+      for (const [category, note] of Object.entries(hidden)) {
+        const count = course.columnCounts?.[category] ?? 0;
+        note.textContent = Number(inputs[category].value) === 0 && count > 0 ? ` ${t("exam.classes.hiddenColumns", { count })}` : "";
+      }
+    };
     Object.values(inputs).forEach((input) => input.addEventListener("input", updateSum));
+    Object.values(inputs).forEach((input) => input.addEventListener("input", updateHidden));
     updateSum();
+    updateHidden();
     const sheet = h(
       "table",
       { class: "sl-exam-table sl-exam-config" },
-      h("tbody", {}, course.categories.map((category) => h("tr", {}, h("td", {}, categoryLabels[category]), h("td", {}, inputs[category], " %"))))
+      h("tbody", {}, course.categories.map((category) => h("tr", {}, h("td", {}, categoryLabels[category]), h("td", {}, inputs[category], " %", hidden[category]))))
     );
-    // One save for the four fields: their `change` events reach the table.
+    // One save for the seven fields: their `change` events reach the table.
     saveOnChange(sheet, {
       value: () => JSON.stringify(weights()),
       check: () => (total() === 100 ? null : t("exam.classes.weightsWrong", { sum: total() })),

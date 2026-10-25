@@ -17,10 +17,15 @@
 /** The semesters of a school year. `ss`'s proposal is the grade for the whole year. */
 export const semesters = Object.freeze(["ws", "ss"]);
 
-/** The category each kind of manual entry counts towards. */
+/**
+ * The category each kind of manual entry counts towards. A project's `+`/`-`
+ * mark (`projectmark`) is not a key: it counts towards nothing.
+ */
 export const entryCategory = Object.freeze({
   test: "manualTests",
   shorttest: "shortTests",
+  presentation: "presentations",
+  project: "projects",
   plusminus: "participation",
   homework: "homework",
 });
@@ -97,10 +102,11 @@ export function weightedMean(categories, weights) {
 /**
  * The proposal for one student's semester: each category's fraction and grade,
  * the weighted mean and its grade. `fraction` and `grade` are null for a
- * student without any entry that counts.
+ * student without any entry that counts. An entry without a category (a
+ * project's mark) counts nowhere.
  */
 export function proposal(entries, { semester, year, weights, scale }) {
-  const counted = entriesOfSemester(entries, semester, year);
+  const counted = entriesOfSemester(entries, semester, year).filter((entry) => entry.category);
   const fractions = categoryFractions(counted);
   const categories = Object.fromEntries(
     Object.entries(fractions).map(([category, value]) => [category, { ...value, grade: gradeFor(value.fraction, scale) }])

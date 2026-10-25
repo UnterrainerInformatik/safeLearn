@@ -7,7 +7,7 @@ Defines how the year grade, proposed at the end of the summer semester, takes th
 
 ### Requirement: The winter semester counts towards the year grade with a weight of its own
 
-A course's config sheet SHALL hold, beside the five category weights, the share in whole percent from 0 to 100 that the winter semester has in the year grade. A new course SHALL start at 50 %. The category weights SHALL keep applying within each semester as before.
+A course's config sheet SHALL hold, beside the seven category weights, the share in whole percent from 0 to 100 that the winter semester has in the year grade. A new course SHALL start at 50 %. The category weights SHALL keep applying within each semester as before.
 
 #### Scenario: Setting the share
 

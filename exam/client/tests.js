@@ -118,12 +118,16 @@ class TestList extends ExamElement {
     // A new test is assembled in the pool, with this course chosen in the bar.
     const newTest = linkButton({ label: t("exam.tests.newTest"), href: `/exam/pool?course=${group.courseId}`, kind: "primary", class: "sl-exam-tests-new" });
     const offlineForm = h("div", { class: "sl-exam-offline-new-form" });
-    const newOffline = button({ label: t("exam.offline.newTest"), class: "sl-exam-tests-new-offline", action: () => offlineForm.replaceChildren(offlineTestForm(group.courseId, () => offlineForm.replaceChildren())) });
+    // Only while the course uses manual or short tests (gradebook-presentations-projects design D4).
+    const newOffline =
+      group.offlineKinds.length === 0
+        ? null
+        : button({ label: t("exam.offline.newTest"), class: "sl-exam-tests-new-offline", action: () => offlineForm.replaceChildren(offlineTestForm(group.courseId, group.offlineKinds, () => offlineForm.replaceChildren())) });
     return h(
       "section",
       { class: "sl-exam-tests-course", "data-course": String(group.courseId) },
       single ? null : h("h2", {}, h("a", { href: `/exam/tests?course=${group.courseId}` }, title)),
-      h("p", { class: "sl-exam-actions" }, newTest, " ", newOffline),
+      h("p", { class: "sl-exam-actions" }, newTest, newOffline ? [" ", newOffline] : null),
       offlineForm,
       group.tests.length === 0
         ? h("p", { class: "sl-exam-quiet" }, t("exam.tests.noTestYet"))
@@ -215,12 +219,14 @@ function handoutPaths(handouts = []) {
 
 /**
  * The form that creates an offline test for a course: its name, its duration
- * and whether it counts as a test or a short test. Its page opens after.
+ * and whether it counts as a test or a short test, of the `kinds` the course
+ * uses. Its page opens after.
  */
-function offlineTestForm(courseId, close) {
+function offlineTestForm(courseId, kinds, close) {
   const name = h("input", { type: "text", name: "name", maxlength: "80", required: true });
   const minutes = h("input", { type: "number", name: "durationMinutes", min: "1", max: "600", required: true, value: "50", class: "sl-exam-number" });
-  const kind = h("select", { name: "gradebookKind" }, h("option", { value: "test" }, t("exam.offline.countsAsTest")), h("option", { value: "shorttest" }, t("exam.offline.countsAsShortTest")));
+  const labels = { test: t("exam.offline.countsAsTest"), shorttest: t("exam.offline.countsAsShortTest") };
+  const kind = h("select", { name: "gradebookKind" }, kinds.map((value) => h("option", { value }, labels[value])));
   const message = h("p", { class: "sl-exam-message", role: "status" });
   return h(
     "form",

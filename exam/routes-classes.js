@@ -34,6 +34,7 @@ import {
   viennaToday,
   weightCategories,
 } from "./classes.js";
+import { columnCounts } from "./gradebook.js";
 import { purgeLeavers, retentionReport } from "./retention.js";
 import {
   asRosterPerson,
@@ -190,7 +191,12 @@ export function registerClassRoutes(router, { db, handle, startPage, retentionYe
   // ----------------------------------------------------------------- courses
 
   api("post", "/classes/:id/courses", (req) => createCourse(db, idParam(req.params.id), req.body ?? {}));
-  api("get", "/courses/:id", (req) => ({ ...getCourse(db, idParam(req.params.id)), categories: weightCategories }));
+  // Every category for the config sheet, and how many columns each holds, for the note on a hidden one.
+  api("get", "/courses/:id", (req) => ({
+    ...getCourse(db, idParam(req.params.id)),
+    categories: weightCategories,
+    columnCounts: columnCounts(db, idParam(req.params.id)),
+  }));
   api("put", "/courses/:id", (req) => updateCourse(db, idParam(req.params.id), req.body ?? {}));
   api("delete", "/courses/:id", (req) => deleteCourse(db, idParam(req.params.id)));
 

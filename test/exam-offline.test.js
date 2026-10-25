@@ -19,7 +19,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { after, afterEach, before, describe, test } from "node:test";
 
-import { createClass, createCourse, createYear } from "../exam/classes.js";
+import { createClass, createCourse, createYear, updateCourse } from "../exam/classes.js";
 import { migrate, openDatabase, readMigrations } from "../exam/db.js";
 import { courseColumns, deleteColumn, setResult, updateColumn } from "../exam/gradebook.js";
 import { importPool } from "../exam/pool-import.js";
@@ -233,6 +233,22 @@ describe("an offline test", () => {
     assert.equal(keyOf(() => createOfflineTest(db, course.id, { ...base, handoutA: "POS/Missing.md" })), "exam.errors.handouts.notFound");
     assert.equal(keyOf(() => createOfflineTest(db, course.id, { ...base, handoutB: "POS/LT1-B.md" })), "exam.errors.handouts.bWithoutA");
     assert.equal(handoutPath("md/POS/LT1-A.md"), "POS/LT1-A.md");
+  });
+
+  test("counts only in a category the course uses, and is not offered while it uses neither", () => {
+    const { db, course } = seeded();
+    const base = { name: "T", durationMinutes: 50 };
+    const weighted = (manualTests, shortTests) =>
+      updateCourse(db, course.id, { weights: { onlineTests: 40 - manualTests - shortTests + 40, manualTests, shortTests, presentations: 0, projects: 0, participation: 10, homework: 10 } });
+    weighted(30, 0);
+    assert.equal(keyOf(() => createOfflineTest(db, course.id, { ...base, gradebookKind: "shorttest" })), "exam.errors.gradebook.categoryNotInUse");
+    assert.equal(createOfflineTest(db, course.id, { ...base, gradebookKind: "test" }).gradebookKind, "test");
+    assert.deepEqual(listTests(db, { courseId: course.id }).groups[0].offlineKinds, ["test"]);
+    weighted(0, 0);
+    assert.equal(keyOf(() => createOfflineTest(db, course.id, { ...base, gradebookKind: "test" })), "exam.errors.gradebook.categoryNotInUse");
+    assert.deepEqual(listTests(db, { courseId: course.id }).groups[0].offlineKinds, [], "no new offline test");
+    weighted(10, 10);
+    assert.deepEqual(listTests(db, { courseId: course.id }).groups[0].offlineKinds, ["test", "shorttest"]);
   });
 
   test("renaming renames its column; removing handout A makes B the only one", () => {

@@ -97,14 +97,33 @@ export function readableMessage(item, { t, format }) {
  * The gradebook's categories, in the order a config sheet lists them, and the
  * weights a new course starts with until a teacher sets its own.
  */
-export const weightCategories = Object.freeze(["onlineTests", "manualTests", "shortTests", "participation", "homework"]);
+export const weightCategories = Object.freeze([
+  "onlineTests",
+  "manualTests",
+  "shortTests",
+  "presentations",
+  "projects",
+  "participation",
+  "homework",
+]);
 export const defaultWeights = Object.freeze({
   onlineTests: 20,
   manualTests: 20,
   shortTests: 20,
+  presentations: 0,
+  projects: 0,
   participation: 20,
   homework: 20,
 });
+
+/**
+ * The categories a course uses: those weighted above 0 %. Every other one is
+ * hidden from the sheet, the records and the results, with its columns and
+ * results kept (gradebook-presentations-projects design D4).
+ */
+export function categoriesInUse(course) {
+  return weightCategories.filter((category) => course.weights[category] > 0);
+}
 
 export const languages = Object.freeze(["de", "en"]);
 
@@ -603,10 +622,12 @@ export function getCourse(db, id) {
   const row = db.prepare("SELECT * FROM course WHERE id = ?").get(id);
   if (!row) throw new NotFoundError("exam.errors.classes.noCourse", { id });
   const klass = db.prepare("SELECT * FROM class WHERE id = ?").get(row.class_id);
+  const course = courseFromRow(row);
   return {
-    ...courseFromRow(row),
+    ...course,
     className: klass.name,
     year: getYear(db, klass.school_year_id),
+    categoriesInUse: categoriesInUse(course),
   };
 }
 

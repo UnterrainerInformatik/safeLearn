@@ -264,8 +264,8 @@ describe("courses", () => {
     assert.deepEqual(course.weights, defaultWeights, "a new course starts with equal weights");
     assert.deepEqual(
       course.weights,
-      { onlineTests: 20, manualTests: 20, shortTests: 20, participation: 20, homework: 20 },
-      "20 % for each of the five categories"
+      { onlineTests: 20, manualTests: 20, shortTests: 20, presentations: 0, projects: 0, participation: 20, homework: 20 },
+      "20 % for each of five categories, presentations and projects at 0 %"
     );
     assert.throws(() => createCourse(db, klass.id, { subject: "WMC" }), ConflictError);
     assert.throws(() => createCourse(db, klass.id, { subject: " wmc " }), ConflictError);
@@ -285,7 +285,7 @@ describe("courses", () => {
     const db = freshDatabase();
     const klass = createClass(db, createYear(db, year2026).id, { name: "4bhif" });
     const course = createCourse(db, klass.id, { subject: "POSE" });
-    const weights = { onlineTests: 40, manualTests: 40, shortTests: 0, participation: 10, homework: 10 };
+    const weights = { onlineTests: 40, manualTests: 40, shortTests: 0, presentations: 0, projects: 0, participation: 10, homework: 10 };
     assert.deepEqual(updateCourse(db, course.id, { weights }).weights, weights);
     for (const bad of [
       { ...weights, homework: 11 },
@@ -293,7 +293,10 @@ describe("courses", () => {
       { ...weights, homework: -10, participation: 30 },
       { onlineTests: 100 },
       { onlineTests: 40, manualTests: 40, participation: 10, homework: 10 },
+      { onlineTests: 40, manualTests: 40, shortTests: 0, participation: 10, homework: 10 },
+      { onlineTests: 40, manualTests: 40, shortTests: 0, presentations: 0, participation: 10, homework: 10 },
       { ...weights, shortTests: 10 },
+      { ...weights, presentations: 10 },
       { ...weights, bonus: 0 },
       [40, 40, 10, 10],
     ]) {

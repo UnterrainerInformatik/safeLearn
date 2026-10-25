@@ -369,7 +369,7 @@ describe("classes and courses", () => {
     });
     assert.equal(duplicate.status, 409);
 
-    const weights = { onlineTests: 50, manualTests: 30, shortTests: 0, participation: 10, homework: 10 };
+    const weights = { onlineTests: 50, manualTests: 30, shortTests: 0, presentations: 0, projects: 0, participation: 10, homework: 10 };
     const saved = await fetchAs(teacher, `/exam/api/courses/${created.json.id}`, { method: "PUT", body: { weights } });
     assert.deepEqual(saved.json.weights, weights);
     const wrong = await fetchAs(teacher, `/exam/api/courses/${created.json.id}`, {
@@ -475,6 +475,7 @@ describe("classes and courses", () => {
 
 describe("the gradebook", () => {
   const fixturePage = "/md/test-exam-gradebook.md";
+  const gbWeights = { onlineTests: 40, manualTests: 30, shortTests: 0, presentations: 0, projects: 0, participation: 15, homework: 15 };
   const other = "gb-other-student";
   let student;
   let teacher;
@@ -584,7 +585,7 @@ describe("the gradebook", () => {
     klass = created.json;
     const gb = await fetchAs(teacher, `/exam/api/classes/${klass.id}/courses`, {
       method: "POST",
-      body: { subject: "GB", language: "de", weights: { onlineTests: 40, manualTests: 30, shortTests: 0, participation: 15, homework: 15 } },
+      body: { subject: "GB", language: "de", weights: gbWeights },
     });
     assert.equal(gb.status, 200, JSON.stringify(gb.json));
     course = gb.json;
@@ -757,8 +758,8 @@ describe("the gradebook", () => {
     assert.equal((await heading()).span, 1, "one manual test so far");
     assert.equal(
       await teacher.page.evaluate(() => document.querySelectorAll(".sl-exam-sheet .sl-exam-category button.sl-exam-add").length),
-      4,
-      "a + for manual tests, short tests, participation and homework, none for online tests"
+      3,
+      "a + for manual tests, participation and homework, none for online tests, nothing of short tests, presentations and projects at 0 %"
     );
     assert.deepEqual(
       await teacher.page.evaluate(() => {
@@ -986,7 +987,7 @@ describe("the gradebook", () => {
   });
 
   test("the config sheet saves its weights as they change, only while they add up to 100 %", async () => {
-    const original = { onlineTests: 40, manualTests: 30, shortTests: 0, participation: 15, homework: 15 };
+    const original = { onlineTests: 40, manualTests: 30, shortTests: 0, presentations: 0, projects: 0, participation: 15, homework: 15 };
     await teacher.page.goto(`${applicationUrl}/exam/courses/${course.id}`, { waitUntil: "domcontentloaded" });
     await teacher.page.waitForSelector(".sl-exam-config input");
     const setWeight = async (label, value) => {
@@ -1163,6 +1164,8 @@ describe("the gradebook", () => {
   test("the sheet: a short test is added through its own +, stands between manual tests and participation, and counts in its category", async () => {
     const page = teacher.page;
     let quiz;
+    // Short tests are at 0 % in this course, and so hidden, until given a weight.
+    await fetchAs(teacher, `/exam/api/courses/${course.id}`, { method: "PUT", body: { weights: { ...gbWeights, shortTests: 10, participation: 5 } } });
     try {
       await openSheet();
       await page.click('button.sl-exam-add[aria-label="Add a column to Short tests"]');
@@ -1187,6 +1190,152 @@ describe("the gradebook", () => {
       assert.equal(row.categories.shortTests.fraction, 5 / 6, "in the short-test category");
     } finally {
       if (quiz) await fetchAs(teacher, `/exam/api/assessments/${quiz.id}`, { method: "DELETE" });
+      await fetchAs(teacher, `/exam/api/courses/${course.id}`, { method: "PUT", body: { weights: gbWeights } });
+    }
+  });
+
+  /** The category headings of the sheet, without their weights. */
+  function categoryOrder() {
+    return teacher.page.evaluate(() => [...document.querySelectorAll(".sl-exam-sheet .sl-exam-category")].map((th) => th.textContent.replace(/ \(.*$/, "")));
+  }
+
+  /** Puts presentations and projects in use, taking their weight from participation and homework. */
+  const inUse = { ...gbWeights, presentations: 10, projects: 10, participation: 5, homework: 5 };
+
+  test("the sheet: a presentation is added through its +, takes a grade from 1 to 5 and refuses a 6", async () => {
+    const page = teacher.page;
+    let talk;
+    await fetchAs(teacher, `/exam/api/courses/${course.id}`, { method: "PUT", body: { weights: inUse } });
+    try {
+      await openSheet();
+      await page.click('button.sl-exam-add[aria-label="Add a column to Presentations"]');
+      await page.waitForSelector("dialog[open] input[name=name]");
+      assert.equal(await page.$eval("dialog[open] h3", (h3) => h3.textContent), "New column: Presentations");
+      assert.equal(await page.$("dialog[open] input[name=maxPoints]"), null, "a presentation asks for no maximum");
+      await page.type("dialog[open] input[name=name]", "Referat Git");
+      await page.click("dialog[open] button[type=submit]");
+      await page.waitForFunction(() => [...document.querySelectorAll("th.sl-exam-column-head")].some((th) => th.title.split("\n")[0] === "Referat Git"), { timeout: 10000 });
+      talk = (await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=ws`)).json.columns.find((c) => c.name === "Referat Git");
+      assert.deepEqual([talk.kind, talk.category, talk.maxPoints], ["presentation", "presentations", null]);
+      const order = await categoryOrder();
+      assert.deepEqual(order.slice(0, 3), ["Online tests", "Manual tests", "Presentations"], "presentations after the tests, short tests hidden");
+
+      await enter(field(talk, other), "2");
+      const row = await overviewRow(other);
+      assert.equal(row.results[talk.id].grade, 2);
+      assert.ok(Math.abs(row.categories.presentations.fraction - 0.815) < 1e-9, `the middle of grade 2's band: ${row.categories.presentations.fraction}`);
+      assert.equal(await page.$eval(field(talk, other), (input) => input.value), "2", "the field shows the grade");
+
+      await enter(field(talk, other), "6");
+      assert.equal(await page.$eval(field(talk, other), (input) => input.classList.contains("is-refused")), true, "a 6 is refused at the field");
+      assert.equal((await overviewRow(other)).results[talk.id].grade, 2, "and the stored grade stays");
+    } finally {
+      if (talk) await fetchAs(teacher, `/exam/api/assessments/${talk.id}`, { method: "DELETE" });
+      await fetchAs(teacher, `/exam/api/courses/${course.id}`, { method: "PUT", body: { weights: gbWeights } });
+    }
+  });
+
+  test("the sheet: a project is a group of its +/− columns and its end grade, and goes with them after a second click", async () => {
+    const page = teacher.page;
+    const columns = async () => (await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=ws`)).json.columns;
+    await fetchAs(teacher, `/exam/api/courses/${course.id}`, { method: "PUT", body: { weights: inUse } });
+    try {
+      await openSheet();
+      assert.equal(await page.$$eval(".sl-exam-sheet thead tr", (rows) => rows.length), 2, "no project, no third heading row");
+      await page.click('button.sl-exam-add[aria-label="Add a column to Projects"]');
+      await page.waitForSelector("dialog[open] input[name=name]");
+      assert.equal(await page.$eval("dialog[open] h3", (h3) => h3.textContent), "New project");
+      await page.type("dialog[open] input[name=name]", "Webshop");
+      await page.click("dialog[open] button[type=submit]");
+      await page.waitForSelector("th.sl-exam-project", { timeout: 10000 });
+      for (const name of ["Sprint 1", "Sprint 2"]) {
+        await page.click('th.sl-exam-project button.sl-exam-add[aria-label="Add a +/− column to Webshop"]');
+        await page.waitForSelector("dialog[open] input[name=name]");
+        assert.equal(await page.$eval("dialog[open] h3", (h3) => h3.textContent), "New +/− column: Webshop");
+        await page.type("dialog[open] input[name=name]", name);
+        await page.click("dialog[open] button[type=submit]");
+        await page.waitForFunction((n) => [...document.querySelectorAll("th.sl-exam-column-head")].some((th) => th.title.split("\n")[0] === n), { timeout: 10000 }, name);
+      }
+      const all = await columns();
+      const project = all.find((c) => c.kind === "project");
+      const marks = all.filter((c) => c.projectId === project.id);
+      assert.deepEqual(marks.map((c) => c.name), ["Sprint 1", "Sprint 2"]);
+
+      const layout = await page.evaluate(() => ({
+        rows: document.querySelectorAll(".sl-exam-sheet thead tr").length,
+        span: document.querySelector("th.sl-exam-project").colSpan,
+        heads: [...document.querySelectorAll(".sl-exam-sheet thead tr.sl-exam-project-columns th")].map((th) => th.textContent),
+      }));
+      assert.deepEqual(layout, { rows: 3, span: 3, heads: [layout.heads[0], layout.heads[1], "Grade"] }, "its marks, then its end grade, under one heading");
+      assert.deepEqual((await categoryOrder()).slice(1, 4), ["Manual tests", "Presentations", "Projects"]);
+
+      await page.focus(field(marks[0], other));
+      await page.keyboard.press("-");
+      await settled(field(marks[0], other));
+      await enter(field(project, other), "1");
+      const row = await overviewRow(other);
+      assert.deepEqual(row.results[marks[0].id], { value: 0, points: null });
+      assert.ok(Math.abs(row.categories.projects.fraction - 0.94) < 1e-9, "the end grade counts, the − does not");
+
+      // The counts in the dialog are the sheet's as it was loaded, as for any column.
+      await openSheet();
+      await page.click("th.sl-exam-project button.sl-exam-project-edit");
+      await page.waitForSelector("dialog[open] .sl-exam-delete-project");
+      assert.equal(await page.$eval("dialog[open] h3", (h3) => h3.textContent), "Edit the project Webshop");
+      const button = "dialog[open] .sl-exam-delete-project";
+      await page.click(button);
+      assert.equal(await page.$eval(button, (b) => b.textContent), "Click again to delete it with 2 +/− columns and 2 results");
+      assert.ok((await columns()).some((c) => c.id === project.id), "one click deletes nothing");
+      await page.click(button);
+      await page.waitForFunction(() => !document.querySelector("th.sl-exam-project"), { timeout: 10000 });
+      assert.deepEqual((await columns()).filter((c) => c.category === "projects"), [], "the project and its +/− columns are gone");
+      assert.equal(await page.$$eval(".sl-exam-sheet thead tr", (rows) => rows.length), 2);
+    } finally {
+      for (const column of (await columns()).filter((c) => c.kind === "project")) await fetchAs(teacher, `/exam/api/assessments/${column.id}`, { method: "DELETE" });
+      await fetchAs(teacher, `/exam/api/courses/${course.id}`, { method: "PUT", body: { weights: gbWeights } });
+    }
+  });
+
+  test("a category at 0 % leaves the sheet and is back at its weight; the config sheet says how many columns it hides", async () => {
+    const page = teacher.page;
+    try {
+      await fetchAs(teacher, `/exam/api/courses/${course.id}`, { method: "PUT", body: { weights: { ...gbWeights, homework: 0, participation: 30 } } });
+      await openSheet();
+      assert.ok(!(await categoryOrder()).includes("Homework"), "no homework group");
+      assert.equal(await page.$('button.sl-exam-add[aria-label="Add a column to Homework"]'), null, "and no + for it");
+      const hidden = (await fetchAs(teacher, `/exam/api/courses/${course.id}`)).json.columnCounts.homework;
+      assert.ok(hidden > 0, "the course holds homework columns");
+      await page.goto(`${applicationUrl}/exam/courses/${course.id}`, { waitUntil: "domcontentloaded" });
+      await page.waitForSelector(".sl-exam-config input");
+      const notes = await page.$$eval(".sl-exam-config tr", (rows) => rows.map((row) => [row.cells[0].textContent, row.querySelector(".sl-exam-hidden-columns").textContent.trim()]));
+      assert.equal(notes.length, 7, "every category on the config sheet");
+      assert.deepEqual(notes.find(([label]) => label === "Homework"), ["Homework", hidden === 1 ? "1 column hidden" : `${hidden} columns hidden`]);
+      assert.deepEqual(notes.filter(([, note]) => note).length, 1, "only where a category at 0 % holds columns");
+
+      await fetchAs(teacher, `/exam/api/courses/${course.id}`, { method: "PUT", body: { weights: gbWeights } });
+      await openSheet();
+      assert.ok((await categoryOrder()).includes("Homework"), "back with its weight");
+    } finally {
+      await fetchAs(teacher, `/exam/api/courses/${course.id}`, { method: "PUT", body: { weights: gbWeights } });
+    }
+  });
+
+  test("the form for a new offline test offers only the categories in use, and is not offered without one", async () => {
+    const page = teacher.page;
+    const open = async () => {
+      await page.goto(`${applicationUrl}/exam/tests?course=${course.id}`, { waitUntil: "domcontentloaded" });
+      await page.waitForSelector(".sl-exam-tests-course", { timeout: 20000 });
+    };
+    try {
+      await open();
+      await page.click(".sl-exam-tests-new-offline");
+      await page.waitForSelector("select[name=gradebookKind]");
+      assert.deepEqual(await page.$$eval("select[name=gradebookKind] option", (options) => options.map((o) => o.value)), ["test"], "short tests are at 0 %");
+      await fetchAs(teacher, `/exam/api/courses/${course.id}`, { method: "PUT", body: { weights: { ...gbWeights, manualTests: 0, participation: 45 } } });
+      await open();
+      assert.equal(await page.$(".sl-exam-tests-new-offline"), null, "neither in use: no new offline test");
+    } finally {
+      await fetchAs(teacher, `/exam/api/courses/${course.id}`, { method: "PUT", body: { weights: gbWeights } });
     }
   });
 });

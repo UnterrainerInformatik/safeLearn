@@ -16,5 +16,7 @@ Measured 2026-10-17 while building exam-module P0, across seven full `test/conte
 
 - 2026-10-20 (publishing-without-keycloak): in the full `npm test` the exam check "the buttons to the pool and the online tests are on every teacher page…" failed once with `Node is either not clickable or not an Element`; `test/exam.test.js` run alone right after it passed it (145/146, only the known Exams-page check red).
 
+- 2026-10-25 (gradebook-presentations-projects): `test/exam.test.js` "the live view orders by status, then by time out of focus…" (2000 ms wait) and "started from its page, a present student sees their handout…" (`.sl-exam-handout-link` for sitting 21, 20 s) failed in **3 of 3** full runs, once on HEAD with the tree stashed. Reproducible on that day, not caused by the gradebook change. The live-view suite cannot be run alone with `--test-name-pattern` (its tests are all cancelled), so compare via a full `test/exam.test.js` run.
+
 **Why:** a red run with only these two is not evidence against a change.
 **How to apply:** if only these fail, re-run the content suite once before investigating; if one fails reproducibly, compare against HEAD in a `git worktree` (symlink `node_modules`, copy `keycloak.json` and `.env`) before blaming the change. See [[browser-verification]].

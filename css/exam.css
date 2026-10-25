@@ -574,6 +574,59 @@ a.sl-exam-button.sl-exam-open:hover,
   font-weight: bold;
 }
 
+/* A project's heading, in the row between the categories and the columns: its
+   name opens the project's dialog and looks like the heading's text, its `+`
+   adds a mark column. A rule on each side sets a project apart from the next;
+   its end-grade column is the one that counts, so its header is bold. */
+.sl-exam-sheet th.sl-exam-project {
+  font-weight: normal;
+  white-space: normal;
+  border-left: 2px solid #c8ccd1;
+  border-right: 2px solid #c8ccd1;
+}
+
+.sl-exam-project-edit {
+  border: none;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.sl-exam-project-edit:hover,
+.sl-exam-project-edit:focus-visible {
+  text-decoration: underline;
+}
+
+.sl-exam-sheet th.sl-exam-end-grade {
+  font-weight: bold;
+}
+
+#markdown-content.dark-mode .sl-exam-sheet th.sl-exam-project {
+  border-left-color: #545d68;
+  border-right-color: #545d68;
+}
+
+/* A project's marks in a results table: indented under their project, and
+   quieter, since they count nowhere. */
+.sl-exam-entries tr.sl-exam-project-mark td:first-child {
+  padding-left: 1.75em;
+}
+
+.sl-exam-entries tr.sl-exam-project-mark {
+  color: #54595d;
+}
+
+#markdown-content.dark-mode .sl-exam-entries tr.sl-exam-project-mark {
+  color: #a2a9b1;
+}
+
+/* The config sheet's note on a category at 0 % that still holds columns. */
+.sl-exam-config .sl-exam-hidden-columns {
+  margin-left: 0.5em;
+}
+
 /* A modal dialog scrolls what overflows it by the browser's own styles; the
    date field's calendar is meant to stand out over its edge instead, so the
    dialog is not made to scroll by it. Its few fields always fit. */

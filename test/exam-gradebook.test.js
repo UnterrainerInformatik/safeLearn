@@ -75,7 +75,7 @@ const seededScale = [
 ];
 
 const year = { name: "2026/27", startsOn: "2026-09-07", summerStartsOn: "2027-02-15", endsOn: "2027-07-02" };
-const weights = { onlineTests: 40, manualTests: 30, shortTests: 0, participation: 15, homework: 15 };
+const weights = { onlineTests: 40, manualTests: 30, shortTests: 0, presentations: 0, projects: 0, participation: 15, homework: 15 };
 
 const close = (actual, expected, message) =>
   assert.ok(Math.abs(actual - expected) < 1e-9, `${message ?? "the fraction"} is ${actual}, not ${expected}`);
@@ -133,7 +133,7 @@ describe("grading functions", () => {
       { category: entryCategory.test, value: 12 / 24, date: "2026-11-03" },
       { category: entryCategory.shorttest, value: 6 / 6, date: "2026-11-10" },
     ];
-    const quizWeights = { onlineTests: 0, manualTests: 60, shortTests: 40, participation: 0, homework: 0 };
+    const quizWeights = { onlineTests: 0, manualTests: 60, shortTests: 40, presentations: 0, projects: 0, participation: 0, homework: 0 };
     const proposed = proposal(entries, { semester: "ws", year, weights: quizWeights, scale: seededScale });
     assert.deepEqual(Object.keys(proposed.categories).sort(), ["manualTests", "shortTests"]);
     close(proposed.fraction, 0.7);
@@ -368,14 +368,16 @@ describe("short tests join the categories", () => {
 
     assert.deepEqual(migrate(db, dbPath), { from: 9, to: readMigrations().length });
 
-    assert.deepEqual(rows("SELECT * FROM assessment ORDER BY id"), columnsBefore, "every column keeps its id and values");
-    assert.deepEqual(rows("SELECT * FROM manual_entry ORDER BY id"), resultsBefore, "every result keeps its id and values");
+    // 014 adds a mark column's project and a result's typed grade, both empty here.
+    assert.deepEqual(rows("SELECT * FROM assessment ORDER BY id"), columnsBefore.map((row) => ({ ...row, project_id: null })), "every column keeps its id and values");
+    assert.deepEqual(rows("SELECT * FROM manual_entry ORDER BY id"), resultsBefore.map((row) => ({ ...row, grade: null })), "every result keeps its id and values");
+    const later = { presentations: 0, projects: 0 };
     assert.deepEqual(
       [1, 2, 3].map(storedWeights),
       [
-        { onlineTests: 40, manualTests: 30, participation: 15, homework: 15, shortTests: 0 },
-        { onlineTests: 25, manualTests: 25, participation: 25, homework: 25, shortTests: 0 },
-        { onlineTests: 10, manualTests: 40, participation: 25, homework: 25, shortTests: 0 },
+        { onlineTests: 40, manualTests: 30, participation: 15, homework: 15, shortTests: 0, ...later },
+        { onlineTests: 25, manualTests: 25, participation: 25, homework: 25, shortTests: 0, ...later },
+        { onlineTests: 10, manualTests: 40, participation: 25, homework: 25, shortTests: 0, ...later },
       ],
       "the weights a course read are written down, short tests at 0 %"
     );
@@ -394,6 +396,7 @@ describe("short tests join the categories", () => {
     assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
     const indexes = rows("SELECT name FROM sqlite_master WHERE type = 'index' AND name IN ('assessment_course', 'manual_entry_username') ORDER BY name");
     assert.deepEqual(indexes.map((index) => index.name), ["assessment_course", "manual_entry_username"]);
+    updateCourse(db, 1, { weights: { onlineTests: 40, manualTests: 30, shortTests: 10, presentations: 0, projects: 0, participation: 10, homework: 10 } });
     assert.equal(createColumn(db, 1, { kind: "shorttest", name: "Quiz", date: "2026-11-10", maxPoints: 6 }).category, "shortTests", "the new kind is taken");
   });
 });
@@ -410,6 +413,7 @@ describe("columns and their results", () => {
 
   test("a short test as a column: in points or in percent, in the short-test category and not the manual-test one", () => {
     const { db, course } = gradebookFixture();
+    updateCourse(db, course.id, { weights: { ...weights, shortTests: 10, homework: 5 } });
     const quiz = column(db, course, { kind: "shorttest", name: "Quiz 1", date: "2026-11-10", maxPoints: 6 }, [["anna", { points: 5 }]]);
     assert.deepEqual([quiz.kind, quiz.category, quiz.maxPoints], ["shorttest", "shortTests", 6]);
     column(db, course, { kind: "shorttest", name: "Quiz 2", date: "2026-11-17" }, [["anna", { percent: 50 }]]);
@@ -508,7 +512,7 @@ describe("columns and their results", () => {
   test("deleting a column removes its results", () => {
     const { db, course } = gradebookFixture();
     const test1 = column(db, course, { kind: "test", date: "2026-11-03", maxPoints: 24 }, [["anna", { points: 20 }], ["ben", { points: 10 }]]);
-    assert.deepEqual(deleteColumn(db, test1.id), { deleted: test1.id, courseId: course.id, results: 2 });
+    assert.deepEqual(deleteColumn(db, test1.id), { deleted: test1.id, courseId: course.id, results: 2, columns: 0 });
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM manual_entry").get().n, 0);
     assert.throws(() => deleteColumn(db, test1.id), NotFoundError);
   });
@@ -541,7 +545,7 @@ describe("proposals, overrides and the course overview", () => {
     column(db, course, { kind: "test", date: "2026-12-01" }, [["anna", { percent: 40 }]]);
     assert.equal(studentRecord(db, course.id, "anna").semesters.ws.proposal.grade, 3, "a new result is reflected at once");
 
-    updateCourse(db, course.id, { weights: { onlineTests: 0, manualTests: 10, shortTests: 0, participation: 90, homework: 0 } });
+    updateCourse(db, course.id, { weights: { onlineTests: 0, manualTests: 10, shortTests: 0, presentations: 0, projects: 0, participation: 90, homework: 0 } });
     assert.equal(studentRecord(db, course.id, "anna").semesters.ws.proposal.grade, 1, "so are new weights");
 
     const set = setSemesterGrade(db, course.id, "anna", "ws", { override: 2, comment: "strong oral exam", commentVisible: false });
@@ -759,5 +763,220 @@ describe("the grading scale", () => {
       assert.throws(() => updateScale(db, thresholds), InvalidInputError, JSON.stringify(thresholds));
     }
     assert.deepEqual(readScale(db), seededScale, "nothing changed");
+  });
+});
+
+describe("presentations and projects", () => {
+  /** Weights that put presentations and projects in use, the other categories as before. */
+  const inUse = { onlineTests: 30, manualTests: 20, shortTests: 0, presentations: 10, projects: 10, participation: 15, homework: 15 };
+  const only = (category) => ({ onlineTests: 0, manualTests: 0, shortTests: 0, presentations: 0, projects: 0, participation: 0, homework: 0, [category]: 100 });
+  const keyOf = (fn) => {
+    try {
+      fn();
+    } catch (error) {
+      return error.key;
+    }
+    return null;
+  };
+
+  test("migrating from schema 13 keeps every id, result and record, and gives every course both new weights at 0 %, closed years included", () => {
+    const dbPath = temporaryPath();
+    const db = new DatabaseSync(dbPath);
+    openDatabases.push(db);
+    db.exec("PRAGMA foreign_keys = ON");
+    migrate(db, dbPath, readMigrations().slice(0, 13));
+    db.exec(`
+      INSERT INTO school_year (id, name, starts_on, summer_starts_on, ends_on, is_current) VALUES
+        (1, '2025/26', '2025-09-08', '2026-02-16', '2026-07-03', 0),
+        (2, '2026/27', '2026-09-07', '2027-02-15', '2027-07-02', 1);
+      INSERT INTO class (id, school_year_id, name) VALUES (1, 1, '3bhif'), (2, 2, '4bhif');
+      INSERT INTO student (username) VALUES ('anna'), ('ben');
+      INSERT INTO roster_entry (class_id, username, joined_at) VALUES (1, 'anna', 'x'), (1, 'ben', 'x'), (2, 'anna', 'x'), (2, 'ben', 'x');
+      INSERT INTO course (id, class_id, subject, weights) VALUES
+        (1, 1, 'WMC', '{"onlineTests":40,"manualTests":30,"shortTests":0,"participation":15,"homework":15}'),
+        (2, 2, 'WMC', '{"onlineTests":20,"manualTests":20,"shortTests":20,"participation":20,"homework":20}');
+      INSERT INTO assessment (id, course_id, kind, name, held_on, max_points, created_at) VALUES
+        (4, 1, 'test', '1st test', '2025-11-03', 24, 'x'),
+        (5, 1, 'plusminus', 'round', '2026-03-04', NULL, 'x'),
+        (8, 2, 'shorttest', 'Quiz', '2026-11-10', 6, 'x'),
+        (9, 2, 'homework', 'Essay', '2027-03-01', NULL, 'x');
+      INSERT INTO manual_entry (id, assessment_id, username, value, points, created_at, updated_at) VALUES
+        (10, 4, 'anna', 0.75, 18, 'x', 'x'), (11, 4, 'ben', 0.25, 6, 'x', 'x'),
+        (12, 5, 'anna', 1, NULL, 'x', 'x'),
+        (20, 8, 'anna', 0.5, 3, 'x', 'x'), (21, 9, 'ben', 0.9, NULL, 'x', 'x');
+      UPDATE school_year SET closed_at = '2026-07-10T00:00:00Z' WHERE id = 1;
+    `);
+    const rows = (sql) => db.prepare(sql).all().map((row) => ({ ...row }));
+    const records = () => [1, 2].flatMap((courseId) => ["anna", "ben"].map((username) => studentRecord(db, courseId, username)));
+    const before = { columns: rows("SELECT * FROM assessment ORDER BY id"), results: rows("SELECT * FROM manual_entry ORDER BY id"), records: records() };
+
+    assert.deepEqual(migrate(db, dbPath), { from: 13, to: readMigrations().length });
+
+    assert.deepEqual(rows("SELECT * FROM assessment ORDER BY id"), before.columns.map((row) => ({ ...row, project_id: null })), "every column keeps its id and values");
+    assert.deepEqual(rows("SELECT * FROM manual_entry ORDER BY id"), before.results.map((row) => ({ ...row, grade: null })), "every result keeps its id and values");
+    assert.deepEqual(records(), before.records, "every record, category and proposal is what it was");
+    const stored = (id) => JSON.parse(db.prepare("SELECT weights FROM course WHERE id = ?").get(id).weights);
+    assert.deepEqual([stored(1).presentations, stored(1).projects, stored(2).presentations, stored(2).projects], [0, 0, 0, 0], "written down, the closed year's course too");
+    assert.throws(() => db.prepare("UPDATE course SET language = 'en' WHERE id = 1").run(), /school year closed/, "the closed year's trigger is back");
+    assert.throws(() => db.prepare("INSERT INTO assessment (course_id, kind, name, held_on, created_at) VALUES (1, 'test', 'x', '2025-11-03', 'x')").run(), /school year closed/);
+    assert.throws(() => db.prepare("DELETE FROM manual_entry WHERE id = 10").run(), /school year closed/);
+    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+    const indexes = rows("SELECT name FROM sqlite_master WHERE type = 'index' AND name IN ('assessment_course', 'assessment_project') ORDER BY name");
+    assert.deepEqual(indexes.map((index) => index.name), ["assessment_course", "assessment_project"]);
+    assert.throws(() => db.prepare("INSERT INTO assessment (course_id, kind, name, held_on, created_at) VALUES (2, 'projectmark', 'x', '2026-11-03', 'x')").run(), /CHECK/, "a mark column needs its project");
+  });
+
+  test("a presentation graded 2 counts as the middle of its band, and follows a change of the scale", () => {
+    const { db, course } = gradebookFixture();
+    updateCourse(db, course.id, { weights: only("presentations") });
+    const git = column(db, course, { kind: "presentation", name: "Referat Git", date: "2026-11-10" }, [["anna", { grade: 2 }]]);
+    assert.deepEqual([git.category, git.maxPoints], ["presentations", null]);
+    const [entry] = studentRecord(db, course.id, "anna").entries;
+    close(entry.value, 0.815, "88/75/63/50: grade 2 is the middle of 75 % and 88 %");
+    assert.equal(entry.grade, 2);
+    assert.equal(courseOverview(db, course.id, "ws").students[0].results[git.id].grade, 2, "the sheet's field shows the grade typed");
+
+    updateScale(db, { 1: 88, 2: 77, 3: 63, 4: 50 });
+    const moved = studentRecord(db, course.id, "anna");
+    close(moved.entries[0].value, 0.825, "the midpoint moves with the threshold");
+    assert.equal(moved.entries[0].grade, 2, "and the grade stays as typed");
+    close(moved.semesters.ws.categories.presentations.fraction, 0.825);
+  });
+
+  test("two presentations graded 1 and 3 make the category 0.815, a 2; a grade out of range is refused", () => {
+    const { db, course } = gradebookFixture();
+    updateCourse(db, course.id, { weights: only("presentations") });
+    const git = column(db, course, { kind: "presentation", name: "Referat Git", date: "2026-11-10" }, [["anna", { grade: 1 }]]);
+    column(db, course, { kind: "presentation", name: "Referat Docker", date: "2026-12-10" }, [["anna", { grade: 3 }]]);
+    const ws = studentRecord(db, course.id, "anna").semesters.ws;
+    close(ws.categories.presentations.fraction, (0.94 + 0.69) / 2);
+    assert.deepEqual(ws.proposal.grade, 2);
+    for (const bad of [{ grade: 6 }, { grade: 0 }, { grade: 2.5 }, { grade: "2" }, { percent: 80 }]) {
+      assert.equal(keyOf(() => setResult(db, git.id, "anna", bad)), "exam.errors.gradebook.gradeRange", JSON.stringify(bad));
+    }
+    assert.equal(studentRecord(db, course.id, "anna").entries[0].grade, 1, "the result stays as it was");
+    assert.equal(keyOf(() => createColumn(db, course.id, { kind: "presentation", date: "2026-11-10", maxPoints: 10 })), "exam.errors.gradebook.noMaxForKind");
+  });
+
+  test("a project's end grade counts; its marks count nowhere, and a project without an end grade is left out", () => {
+    const { db, course } = gradebookFixture();
+    updateCourse(db, course.id, { weights: inUse });
+    const webshop = column(db, course, { kind: "project", name: "Webshop", date: "2027-01-20" });
+    const marks = ["2027-01-10", "2027-01-12", "2027-01-14"].map((date) => column(db, course, { kind: "projectmark", projectId: webshop.id, date }, [["anna", { mark: "-" }]]));
+    assert.deepEqual(marks.map((mark) => [mark.category, mark.projectId]), marks.map(() => ["projects", webshop.id]));
+    const withoutGrade = studentRecord(db, course.id, "anna");
+    assert.equal(withoutGrade.semesters.ws.categories.projects, undefined, "no end grade: no entry in projects");
+    assert.equal(withoutGrade.semesters.ws.proposal, null, "and nothing else counts either");
+    assert.deepEqual(withoutGrade.entries.map((entry) => [entry.kind, entry.category, entry.projectName]), marks.map(() => ["projectmark", null, "Webshop"]));
+
+    setResult(db, webshop.id, "anna", { grade: 2 });
+    const graded = studentRecord(db, course.id, "anna").semesters.ws;
+    close(graded.categories.projects.fraction, 0.815, "three − marks change nothing");
+    assert.equal(graded.categories.projects.count, 1);
+    close(graded.proposal.fraction, 0.815);
+    assert.equal(keyOf(() => setResult(db, marks[0].id, "anna", { grade: 1 })), "exam.errors.gradebook.participationMark", "a mark is + or −");
+  });
+
+  test("a project's marks stand right before it and go by its semester, whatever their own dates", () => {
+    const { db, course } = gradebookFixture();
+    updateCourse(db, course.id, { weights: inUse });
+    const talk = createColumn(db, course.id, { kind: "presentation", name: "Talk", date: "2027-03-05" });
+    const webshop = createColumn(db, course.id, { kind: "project", name: "Webshop", date: "2027-03-01" });
+    const early = createColumn(db, course.id, { kind: "projectmark", projectId: webshop.id, name: "early", date: "2027-01-15" });
+    const later = createColumn(db, course.id, { kind: "projectmark", projectId: webshop.id, name: "later", date: "2027-02-20" });
+    const blog = createColumn(db, course.id, { kind: "project", name: "Blog", date: "2027-02-16" });
+    const round = createColumn(db, course.id, { kind: "plusminus", date: "2027-02-16" });
+    assert.deepEqual(courseColumns(db, course.id, "ws").map((c) => c.id), [], "the winter sheet shows nothing of Webshop");
+    assert.deepEqual(courseColumns(db, course.id, "ss").map((c) => c.id), [talk.id, blog.id, early.id, later.id, webshop.id, round.id]);
+    setResult(db, early.id, "anna", { mark: "+" });
+    const anna = studentRecord(db, course.id, "anna");
+    assert.equal(anna.entries[0].semester, "ss", "a mark's semester is its project's");
+    assert.deepEqual(Object.keys(courseOverview(db, course.id, "ss").students[0].results), [String(early.id)]);
+  });
+
+  test("deleting a project deletes its mark columns and every result in the project", () => {
+    const { db, course } = gradebookFixture();
+    updateCourse(db, course.id, { weights: inUse });
+    const webshop = column(db, course, { kind: "project", name: "Webshop", date: "2027-01-20" }, [["anna", { grade: 1 }]]);
+    column(db, course, { kind: "projectmark", projectId: webshop.id, date: "2027-01-10" }, [["anna", { mark: "+" }], ["ben", { mark: "-" }]]);
+    column(db, course, { kind: "projectmark", projectId: webshop.id, date: "2027-01-12" }, [["anna", { mark: "+" }]]);
+    const other = column(db, course, { kind: "project", name: "Blog", date: "2027-01-21" });
+    const otherMark = column(db, course, { kind: "projectmark", projectId: other.id, date: "2027-01-12" }, [["ben", { mark: "+" }]]);
+    assert.deepEqual(deleteColumn(db, otherMark.id), { deleted: otherMark.id, courseId: course.id, results: 1, columns: 0 }, "a mark column goes alone");
+    assert.deepEqual(deleteColumn(db, webshop.id), { deleted: webshop.id, courseId: course.id, results: 4, columns: 2 });
+    assert.deepEqual(courseColumns(db, course.id).map((c) => c.id), [other.id]);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM manual_entry").get().n, 0);
+  });
+
+  test("a mark column needs a project of its course, and only a mark column has one", () => {
+    const { db, course } = gradebookFixture();
+    updateCourse(db, course.id, { weights: inUse });
+    const webshop = createColumn(db, course.id, { kind: "project", name: "Webshop", date: "2027-01-20" });
+    const talk = createColumn(db, course.id, { kind: "presentation", name: "Talk", date: "2027-01-20" });
+    const elsewhere = createCourse(db, course.classId, { subject: "POS", weights: inUse });
+    const foreign = createColumn(db, elsewhere.id, { kind: "project", name: "Foreign", date: "2027-01-20" });
+    const mark = (projectId) => keyOf(() => createColumn(db, course.id, { kind: "projectmark", projectId, date: "2027-01-10" }));
+    assert.equal(mark(undefined), "exam.errors.gradebook.projectIdMissing");
+    assert.equal(mark("1"), "exam.errors.gradebook.projectIdMissing");
+    assert.equal(mark(talk.id), "exam.errors.gradebook.noProject", "a presentation is no project");
+    assert.equal(mark(foreign.id), "exam.errors.gradebook.noProject", "another course's project");
+    assert.equal(mark(999), "exam.errors.gradebook.noProject");
+    assert.equal(keyOf(() => createColumn(db, course.id, { kind: "test", projectId: webshop.id, date: "2027-01-10" })), "exam.errors.gradebook.projectIdNotMark");
+    assert.equal(keyOf(() => createColumn(db, course.id, { kind: "projectmark", projectId: webshop.id, date: "2027-01-10", maxPoints: 2 })), "exam.errors.gradebook.noMaxForKind");
+  });
+
+  test("a category not in use takes no new column", () => {
+    const { db, course } = gradebookFixture();
+    updateCourse(db, course.id, { weights: inUse });
+    const webshop = createColumn(db, course.id, { kind: "project", name: "Webshop", date: "2027-01-20" });
+    updateCourse(db, course.id, { weights });
+    for (const spec of [{ kind: "presentation" }, { kind: "project" }, { kind: "projectmark", projectId: webshop.id }, { kind: "shorttest" }]) {
+      assert.equal(keyOf(() => createColumn(db, course.id, { ...spec, date: "2027-01-10" })), "exam.errors.gradebook.categoryNotInUse", spec.kind);
+    }
+  });
+
+  test("a category at 0 % is hidden from the sheet, the record and the results, kept, and shown again above 0 %", () => {
+    const { db, course } = gradebookFixture();
+    column(db, course, { kind: "test", date: "2026-11-03" }, [["anna", { percent: 70 }]]);
+    const essay = column(db, course, { kind: "homework", name: "Essay", date: "2026-11-05" }, [["anna", { percent: 0 }]]);
+    const lab = column(db, course, { kind: "homework", name: "Lab", date: "2026-11-06" }, [["anna", { percent: 0 }]]);
+    const shown = { overview: courseOverview(db, course.id, "ws"), record: studentRecord(db, course.id, "anna"), results: resultsOf(db, "anna", { today: "2026-11-20" }) };
+
+    updateCourse(db, course.id, { weights: { ...weights, homework: 0, participation: 30 } });
+    const overview = courseOverview(db, course.id, "ws");
+    assert.ok(!overview.course.categoriesInUse.includes("homework"));
+    assert.ok(!overview.columns.some((c) => c.category === "homework"), "no homework group in the sheet");
+    assert.deepEqual(Object.keys(overview.students[0].results).map(Number), [overview.columns[0].id], "nor its results");
+    assert.deepEqual(Object.keys(overview.students[0].categories), ["manualTests"]);
+    const record = studentRecord(db, course.id, "anna");
+    assert.deepEqual(record.entries.map((e) => e.category), ["manualTests"]);
+    assert.deepEqual(Object.keys(record.semesters.ws.categories), ["manualTests"]);
+    close(record.semesters.ws.proposal.fraction, 0.7, "0/10 in homework does not count");
+    const [own] = resultsOf(db, "anna", { today: "2026-11-20" }).courses;
+    assert.deepEqual(own.entries.map((e) => e.category), ["manualTests"]);
+    assert.deepEqual(Object.keys(own.semesters.ws.categories), ["manualTests"]);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM manual_entry").get().n, 3, "nothing is deleted");
+
+    updateCourse(db, course.id, { weights });
+    assert.deepEqual(courseOverview(db, course.id, "ws"), shown.overview, "both columns and their results are back as they were");
+    assert.deepEqual(studentRecord(db, course.id, "anna"), shown.record);
+    assert.deepEqual(resultsOf(db, "anna", { today: "2026-11-20" }), shown.results);
+    assert.deepEqual([essay.id, lab.id].every((id) => courseOverview(db, course.id, "ws").columns.some((c) => c.id === id)), true);
+  });
+
+  test("a student's results carry a grade entry's grade and a mark's project", () => {
+    const { db, course } = gradebookFixture();
+    updateCourse(db, course.id, { weights: inUse });
+    const webshop = column(db, course, { kind: "project", name: "Webshop", date: "2026-11-20" }, [["anna", { grade: 2 }]]);
+    column(db, course, { kind: "projectmark", projectId: webshop.id, date: "2026-11-10" }, [["anna", { mark: "+" }]]);
+    const [own] = resultsOf(db, "anna", { today: "2026-11-25" }).courses;
+    assert.deepEqual(
+      own.entries.map((e) => [e.kind, e.category, e.grade, e.projectId, e.projectName]),
+      [
+        ["projectmark", null, null, webshop.id, "Webshop"],
+        ["project", "projects", 2, null, null],
+      ]
+    );
+    close(own.semesters.ws.categories.projects.fraction, 0.815);
   });
 });

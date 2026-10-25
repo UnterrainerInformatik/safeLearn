@@ -18,19 +18,34 @@ import { viennaLocal } from "./periods.js";
 import { act, candidateNote, directoryNotice, displayClass, displayPerson, messageLine, personName } from "./classes.js";
 import { confirmButton, defineExamElement, ExamElement, examApi, format, h, linkButton, markRows, readOnlyFor, saveOnChange, stickyColumns, t } from "./frame.js";
 
-const categories = ["onlineTests", "manualTests", "shortTests", "participation", "homework"];
+const categories = ["onlineTests", "manualTests", "shortTests", "presentations", "projects", "participation", "homework"];
 
 /** The categories by name, in the reader's language. */
 const categoryLabels = {
   onlineTests: t("exam.categories.onlineTests"),
   manualTests: t("exam.categories.manualTests"),
   shortTests: t("exam.categories.shortTests"),
+  presentations: t("exam.categories.presentations"),
+  projects: t("exam.categories.projects"),
   participation: t("exam.categories.participation"),
   homework: t("exam.categories.homework"),
 };
 
-/** The kind a category's `+` adds a column of. Online tests have no `+`: their columns are the tests. */
-const addableKinds = { manualTests: "test", shortTests: "shorttest", participation: "plusminus", homework: "homework" };
+/**
+ * The kind a category's `+` adds a column of; in projects, a project. Online
+ * tests have no `+`: their columns are the tests.
+ */
+const addableKinds = { manualTests: "test", shortTests: "shorttest", presentations: "presentation", projects: "project", participation: "plusminus", homework: "homework" };
+
+/** True for a column whose fields take `+` or `−`: participation and a project's marks. */
+function isMark(column) {
+  return column.kind === "plusminus" || column.kind === "projectmark";
+}
+
+/** True for a column whose fields take a grade from 1 to 5: a presentation or a project's end grade. */
+function isGraded(column) {
+  return column.kind === "presentation" || column.kind === "project";
+}
 
 const semesterLabels = { ws: t("exam.gradebook.semester.ws"), ss: t("exam.gradebook.semester.ss") };
 
@@ -55,9 +70,10 @@ function parseNumber(text) {
   return value === null || value < 0 ? Number.NaN : value;
 }
 
-/** A result as it was entered: "17/24", "75 %", "+" or "−". */
+/** A result as it was entered: "17/24", "75 %", "+", "−" or "grade 2". */
 function entryResult(entry) {
-  if (entry.kind === "plusminus") return entry.value === 1 ? "+" : "−";
+  if (isMark(entry)) return entry.value === 1 ? "+" : "−";
+  if (isGraded(entry)) return t("exam.gradebook.gradeValue", { grade: entry.grade });
   if (entry.maxPoints !== null) return `${format.number(entry.points)}/${format.number(entry.maxPoints)}`;
   return percent(entry.value);
 }
@@ -124,6 +140,8 @@ function namedByDate(column) {
  * the column is as narrow as its result fields.
  */
 function columnLines(column) {
+  // A project's end grade is headed as such; the project's heading above holds its name and date.
+  if (column.kind === "project") return [h("span", { class: "sl-exam-column-day" }, t("exam.gradebook.endGrade"))];
   return [
     h("span", { class: "sl-exam-column-day" }, format.dayMonth(column.date)),
     column.maxPoints === null ? null : h("span", {}, `/${format.number(column.maxPoints)}`),
@@ -133,7 +151,8 @@ function columnLines(column) {
 /** A column's details for hovering over its header: name, full date, and maximum or percent. */
 function columnTitle(column) {
   const scoring =
-    column.kind === "plusminus" ? null : column.maxPoints === null ? t("exam.gradebook.inPercent") : t("exam.gradebook.outOfMax", { max: format.number(column.maxPoints) });
+    isMark(column) || isGraded(column) ? null : column.maxPoints === null ? t("exam.gradebook.inPercent") : t("exam.gradebook.outOfMax", { max: format.number(column.maxPoints) });
+  if (column.kind === "project") return [t("exam.gradebook.endGradeTitle", { name: column.name }), displayDate(column.date)].join("\n");
   return [namedByDate(column) ? null : column.name, displayDate(column.date), scoring].filter(Boolean).join("\n");
 }
 
@@ -154,7 +173,8 @@ function scrollingTable(table) {
 function cellText(column, result) {
   if (!result) return "";
   if (column.readOnly) return `${format.number(result.points)}/${format.number(column.maxPoints)}`;
-  if (column.kind === "plusminus") return result.value === 1 ? "+" : "−";
+  if (isMark(column)) return result.value === 1 ? "+" : "−";
+  if (isGraded(column)) return String(result.grade);
   if (column.maxPoints !== null) return numberText(result.points);
   return numberText(Math.round(result.value * 10000) / 100);
 }
@@ -167,10 +187,11 @@ function cellText(column, result) {
 function readCell(column, text) {
   const trimmed = text.trim();
   if (trimmed === "") return { empty: true };
-  if (column.kind === "plusminus") {
+  if (isMark(column)) {
     const mark = trimmed.replace("−", "-");
     return mark === "+" || mark === "-" ? { body: { mark } } : { reason: t("exam.gradebook.markRefused") };
   }
+  if (isGraded(column)) return /^[1-5]$/.test(trimmed) ? { body: { grade: Number(trimmed) } } : { reason: t("exam.gradebook.gradeRefused") };
   const value = parseNumber(trimmed);
   if (Number.isNaN(value)) return { reason: t("exam.gradebook.numberRefused") };
   return { body: column.maxPoints !== null ? { points: value } : { percent: value } };
@@ -215,8 +236,9 @@ class GradebookView extends ExamElement {
           Object.entries(semesterLabels).map(([value, label]) => h("option", { value, selected: value === semester }, label))
         );
     this.line = messageLine();
-    // Every category is shown with its weight, even without columns yet.
-    const groups = categories.map((category) => ({ category, columns: overview.columns.filter((column) => column.category === category) }));
+    // Every category in use is shown with its weight, even without columns yet;
+    // one at 0 % is not (gradebook-presentations-projects design D4).
+    const groups = course.categoriesInUse.map((category) => ({ category, columns: overview.columns.filter((column) => column.category === category) }));
     // A closed year's sheet shows every result as text (exam-year-change D1).
     const open = !course.year.closed;
     return readOnlyFor(course.year, h(
@@ -273,10 +295,14 @@ class GradebookView extends ExamElement {
     const { course, semester } = overview;
     const toggle = editable && overview.participants?.state !== undefined && !["unavailable", "notMaturaClass"].includes(overview.participants.state);
     const leading = this.leading(semester, toggle);
+    // A project shown adds a heading row between the categories and the
+    // columns (design D5); every other header then spans both.
+    const projects = overview.columns.filter((column) => column.kind === "project");
+    const span = projects.length ? "2" : null;
     const headRow = h(
       "tr",
       {},
-      leading.map(({ label, title }, index) => h("th", { rowspan: "2", "data-sticky": String(index), class: "sl-exam-leading-head", title }, label)),
+      leading.map(({ label, title }, index) => h("th", { rowspan: projects.length ? "3" : "2", "data-sticky": String(index), class: "sl-exam-leading-head", title }, label)),
       groups.map((group) =>
         h(
           "th",
@@ -291,19 +317,28 @@ class GradebookView extends ExamElement {
     const columnRow = h(
       "tr",
       {},
-      groups.map((group) =>
-        group.columns.length
-          ? group.columns.map((column) => this.columnHead(course, column, editable, semester))
-          : h("th", { class: "sl-exam-column-head sl-exam-quiet", title: addableKinds[group.category] ? t("exam.gradebook.noColumns") : t("exam.gradebook.noTests") }, "–")
-      )
+      groups.map((group) => {
+        if (!group.columns.length) {
+          return h("th", { rowspan: span, class: "sl-exam-column-head sl-exam-quiet", title: addableKinds[group.category] ? t("exam.gradebook.noColumns") : t("exam.gradebook.noTests") }, "–");
+        }
+        if (group.category === "projects") return projects.map((project) => this.projectHead(overview, project, editable));
+        return group.columns.map((column) => this.columnHead(course, column, editable, semester, span));
+      })
     );
+    const projectRow = projects.length
+      ? h(
+          "tr",
+          { class: "sl-exam-project-columns" },
+          groups.find((group) => group.category === "projects").columns.map((column) => this.columnHead(course, column, editable, semester))
+        )
+      : null;
     const ordered = groups.flatMap((group) => group.columns);
     const body = h(
       "tbody",
       {},
       rows.map((row, rowIndex) => this.studentRow(overview, groups, ordered, row, rowIndex, editable, toggle))
     );
-    const table = h("table", { class: "sl-exam-table sl-exam-sheet sl-exam-gradebook", "data-columns": String(ordered.length) }, h("thead", {}, headRow, columnRow), body);
+    const table = h("table", { class: "sl-exam-table sl-exam-sheet sl-exam-gradebook", "data-columns": String(ordered.length) }, h("thead", {}, headRow, columnRow, projectRow), body);
     if (editable) table.addEventListener("keydown", (event) => this.arrowKey(table, event));
     return scrollingTable(table);
   }
@@ -316,8 +351,8 @@ class GradebookView extends ExamElement {
    * deleted here. An offline test's column is edited like any other, with a
    * link to its test beside the button (`offline-test`).
    */
-  columnHead(course, column, editable, semester) {
-    const head = { class: "sl-exam-column-head", "data-column": String(column.id), title: columnTitle(column) };
+  columnHead(course, column, editable, semester, rowspan = null) {
+    const head = { class: "sl-exam-column-head", "data-column": String(column.id), title: columnTitle(column), rowspan };
     if (column.readOnly) {
       const [day, ...rest] = columnLines(column);
       return h(
@@ -330,6 +365,8 @@ class GradebookView extends ExamElement {
       ? h("a", { href: `/exam/tests/${column.testId}`, class: "sl-exam-column-test-link", "aria-label": t("exam.gradebook.openTest", { name: column.name }), title: t("exam.gradebook.openTest", { name: column.name }) }, "↗")
       : null;
     if (!editable) return h("th", { ...head, "data-column": null }, columnLines(column), testLink);
+    // A project's end grade is edited through the project's heading above it.
+    if (column.kind === "project") return h("th", { ...head, class: "sl-exam-column-head sl-exam-end-grade" }, columnLines(column));
     return h(
       "th",
       head,
@@ -344,6 +381,33 @@ class GradebookView extends ExamElement {
         columnLines(column)
       ),
       testLink
+    );
+  }
+
+  /**
+   * A project's heading, spanning its mark columns and its end grade: its
+   * name opens the project's dialog, its `+` adds a mark column (design D5).
+   */
+  projectHead(overview, project, editable) {
+    const { course, semester } = overview;
+    const marks = overview.columns.filter((column) => column.projectId === project.id);
+    const head = { colspan: String(marks.length + 1), class: "sl-exam-project", "data-project": String(project.id), title: [project.name, displayDate(project.date)].join("\n") };
+    if (!editable) return h("th", head, project.name);
+    return h(
+      "th",
+      head,
+      h("button", { type: "button", class: "sl-exam-project-edit", "aria-label": t("exam.gradebook.editProject", { name: project.name }), onclick: () => this.columnDialog(course, semester, project, "projects", { marks }) }, project.name),
+      h(
+        "button",
+        {
+          type: "button",
+          class: "sl-exam-add",
+          title: t("exam.gradebook.addMarkColumn", { project: project.name }),
+          "aria-label": t("exam.gradebook.addMarkColumn", { project: project.name }),
+          onclick: () => this.columnDialog(course, semester, null, "projects", { project }),
+        },
+        "+"
+      )
     );
   }
 
@@ -480,13 +544,14 @@ class GradebookView extends ExamElement {
     // An online test's result is the attempt's; the sheet shows it as text.
     if (column.readOnly) return h("td", { class: "sl-exam-online-result", "data-column": String(column.id), "data-student": row.username }, cellText(column, result));
     if (!editable) return h("td", {}, cellText(column, result));
-    const mark = column.kind === "plusminus";
+    const mark = isMark(column);
+    const graded = isGraded(column);
     let stored = result;
     const field = h("input", {
       type: "text",
       class: mark ? "sl-exam-cell sl-exam-mark" : "sl-exam-cell",
-      inputmode: mark ? "text" : "decimal",
-      maxlength: mark ? "1" : null,
+      inputmode: mark ? "text" : graded ? "numeric" : "decimal",
+      maxlength: mark || graded ? "1" : null,
       autocomplete: "off",
       value: cellText(column, result),
       "data-row": String(rowIndex),
@@ -567,9 +632,13 @@ class GradebookView extends ExamElement {
    * and offers to delete the column; closing it after a save reloads the
    * sheet, since a new date may move the column, or out of this semester, and
    * a new maximum recomputes its results.
+   *
+   * In projects, `project` names the project a new mark column is added to,
+   * and a project's own dialog gets its `marks`, which go with it when it is
+   * deleted (design D5).
    */
-  columnDialog(course, semester, column, category) {
-    const kind = column ? column.kind : addableKinds[category];
+  columnDialog(course, semester, column, category, { project = null, marks = [] } = {}) {
+    const kind = column ? column.kind : project ? "projectmark" : addableKinds[category];
     const [from, to] = semesterRange(course.year, semester);
     const line = messageLine();
     const dialog = h("dialog", { class: "sl-exam-dialog sl-exam" });
@@ -584,8 +653,9 @@ class GradebookView extends ExamElement {
     const name = h("input", { type: "text", name: "name", value: column?.name ?? "", placeholder: t("exam.gradebook.namePlaceholder"), "aria-label": t("exam.gradebook.name") });
     const proposed = column ? column.date : defaultDate(course.year, semester);
     const date = h("sl-date-input", { name: "date", required: true, min: course.year.startsOn, max: course.year.endsOn, value: proposed, "aria-label": t("exam.gradebook.date") });
+    // Marks and grades have no maximum (design D6).
     const max =
-      kind === "plusminus"
+      ["plusminus", "projectmark", "presentation", "project"].includes(kind)
         ? null
         : h("input", {
             type: "text",
@@ -596,8 +666,17 @@ class GradebookView extends ExamElement {
             placeholder: t("exam.gradebook.percentPlaceholder"),
             "aria-label": t("exam.gradebook.maxPoints"),
           });
+    const title = column
+      ? kind === "project"
+        ? t("exam.gradebook.editProject", { name: column.name })
+        : t("exam.gradebook.editColumn", { category: categoryLabels[category] })
+      : project
+        ? t("exam.gradebook.newMarkColumn", { project: project.name })
+        : kind === "project"
+          ? t("exam.gradebook.newProject")
+          : t("exam.gradebook.newColumn", { category: categoryLabels[category] });
     const fields = [
-      h("h3", {}, column ? t("exam.gradebook.editColumn", { category: categoryLabels[category] }) : t("exam.gradebook.newColumn", { category: categoryLabels[category] })),
+      h("h3", {}, title),
       h("label", {}, `${t("exam.gradebook.name")} `, name),
       h("label", {}, `${t("exam.gradebook.date")} `, date),
       column || proposed < from || proposed > to ? null : h("span", { class: "sl-exam-quiet" }, `${semesterLabels[semester]}: ${displayDate(from)} – ${displayDate(to)}`),
@@ -639,12 +718,14 @@ class GradebookView extends ExamElement {
           // An offline test's column goes with its test, on the test's page.
           column.testId
             ? linkButton({ label: t("exam.gradebook.openTestPage"), href: `/exam/tests/${column.testId}`, class: "sl-exam-column-test" })
-            : confirmButton({
-                class: "sl-exam-delete-column",
-                label: t("exam.gradebook.deleteColumn"),
-                armed: column.results > 0 ? t("exam.gradebook.deleteColumnArmed", { count: column.results }) : t("exam.gradebook.deleteEmptyColumnArmed"),
-                action: remove,
-              })
+            : kind === "project"
+              ? this.deleteProjectButton(column, marks, remove)
+              : confirmButton({
+                  class: "sl-exam-delete-column",
+                  label: t("exam.gradebook.deleteColumn"),
+                  armed: column.results > 0 ? t("exam.gradebook.deleteColumnArmed", { count: column.results }) : t("exam.gradebook.deleteEmptyColumnArmed"),
+                  action: remove,
+                })
         ),
         line
       );
@@ -660,7 +741,9 @@ class GradebookView extends ExamElement {
               return;
             }
             act(form.querySelector("button[type=submit]"), line, async () => {
-              await examApi(`/courses/${course.id}/assessments`, { method: "POST", body: { kind, name: name.value, date: date.value, maxPoints } });
+              const body = { kind, name: name.value, date: date.value, maxPoints };
+              if (project) body.projectId = project.id;
+              await examApi(`/courses/${course.id}/assessments`, { method: "POST", body });
               saved = true;
               dialog.close();
             });
@@ -679,6 +762,20 @@ class GradebookView extends ExamElement {
     this.append(dialog);
     dialog.showModal();
     name.focus();
+  }
+
+  /** A project's delete, which takes its mark columns and every result in the project with it. */
+  deleteProjectButton(project, marks, remove) {
+    const results = project.results + marks.reduce((sum, mark) => sum + mark.results, 0);
+    return confirmButton({
+      class: "sl-exam-delete-column sl-exam-delete-project",
+      label: t("exam.gradebook.deleteProject"),
+      armed:
+        results > 0 || marks.length > 0
+          ? t("exam.gradebook.deleteProjectArmed", { columns: marks.length, count: results })
+          : t("exam.gradebook.deleteEmptyProjectArmed"),
+      action: remove,
+    });
   }
 }
 
@@ -765,7 +862,7 @@ class GradebookStudent extends ExamElement {
           h(
             "tbody",
             {},
-            categories.map((category) => h("tr", {}, h("td", { "data-sticky": "0" }, t("exam.gradebook.categoryWeight", { category: categoryLabels[category], weight: course.weights[category] })), categoryCell(values.categories[category]))),
+            course.categoriesInUse.map((category) => h("tr", {}, h("td", { "data-sticky": "0" }, t("exam.gradebook.categoryWeight", { category: categoryLabels[category], weight: course.weights[category] })), categoryCell(values.categories[category]))),
             semester === "ss" ? h("tr", {}, h("td", { "data-sticky": "0" }, t("exam.gradebook.winterShare", { share: course.winterShare })), h("td", {}, winterText(values.winter))) : null,
             h("tr", {}, h("td", { "data-sticky": "0" }, t("exam.gradebook.proposal")), proposalCell),
             h("tr", {}, h("td", { "data-sticky": "0" }, t("exam.gradebook.actualGrade")), gradeCell)
@@ -780,6 +877,36 @@ class GradebookStudent extends ExamElement {
       h("p", {}, linkButton({ label: t("exam.gradebook.enterResults"), href: `/exam/courses/${course.id}/gradebook?semester=${semester}`, class: "sl-exam-enter-results" }))
     );
   }
+}
+
+/**
+ * The entries in the order a results table lists them: as they come, but a
+ * project's marks right below the project, indented and noted as not
+ * counting. A project without an end grade yet gets a line of its own above
+ * its marks (design D6).
+ */
+function resultRows(entries) {
+  const projects = new Set(entries.filter((entry) => entry.kind === "project").map((entry) => entry.columnId));
+  const marksOf = (projectId) => entries.filter((entry) => entry.kind === "projectmark" && entry.projectId === projectId);
+  const rows = [];
+  const placed = new Set();
+  for (const entry of entries) {
+    if (entry.kind === "projectmark") {
+      if (projects.has(entry.projectId) || placed.has(entry.projectId)) continue;
+      placed.add(entry.projectId);
+      rows.push({ name: entry.projectName, date: null, category: "projects", result: "–", grade: "" });
+      rows.push(...marksOf(entry.projectId).map(markRow));
+      continue;
+    }
+    rows.push({ name: entry.name, date: entry.date, category: entry.category, result: entryResult(entry), grade: entry.grade === null ? "" : String(entry.grade) });
+    if (entry.kind === "project") rows.push(...marksOf(entry.columnId).map(markRow));
+  }
+  return rows;
+}
+
+/** A project's mark as a row of the results table. */
+function markRow(entry) {
+  return { name: entry.name, date: entry.date, note: t("exam.gradebook.projectMarksNote"), result: entryResult(entry), grade: "", mark: true };
 }
 
 /** Results by column, read-only: the column's name and date, the category, the result and its grade. */
@@ -804,15 +931,15 @@ function resultsTable(entries) {
       h(
         "tbody",
         {},
-        entries.map((entry) =>
+        resultRows(entries).map((row) =>
           h(
             "tr",
-            {},
-            h("td", { "data-sticky": "0" }, entry.name),
-            h("td", {}, displayDate(entry.date)),
-            h("td", {}, categoryLabels[entry.category] ?? entry.category),
-            h("td", {}, entryResult(entry)),
-            h("td", {}, entry.grade === null ? "" : String(entry.grade))
+            { class: row.mark ? "sl-exam-project-mark" : null },
+            h("td", { "data-sticky": "0" }, row.name),
+            h("td", {}, displayDate(row.date)),
+            row.mark ? h("td", { class: "sl-exam-quiet" }, row.note) : h("td", {}, categoryLabels[row.category] ?? row.category),
+            h("td", {}, row.result),
+            h("td", {}, row.grade)
           )
         )
       )

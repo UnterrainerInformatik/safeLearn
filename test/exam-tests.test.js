@@ -159,7 +159,7 @@ describe("the migration to online tests", () => {
         VALUES (1, 'ben', 'ws', 4, 'oral exam', 1, 'x');
     `);
     const year = { startsOn: "2026-09-07", summerStartsOn: "2027-02-15", endsOn: "2027-07-02" };
-    const weights = { onlineTests: 40, manualTests: 30, shortTests: 0, participation: 15, homework: 15 };
+    const weights = { onlineTests: 40, manualTests: 30, shortTests: 0, presentations: 0, projects: 0, participation: 15, homework: 15 };
     const scale = readScale(db);
     const before = {};
     for (const username of ["anna", "ben"]) {

@@ -24,6 +24,7 @@
  */
 
 import {
+  categoriesInUse,
   ConflictError,
   currentYear,
   ForbiddenError,
@@ -40,6 +41,7 @@ import {
 } from "./classes.js";
 import { viennaLocal } from "./client/periods.js";
 import { finalizeDue } from "./attempts.js";
+import { entryCategory } from "./grading.js";
 import { handoutGroups, handoutPath, handoutResolves, handoutsOf } from "./handout.js";
 
 /** The calendar date in Vienna of an ISO timestamp, as `YYYY-MM-DD`. */
@@ -527,7 +529,9 @@ function coursesInScope(db, { yearId = null, classId = null, courseId = null }) 
 /**
  * The tests of the courses in scope (`coursesInScope`), one group per course
  * in class order: `{ scope, year, groups: [{ courseId, classId, className,
- * subject, language, tests }] }`.
+ * subject, language, offlineKinds, tests }] }`. `offlineKinds` are the
+ * gradebook kinds a new offline test of the course can count as: those of
+ * the categories it uses.
  */
 export function listTests(db, scope = {}) {
   const { scope: kind, year, klass, courses } = coursesInScope(db, scope);
@@ -541,6 +545,7 @@ export function listTests(db, scope = {}) {
       className: course.className,
       subject: course.subject,
       language: course.language,
+      offlineKinds: offlineColumnKinds.filter((gradebookKind) => categoriesInUse(course).includes(entryCategory[gradebookKind])),
       tests: courseTests(db, course.id),
     })),
   };
@@ -852,8 +857,8 @@ function offlineFields(db, row) {
 
 /**
  * Creates the offline test `name` for a course (design D1, D9): a duration in
- * minutes, the gradebook category it counts in - `test` or `shorttest` - and
- * optionally its handouts. Its column is created with it, named by the test
+ * minutes, the gradebook category it counts in - `test` or `shorttest`, of
+ * those the course uses - and optionally its handouts. Its column is created with it, named by the test
  * and dated today until a sitting is planned.
  */
 export function createOfflineTest(db, courseId, { name, durationMinutes, gradebookKind, handoutA = null, handoutB = null } = {}) {
@@ -861,6 +866,10 @@ export function createOfflineTest(db, courseId, { name, durationMinutes, gradebo
   const trimmed = normalizeName(name);
   const durationS = offlineDuration(durationMinutes);
   if (!offlineColumnKinds.includes(gradebookKind)) throw new InvalidInputError("exam.errors.tests.gradebookKind");
+  // Only a category the course uses (gradebook-presentations-projects design D4).
+  if (!course.categoriesInUse.includes(entryCategory[gradebookKind])) {
+    throw new InvalidInputError("exam.errors.gradebook.categoryNotInUse", { category: entryCategory[gradebookKind] });
+  }
   const handouts = nextHandouts({ a: null, b: null }, { handoutA, handoutB });
   return inTransaction(db, () => {
     const at = now();

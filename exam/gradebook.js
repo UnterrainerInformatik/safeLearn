@@ -10,6 +10,7 @@
  */
 
 import {
+  categoriesInUse,
   ConflictError,
   currentYear,
   getCourse,
@@ -26,7 +27,27 @@ import {
 import { bandMidpoint, entryCategory, gradeFor, proposal, semesterOf, semesters, yearProposal } from "./grading.js";
 import { viennaDate } from "./tests.js";
 
-export const entryKinds = Object.freeze(Object.keys(entryCategory));
+/**
+ * The kinds of manual column: those of the categories, and a project's `+`/`-`
+ * column (`projectmark`), which counts towards nothing (design D1).
+ */
+export const entryKinds = Object.freeze([...Object.keys(entryCategory), "projectmark"]);
+
+/** The kinds whose result is a grade from 1 to 5 the teacher types (design D3). */
+const gradeKinds = Object.freeze(["presentation", "project"]);
+
+/**
+ * The category a column of `kind` is shown in: the one it counts towards, and
+ * for a project's mark column its project's, `projects`.
+ */
+function shownCategory(kind) {
+  return kind === "projectmark" ? "projects" : entryCategory[kind];
+}
+
+/** Whether `course` uses the category a column or entry of `kind` is shown in. */
+function kindInUse(course, kind) {
+  return course.categoriesInUse.includes(kind === "online" ? "onlineTests" : shownCategory(kind));
+}
 
 // ----------------------------------------------------------------- the scale
 
@@ -116,6 +137,7 @@ function columnName(value, date) {
 function columnMax(value, kind) {
   if (value === undefined || value === null) return null;
   if (kind === "plusminus") throw new InvalidInputError("exam.errors.gradebook.participationMax");
+  if (gradeKinds.includes(kind) || kind === "projectmark") throw new InvalidInputError("exam.errors.gradebook.noMaxForKind");
   if (!isNumber(value) || value <= 0) throw new InvalidInputError("exam.errors.gradebook.maxPositive");
   return value;
 }
@@ -125,11 +147,13 @@ function columnFromRow(row, results = 0) {
     id: row.id,
     courseId: row.course_id,
     kind: row.kind,
-    category: entryCategory[row.kind],
+    category: shownCategory(row.kind),
     name: row.name,
     date: row.held_on,
     maxPoints: row.max_points,
     results,
+    // A mark column's project, whose group it stands in (design D5).
+    projectId: row.project_id ?? null,
     // The offline test this column belongs to, which its header links to (`offline-test`).
     testId: row.test_id ?? null,
   };
@@ -166,9 +190,21 @@ export function getColumn(db, id) {
 }
 
 /**
+ * The date that decides the semester of a column's results: its own, or for a
+ * project's mark column its project's (design D5).
+ */
+function semesterDate(db, row) {
+  if (row.project_id === null || row.project_id === undefined) return row.held_on;
+  return db.prepare("SELECT held_on FROM assessment WHERE id = ?").get(row.project_id).held_on;
+}
+
+/**
  * The columns of a course as the sheet shows them: grouped by category in the
- * config sheet's order, then by date, then by when they were added. With
- * `semester`, only the columns dated in it.
+ * config sheet's order, then by date, then by when they were added. Within
+ * projects, each project's mark columns stand right before it (design D5).
+ * Columns of a category the course does not use are left out (design D4).
+ * With `semester`, only the columns dated in it; a mark column goes by its
+ * project's date.
  */
 export function courseColumns(db, courseId, semester = null) {
   const course = getCourse(db, courseId);
@@ -187,16 +223,51 @@ export function courseColumns(db, courseId, semester = null) {
     .prepare("SELECT * FROM assessment WHERE course_id = ? ORDER BY held_on, created_at, id")
     .all(courseId)
     .map((row) => columnFromRow({ ...row, test_id: tests.get(row.id) ?? null }, counts.get(row.id) ?? 0));
-  return [...onlineColumns(db, courseId), ...manual]
-    .filter((column) => semester === null || semesterOf(column.date, course.year) === semester)
+  const projectDates = new Map(manual.filter((column) => column.kind === "project").map((column) => [column.id, column.date]));
+  const sorted = [...onlineColumns(db, courseId), ...manual]
+    .filter((column) => kindInUse(course, column.kind))
+    .filter((column) => semester === null || semesterOf(projectDates.get(column.projectId) ?? column.date, course.year) === semester)
     .sort((a, b) => order(a) - order(b));
+  const marks = sorted.filter((column) => column.kind === "projectmark");
+  return sorted
+    .filter((column) => column.kind !== "projectmark")
+    .flatMap((column) => (column.kind === "project" ? [...marks.filter((mark) => mark.projectId === column.id), column] : [column]));
 }
 
 /**
- * Adds a column to a course: a manual test, a short test, a participation
- * round or a homework, with a name, a date inside the school year and, for a
- * test, a short test or a homework, optionally a maximum. Without a maximum its
- * results are percent.
+ * A mark column's project: `projectId` has to name a project of the same
+ * course (design D2).
+ */
+function columnProject(db, courseId, projectId) {
+  if (!Number.isInteger(projectId)) throw new InvalidInputError("exam.errors.gradebook.projectIdMissing");
+  const project = db.prepare("SELECT * FROM assessment WHERE id = ?").get(projectId);
+  if (!project || project.course_id !== courseId || project.kind !== "project") {
+    throw new InvalidInputError("exam.errors.gradebook.noProject", { id: projectId });
+  }
+  return project.id;
+}
+
+/**
+ * How many columns a course holds per category, hidden ones included: for the
+ * config sheet's note on a category at 0 % (design, Risks). A project's mark
+ * columns count with projects.
+ */
+export function columnCounts(db, courseId) {
+  const counts = { onlineTests: onlineColumns(db, courseId).length };
+  for (const { kind } of db.prepare("SELECT kind FROM assessment WHERE course_id = ?").all(courseId)) {
+    const category = shownCategory(kind);
+    counts[category] = (counts[category] ?? 0) + 1;
+  }
+  return counts;
+}
+
+/**
+ * Adds a column to a course: a manual test, a short test, a presentation, a
+ * project, a participation round or a homework, with a name, a date inside
+ * the school year and, for a test, a short test or a homework, optionally a
+ * maximum. Without a maximum its results are percent. A project's `+`/`-`
+ * column (`projectmark`) names its project as `projectId`. Only a category
+ * the course uses takes a new column (design D4).
  */
 export function createColumn(db, courseId, input) {
   const course = getCourse(db, courseId);
@@ -204,12 +275,23 @@ export function createColumn(db, courseId, input) {
   if (!entryKinds.includes(kind)) {
     throw new InvalidInputError("exam.errors.gradebook.columnKind", { kinds: entryKinds.join(", ") });
   }
+  if (!kindInUse(course, kind)) throw new InvalidInputError("exam.errors.gradebook.categoryNotInUse", { category: shownCategory(kind) });
+  const projectId = kind === "projectmark" ? columnProject(db, courseId, input.projectId) : null;
+  if (kind !== "projectmark" && input.projectId !== undefined && input.projectId !== null) {
+    throw new InvalidInputError("exam.errors.gradebook.projectIdNotMark");
+  }
   const date = columnDate(input.date, course.year);
   const name = columnName(input.name, date);
   const maxPoints = columnMax(input.maxPoints, kind);
-  const { lastInsertRowid } = db
-    .prepare("INSERT INTO assessment (course_id, kind, name, held_on, max_points, created_at) VALUES (?, ?, ?, ?, ?, ?)")
-    .run(courseId, kind, name, date, maxPoints, now());
+  // `project_id` only where there is one, so a database before 014 still takes a column.
+  const { lastInsertRowid } =
+    projectId === null
+      ? db
+          .prepare("INSERT INTO assessment (course_id, kind, name, held_on, max_points, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+          .run(courseId, kind, name, date, maxPoints, now())
+      : db
+          .prepare("INSERT INTO assessment (course_id, kind, name, held_on, max_points, created_at, project_id) VALUES (?, ?, ?, ?, ?, ?, ?)")
+          .run(courseId, kind, name, date, maxPoints, now(), projectId);
   return getColumn(db, Number(lastInsertRowid));
 }
 
@@ -245,44 +327,59 @@ export function updateColumn(db, id, input = {}) {
   return getColumn(db, id);
 }
 
-/** Deletes a column and every result in it. */
+/**
+ * Deletes a column and every result in it. A project goes with its mark
+ * columns and their results (design D5); `columns` counts the mark columns.
+ */
 export function deleteColumn(db, id) {
   const row = getColumnRow(db, id);
   // An offline test's column goes with its test, not on its own.
   if (row.test_id !== null) throw new ConflictError("exam.errors.gradebook.columnOfTest");
-  const results = inTransaction(db, () => {
-    const { changes } = db.prepare("DELETE FROM manual_entry WHERE assessment_id = ?").run(id);
+  return inTransaction(db, () => {
+    let results = 0;
+    let columns = 0;
+    if (row.kind === "project") {
+      results += db.prepare("DELETE FROM manual_entry WHERE assessment_id IN (SELECT id FROM assessment WHERE project_id = ?)").run(id).changes;
+      columns = db.prepare("DELETE FROM assessment WHERE project_id = ?").run(id).changes;
+    }
+    results += db.prepare("DELETE FROM manual_entry WHERE assessment_id = ?").run(id).changes;
     db.prepare("DELETE FROM assessment WHERE id = ?").run(id);
-    return changes;
+    return { deleted: id, courseId: row.course_id, results, columns };
   });
-  return { deleted: id, courseId: row.course_id, results };
 }
 
 // ------------------------------------------------------------ the results
 
 /**
  * A result as typed into a column's field, turned into what is stored: `mark`
- * (`+` or `-`) for participation, `points` (0 to the maximum) for a column
- * with a maximum, `percent` (0 to 100) for one without.
+ * (`+` or `-`) for participation and a project's mark, `grade` (1 to 5) for a
+ * presentation or a project, `points` (0 to the maximum) for a column with a
+ * maximum, `percent` (0 to 100) for one without. A grade's `value` is its band
+ * midpoint now; it is recomputed on every read (design D3).
  */
-function normalizeResult(input, column) {
-  if (column.kind === "plusminus") {
+function normalizeResult(input, column, scale) {
+  if (column.kind === "plusminus" || column.kind === "projectmark") {
     const mark = typeof input?.mark === "string" ? input.mark.trim().replace("−", "-") : null;
     if (mark !== "+" && mark !== "-") throw new InvalidInputError("exam.errors.gradebook.participationMark");
-    return { value: mark === "+" ? 1 : 0, points: null };
+    return { value: mark === "+" ? 1 : 0, points: null, grade: null };
+  }
+  if (gradeKinds.includes(column.kind)) {
+    const grade = input?.grade;
+    if (!Number.isInteger(grade) || grade < 1 || grade > 5) throw new InvalidInputError("exam.errors.gradebook.gradeRange");
+    return { value: bandMidpoint(grade, scale), points: null, grade };
   }
   if (column.max_points !== null) {
     const points = input?.points;
     if (!isNumber(points) || points < 0 || points > column.max_points) {
       throw new InvalidInputError("exam.errors.gradebook.pointsRange", { max: column.max_points });
     }
-    return { value: points / column.max_points, points };
+    return { value: points / column.max_points, points, grade: null };
   }
   const percent = input?.percent;
   if (!isNumber(percent) || percent < 0 || percent > 100) {
     throw new InvalidInputError("exam.errors.gradebook.percentRange");
   }
-  return { value: percent / 100, points: null };
+  return { value: percent / 100, points: null, grade: null };
 }
 
 /**
@@ -294,13 +391,22 @@ export function setResult(db, columnId, username, input) {
   const column = getColumnRow(db, columnId);
   const course = getCourse(db, column.course_id);
   const student = requireRosterEntry(db, course, username);
-  const { value, points } = normalizeResult(input, column);
+  const { value, points, grade } = normalizeResult(input, column, readScale(db));
   const stamp = now();
-  db.prepare(
-    `INSERT INTO manual_entry (assessment_id, username, value, points, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT (assessment_id, username) DO UPDATE SET value = excluded.value, points = excluded.points, updated_at = excluded.updated_at`
-  ).run(columnId, student.username, value, points, stamp, stamp);
-  return sheetRow(db, course, student.username, semesterOf(column.held_on, course.year));
+  // `grade` only for a grade result, so a database before 014 still takes the others.
+  if (grade === null && !db.prepare("SELECT 1 FROM pragma_table_info('manual_entry') WHERE name = 'grade'").get()) {
+    db.prepare(
+      `INSERT INTO manual_entry (assessment_id, username, value, points, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (assessment_id, username) DO UPDATE SET value = excluded.value, points = excluded.points, updated_at = excluded.updated_at`
+    ).run(columnId, student.username, value, points, stamp, stamp);
+  } else {
+    db.prepare(
+      `INSERT INTO manual_entry (assessment_id, username, value, points, grade, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (assessment_id, username) DO UPDATE SET
+         value = excluded.value, points = excluded.points, grade = excluded.grade, updated_at = excluded.updated_at`
+    ).run(columnId, student.username, value, points, grade, stamp, stamp);
+  }
+  return sheetRow(db, course, student.username, semesterOf(semesterDate(db, column), course.year));
 }
 
 /** Removes one student's result in one column, if there is one. Answers the row as `setResult` does. */
@@ -309,22 +415,34 @@ export function deleteResult(db, columnId, username) {
   const course = getCourse(db, column.course_id);
   const student = requireRosterEntry(db, course, username);
   db.prepare("DELETE FROM manual_entry WHERE assessment_id = ? AND username = ?").run(columnId, student.username);
-  return sheetRow(db, course, student.username, semesterOf(column.held_on, course.year));
+  return sheetRow(db, course, student.username, semesterOf(semesterDate(db, column), course.year));
 }
 
+/**
+ * A manual result as an entry. A grade result's fraction is its band midpoint
+ * on the scale as it is now, and its grade the one typed (design D3). A
+ * project's mark has no category, so it counts nowhere; `semesterDate` is its
+ * project's date, which decides where it shows.
+ */
 function entryFromRow(row, scale) {
+  const typed = row.grade ?? null;
+  const mark = row.kind === "plusminus" || row.kind === "projectmark";
   return {
     id: row.id,
     columnId: row.assessment_id,
     username: row.username,
     kind: row.kind,
-    category: entryCategory[row.kind],
-    value: row.value,
+    category: entryCategory[row.kind] ?? null,
+    value: typed === null ? row.value : bandMidpoint(typed, scale),
     points: row.points,
     maxPoints: row.max_points,
-    // A participation mark is + or -, not a grade.
-    grade: row.kind === "plusminus" ? null : gradeFor(row.value, scale),
+    // A participation or project mark is + or -, not a grade.
+    grade: mark ? null : (typed ?? gradeFor(row.value, scale)),
     date: row.held_on,
+    semesterDate: row.project_held_on ?? row.held_on,
+    projectId: row.project_id ?? null,
+    // A mark's project by name, for a project without an end grade yet (design D6).
+    projectName: row.project_name ?? null,
     name: row.name,
   };
 }
@@ -388,29 +506,40 @@ function onlineEntries(db, courseId, scale, username = null) {
       maxPoints: row.question_count,
       grade: gradeFor(value, scale),
       date: column.date,
+      semesterDate: column.date,
+      projectId: null,
+      projectName: null,
       name: column.name,
     };
   });
 }
 
 /**
- * Every result of a course that counts towards its proposals, for one student
- * or for all, oldest first, each with its column's kind, name, date and
- * maximum: the manual columns' results and the submitted attempts of the
- * course's online tests, under the category `onlineTests`.
+ * Every result of a course shown in its categories in use, for one student or
+ * for all, oldest first, each with its column's kind, name, date and maximum:
+ * the manual columns' results and the submitted attempts of the course's
+ * online tests, under the category `onlineTests`. A category the course does
+ * not use is left out with its results (design D4); it would weigh nothing in
+ * a proposal anyway.
  */
-function courseEntries(db, courseId, scale, username = null) {
-  const select = `SELECT e.id, e.assessment_id, e.username, e.value, e.points, a.kind, a.name, a.held_on, a.max_points
+function courseEntries(db, course, scale, username = null) {
+  // Whole rows, so a database before 014 (no `grade`, no `project_id`) still answers.
+  const columns = new Map(db.prepare("SELECT * FROM assessment WHERE course_id = ?").all(course.id).map((row) => [row.id, row]));
+  const select = `SELECT e.*, a.kind, a.name, a.held_on, a.max_points
     FROM manual_entry e JOIN assessment a ON a.id = e.assessment_id WHERE a.course_id = ?`;
   const rows =
     username === null
-      ? db.prepare(`${select} ORDER BY a.held_on, a.created_at, a.id`).all(courseId)
-      : db.prepare(`${select} AND e.username = ? ORDER BY a.held_on, a.created_at, a.id`).all(courseId, username);
-  const manual = rows.map((row) => entryFromRow(row, scale));
-  const online = onlineEntries(db, courseId, scale, username);
-  if (online.length === 0) return manual;
+      ? db.prepare(`${select} ORDER BY a.held_on, a.created_at, a.id`).all(course.id)
+      : db.prepare(`${select} AND e.username = ? ORDER BY a.held_on, a.created_at, a.id`).all(course.id, username);
+  const manual = rows.map((row) => {
+    const projectId = columns.get(row.assessment_id).project_id ?? null;
+    const project = columns.get(projectId);
+    return entryFromRow({ ...row, project_id: projectId, project_held_on: project?.held_on, project_name: project?.name }, scale);
+  });
+  const online = onlineEntries(db, course.id, scale, username);
   // A stable sort: entries of one date keep the order they had.
-  return [...online, ...manual].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const all = online.length === 0 ? manual : [...online, ...manual].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  return all.filter((entry) => kindInUse(course, entry.kind));
 }
 
 // ----------------------------------------------------- overrides and comments
@@ -531,12 +660,18 @@ function teacherSemester(entries, grades, username, semester, course, scale) {
   };
 }
 
-/** A student's results by column id, for the columns of `semester`: `{ id: { value, points } }`. */
+/**
+ * A student's results by column id, for the columns of `semester`:
+ * `{ id: { value, points } }`, and the typed `grade` for a grade result.
+ */
 function resultsByColumn(entries, semester, year) {
   return Object.fromEntries(
     entries
-      .filter((entry) => semesterOf(entry.date, year) === semester)
-      .map((entry) => [entry.columnId, { value: entry.value, points: entry.points }])
+      .filter((entry) => semesterOf(entry.semesterDate, year) === semester)
+      .map((entry) => [
+        entry.columnId,
+        gradeKinds.includes(entry.kind) ? { value: entry.value, points: entry.points, grade: entry.grade } : { value: entry.value, points: entry.points },
+      ])
   );
 }
 
@@ -554,7 +689,7 @@ function overviewRow(student, entries, grades, semester, course, scale) {
 function sheetRow(db, course, username, semester) {
   const scale = readScale(db);
   const student = rosterEntry(db, course, username);
-  return overviewRow(student, courseEntries(db, course.id, scale, username), courseGrades(db, course.id), semester, course, scale);
+  return overviewRow(student, courseEntries(db, course, scale, username), courseGrades(db, course.id), semester, course, scale);
 }
 
 /**
@@ -566,7 +701,7 @@ export function courseOverview(db, courseId, semester) {
   const course = getCourse(db, courseId);
   normalizeSemester(semester);
   const scale = readScale(db);
-  const entries = courseEntries(db, courseId, scale);
+  const entries = courseEntries(db, course, scale);
   const grades = courseGrades(db, courseId);
   const byStudent = new Map();
   for (const entry of entries) {
@@ -597,7 +732,7 @@ export function studentRecord(db, courseId, username) {
   const student = rosterEntry(db, course, key);
   if (!student) throw new NotFoundError("exam.errors.gradebook.notOnCourseRoster", { username: key });
   const scale = readScale(db);
-  const entries = courseEntries(db, courseId, scale, key);
+  const entries = courseEntries(db, course, scale, key);
   const grades = courseGrades(db, courseId);
   // The neighbours in the sheet's order: those attending, then those who left (design D10).
   const roster = rosterOf(db, course.classId);
@@ -610,7 +745,7 @@ export function studentRecord(db, courseId, username) {
     scale,
     previous: neighbour(order[at - 1]),
     next: neighbour(order[at + 1]),
-    entries: entries.map((entry) => ({ ...entry, semester: semesterOf(entry.date, course.year) })),
+    entries: entries.map(({ semesterDate: decides, ...entry }) => ({ ...entry, semester: semesterOf(decides, course.year) })),
     semesters: Object.fromEntries(
       semesters.map((semester) => [semester, teacherSemester(entries, grades, key, semester, course, scale)])
     ),
@@ -668,7 +803,7 @@ export function resultsOf(db, username, { yearId = null, today = now().slice(0, 
     .all(key, year.id);
   const courses = rows.map((row) => {
     const course = getCourse(db, row.id);
-    const entries = courseEntries(db, course.id, scale, key);
+    const entries = courseEntries(db, course, scale, key);
     const grades = courseGrades(db, course.id);
     const shown = semesters.filter(
       (semester) =>
@@ -679,8 +814,9 @@ export function resultsOf(db, username, { yearId = null, today = now().slice(0, 
       subject: course.subject,
       className: course.className,
       leftAt: row.left_at,
-      entries: entries.map(({ id, kind, category, value, points, maxPoints, grade, date, name }) => ({
+      entries: entries.map(({ id, columnId, kind, category, value, points, maxPoints, grade, date, semesterDate: decides, projectId, projectName, name }) => ({
         id,
+        columnId,
         kind,
         category,
         value,
@@ -688,6 +824,9 @@ export function resultsOf(db, username, { yearId = null, today = now().slice(0, 
         maxPoints,
         grade,
         date,
+        semester: semesterOf(decides, course.year),
+        projectId,
+        projectName,
         name,
       })),
       semesters: Object.fromEntries(
