@@ -7,7 +7,7 @@ import {
   setUserAttribute,
   SessionEndedError,
 } from "./middlewares/keycloak-middleware.js";
-import { getPermissionContext } from "./permission-context.js";
+import { getPermissionContext, handoutViews } from "./permission-context.js";
 import { establishAuthMode, withoutIdentity } from "./auth-mode.js";
 import { readerPreferences } from "./reader-preferences.js";
 import { languages } from "./i18n/t.js";
@@ -114,7 +114,7 @@ const { mode: authMode } = establishAuthMode();
 const app = express();
 app.set("trust proxy", true);
 
-import { registerEmbedHandler, registerEmbedClientScript, registerOpenTestsCheck, highlightExtension, scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions, wrapAsDocument, resolveFileVisibility, registerVisibilityChangeCallback, searchCorpus, minimumQueryLength, recordAttachmentGrants, hasAttachmentGrant, dropAttachmentGrants, mayServeAttachment, normalizeCorpusPath } from "./obsidian.js";
+import { registerEmbedHandler, registerEmbedClientScript, registerOpenTestsCheck, highlightExtension, scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions, wrapAsDocument, resolveFileVisibility, registerVisibilityChangeCallback, searchCorpus, minimumQueryLength, recordAttachmentGrants, hasAttachmentGrant, dropAttachmentGrants, mayServeAttachment, normalizeCorpusPath, registerHandoutAttachmentCheck, mayServeHandoutAttachment } from "./obsidian.js";
 
 import chokidar from "chokidar";
 import { openEventStream } from "./event-stream.js";
@@ -142,16 +142,7 @@ async function sanitizeAndParseMarkdown(data, req, options = {}) {
       d = d.split("\n").slice(1).join("\n");
     }
     d = await preParse(d, req, options);
-    
-    let dm = 0;
-    if (withoutIdentity()) {
-      dm = (await getPermissionContext(req)).preferences.dm;
-    } else if (req.user.accessTokenDecoded.config) {
-      const a = JSON.parse(req.user.accessTokenDecoded.config);
-      dm = a.dm;
-    }
-    
-    const marked = dm == 1 ? markedDark : markedLight;
+    const marked = await markedFor(req);
     let html = await marked.parse(d);
     html = manipulateHtml(html, req);
     return sanitizeHtml(html);
@@ -163,6 +154,49 @@ async function sanitizeAndParseMarkdown(data, req, options = {}) {
     }
     console.error(`Error parsing markdown: ${error}`);
     return `Error parsing markdown: ${error}`;
+  }
+}
+
+/** The configured `marked` instance for the session's dark-mode preference. */
+async function markedFor(req) {
+  let dm = 0;
+  if (withoutIdentity()) {
+    dm = (await getPermissionContext(req)).preferences.dm;
+  } else if (req.user.accessTokenDecoded.config) {
+    const a = JSON.parse(req.user.accessTokenDecoded.config);
+    dm = a.dm;
+  }
+  return dm == 1 ? markedDark : markedLight;
+}
+
+/**
+ * The corpus file at `corpusPath` (relative to `md/`) rendered as an exam
+ * handout (`exam-handout`, exam-offline-sittings design D6), for a request
+ * the exam module has already authorized from its database. The first-line
+ * directive is stripped without being evaluated - the one place a file's own
+ * whole-file gate is set aside - and the views are fixed for the render
+ * alone: as a student, the exam variant shown, the practice variant hidden,
+ * the answers per `answer`. Inline blocks are decided by the session's roles
+ * as on any page. Embedded module elements render their defaults, and no
+ * attachment grant is recorded: the module answers for a handout's
+ * attachments itself, from its database (design D7). Rejects when the file
+ * cannot be read.
+ */
+async function renderHandout(corpusPath, req, { answer = false } = {}) {
+  await refreshAccessToken(req);
+  const data = await fs.promises.readFile(path.join(__dirname, "md", corpusPath), "utf8");
+  let d = data.replace(/^[\u200B\u200C\u200D\u200E\u200F\uFEFF]/, "");
+  if (parseFirstLineForPermissions(d.split("\n")[0]) !== null) {
+    d = d.split("\n").slice(1).join("\n");
+  }
+  req[handoutViews] = { answer: answer === true };
+  try {
+    d = await preParse(d, req, { embedDefaults: true });
+    const marked = await markedFor(req);
+    return sanitizeHtml(manipulateHtml(await marked.parse(d), req));
+  } finally {
+    // The page around it - top bar, menu, navigation - is the session's own.
+    delete req[handoutViews];
   }
 }
 
@@ -319,7 +353,7 @@ async function loadExamModule() {
   }
   try {
     const { init } = await import("./exam/index.js");
-    const started = await init({ startPage: getStartPage });
+    const started = await init({ startPage: getStartPage, renderHandout });
     if (!started.active) {
       console.error(`Exam module: disabled - ${started.reason}`);
       return null;
@@ -329,6 +363,7 @@ async function loadExamModule() {
     }
     registerEmbedClientScript(started.clientScript);
     registerOpenTestsCheck(started.hasOpenTests);
+    registerHandoutAttachmentCheck(started.handoutAttachmentCheck);
     console.log(`Exam module: active, database ${started.dbPath}`);
     return started;
   } catch (error) {
@@ -546,7 +581,11 @@ async function registerRoutes(app, identity) {
       serve();
       return;
     }
+    // Last, a handout the exam module serves this session right now
+    // (`attachment-access`): decided from its database at every request, so
+    // it ends with the window or the attendance, not with a grant's lifetime.
     mayServeAttachment(req, attachment)
+      .then((yes) => yes || mayServeHandoutAttachment(req, attachment))
       .then((yes) => (yes ? serve() : next("router")))
       .catch(next);
   });

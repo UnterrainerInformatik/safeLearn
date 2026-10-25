@@ -7,13 +7,15 @@
  * An event names the participant and what happened - started, saved (with the
  * remaining time only), submitted, away, back, refused device, released,
  * bound to the next browser after a release -
- * never an answer.
+ * never an answer. An offline sitting (`offline-test`) has no attempts: its
+ * events are the window's and the attendance's.
  */
 
 import { EventEmitter } from "node:events";
 
 import { getCourse, NotFoundError, now } from "./classes.js";
 import { sittingState } from "./tests.js";
+import { handoutsOf } from "./handout.js";
 import { browserLabel } from "./user-agent.js";
 
 const emitter = new EventEmitter();
@@ -63,7 +65,11 @@ export function listen(sittingId, listener) {
  * its `full` null for a binding from before browser strings were kept.
  * Never an answer.
  */
-function participantFrom(row, attempt, { count: refused, userAgent: refusedAgent }, at) {
+function participantFrom(row, attempt, { count: refused, userAgent: refusedAgent }, at, offline = false) {
+  // An offline sitting's participant is a row of the attendance table (exam-offline-sittings design D8).
+  if (offline) {
+    return { username: row.username, givenName: row.given_name, familyName: row.family_name, present: row.present === 1, group: row.handout_group };
+  }
   const status = attempt === undefined ? "not started" : attempt.submitted_at !== null ? "submitted" : "writing";
   const awayNow = attempt?.away_since && attempt.submitted_at === null ? Math.max(0, Date.parse(at) - Date.parse(attempt.away_since)) : 0;
   return {
@@ -85,6 +91,10 @@ function participantFrom(row, attempt, { count: refused, userAgent: refusedAgent
   };
 }
 
+function testKind(db, sitting) {
+  return db.prepare("SELECT kind FROM test WHERE id = ?").get(sitting.test_id).kind;
+}
+
 function sittingRow(db, sittingId) {
   const sitting = db.prepare("SELECT * FROM sitting WHERE id = ?").get(sittingId);
   if (!sitting) throw new NotFoundError("exam.errors.tests.noSitting");
@@ -92,7 +102,7 @@ function sittingRow(db, sittingId) {
 }
 
 function participantRows(db, sittingId, username = null) {
-  const select = `SELECT p.username, s.given_name, s.family_name FROM sitting_participant p JOIN student s ON s.username = p.username
+  const select = `SELECT p.username, p.present, p.handout_group, s.given_name, s.family_name FROM sitting_participant p JOIN student s ON s.username = p.username
     WHERE p.sitting_id = ?`;
   return username === null
     ? db.prepare(`${select} ORDER BY s.family_name COLLATE NOCASE, s.given_name COLLATE NOCASE, p.username`).all(sittingId)
@@ -121,6 +131,7 @@ export function liveParticipant(db, sittingId, username, at = now()) {
   const sitting = sittingRow(db, sittingId);
   const [row] = participantRows(db, sittingId, username);
   if (!row) return null;
+  if (testKind(db, sitting) === "offline") return participantFrom(row, undefined, noRefusals, at, true);
   const attempt = db.prepare("SELECT * FROM attempt WHERE test_id = ? AND username = ?").get(sitting.test_id, username);
   const refused = attempt ? refusalsOf(db, "WHERE r.attempt_id = ?", attempt.id).get(username) : undefined;
   return participantFrom(row, attempt, refused ?? noRefusals, at);
@@ -132,7 +143,8 @@ export function liveParticipant(db, sittingId, username, at = now()) {
  */
 export function liveSnapshot(db, sittingId, at = now()) {
   const sitting = sittingRow(db, sittingId);
-  const test = db.prepare("SELECT id, name, course_id FROM test WHERE id = ?").get(sitting.test_id);
+  const test = db.prepare("SELECT id, name, course_id, kind, handout_a, handout_b FROM test WHERE id = ?").get(sitting.test_id);
+  const offline = test.kind === "offline";
   const course = getCourse(db, test.course_id);
   const attempts = new Map(db.prepare("SELECT * FROM attempt WHERE test_id = ?").all(test.id).map((attempt) => [attempt.username, attempt]));
   const refused = refusalsOf(db, "WHERE a.test_id = ?", test.id);
@@ -144,10 +156,14 @@ export function liveSnapshot(db, sittingId, at = now()) {
       closesAt: sitting.closes_at,
       durationS: sitting.duration_s,
       makeup: sitting.makeup === 1,
-      state: sittingState({ opensAt: sitting.opens_at, closesAt: sitting.closes_at }, at),
+      startedAt: sitting.started_at,
+      state: sittingState({ opensAt: sitting.opens_at, closesAt: sitting.closes_at, offline, startedAt: sitting.started_at }, at),
     },
-    test: { id: test.id, name: test.name },
+    kind: test.kind,
+    test: { id: test.id, name: test.name, kind: test.kind, handouts: offline ? handoutsOf(test) : [] },
     course: { id: course.id, subject: course.subject, language: course.language, className: course.className },
-    participants: participantRows(db, sittingId).map((row) => participantFrom(row, attempts.get(row.username), refused.get(row.username) ?? noRefusals, at)),
+    participants: participantRows(db, sittingId).map((row) =>
+      participantFrom(row, attempts.get(row.username), refused.get(row.username) ?? noRefusals, at, offline)
+    ),
   };
 }

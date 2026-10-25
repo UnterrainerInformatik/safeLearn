@@ -313,7 +313,8 @@ class GradebookView extends ExamElement {
    * the full details on hover. An editable column's header is a button that
    * fills the cell and opens the column's dialog. An online test's column is
    * the test's: its day links to the test, and nothing in it is edited or
-   * deleted here.
+   * deleted here. An offline test's column is edited like any other, with a
+   * link to its test beside the button (`offline-test`).
    */
   columnHead(course, column, editable, semester) {
     const head = { class: "sl-exam-column-head", "data-column": String(column.id), title: columnTitle(column) };
@@ -325,7 +326,10 @@ class GradebookView extends ExamElement {
         h("a", { href: `/exam/tests/${column.testId}`, "aria-label": t("exam.gradebook.openTest", { name: column.name }) }, day, rest)
       );
     }
-    if (!editable) return h("th", { ...head, "data-column": null }, columnLines(column));
+    const testLink = column.testId
+      ? h("a", { href: `/exam/tests/${column.testId}`, class: "sl-exam-column-test-link", "aria-label": t("exam.gradebook.openTest", { name: column.name }), title: t("exam.gradebook.openTest", { name: column.name }) }, "↗")
+      : null;
+    if (!editable) return h("th", { ...head, "data-column": null }, columnLines(column), testLink);
     return h(
       "th",
       head,
@@ -338,7 +342,8 @@ class GradebookView extends ExamElement {
           onclick: () => this.columnDialog(course, semester, column, column.category),
         },
         columnLines(column)
-      )
+      ),
+      testLink
     );
   }
 
@@ -631,12 +636,15 @@ class GradebookView extends ExamElement {
           {},
           cancel(t("exam.gradebook.close"), "sl-exam-column-close"),
           " ",
-          confirmButton({
-            class: "sl-exam-delete-column",
-            label: t("exam.gradebook.deleteColumn"),
-            armed: column.results > 0 ? t("exam.gradebook.deleteColumnArmed", { count: column.results }) : t("exam.gradebook.deleteEmptyColumnArmed"),
-            action: remove,
-          })
+          // An offline test's column goes with its test, on the test's page.
+          column.testId
+            ? linkButton({ label: t("exam.gradebook.openTestPage"), href: `/exam/tests/${column.testId}`, class: "sl-exam-column-test" })
+            : confirmButton({
+                class: "sl-exam-delete-column",
+                label: t("exam.gradebook.deleteColumn"),
+                armed: column.results > 0 ? t("exam.gradebook.deleteColumnArmed", { count: column.results }) : t("exam.gradebook.deleteEmptyColumnArmed"),
+                action: remove,
+              })
         ),
         line
       );

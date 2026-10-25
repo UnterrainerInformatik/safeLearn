@@ -10,6 +10,8 @@ Defines which session is served which attachment from the Markdown corpus, the i
 
 An attachment in the corpus SHALL be served to a session only when that session may see at least one place in the corpus that references it. A place SHALL count as visible when the session may see the Markdown file it is in, under the whole-file directive with its time windows, and, where the reference sits inside an inline `@@@` block, may also see that block under the same rules the rendered page applies to it: its roles, its time windows, the view pseudo-roles, and the student-view downgrade. A reference is any way a rendered page addresses the attachment: an embed (`![[name]]`), an image, a link, or a wiki link (`[[name]]`, `[[name|text]]`) that resolves to the attachment.
 
+A handout the exam module currently serves to a session (`exam-handout`) SHALL count as a visible place for that session as well, with its whole-file directive set aside and its inline blocks decided under the views the handout rendering fixes. It SHALL count only while the module would serve the handout to that session. When the window closes, the sitting ends, or the participant is marked absent or moved to the other group, it SHALL stop counting from that moment on, not after a grant's lifetime.
+
 #### Scenario: Referenced from an unrestricted page
 
 - **WHEN** an attachment is referenced on a page that carries no directive, outside any `@@@` block
@@ -47,6 +49,17 @@ An attachment in the corpus SHALL be served to a session only when that session 
 - **WHEN** an attachment is referenced only by a wiki link `[[handout.pdf]]` on an unrestricted page, outside any `@@@` block
 - **THEN** it is served to every authenticated session
 - **AND** if that wiki link is moved inside a `@@@ teacher` block, it is no longer served to a student session
+
+#### Scenario: Referenced by a handout during the window
+
+- **WHEN** an attachment is referenced only in a handout restricted to teachers, inside its `#exam` block, and a present participant of the open sitting requests it
+- **THEN** it is served to that participant
+- **AND** it is not served to an absent participant or to a student of another class
+
+#### Scenario: The participant is marked absent during the window
+
+- **WHEN** a participant who was served the handout's image is marked absent and requests the image again
+- **THEN** it is not served
 
 ### Requirement: An attachment no page references is not served
 

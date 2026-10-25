@@ -2409,8 +2409,13 @@ function firstTrue(promises) {
   });
 }
 
-/** Whether `fullPath` references `attachment` in a place this session may see. */
-async function referencesVisibly(req, fullPath, attachment) {
+/**
+ * Whether `fullPath` references `attachment` in a place this session may see.
+ * With `asHandout`, the file's whole-file directive is set aside, as the exam
+ * module's handout rendering sets it aside; its blocks are still decided for
+ * this session, under whatever views the caller fixed on `req`.
+ */
+async function referencesVisibly(req, fullPath, attachment, { asHandout = false } = {}) {
   const file = mdFilesDirStructure[fullPath.slice(dirPrefix.length)];
   if (!file) {
     return false;
@@ -2426,9 +2431,11 @@ async function referencesVisibly(req, fullPath, attachment) {
   let content = raw.replace(/^[​‌‍‎‏﻿]/, "");
   const permissions = parseFirstLineForPermissions(content.split("\n")[0]);
   if (permissions !== null) {
-    const { visible } = await resolveFileVisibility(req, permissions);
-    if (!visible) {
-      return false;
+    if (!asHandout) {
+      const { visible } = await resolveFileVisibility(req, permissions);
+      if (!visible) {
+        return false;
+      }
     }
     content = content.split("\n").slice(1).join("\n");
   }
@@ -2460,6 +2467,37 @@ export async function mayServeAttachment(req, attachment) {
     return sharedAttachmentDecision(req, attachment, candidates);
   }
   return decideAttachment(req, attachment, candidates);
+}
+
+/**
+ * Whether the handout at `corpusPath` (relative to `md/`) references
+ * `attachment` in a place this session may see, its whole-file directive set
+ * aside. The exam module asks this for the handouts it serves the session
+ * right now, with the handout's views fixed on `req` (`attachment-access`).
+ */
+export function handoutReferencesVisibly(req, corpusPath, attachment) {
+  return referencesVisibly(req, dirPrefix + corpusPath, attachment, { asHandout: true });
+}
+
+let handoutAttachmentCheck = null;
+
+/**
+ * The exam module's check whether a handout it serves the session right now
+ * references an attachment (exam-offline-sittings design D7). Set by the
+ * module at start-up, like the open-tests check.
+ */
+export function registerHandoutAttachmentCheck(check) {
+  handoutAttachmentCheck = check;
+}
+
+/**
+ * The attachment gate's last question, after the grant and the full decision:
+ * whether a handout open to this session references `attachment`. Nothing is
+ * kept, so the answer follows the attendance and the window from one request
+ * to the next. False without the module.
+ */
+export async function mayServeHandoutAttachment(req, attachment) {
+  return handoutAttachmentCheck === null ? false : handoutAttachmentCheck(req, attachment);
 }
 
 function decideAttachment(req, attachment, candidates) {

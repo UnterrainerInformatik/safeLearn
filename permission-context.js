@@ -281,6 +281,16 @@ async function buildPermissionContext(req) {
 }
 
 /**
+ * The key of the views the exam module's handout rendering fixes for one
+ * request (`exam-handout`, exam-offline-sittings design D4): `req[handoutViews]
+ * = { answer }`. A Symbol, so no body, query, header or cookie parser can
+ * produce the property; only server code holding this export can set it, and
+ * the module sets it only after the database has authorized the request, for
+ * the duration of the render. `hasRoles` is its one reader.
+ */
+export const handoutViews = Symbol("handoutViews");
+
+/**
  * The one context of this request, built on first need.
  *
  * The promise is stored, not the value it resolves to: a caller arriving while

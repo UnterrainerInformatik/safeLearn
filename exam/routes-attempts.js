@@ -119,7 +119,7 @@ export function registerAttemptRoutes(router, { db, handle, startPage }) {
       let sent = null;
       const push = () => {
         const tests = openTestsOf(db, username);
-        const key = JSON.stringify(tests.map((test) => [test.testId, test.closesAt, test.attempt?.attemptId ?? null]));
+        const key = JSON.stringify(tests.map((test) => [test.testId, test.closesAt, test.attempt?.attemptId ?? null, test.sittingId ?? null, test.handout ?? null]));
         if (key !== sent) {
           sent = key;
           stream.send("tests", { tests });

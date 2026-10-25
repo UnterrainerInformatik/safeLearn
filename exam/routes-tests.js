@@ -10,6 +10,7 @@
  */
 
 import {
+  createOfflineTest,
   createSitting,
   createTest,
   deleteSitting,
@@ -20,6 +21,8 @@ import {
   listTests,
   removeWrittenQuestion,
   rescheduleSitting,
+  setAttendance,
+  startSitting,
   updateSitting,
   updateTest,
 } from "./tests.js";
@@ -97,6 +100,8 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
 
   api("get", "/tests", (req) => listTests(db, contextFromQuery(req.query)));
   api("post", "/courses/:id/tests", (req) => createTest(db, idParam(req.params.id), req.body ?? {}));
+  // An offline test (`offline-test`): no questions, a duration, a gradebook category and its handouts.
+  api("post", "/courses/:id/offline-tests", (req) => createOfflineTest(db, idParam(req.params.id), req.body ?? {}));
   api("get", "/tests/:id", (req) => getTest(db, idParam(req.params.id)));
   api("put", "/tests/:id", (req) => updateTest(db, idParam(req.params.id), req.body ?? {}));
   // Each write of a sitting tells the students' streams of open tests.
@@ -114,6 +119,16 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
     return announced(sitting);
   };
   api("post", "/sittings/:id/end", (req) => announcedLive(endSitting(db, idParam(req.params.id))));
+  // Starting an offline sitting opens its window for everyone on it (exam-offline-sittings design D2).
+  api("post", "/sittings/:id/start", (req) => announcedLive(startSitting(db, idParam(req.params.id))));
+  // A row of an offline sitting's attendance table. It reaches the sitting's
+  // pages and the student's open tests at once (design D3).
+  api("put", "/sittings/:id/participants/:username", (req) => {
+    const sittingId = idParam(req.params.id);
+    const participant = setAttendance(db, sittingId, req.params.username, req.body ?? {});
+    notify(sittingId, "attendance", participant.username);
+    return participant;
+  });
   api("post", "/sittings/:id/extend", (req) => announcedLive(extendSitting(db, idParam(req.params.id), req.body ?? {})));
   // Rescheduling deletes the sitting's attempts - an admin's alone once there
   // are any; an open live view drops their rows.

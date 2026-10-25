@@ -3,6 +3,12 @@
  * the pool for a course, the snapshot of its questions, the sittings it is
  * written in, and the lists of a course's or a school year's tests.
  *
+ * Offline tests (`offline-test`, exam-offline-sittings design D1) are tests of
+ * the same table with `kind = 'offline'`: no questions, a duration, up to two
+ * handouts and a column of their own in the gradebook. Their sittings open
+ * only when a teacher starts them (design D2), and every guard about
+ * questions asks for `kind = 'online'`.
+ *
  * A test holds a copy of its questions with both languages, answers and
  * correct flags, and everything that shows or grades it reads only that copy.
  * Until the test begins - its first sitting opens or its first attempt starts
@@ -34,6 +40,7 @@ import {
 } from "./classes.js";
 import { viennaLocal } from "./client/periods.js";
 import { finalizeDue } from "./attempts.js";
+import { handoutGroups, handoutPath, handoutResolves, handoutsOf } from "./handout.js";
 
 /** The calendar date in Vienna of an ISO timestamp, as `YYYY-MM-DD`. */
 export function viennaDate(iso) {
@@ -60,7 +67,7 @@ export function testStarted(db, testId) {
 export function testBegun(db, testId, at = now()) {
   return (
     testStarted(db, testId) ||
-    db.prepare("SELECT 1 FROM sitting WHERE test_id = ? AND opens_at <= ? LIMIT 1").get(testId, at) !== undefined
+    db.prepare(`SELECT 1 FROM sitting WHERE test_id = ? AND opens_at <= ? AND ${startedCondition("sitting")} LIMIT 1`).get(testId, at) !== undefined
   );
 }
 
@@ -82,6 +89,15 @@ export function pendingTestsWith(db, questionId, at = now()) {
        ORDER BY t.created_at, t.id`
     )
     .all(questionId, at);
+}
+
+/**
+ * The condition every query asking "has this sitting opened" adds (design
+ * D2): an online sitting opens by the clock, an offline one only once a
+ * teacher started it. `alias` is the sitting's table name in the query.
+ */
+export function startedCondition(alias) {
+  return `(${alias}.started_at IS NOT NULL OR (SELECT kind FROM test WHERE test.id = ${alias}.test_id) = 'online')`;
 }
 
 function testRow(db, id) {
@@ -190,7 +206,7 @@ export function dropFromTest(db, testId, questionId) {
  * meanwhile goes. Inside a transaction.
  */
 export function followPoolIfNotBegun(db, testId, at = now()) {
-  if (testBegun(db, testId, at)) return;
+  if (testRow(db, testId).kind !== "online" || testBegun(db, testId, at)) return;
   const read = db.prepare("SELECT * FROM question WHERE id = ?");
   for (const row of db.prepare("SELECT id, question_id FROM test_question WHERE test_id = ?").all(testId)) {
     if (row.question_id === null) db.prepare("DELETE FROM test_question WHERE id = ?").run(row.id);
@@ -277,8 +293,10 @@ export function createTest(db, courseId, { name, questionIds } = {}) {
  * questions with a fresh copy of `questionIds`. A retired question the test
  * already holds may stay.
  */
-export function updateTest(db, id, { name, questionIds } = {}) {
+export function updateTest(db, id, input = {}) {
   const test = testRow(db, id);
+  if (test.kind === "offline") return updateOfflineTest(db, test, input);
+  const { name, questionIds } = input;
   const trimmed = name === undefined ? test.name : normalizeName(name);
   const held = db.prepare("SELECT question_id FROM test_question WHERE test_id = ? AND question_id IS NOT NULL").all(id);
   const keep = held.map((row) => row.question_id);
@@ -300,9 +318,17 @@ export function updateTest(db, id, { name, questionIds } = {}) {
  * answers, which takes its column out of the gradebook.
  */
 export function deleteTest(db, id, { admin = false } = {}) {
-  testRow(db, id);
+  const test = testRow(db, id);
   inTransaction(db, () => {
     if (testStarted(db, id) && !admin) throw new ConflictError("exam.errors.tests.writtenCannotDelete");
+    // An offline test's column goes with it, but never with a result in it (design D9).
+    if (test.assessment_id !== null) {
+      if (db.prepare("SELECT 1 FROM manual_entry WHERE assessment_id = ? LIMIT 1").get(test.assessment_id)) {
+        throw new ConflictError("exam.errors.tests.offlineHasResults");
+      }
+      db.prepare("UPDATE test SET assessment_id = NULL WHERE id = ?").run(id);
+      db.prepare("DELETE FROM assessment WHERE id = ?").run(test.assessment_id);
+    }
     // An attempt's questions, tokens, answers and refused browsers go with it.
     db.prepare("DELETE FROM attempt WHERE test_id = ?").run(id);
     dropSnapshot(db, id);
@@ -380,8 +406,13 @@ export function testQuestions(db, testId) {
     }));
 }
 
-/** The state of a sitting at `at`: scheduled, open or over. */
+/**
+ * The state of a sitting at `at`: scheduled, open or over. An offline sitting
+ * (`offline: true`) stays scheduled until it is started, whatever its planned
+ * time.
+ */
 export function sittingState(sitting, at = now()) {
+  if (sitting.offline && !sitting.startedAt) return "scheduled";
   if (at < sitting.opensAt) return "scheduled";
   if (at < sitting.closesAt) return "open";
   return "over";
@@ -389,21 +420,30 @@ export function sittingState(sitting, at = now()) {
 
 /** A test's sittings in the order they open, each with its participants and the number of its attempts. */
 export function testSittings(db, testId, at = now()) {
-  const participants = db.prepare("SELECT username FROM sitting_participant WHERE sitting_id = ? ORDER BY username");
+  const offline = testRow(db, testId).kind === "offline";
+  // Whole rows, so the checks of earlier migrations can still read a sitting
+  // through this before the attendance columns exist.
+  const participants = db.prepare("SELECT * FROM sitting_participant WHERE sitting_id = ? ORDER BY username");
   const attempts = db.prepare("SELECT COUNT(*) AS n FROM attempt WHERE sitting_id = ?");
   return db
-    .prepare(
-      `SELECT id, opens_at AS opensAt, closes_at AS closesAt, duration_s AS durationS, makeup
-       FROM sitting WHERE test_id = ? ORDER BY opens_at, id`
-    )
+    .prepare("SELECT * FROM sitting WHERE test_id = ? ORDER BY opens_at, id")
     .all(testId)
-    .map((sitting) => ({
-      ...sitting,
-      makeup: sitting.makeup === 1,
-      state: sittingState({ opensAt: sitting.opensAt, closesAt: sitting.closesAt }, at),
-      participants: participants.all(sitting.id).map((row) => row.username),
-      attempts: attempts.get(sitting.id).n,
-    }));
+    .map((sitting) => {
+      const rows = participants.all(sitting.id);
+      const window = { opensAt: sitting.opens_at, closesAt: sitting.closes_at };
+      return {
+        id: sitting.id,
+        ...window,
+        durationS: sitting.duration_s,
+        makeup: sitting.makeup === 1,
+        startedAt: sitting.started_at ?? null,
+        state: sittingState({ ...window, offline, startedAt: sitting.started_at }, at),
+        participants: rows.map((row) => row.username),
+        // Who was marked absent, for an offline sitting's make-up.
+        absent: offline ? rows.filter((row) => row.present === 0).map((row) => row.username) : [],
+        attempts: attempts.get(sitting.id).n,
+      };
+    });
 }
 
 /** How many attempts of a test have started and how many are submitted. */
@@ -424,6 +464,8 @@ export function getTest(db, id) {
   return {
     id: row.id,
     name: row.name,
+    kind: row.kind,
+    ...offlineFields(db, row),
     createdAt: row.created_at,
     course: {
       id: course.id,
@@ -445,15 +487,16 @@ export function getTest(db, id) {
 function courseTests(db, courseId) {
   return db
     .prepare(
-      `SELECT t.id, t.name, (SELECT COUNT(*) FROM test_question q WHERE q.test_id = t.id) AS questions
+      `SELECT t.id, t.name, t.kind, t.handout_a, t.handout_b, (SELECT COUNT(*) FROM test_question q WHERE q.test_id = t.id) AS questions
        FROM test t WHERE t.course_id = ?
        ORDER BY (SELECT MIN(opens_at) FROM sitting s WHERE s.test_id = t.id) IS NULL,
          (SELECT MIN(opens_at) FROM sitting s WHERE s.test_id = t.id), t.created_at, t.id`
     )
     .all(courseId)
-    .map((test) => ({
+    .map(({ handout_a, handout_b, ...test }) => ({
       ...test,
-      sittings: testSittings(db, test.id).map(({ participants, ...sitting }) => ({ ...sitting, participants: participants.length })),
+      handouts: handoutsOf({ handout_a, handout_b }).map(({ group, path, resolves }) => ({ group, path, resolves })),
+      sittings: testSittings(db, test.id).map(({ participants, absent, ...sitting }) => ({ ...sitting, participants: participants.length })),
       ...attemptCounts(db, test.id),
     }));
 }
@@ -523,7 +566,7 @@ export function getSitting(db, id) {
   const row = sittingRow(db, id);
   const test = testRow(db, row.test_id);
   const sitting = testSittings(db, row.test_id).find((candidate) => candidate.id === id);
-  return { ...sitting, testId: test.id, testName: test.name, courseId: test.course_id };
+  return { ...sitting, testId: test.id, testName: test.name, courseId: test.course_id, kind: test.kind ?? "online", handouts: offlineFields(db, test).handouts };
 }
 
 /**
@@ -578,8 +621,10 @@ function firstSitting(db, testId) {
  * of the course's class - or by the `participants` chosen; every later one is
  * a make-up for the `participants` chosen, with the first one's duration.
  */
-export function createSitting(db, testId, { opensAt, closesAt, durationMinutes, participants = null } = {}) {
+export function createSitting(db, testId, input = {}) {
   const test = testRow(db, testId);
+  if (test.kind === "offline") return createOfflineSitting(db, test, input);
+  const { opensAt, closesAt, durationMinutes, participants = null } = input;
   if (db.prepare("SELECT 1 FROM test_question WHERE test_id = ? LIMIT 1").get(testId) === undefined) {
     throw new ConflictError("exam.errors.tests.noQuestions");
   }
@@ -613,8 +658,9 @@ function requireNotOpened(row, at = now()) {
  */
 export function updateSitting(db, id, input = {}) {
   const row = sittingRow(db, id);
-  requireNotOpened(row);
   const test = testRow(db, row.test_id);
+  if (test.kind === "offline") return updateOfflineSitting(db, row, test, input);
+  requireNotOpened(row);
   const makeups = db.prepare("SELECT COUNT(*) AS n FROM sitting WHERE test_id = ? AND makeup = 1").get(row.test_id).n;
   const durationMinutes = input.durationMinutes ?? row.duration_s / 60;
   if (durationMinutes * 60 !== row.duration_s && (row.makeup === 1 || makeups > 0)) {
@@ -635,9 +681,15 @@ export function updateSitting(db, id, input = {}) {
   });
 }
 
-/** Refuses anything but a sitting that is open now. */
-function requireOpen(row, at) {
-  if (sittingState({ opensAt: row.opens_at, closesAt: row.closes_at }, at) !== "open") throw new ConflictError("exam.errors.tests.sittingNotOpen");
+/** The state of the sitting `row` at `at`, its test's kind taken into account. */
+function rowState(db, row, at) {
+  const offline = testRow(db, row.test_id).kind === "offline";
+  return sittingState({ opensAt: row.opens_at, closesAt: row.closes_at, offline, startedAt: row.started_at }, at);
+}
+
+/** Refuses anything but a sitting that is open now; an offline one before its start included. */
+function requireOpen(db, row, at) {
+  if (rowState(db, row, at) !== "open") throw new ConflictError("exam.errors.tests.sittingNotOpen");
 }
 
 /**
@@ -648,7 +700,7 @@ function requireOpen(row, at) {
  */
 export function endSitting(db, id, at = now()) {
   const row = sittingRow(db, id);
-  requireOpen(row, at);
+  requireOpen(db, row, at);
   inTransaction(db, () => {
     db.prepare("UPDATE sitting SET closes_at = ? WHERE id = ?").run(at, id);
     // An attempt's deadline is stored, the earlier of its start plus the duration and the window's end.
@@ -666,7 +718,7 @@ export function endSitting(db, id, at = now()) {
  */
 export function extendSitting(db, id, { minutes } = {}, at = now()) {
   const row = sittingRow(db, id);
-  requireOpen(row, at);
+  requireOpen(db, row, at);
   if (!Number.isInteger(minutes) || minutes < 5 || minutes > 120) throw new InvalidInputError("exam.errors.tests.extendMinutes");
   const closes = new Date(Date.parse(row.closes_at) + minutes * 60000).toISOString();
   inTransaction(db, () => {
@@ -692,6 +744,8 @@ export function extendSitting(db, id, { minutes } = {}, at = now()) {
  */
 export function rescheduleSitting(db, id, { opensAt, closesAt, attempts } = {}, { admin = false } = {}, at = now()) {
   const row = sittingRow(db, id);
+  // An offline sitting that is over is followed by a make-up, not set again.
+  if (testRow(db, row.test_id).kind === "offline") throw new ConflictError("exam.errors.tests.offlineNoReschedule");
   if (sittingState({ opensAt: row.opens_at, closesAt: row.closes_at }, at) !== "over") throw new ConflictError("exam.errors.tests.sittingNotOver");
   const written = db.prepare("SELECT COUNT(*) AS n FROM attempt WHERE sitting_id = ?").get(id).n;
   if (written > 0 && !admin) throw new ForbiddenError("Forbidden");
@@ -720,20 +774,260 @@ export function rescheduleSitting(db, id, { opensAt, closesAt, attempts } = {}, 
 }
 
 /**
- * Deletes a sitting that has not opened yet. A first sitting goes only after
+ * Deletes a sitting that has not opened yet - an offline one also once it is
+ * over, never while its window is open. A first sitting goes only after
  * its make-ups. A test left with no attempt and no opened sitting follows the
  * pool again.
  */
 export function deleteSitting(db, id) {
   const row = sittingRow(db, id);
-  requireNotOpened(row);
+  // An offline sitting can go in an emergency also once it is over; never while it runs.
+  if (testRow(db, row.test_id).kind === "offline") {
+    if (rowState(db, row, now()) === "open") throw new ConflictError("exam.errors.tests.sittingRunning");
+  } else requireNotOpened(row);
   if (row.makeup === 0 && db.prepare("SELECT 1 FROM sitting WHERE test_id = ? AND makeup = 1").get(row.test_id)) {
     throw new ConflictError("exam.errors.tests.deleteMakeupsFirst");
   }
   inTransaction(db, () => {
     db.prepare("DELETE FROM sitting WHERE id = ?").run(id);
     refreshUsageDate(db, row.test_id);
+    refreshColumnDate(db, row.test_id);
     followPoolIfNotBegun(db, row.test_id);
   });
   return { deleted: id };
+}
+
+// ------------------------------------------------------------ offline tests
+
+/** The gradebook categories an offline test can count in (design D9). */
+const offlineColumnKinds = Object.freeze(["test", "shorttest"]);
+
+/** An offline test's duration in minutes, checked, as seconds. */
+function offlineDuration(durationMinutes) {
+  if (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 600) {
+    throw new InvalidInputError("exam.errors.tests.durationMinutes");
+  }
+  return durationMinutes * 60;
+}
+
+/** A handout chosen by the teacher: a Markdown file of the corpus that is there now. */
+function chosenHandout(value) {
+  const corpusPath = handoutPath(value);
+  if (!handoutResolves(corpusPath)) throw new InvalidInputError("exam.errors.handouts.notFound", { path: corpusPath });
+  return corpusPath;
+}
+
+/**
+ * The handouts after a change: `handoutA`/`handoutB` as given - undefined
+ * keeps one, null removes it. Removing A while B is set makes B the only one;
+ * a B without an A is refused.
+ */
+function nextHandouts(current, { handoutA, handoutB }) {
+  let a = handoutA === undefined ? current.a : handoutA === null ? null : chosenHandout(handoutA);
+  let b = handoutB === undefined ? current.b : handoutB === null ? null : chosenHandout(handoutB);
+  if (a === null && b !== null) {
+    if (handoutB !== undefined && handoutB !== null) throw new InvalidInputError("exam.errors.handouts.bWithoutA");
+    [a, b] = [b, null];
+  }
+  return { a, b };
+}
+
+/** The date in Vienna of `iso`, kept inside the school year a column has to lie in. */
+function dateInYear(iso, year) {
+  const date = viennaDate(iso);
+  return date < year.startsOn ? year.startsOn : date > year.endsOn ? year.endsOn : date;
+}
+
+/** What a test answers beyond the online fields: an offline test's duration, column and handouts. */
+function offlineFields(db, row) {
+  if (row.kind !== "offline") return { handouts: [] };
+  const column = row.assessment_id === null ? null : db.prepare("SELECT kind FROM assessment WHERE id = ?").get(row.assessment_id);
+  return {
+    durationS: row.duration_s,
+    gradebookKind: column?.kind ?? null,
+    assessmentId: row.assessment_id,
+    handouts: handoutsOf(row),
+  };
+}
+
+/**
+ * Creates the offline test `name` for a course (design D1, D9): a duration in
+ * minutes, the gradebook category it counts in - `test` or `shorttest` - and
+ * optionally its handouts. Its column is created with it, named by the test
+ * and dated today until a sitting is planned.
+ */
+export function createOfflineTest(db, courseId, { name, durationMinutes, gradebookKind, handoutA = null, handoutB = null } = {}) {
+  const course = getCourse(db, courseId);
+  const trimmed = normalizeName(name);
+  const durationS = offlineDuration(durationMinutes);
+  if (!offlineColumnKinds.includes(gradebookKind)) throw new InvalidInputError("exam.errors.tests.gradebookKind");
+  const handouts = nextHandouts({ a: null, b: null }, { handoutA, handoutB });
+  return inTransaction(db, () => {
+    const at = now();
+    const column = db
+      .prepare("INSERT INTO assessment (course_id, kind, name, held_on, max_points, created_at) VALUES (?, ?, ?, ?, NULL, ?)")
+      .run(courseId, gradebookKind, trimmed, dateInYear(at, course.year), at);
+    const { lastInsertRowid } = db
+      .prepare(
+        `INSERT INTO test (course_id, name, kind, duration_s, handout_a, handout_b, assessment_id, created_at, updated_at)
+         VALUES (?, ?, 'offline', ?, ?, ?, ?, ?, ?)`
+      )
+      .run(courseId, trimmed, durationS, handouts.a, handouts.b, Number(column.lastInsertRowid), at, at);
+    return getTest(db, Number(lastInsertRowid));
+  });
+}
+
+/**
+ * Changes an offline test: its name, which renames its column; its duration,
+ * only while none of its sittings has started, which the planned ones take
+ * on; and its handouts.
+ */
+function updateOfflineTest(db, test, { name, durationMinutes, handoutA, handoutB, questionIds } = {}) {
+  if (questionIds !== undefined) throw new ConflictError("exam.errors.tests.offlineNoQuestions");
+  const trimmed = name === undefined ? test.name : normalizeName(name);
+  const durationS = durationMinutes === undefined ? test.duration_s : offlineDuration(durationMinutes);
+  if (durationS !== test.duration_s && db.prepare("SELECT 1 FROM sitting WHERE test_id = ? AND started_at IS NOT NULL").get(test.id)) {
+    throw new ConflictError("exam.errors.tests.offlineDurationFixed");
+  }
+  const handouts = nextHandouts({ a: test.handout_a, b: test.handout_b }, { handoutA, handoutB });
+  return inTransaction(db, () => {
+    db.prepare("UPDATE test SET name = ?, duration_s = ?, handout_a = ?, handout_b = ?, updated_at = ? WHERE id = ?").run(
+      trimmed,
+      durationS,
+      handouts.a,
+      handouts.b,
+      now(),
+      test.id
+    );
+    if (test.assessment_id !== null && trimmed !== test.name) {
+      db.prepare("UPDATE assessment SET name = ? WHERE id = ?").run(trimmed, test.assessment_id);
+    }
+    if (durationS !== test.duration_s) {
+      for (const sitting of db.prepare("SELECT id, opens_at FROM sitting WHERE test_id = ?").all(test.id)) {
+        db.prepare("UPDATE sitting SET duration_s = ?, closes_at = ? WHERE id = ?").run(durationS, plannedClose(sitting.opens_at, durationS), sitting.id);
+      }
+    }
+    return getTest(db, test.id);
+  });
+}
+
+/** Where a planned window opening at `opens` and running `durationS` ends. */
+function plannedClose(opens, durationS) {
+  return new Date(Date.parse(opens) + durationS * 1000).toISOString();
+}
+
+/** A planned offline window: it opens at `opensAt` for the test's duration, and has to end in the future. */
+function plannedTimes(opensAt, durationS, at = now()) {
+  const opens = instant(opensAt, "exam.errors.tests.startFormat");
+  const closes = plannedClose(opens, durationS);
+  if (closes <= at) throw new InvalidInputError("exam.errors.tests.closesInFuture");
+  return { opens, closes };
+}
+
+/**
+ * Moves an offline test's column to the date of its first sitting: the day it
+ * was started, or the day it is planned for while it has not (design D2, D9).
+ * Inside a transaction.
+ */
+function refreshColumnDate(db, testId) {
+  const test = testRow(db, testId);
+  if (test.assessment_id === null) return;
+  const first = firstSitting(db, testId);
+  if (first === null) return;
+  const date = dateInYear(first.started_at ?? first.opens_at, getCourse(db, test.course_id).year);
+  db.prepare("UPDATE assessment SET held_on = ? WHERE id = ?").run(date, test.assessment_id);
+}
+
+/** Writes a sitting's participants, keeping the attendance of those who stay. Inside a transaction. */
+function writeParticipants(db, sittingId, usernames) {
+  const placeholders = usernames.map(() => "?").join(", ");
+  db.prepare(`DELETE FROM sitting_participant WHERE sitting_id = ? AND username NOT IN (${placeholders})`).run(sittingId, ...usernames);
+  const take = db.prepare("INSERT OR IGNORE INTO sitting_participant (sitting_id, username) VALUES (?, ?)");
+  for (const username of usernames) take.run(sittingId, username);
+}
+
+/**
+ * Plans a sitting of an offline test (design D2): its planned start and its
+ * participants - the whole roster, or those chosen; every later one is a
+ * make-up for the participants chosen. Its window is planned from the start
+ * for the test's duration, and opens only when a teacher starts it.
+ */
+function createOfflineSitting(db, test, { opensAt, participants = null } = {}) {
+  const makeup = firstSitting(db, test.id) !== null;
+  if (makeup && (participants === null || participants === undefined)) {
+    throw new InvalidInputError("exam.errors.tests.makeupParticipants");
+  }
+  const times = plannedTimes(opensAt, test.duration_s);
+  const usernames = participantsOf(db, test, participants);
+  return inTransaction(db, () => {
+    const { lastInsertRowid } = db
+      .prepare("INSERT INTO sitting (test_id, opens_at, closes_at, duration_s, makeup, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(test.id, times.opens, times.closes, test.duration_s, makeup ? 1 : 0, now());
+    const id = Number(lastInsertRowid);
+    writeParticipants(db, id, usernames);
+    refreshColumnDate(db, test.id);
+    return getSitting(db, id);
+  });
+}
+
+/** Refuses a change to an offline sitting that has been started. */
+function requireNotStarted(row) {
+  if (row.started_at !== null) throw new ConflictError("exam.errors.tests.sittingStarted");
+}
+
+/** Changes the planned start and the participants of an offline sitting not yet started. */
+function updateOfflineSitting(db, row, test, input = {}) {
+  requireNotStarted(row);
+  const times = plannedTimes(input.opensAt ?? row.opens_at, row.duration_s);
+  if (row.makeup === 1 && input.participants === null) throw new InvalidInputError("exam.errors.tests.makeupParticipants");
+  const usernames = input.participants === undefined ? null : participantsOf(db, test, input.participants);
+  return inTransaction(db, () => {
+    db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ? WHERE id = ?").run(times.opens, times.closes, row.id);
+    if (usernames !== null) writeParticipants(db, row.id, usernames);
+    refreshColumnDate(db, row.test_id);
+    return getSitting(db, row.id);
+  });
+}
+
+/**
+ * Starts an offline sitting now (design D2): its window runs from `at` for
+ * the test's duration, and its column is dated by the day. Refused for an
+ * online sitting, for one already started, and while a handout of the test
+ * does not resolve - the refusal names the handout to choose again.
+ */
+export function startSitting(db, id, at = now()) {
+  const row = sittingRow(db, id);
+  const test = testRow(db, row.test_id);
+  if (test.kind !== "offline") throw new ConflictError("exam.errors.tests.onlineNoStart");
+  requireNotStarted(row);
+  const broken = handoutsOf(test).find((handout) => !handout.resolves);
+  if (broken) throw new ConflictError("exam.errors.tests.handoutUnresolved", { group: broken.group, path: broken.path });
+  inTransaction(db, () => {
+    db.prepare("UPDATE sitting SET started_at = ?, opens_at = ?, closes_at = ? WHERE id = ?").run(at, at, plannedClose(at, row.duration_s), id);
+    refreshColumnDate(db, row.test_id);
+  });
+  return getSitting(db, id);
+}
+
+/**
+ * Marks `username` present or absent in an offline sitting and puts them in
+ * handout group A or B (design D3): `present` and `group` as given, either
+ * one alone. Allowed before, during and after the window. Refused for
+ * somebody who is not a participant, and group B for a test without a second
+ * handout.
+ */
+export function setAttendance(db, sittingId, username, { present, group } = {}) {
+  const row = sittingRow(db, sittingId);
+  const test = testRow(db, row.test_id);
+  if (test.kind !== "offline") throw new ConflictError("exam.errors.tests.onlineNoAttendance");
+  const name = String(username ?? "").trim().toLowerCase();
+  const participant = db.prepare("SELECT * FROM sitting_participant WHERE sitting_id = ? AND username = ?").get(sittingId, name);
+  if (!participant) throw new NotFoundError("exam.errors.tests.notParticipant");
+  if (present !== undefined && typeof present !== "boolean") throw new InvalidInputError("exam.errors.tests.presentFlag");
+  if (group !== undefined && !handoutGroups.includes(group)) throw new InvalidInputError("exam.errors.tests.handoutGroup");
+  if (group === "B" && test.handout_b === null) throw new InvalidInputError("exam.errors.tests.noHandoutB");
+  const nextPresent = present === undefined ? participant.present : present ? 1 : 0;
+  const nextGroup = group ?? participant.handout_group;
+  db.prepare("UPDATE sitting_participant SET present = ?, handout_group = ? WHERE sitting_id = ? AND username = ?").run(nextPresent, nextGroup, sittingId, name);
+  return { username: name, present: nextPresent === 1, group: nextGroup };
 }

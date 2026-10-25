@@ -202,6 +202,18 @@ const restrictedFiles = [
     directive: ["teacher"],
     content: "The second place",
   },
+  // The handouts of `test/exam-offline.test.js`. Outside a sitting they are
+  // ordinary teacher-only files, and the tree and the page must agree on that.
+  {
+    path: "/md/test-exam-handout.md",
+    directive: ["teacher"],
+    content: "HANDOUT-A-TASK",
+  },
+  {
+    path: "/md/test-exam-handout-b.md",
+    directive: ["teacher"],
+    content: "HANDOUT-B-TASK",
+  },
 ];
 
 /**

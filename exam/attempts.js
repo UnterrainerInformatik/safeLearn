@@ -21,6 +21,7 @@ import { ConflictError, getCourse, inTransaction, InvalidInputError, isClosedYea
 import { readScale } from "./gradebook.js";
 import { gradeFor } from "./grading.js";
 import { notify } from "./live.js";
+import { startedCondition } from "./tests.js";
 
 /** A request for an attempt from another browser than the one it is bound to. Answered with 409. */
 export class DeviceRefusedError extends ConflictError {
@@ -196,6 +197,13 @@ export function scheduleSweep(db, intervalMs = 30000) {
  * they take part in and that they have not submitted. Each with its course,
  * how long an attempt takes, and the attempt if one is running. `testId`
  * narrows it to one test.
+ *
+ * After them, the offline sittings open for `username` (exam-offline-sittings
+ * design D3): started, inside their window, and the participant marked
+ * present. Each with `kind: 'offline'`, its sitting, when it closes, no
+ * attempt, and the handout group they are served - `A` or `B`, or null for a
+ * test without a handout. The Exams button and the student's stream read
+ * this, so an offline sitting shows and goes with them.
  */
 export function openTestsOf(db, username, { at = now(), testId = null } = {}) {
   finalizeDue(db, at, username);
@@ -205,7 +213,7 @@ export function openTestsOf(db, username, { at = now(), testId = null } = {}) {
        FROM sitting_participant p
        JOIN sitting s ON s.id = p.sitting_id
        JOIN test t ON t.id = s.test_id
-       WHERE p.username = ? AND s.opens_at <= ? AND ? < s.closes_at
+       WHERE p.username = ? AND t.kind = 'online' AND s.opens_at <= ? AND ? < s.closes_at
          AND NOT EXISTS (SELECT 1 FROM attempt a WHERE a.test_id = t.id AND a.username = p.username AND a.submitted_at IS NOT NULL)
        GROUP BY t.id
        ORDER BY MAX(s.closes_at), t.id`
@@ -213,10 +221,11 @@ export function openTestsOf(db, username, { at = now(), testId = null } = {}) {
     .all(username, at, at)
     .filter((row) => testId === null || row.testId === testId);
   const attemptOf = db.prepare("SELECT id, deadline FROM attempt WHERE test_id = ? AND username = ?");
-  return rows.map((row) => {
+  const online = rows.map((row) => {
     const course = getCourse(db, row.courseId);
     const attempt = attemptOf.get(row.testId, username);
     return {
+      kind: "online",
       testId: row.testId,
       name: row.name,
       className: course.className,
@@ -227,6 +236,36 @@ export function openTestsOf(db, username, { at = now(), testId = null } = {}) {
       attempt: attempt ? { attemptId: attempt.id, remainingMs: Math.max(0, msBetween(at, attempt.deadline)) } : null,
     };
   });
+  const offline = db
+    .prepare(
+      `SELECT t.id AS testId, t.name, t.course_id AS courseId, t.handout_a, t.handout_b, s.id AS sittingId, s.closes_at AS closesAt,
+         s.duration_s AS durationS, p.handout_group AS handoutGroup
+       FROM sitting_participant p
+       JOIN sitting s ON s.id = p.sitting_id
+       JOIN test t ON t.id = s.test_id
+       WHERE p.username = ? AND t.kind = 'offline' AND s.started_at IS NOT NULL AND s.opens_at <= ? AND ? < s.closes_at AND p.present = 1
+       ORDER BY s.closes_at, s.id`
+    )
+    .all(username, at, at)
+    .filter((row) => testId === null || row.testId === testId)
+    .map((row) => {
+      const course = getCourse(db, row.courseId);
+      return {
+        kind: "offline",
+        testId: row.testId,
+        sittingId: row.sittingId,
+        name: row.name,
+        className: course.className,
+        subject: course.subject,
+        language: course.language,
+        closesAt: row.closesAt,
+        durationS: row.durationS,
+        remainingMs: Math.max(0, msBetween(at, row.closesAt)),
+        attempt: null,
+        handout: row.handout_a === null ? null : row.handout_b === null ? "A" : row.handoutGroup,
+      };
+    });
+  return [...online, ...offline];
 }
 
 /**
@@ -238,9 +277,11 @@ export function nextOpenTestsChange(db, username, at = now()) {
   const row = db
     .prepare(
       `SELECT MIN(t) AS next FROM (
-         SELECT s.opens_at AS t FROM sitting s JOIN sitting_participant p ON p.sitting_id = s.id WHERE p.username = ? AND s.opens_at > ?
+         SELECT s.opens_at AS t FROM sitting s JOIN sitting_participant p ON p.sitting_id = s.id
+           WHERE p.username = ? AND s.opens_at > ? AND ${startedCondition("s")}
          UNION ALL
-         SELECT s.closes_at FROM sitting s JOIN sitting_participant p ON p.sitting_id = s.id WHERE p.username = ? AND s.closes_at > ?
+         SELECT s.closes_at FROM sitting s JOIN sitting_participant p ON p.sitting_id = s.id
+           WHERE p.username = ? AND s.closes_at > ? AND ${startedCondition("s")}
          UNION ALL
          SELECT deadline FROM attempt WHERE username = ? AND submitted_at IS NULL AND deadline > ?
        )`
@@ -263,6 +304,8 @@ export function nextOpenTestsChange(db, username, at = now()) {
  */
 export function startAttempt(db, username, testId, at = now(), { userAgent = null } = {}) {
   finalizeDue(db, at, username);
+  // An offline test is written on paper or elsewhere, never here (design D1).
+  if (db.prepare("SELECT * FROM test WHERE id = ?").get(testId)?.kind === "offline") throw new ConflictError("exam.errors.attempts.offlineTest");
   const existing = db.prepare("SELECT * FROM attempt WHERE test_id = ? AND username = ?").get(testId, username);
   if (existing) {
     if (existing.submitted_at !== null) throw new ConflictError("exam.errors.attempts.submittedByYou");
@@ -505,8 +548,9 @@ export function deleteAttempt(db, id) {
  * and no grade or usage changes.
  */
 export function previewView(db, testId) {
-  const test = db.prepare("SELECT id, name, course_id FROM test WHERE id = ?").get(testId);
+  const test = db.prepare("SELECT * FROM test WHERE id = ?").get(testId);
   if (!test) throw new NotFoundError("exam.errors.attempts.noTest");
+  if (test.kind === "offline") throw new ConflictError("exam.errors.attempts.offlineTest");
   const language = getCourse(db, test.course_id).language;
   const text = language === "en" ? "text_en" : "text_de";
   const first = db.prepare("SELECT duration_s FROM sitting WHERE test_id = ? ORDER BY opens_at, id LIMIT 1").get(testId);

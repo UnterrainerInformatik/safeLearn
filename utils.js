@@ -1,4 +1,4 @@
-import { getPermissionContext, normalizeRole } from "./permission-context.js";
+import { getPermissionContext, handoutViews, normalizeRole } from "./permission-context.js";
 
 /**
  * The directory username a request is recorded under, lowercased: the
@@ -49,11 +49,16 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
     let clientAccess = null;
     const context = await getPermissionContext(req);
     const a = context.preferences;
+    // The views a handout rendering fixes for this request alone (design D4 of
+    // exam-offline-sittings): rendered as a student whatever `vt` holds, the
+    // exam variant shown, the practice variant hidden, the answers per flag.
+    // Set by the server under a Symbol, never by anything the request carries.
+    const handout = req?.[handoutViews] ?? null;
     // The student-view downgrade, as a choice between two sets built before
     // either was read. It used to delete `teacher`, `teachers` and `admin` from
     // the map the call had just assembled, which is the one write that would
     // make the answer to a directive depend on which directive came before it.
-    const view = allowOverride && a.vt == 0 ? context.studentView : context.full;
+    const view = handout !== null || (allowOverride && a.vt == 0) ? context.studentView : context.full;
 
     let clientViews = normalizedClientRoles.filter((role) => role.startsWith("#"));
     normalizedClientRoles = normalizedClientRoles.filter((role) => !role.startsWith("#"));
@@ -78,13 +83,14 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
           // both, or a session ends up seeing neither version of the question.
           case "exam":
             // For security reasons hardcoded to only allow teachers and admins to view exam-questions.
-            clientAccess = a.ve == 1 && (view.isAdmin || view.isTeacher);
+            // The handout rendering is the one exception, and it fixes both cases together.
+            clientAccess = handout !== null || (a.ve == 1 && (view.isAdmin || view.isTeacher));
             break;
           case "practice":
-            clientAccess = !(a.ve == 1 && (view.isAdmin || view.isTeacher));
+            clientAccess = handout === null && !(a.ve == 1 && (view.isAdmin || view.isTeacher));
             break;
           case "answer":
-            clientAccess = a.va == 1;
+            clientAccess = handout !== null ? handout.answer === true : a.va == 1;
             break;
         }
       }

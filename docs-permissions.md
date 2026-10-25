@@ -33,6 +33,14 @@ Images, PDFs and every other file a page embeds or links (`![[name]]`, `[[name]]
 * A refused attachment is answered exactly like a file that does not exist.
 * Tightening the restriction around a reference takes effect at once where the server rescans on change (`NEXT_AUTOSCAN`, as the WYSIWYG container has it). Without autoscan, a reader who opened the page before the edit may keep loading the attachment for **up to 10 minutes**.
 
+### Exam handouts: the one exception
+The exam module's offline tests can show a corpus file as a **handout** ([Offline Tests](docs-exam-module.md#offline-tests)). That is the only place where a file is shown to someone its whole-file directive does not admit, and the only place a student sees `#exam` content:
+* Only the module's own handout page does it, and only for a participant of an open, started sitting who is marked present, for the file of their group - decided from the module's database at every request. Everyone else, and the same student before the start or after the window, gets what a path with nothing behind it gets.
+* The page renders the file as for a student, whatever the reader's own view switches say: the first-line directive is set aside, `#exam` is shown, `#practice` and `#answer` hidden. Inline blocks for roles - `@@@ teacher`, another class, another person - are decided exactly as on any page.
+* These views are set by the server for that one rendering. No preference, cookie, header or query parameter produces them, and the same session's other pages keep showing the practice variant.
+* The file stays hidden everywhere else: the navigation tree, the search and its own URL still follow its directive.
+* Its attachments count as visible for that student while, and only while, the handout is shown to them (see [Attachments](#attachments)); a teacher's preview and solution deck count for the teacher.
+
 ### Addressing students
 **Being a student is not a role. It is the absence of the other two.** A student is a user who is neither `admin` nor `teacher`, and that is the normal case — the overwhelming majority of all users.
 

@@ -16,6 +16,16 @@
  * language; questions and answers stay in the course's language and are
  * marked with it (`ui-language`, design.md, D7).
  *
+ * An offline sitting open for the reader (`offline-test`) is listed among
+ * them with its time left and, when the test has a handout, the link to the
+ * reader's handout - nothing to start, nothing written here. It goes when its
+ * window closes, as the stream says.
+ *
+ * - `handout-watch`: on a handout's page, replaces the handout with a notice
+ *   the moment its sitting leaves the reader's open tests (exam-offline-
+ *   sittings design D6) - a courtesy, the server refuses the next request
+ *   anyway
+ *
  * With `preview: 1` a teacher tries the test as a student would see it, on
  * the test's own preview page: shuffled, in the course's language, with the
  * first sitting's countdown - but nothing is saved, the focus is not
@@ -50,12 +60,18 @@ function refusal(error) {
   return error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.frame.saveFailed");
 }
 
+/** What makes a list of open tests another list: its tests, their windows, and an offline sitting's handout. */
+function openKey(tests) {
+  return JSON.stringify(tests.map((test) => [test.testId, test.closesAt, test.sittingId ?? null, test.handout ?? null]));
+}
+
 /** How long a stream the browser gave up on waits before it is tried again. */
 const streamRetryMs = 30000;
 
 class WriteTest extends ExamElement {
   disconnectedCallback() {
     this.stop?.();
+    clearInterval(this.offlineTicker);
     this.closeStream();
     this.announce(false);
   }
@@ -84,8 +100,7 @@ class WriteTest extends ExamElement {
       window.dispatchEvent(new CustomEvent("sl-exam-open-tests", { detail: { count: tests.length } }));
       if (!this.listing) return;
       const shown = this.params.test === undefined ? tests : tests.filter((test) => String(test.testId) === this.params.test);
-      const key = JSON.stringify(shown.map((test) => [test.testId, test.closesAt]));
-      if (key !== this.shownKey) this.show(this.openTests(shown));
+      if (openKey(shown) !== this.shownKey) this.show(this.openTests(shown));
     });
     source.addEventListener("renew", () => {
       this.closeStream();
@@ -134,17 +149,30 @@ class WriteTest extends ExamElement {
   openTests(tests) {
     this.listing = true;
     this.announce(false);
-    this.shownKey = JSON.stringify(tests.map((test) => [test.testId, test.closesAt]));
+    this.shownKey = openKey(tests);
     this.watch();
+    clearInterval(this.offlineTicker);
     if (tests.length === 0) {
       return h("div", { class: "sl-exam sl-exam-attempt" }, h("p", { class: "sl-exam-quiet" }, t("exam.attempt.noneOpen")));
     }
     this.message = h("p", { class: "sl-exam-message", role: "status" });
+    const offline = tests.filter((test) => test.kind === "offline");
+    if (offline.length > 0) {
+      const received = performance.now();
+      const tick = () => {
+        for (const test of offline) {
+          const left = this.querySelector(`.sl-exam-offline-left[data-sitting="${test.sittingId}"]`);
+          if (left) left.textContent = clock(test.remainingMs - (performance.now() - received));
+        }
+      };
+      this.offlineTicker = setInterval(tick, 1000);
+      queueMicrotask(tick);
+    }
     return h(
       "div",
       { class: "sl-exam sl-exam-attempt" },
       tests.map((test) =>
-        h(
+        test.kind === "offline" ? this.offlineEntry(test) : h(
           "section",
           { class: "sl-exam-attempt-open", "data-test": String(test.testId) },
           h("h3", {}, test.name),
@@ -157,6 +185,30 @@ class WriteTest extends ExamElement {
         )
       ),
       this.message
+    );
+  }
+
+  /**
+   * An open offline sitting: its name and course, the time left by the
+   * server's clock, and the reader's handout if the test has one.
+   */
+  offlineEntry(test) {
+    return h(
+      "section",
+      { class: "sl-exam-attempt-open sl-exam-attempt-offline", "data-test": String(test.testId), "data-sitting": String(test.sittingId) },
+      h("h3", {}, test.name),
+      h(
+        "p",
+        { class: "sl-exam-quiet" },
+        t("exam.attempt.offlineDetails", { subject: test.subject, className: displayClass(test.className) }),
+        " ",
+        t("exam.attempt.timeLeft"),
+        " ",
+        h("span", { class: "sl-exam-countdown sl-exam-offline-left", "data-sitting": String(test.sittingId) }, clock(test.remainingMs))
+      ),
+      test.handout
+        ? h("a", { class: "sl-exam-primary sl-exam-handout-link", href: `/exam/my/sittings/${test.sittingId}/handout` }, t("exam.attempt.openHandout"))
+        : h("p", { class: "sl-exam-quiet" }, t("exam.attempt.offlineNoHandout"))
     );
   }
 
@@ -395,3 +447,61 @@ class WriteTest extends ExamElement {
 }
 
 defineExamElement("test", WriteTest);
+
+/**
+ * Watches the handout page's sitting over the reader's stream of open tests,
+ * and replaces the handout with a notice once the sitting is no longer
+ * among them: the window closed, the sitting ended, or the reader was
+ * marked absent. A change of group reloads the page, which then shows the
+ * other handout or none.
+ */
+class HandoutWatch extends ExamElement {
+  disconnectedCallback() {
+    clearTimeout(this.retry);
+    this.source?.close();
+  }
+
+  async load() {
+    return null;
+  }
+
+  render() {
+    this.watch();
+    return "";
+  }
+
+  watch() {
+    const sitting = Number(this.params.sitting);
+    const source = new EventSource("/exam/api/my/events");
+    this.source = source;
+    let group = null;
+    source.addEventListener("tests", (event) => {
+      const { tests } = JSON.parse(event.data);
+      window.dispatchEvent(new CustomEvent("sl-exam-open-tests", { detail: { count: tests.length } }));
+      const open = tests.find((test) => test.kind === "offline" && test.sittingId === sitting);
+      if (!open) {
+        this.closed();
+        return;
+      }
+      if (group !== null && open.handout !== group) window.location.reload();
+      group = open.handout;
+    });
+    source.addEventListener("renew", () => {
+      source.close();
+      this.watch();
+    });
+    source.addEventListener("refused", () => source.close());
+    source.addEventListener("error", () => {
+      if (source.readyState !== EventSource.CLOSED) return;
+      this.retry = setTimeout(() => this.isConnected && this.watch(), streamRetryMs);
+    });
+  }
+
+  closed() {
+    this.source?.close();
+    const handout = document.querySelector(`.sl-exam-handout[data-sitting="${this.params.sitting}"]`);
+    if (handout) handout.replaceChildren(h("p", { class: "sl-exam-handout-closed", role: "status" }, t("exam.attempt.handoutClosed")));
+  }
+}
+
+defineExamElement("handout-watch", HandoutWatch);

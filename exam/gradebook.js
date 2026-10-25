@@ -10,6 +10,7 @@
  */
 
 import {
+  ConflictError,
   currentYear,
   getCourse,
   getYear,
@@ -129,11 +130,29 @@ function columnFromRow(row, results = 0) {
     date: row.held_on,
     maxPoints: row.max_points,
     results,
+    // The offline test this column belongs to, which its header links to (`offline-test`).
+    testId: row.test_id ?? null,
   };
 }
 
+/**
+ * The offline tests of a course by the column each one owns. Read from whole
+ * rows, so a database before that migration still answers.
+ */
+function testsByColumn(db, courseId) {
+  return new Map(
+    db
+      .prepare("SELECT * FROM test WHERE course_id = ?")
+      .all(courseId)
+      .filter((test) => test.assessment_id !== undefined && test.assessment_id !== null)
+      .map((test) => [test.assessment_id, test.id])
+  );
+}
+
+/** A column's row with the offline test it belongs to, if any, as `test_id`. */
 function getColumnRow(db, id) {
-  const row = db.prepare("SELECT * FROM assessment WHERE id = ?").get(id);
+  const found = db.prepare("SELECT * FROM assessment WHERE id = ?").get(id);
+  const row = found ? { ...found, test_id: testsByColumn(db, found.course_id).get(found.id) ?? null } : undefined;
   if (!row) throw new NotFoundError("exam.errors.gradebook.noColumn", { id });
   return row;
 }
@@ -163,10 +182,11 @@ export function courseColumns(db, courseId, semester = null) {
       .map((row) => [row.id, row.n])
   );
   const order = (column) => weightCategories.indexOf(column.category);
+  const tests = testsByColumn(db, courseId);
   const manual = db
     .prepare("SELECT * FROM assessment WHERE course_id = ? ORDER BY held_on, created_at, id")
     .all(courseId)
-    .map((row) => columnFromRow(row, counts.get(row.id) ?? 0));
+    .map((row) => columnFromRow({ ...row, test_id: tests.get(row.id) ?? null }, counts.get(row.id) ?? 0));
   return [...onlineColumns(db, courseId), ...manual]
     .filter((column) => semester === null || semesterOf(column.date, course.year) === semester)
     .sort((a, b) => order(a) - order(b));
@@ -228,6 +248,8 @@ export function updateColumn(db, id, input = {}) {
 /** Deletes a column and every result in it. */
 export function deleteColumn(db, id) {
   const row = getColumnRow(db, id);
+  // An offline test's column goes with its test, not on its own.
+  if (row.test_id !== null) throw new ConflictError("exam.errors.gradebook.columnOfTest");
   const results = inTransaction(db, () => {
     const { changes } = db.prepare("DELETE FROM manual_entry WHERE assessment_id = ?").run(id);
     db.prepare("DELETE FROM assessment WHERE id = ?").run(id);
@@ -317,7 +339,7 @@ function entryFromRow(row, scale) {
 function onlineColumns(db, courseId) {
   return db
     .prepare(
-      `SELECT t.id, t.name, t.created_at, MIN(s.opens_at) AS first_opens_at,
+      `SELECT t.*, MIN(s.opens_at) AS first_opens_at,
          (SELECT COUNT(*) FROM test_question q WHERE q.test_id = t.id) AS questions,
          (SELECT COUNT(*) FROM attempt a WHERE a.test_id = t.id AND a.submitted_at IS NOT NULL) AS results
        FROM test t JOIN sitting s ON s.test_id = t.id
@@ -326,6 +348,9 @@ function onlineColumns(db, courseId) {
        ORDER BY MIN(s.opens_at), t.created_at, t.id`
     )
     .all(courseId)
+    // An offline test is a manual column of its own (`offline-test`). Read
+    // from the whole row, so a database before that migration still answers.
+    .filter((row) => row.kind !== "offline")
     .map((row) => ({
       id: `test-${row.id}`,
       testId: row.id,

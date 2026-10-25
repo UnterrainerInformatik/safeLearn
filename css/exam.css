@@ -2214,3 +2214,141 @@ sl-date-input .sl-date-input-grid button.is-disabled {
   background-color: var(--sl-exam-participant-fg);
   color: var(--sl-exam-participant-bg);
 }
+
+/* Offline tests (`offline-test`, `exam-handout`): the kind marker, a handout
+   path that no longer resolves in red, the attendance table's rows tinted by
+   their handout group with an absent row faded, and the handout picker. The
+   group is also written in the row's A/B buttons, so the colour is never its
+   only carrier. */
+#markdown-content {
+  --sl-exam-group-a-bg: #e3f0fb;
+  --sl-exam-group-a-fg: #1d4f7a;
+  --sl-exam-group-b-bg: #fdf0d5;
+  --sl-exam-group-b-fg: #6b4200;
+  --sl-exam-broken: #b42318;
+}
+
+#markdown-content.dark-mode {
+  --sl-exam-group-a-bg: #1d3347;
+  --sl-exam-group-a-fg: #a9d1f5;
+  --sl-exam-group-b-bg: #4a3510;
+  --sl-exam-group-b-fg: #ffd98a;
+  --sl-exam-broken: #ff8a80;
+}
+
+.sl-exam-kind-offline {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  font-size: 0.8em;
+  opacity: 0.8;
+}
+
+.sl-exam-handout-paths {
+  display: block;
+  font-size: 0.85em;
+}
+
+.sl-exam-handout-path.is-broken {
+  color: var(--sl-exam-broken);
+  text-decoration: line-through;
+  font-weight: 600;
+}
+
+.sl-exam-handouts {
+  padding-left: 1.2em;
+}
+
+.sl-exam-handouts li {
+  margin: 0.3em 0;
+}
+
+.sl-exam-attendance-table tr[data-group="A"] > td {
+  background-color: var(--sl-exam-group-a-bg);
+}
+
+.sl-exam-attendance-table tr[data-group="B"] > td {
+  background-color: var(--sl-exam-group-b-bg);
+}
+
+.sl-exam-attendance-table tr[data-present="0"] > td {
+  opacity: 0.55;
+}
+
+#markdown-content .sl-exam-action.sl-exam-attendance-group {
+  min-width: 2.2em;
+}
+
+#markdown-content .sl-exam-action.sl-exam-attendance-group[data-group="A"][aria-pressed="true"] {
+  border-color: var(--sl-exam-group-a-fg);
+  background-color: var(--sl-exam-group-a-fg);
+  color: var(--sl-exam-group-a-bg);
+}
+
+#markdown-content .sl-exam-action.sl-exam-attendance-group[data-group="B"][aria-pressed="true"] {
+  border-color: var(--sl-exam-group-b-fg);
+  background-color: var(--sl-exam-group-b-fg);
+  color: var(--sl-exam-group-b-bg);
+}
+
+.sl-exam-live-start-blocked {
+  color: var(--sl-exam-broken);
+}
+
+.sl-exam-handout-link {
+  display: inline-block;
+  text-decoration: none;
+}
+
+.sl-exam-handout-closed {
+  padding: 1em;
+  border-left: 5px solid var(--sl-exam-broken);
+  font-weight: 600;
+}
+
+.sl-exam-column-test-link {
+  margin-left: 4px;
+  text-decoration: none;
+}
+
+/* The picker: a search field over a tree that scrolls inside the dialog. */
+.sl-exam-picker {
+  width: min(40em, calc(100vw - 32px));
+}
+
+.sl-exam-picker-search {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.sl-exam-picker-tree {
+  max-height: 55vh;
+  overflow: auto;
+  margin-top: 0.5em;
+}
+
+.sl-exam-picker-tree ul {
+  list-style: none;
+  margin: 0;
+  padding-left: 1em;
+}
+
+.sl-exam-picker-tree summary {
+  cursor: pointer;
+}
+
+.sl-exam-picker-choose {
+  border: none;
+  background: none;
+  padding: 2px 0;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.sl-exam-picker-readable {
+  font-size: 0.8em;
+  color: var(--sl-exam-group-b-fg);
+}

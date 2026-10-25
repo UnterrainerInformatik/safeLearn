@@ -2871,6 +2871,266 @@ describe("Matura candidates", () => {
   });
 });
 
+describe("offline tests and their handouts", () => {
+  const other = "of-other-student";
+  const handoutA = "test-exam-handout.md";
+  const handoutB = "test-exam-handout-b.md";
+  const image = "/md/assets/handout/test-handout-diagram.png";
+  const starter = "/md/assets/handout/test-handout-starter.zip";
+  const imageB = "/md/assets/handout/test-handout-b.png";
+  let student;
+  let teacher;
+  let course;
+  let offline;
+  let sitting;
+
+  /** Whether a path is served to `session` as itself, rather than landing where a path with nothing behind it lands. */
+  async function served(session, reference) {
+    const answer = await fetchAs(session, reference);
+    return answer.status === 200 && answer.servedFrom === reference.split("?")[0];
+  }
+
+  /** The text of the participant's handout page as the student's browser shows it, or null when refused. */
+  async function handoutText(session = student) {
+    const reference = `/exam/my/sittings/${sitting.id}/handout`;
+    if (!(await served(session, reference))) return null;
+    await session.page.goto(`${applicationUrl}${reference}`, { waitUntil: "domcontentloaded" });
+    await session.page.waitForSelector(".sl-exam-handout", { timeout: 20000 });
+    return session.page.$eval(".sl-exam-handout", (div) => div.textContent);
+  }
+
+  /** Marks the shared student present or absent, and in a group, through the API. */
+  async function attendance(body, username = student.username.toLowerCase()) {
+    const answer = await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/participants/${username}`, { method: "PUT", body });
+    assert.equal(answer.status, 200, JSON.stringify(answer.json));
+    return answer.json;
+  }
+
+  before(async () => {
+    student = await sharedSession("student");
+    teacher = await sharedSession("teacher");
+    await setPreferences(student, {});
+    await setPreferences(teacher, {});
+    let year = (await fetchAs(teacher, "/exam/api/years")).json.current;
+    if (!year) {
+      year = (
+        await fetchAs(teacher, "/exam/api/years", {
+          method: "POST",
+          body: { name: "2026/27", startsOn: "2026-09-07", summerStartsOn: "2027-02-15", endsOn: "2027-07-02" },
+        })
+      ).json;
+    }
+    const klass = await fetchAs(teacher, `/exam/api/years/${year.id}/classes`, { method: "POST", body: { name: "9XOF", students: [student.username, other] } });
+    assert.equal(klass.status, 200, JSON.stringify(klass.json));
+    const created = await fetchAs(teacher, `/exam/api/classes/${klass.json.id}/courses`, { method: "POST", body: { subject: "POS", language: "de" } });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    course = created.json;
+  });
+
+  test("a teacher creates an offline test with two handouts; its page shows them with preview and solution, and the gradebook its column", async () => {
+    const answer = await fetchAs(teacher, `/exam/api/courses/${course.id}/offline-tests`, {
+      method: "POST",
+      body: { name: "POS Langtest 1", durationMinutes: 100, gradebookKind: "test", handoutA, handoutB },
+    });
+    assert.equal(answer.status, 200, JSON.stringify(answer.json));
+    offline = answer.json;
+    assert.deepEqual(offline.handouts.map((h) => [h.group, h.path, h.resolves, h.hasAnswers]), [["A", handoutA, true, true], ["B", handoutB, true, false]]);
+
+    const page = teacher.page;
+    await page.goto(`${applicationUrl}/exam/tests/${offline.id}`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".sl-exam-test-offline .sl-exam-test-handouts", { timeout: 20000 });
+    const shown = await page.evaluate(() => ({
+      paths: [...document.querySelectorAll(".sl-exam-handouts li")].map((li) => [li.dataset.group, li.querySelector("code").textContent, li.querySelector("code").classList.contains("is-broken")]),
+      previews: [...document.querySelectorAll(".sl-exam-handout-preview")].map((a) => a.getAttribute("href")),
+      solutions: [...document.querySelectorAll(".sl-exam-handout-solution")].map((a) => a.getAttribute("href")),
+      questions: Boolean(document.querySelector(".sl-exam-test-questions")),
+    }));
+    assert.deepEqual(shown.paths, [["A", handoutA, false], ["B", handoutB, false]]);
+    assert.deepEqual(shown.previews, [`/exam/tests/${offline.id}/handouts/A/preview`, `/exam/tests/${offline.id}/handouts/B/preview`]);
+    assert.deepEqual(shown.solutions, [`/exam/tests/${offline.id}/handouts/A/solution`], "a solution only for the handout with answers");
+    assert.equal(shown.questions, false, "no questions");
+
+    const list = (await fetchAs(teacher, `/exam/api/tests?course=${course.id}`)).json.groups[0].tests;
+    assert.deepEqual(list.map((t) => [t.name, t.kind]), [["POS Langtest 1", "offline"]]);
+    const sheet = (await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=ws`)).json;
+    assert.ok(JSON.stringify(sheet).includes(`"testId":${offline.id}`), "the test's column links to the test");
+  });
+
+  test("the picker lists the corpus, narrows by file name in any case, and warns about a file the class can read", async () => {
+    const files = (await fetchAs(teacher, `/exam/api/courses/${course.id}/handout-files`)).json.files;
+    const byPath = Object.fromEntries(files.map((file) => [file.path, file]));
+    assert.equal(byPath[handoutA].classReadable, false);
+    assert.equal(byPath["test-md-file.md"].classReadable, true, "a file without a directive is readable by the class");
+    assert.equal((await fetchAs(student, `/exam/api/courses/${course.id}/handout-files`)).status, 403);
+
+    const page = teacher.page;
+    await page.goto(`${applicationUrl}/exam/tests/${offline.id}`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".sl-exam-handout-change", { timeout: 20000 });
+    await page.click(`.sl-exam-handouts li[data-group="B"] .sl-exam-handout-change`);
+    await page.waitForSelector("dialog[open] .sl-exam-picker-choose", { timeout: 10000 });
+    await page.type("dialog[open] .sl-exam-picker-search", "EXAM-HANDOUT");
+    const narrowed = await page.$$eval("dialog[open] .sl-exam-picker-choose", (buttons) => buttons.map((b) => b.dataset.path).sort());
+    assert.deepEqual(narrowed, [handoutB, handoutA].sort(), "the search ignores the letter case");
+    // Choosing saves and draws the page anew; the next click waits for the new button.
+    await page.$eval(`.sl-exam-handouts li[data-group="B"] .sl-exam-handout-change`, (button) => (button.dataset.stale = "1"));
+    await page.click(`dialog[open] .sl-exam-picker-choose[data-path="${handoutB}"]`);
+    await page.waitForFunction(() => !document.querySelector("dialog[open]"), { timeout: 10000 });
+    await page.waitForSelector(`.sl-exam-handouts li[data-group="B"] .sl-exam-handout-change:not([data-stale])`, { timeout: 10000 });
+    await page.click(`.sl-exam-handouts li[data-group="B"] .sl-exam-handout-change`);
+    await page.waitForSelector("dialog[open] .sl-exam-picker-choose", { timeout: 10000 });
+    await page.type("dialog[open] .sl-exam-picker-search", "test-md-file");
+    await page.click(`dialog[open] .sl-exam-picker-choose[data-path="test-md-file.md"]`);
+    await page.waitForFunction(() => document.querySelector("dialog[open] .sl-exam-picker-warning")?.textContent.length > 0, { timeout: 5000 });
+    assert.ok(await page.$("dialog[open]"), "a file the class can read asks a second time");
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.querySelector("dialog[open]"), { timeout: 5000 });
+    const test = (await fetchAs(teacher, `/exam/api/tests/${offline.id}`)).json;
+    assert.deepEqual(test.handouts.map((h) => h.path), [handoutA, handoutB], "nothing changed");
+  });
+
+  test("a planned sitting is not open at its time; groups are assigned in the attendance table and kept", async () => {
+    const planned = await fetchAs(teacher, `/exam/api/tests/${offline.id}/sittings`, { method: "POST", body: { opensAt: new Date(Date.now() - 5 * 60000).toISOString() } });
+    assert.equal(planned.status, 200, JSON.stringify(planned.json));
+    sitting = planned.json;
+    assert.equal(sitting.state, "scheduled", "its planned time has passed, nobody pressed start");
+    assert.ok(!(await fetchAs(student, "/exam/api/my/tests")).json.tests.some((t) => t.sittingId === sitting.id));
+    assert.equal(await handoutText(), null, "no handout before the start");
+
+    const page = teacher.page;
+    await page.goto(`${applicationUrl}/exam/sittings/${sitting.id}/live`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(`.sl-exam-attendance-table tr[data-username="${other}"] .sl-exam-attendance-group[data-group="B"]`, { timeout: 20000 });
+    const rows = () => page.$$eval(".sl-exam-attendance-table tbody tr", (trs) => trs.map((tr) => [tr.dataset.username, tr.dataset.present, tr.dataset.group]));
+    assert.ok((await rows()).every(([, present, group]) => present === "1" && group === "A"), "everyone starts present in group A");
+    await page.click(`.sl-exam-attendance-table tr[data-username="${other}"] .sl-exam-attendance-group[data-group="B"]`);
+    await page.waitForSelector(`.sl-exam-attendance-table tr[data-username="${other}"][data-group="B"]`, { timeout: 10000 });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.waitForSelector(`.sl-exam-attendance-table tr[data-username="${other}"][data-group="B"]`, { timeout: 20000 });
+    assert.ok(await page.$(".sl-exam-live-start:not([hidden])"), "the start button is offered");
+  });
+
+  test("started from its page, a present student sees their handout as a student with the exam variant, and its attachments", async () => {
+    const screen = await teacher.page.browserContext().newPage();
+    try {
+      await screen.goto(`${applicationUrl}/exam/sittings/${sitting.id}/screen`, { waitUntil: "domcontentloaded" });
+      await screen.waitForSelector(".sl-exam-screen-label", { timeout: 20000 });
+      await screen.waitForFunction(() => document.querySelector(".sl-exam-screen-label").textContent === "Not started yet", { timeout: 10000 });
+      const page = teacher.page;
+      // The screen opened in front; a tab in the background runs no
+      // requestAnimationFrame, and a click there never lands.
+      await page.bringToFront();
+      await page.click(".sl-exam-live-start");
+      await page.waitForFunction(() => document.querySelector(".sl-exam-live-badge")?.dataset.state === "open", { timeout: 10000 });
+      await screen.waitForFunction(() => document.querySelector(".sl-exam-screen-label").textContent === "Closes in", { timeout: 15000, polling: 250 });
+      const onScreen = await screen.evaluate(() => ({ remaining: document.querySelector(".sl-exam-screen-remaining").textContent, summary: Boolean(document.querySelector(".sl-exam-screen-summary")), text: document.body.innerText }));
+      assert.match(onScreen.remaining, /^1:(39|40):\d\d$/, "100 minutes from the press");
+      assert.equal(onScreen.summary, false, "no counts on the class's view");
+      assert.ok(!onScreen.text.includes(other) && !/Group|Gruppe/.test(onScreen.text), "nothing about names or groups");
+    } finally {
+      await screen.close();
+    }
+
+    const entry = (await fetchAs(student, "/exam/api/my/tests")).json.tests.find((t) => t.sittingId === sitting.id);
+    assert.equal(entry.kind, "offline");
+    assert.equal(entry.handout, "A");
+    await student.page.goto(`${applicationUrl}/exam/my`, { waitUntil: "domcontentloaded" });
+    await student.page.waitForSelector(`.sl-exam-attempt-offline[data-sitting="${sitting.id}"] .sl-exam-handout-link`, { timeout: 20000 });
+    await student.page.waitForSelector("#slExamsButton.sl-exam-open", { timeout: 5000 });
+
+    const text = await handoutText();
+    assert.match(text, /HANDOUT-A-TASK/);
+    assert.match(text, /HANDOUT-EXAM-VARIANT/);
+    assert.doesNotMatch(text, /HANDOUT-PRACTICE-VARIANT|HANDOUT-ANSWER|HANDOUT-TEACHER-HINT|HANDOUT-B-TASK/);
+    const loaded = await student.page.$eval(".sl-exam-handout img", (img) => img.complete && img.naturalWidth > 0);
+    assert.ok(loaded, "the image is loaded");
+    assert.ok(await served(student, image), "the image is served");
+    assert.ok(await served(student, starter), "the starter archive is served");
+    assert.equal(await served(student, imageB), false, "the other group's image is not");
+    assert.equal(await served(student, `/exam/my/sittings/${sitting.id}/handout?ve=1`), true);
+    await student.page.goto(`${applicationUrl}/md/${handoutA}`, { waitUntil: "domcontentloaded" });
+    const corpus = await student.page.evaluate(() => document.body.innerText);
+    assert.doesNotMatch(corpus, /HANDOUT-A-TASK/, "the file's own URL stays refused");
+    const tree = await student.page.evaluate(() => [...document.querySelectorAll("#sidebar a")].map((a) => a.getAttribute("href")));
+    assert.ok(!tree.some((href) => href?.includes("test-exam-handout")), "and the tree does not list it");
+    await student.page.goto(`${applicationUrl}/md/test-exam-practice-question.md?handoutViews=1`, { waitUntil: "domcontentloaded" });
+    assert.doesNotMatch(await student.page.evaluate(() => document.body.innerText), /exam variant/i, "no other page shows the exam variant");
+  });
+
+  test("marking absent, arriving late and changing the group take effect at the student's next request", async () => {
+    await attendance({ present: false });
+    assert.equal(await handoutText(), null, "absent: refused");
+    assert.equal(await served(student, image), false, "and the image too");
+    assert.ok(!(await fetchAs(student, "/exam/api/my/tests")).json.tests.some((t) => t.sittingId === sitting.id));
+    await attendance({ present: true });
+    assert.match(await handoutText(), /HANDOUT-A-TASK/, "arriving late, without a new start");
+    // The open handout page reloads itself on a change of group; anything
+    // evaluated on it meanwhile would be cut off, so the reload is waited for.
+    const reloadedWith = (task) =>
+      student.page.waitForFunction((text) => document.querySelector(".sl-exam-handout")?.textContent.includes(text), { timeout: 15000, polling: 250 }, task);
+    await attendance({ group: "B" });
+    await reloadedWith("HANDOUT-B-TASK");
+    const b = await handoutText();
+    assert.match(b, /HANDOUT-B-TASK/);
+    assert.doesNotMatch(b, /HANDOUT-A-TASK/);
+    assert.equal(await served(student, image), false, "handout A's image goes with the group");
+    assert.ok(await served(student, imageB));
+    await attendance({ group: "A" });
+    await reloadedWith("HANDOUT-A-TASK");
+  });
+
+  test("extending moves the window for everyone, and the solution deck is a teacher's alone", async () => {
+    const before = (await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/live`)).json.sitting.closesAt;
+    const extended = await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/extend`, { method: "POST", body: { minutes: 10 } });
+    assert.equal(extended.status, 200, JSON.stringify(extended.json));
+    assert.equal(Date.parse(extended.json.closesAt) - Date.parse(before), 10 * 60000);
+    assert.equal((await fetchAs(student, "/exam/api/my/tests")).json.tests.find((t) => t.sittingId === sitting.id).closesAt, extended.json.closesAt);
+
+    const deck = `/exam/tests/${offline.id}/handouts/A/solution`;
+    await teacher.page.goto(`${applicationUrl}${deck}`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForSelector(".reveal .slides", { timeout: 20000 });
+    const slides = await teacher.page.evaluate(() => document.querySelector(".reveal .slides").textContent);
+    assert.match(slides, /HANDOUT-ANSWER/);
+    assert.match(slides, /HANDOUT-EXAM-VARIANT/);
+    assert.doesNotMatch(slides, /HANDOUT-PRACTICE-VARIANT|HANDOUT-TEACHER-HINT/);
+    // Not the shared account's name: it is `student`, a word the fixture's prose uses.
+    assert.ok(!slides.includes(other), "no participant's name");
+    assert.deepEqual(await fetchAs(student, deck), await fetchAs(student, absent), "a student finds no deck");
+    await setPreferences(teacher, { vt: 0 });
+    try {
+      assert.deepEqual(await fetchAs(teacher, deck), await fetchAs(teacher, absent), "nor does a teacher in student view");
+    } finally {
+      await setPreferences(teacher, {});
+    }
+  });
+
+  test("when the window closes the handout and its attachment are refused, and the open page says so", async () => {
+    await student.page.goto(`${applicationUrl}/exam/my/sittings/${sitting.id}/handout`, { waitUntil: "domcontentloaded" });
+    await student.page.waitForSelector(".sl-exam-handout", { timeout: 20000 });
+    const ended = await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/end`, { method: "POST" });
+    assert.equal(ended.status, 200, JSON.stringify(ended.json));
+    await student.page.waitForSelector(".sl-exam-handout .sl-exam-handout-closed", { timeout: 10000 });
+    assert.doesNotMatch(await student.page.$eval(".sl-exam-handout", (div) => div.textContent), /HANDOUT-A-TASK/);
+    assert.equal(await handoutText(), null, "the page is refused");
+    assert.equal(await served(student, image), false, "the image right after closing");
+    assert.equal(await served(student, starter), false, "and the archive");
+    assert.ok(!(await fetchAs(student, "/exam/api/my/tests")).json.tests.some((t) => t.sittingId === sitting.id));
+  });
+
+  test("an offline test reaches no student and no teacher in student view, and with a result in its column it stays", async () => {
+    for (const [method, reference, body] of [
+      ["POST", `/exam/api/courses/${course.id}/offline-tests`, { name: "X", durationMinutes: 10, gradebookKind: "test" }],
+      ["POST", `/exam/api/sittings/${sitting.id}/start`],
+      ["PUT", `/exam/api/sittings/${sitting.id}/participants/${other}`, { present: false }],
+    ]) {
+      assert.equal((await fetchAs(student, reference, { method, body })).status, 403, `${method} ${reference}`);
+    }
+    assert.deepEqual(await fetchAs(student, `/exam/tests/${offline.id}/handouts/A/preview`), await fetchAs(student, absent));
+    const column = (await fetchAs(teacher, `/exam/api/tests/${offline.id}`)).json.assessmentId;
+    assert.equal((await fetchAs(teacher, `/exam/api/assessments/${column}/results/${student.username.toLowerCase()}`, { method: "PUT", body: { percent: 80 } })).status, 200);
+    assert.equal((await fetchAs(teacher, `/exam/api/tests/${offline.id}`, { method: "DELETE" })).status, 409);
+    assert.equal((await fetchAs(teacher, `/exam/api/assessments/${column}`, { method: "DELETE" })).status, 409, "the column goes with its test only");
+  });
+});
+
 describe("the question editor", () => {
   let student;
   let teacher;

@@ -9,6 +9,11 @@
  *   is bound to; and the button that unbinds it, so the next browser that
  *   opens the attempt is bound instead
  *
+ * For an offline sitting (`offline-test`) the table is the attendance table
+ * instead: per participant present or absent and, with two handouts, group A
+ * or B, each change saved as it is made; above it Start, until the sitting is
+ * started, and Extend and End while it is open (exam-offline-sittings D8).
+ *
  * With `screen: 1` it is the view for the class, on its own page
  * (`/exam/sittings/<id>/screen`) for a projector: whether the sitting is
  * live, its window, the time until it opens or closes and the server's time,
@@ -131,6 +136,8 @@ class LiveView extends ExamElement {
   render(snapshot) {
     this.rows = new Map();
     this.sitting = snapshot.sitting;
+    this.offline = snapshot.kind === "offline";
+    this.handouts = snapshot.test.handouts ?? [];
     this.badge = h("span", { class: "sl-exam-live-badge" });
     this.state = h("span", { class: "sl-exam-quiet sl-exam-live-state", role: "status" });
     // The window is drawn only when it changes, the time beside it every
@@ -168,16 +175,20 @@ class LiveView extends ExamElement {
         `${t("exam.live.serverTime")} `,
         this.serverClock
       ),
-      h("p", { class: "sl-exam-actions" }, this.screenLink, this.windowActions),
+      h("p", { class: "sl-exam-actions" }, this.screenLink, this.offline ? this.startControl(snapshot.sitting) : null, this.windowActions),
       this.windowMessage,
       h(
         "p",
         { class: "sl-exam-quiet" },
         h("a", { href: `/exam/tests/${test.id}` }, test.name),
-        ` · ${displayClass(course.className)} ${course.subject} · ${sitting.makeup ? `${t("exam.live.makeupSitting")} · ` : ""}${t("exam.tests.minutesPerAttempt", { minutes: Math.round(sitting.durationS / 60) })}`
-      )
+        ` · ${displayClass(course.className)} ${course.subject} · ${sitting.makeup ? `${t("exam.live.makeupSitting")} · ` : ""}${
+          this.offline ? t("exam.offline.minutes", { minutes: Math.round(sitting.durationS / 60) }) : t("exam.tests.minutesPerAttempt", { minutes: Math.round(sitting.durationS / 60) })
+        }`
+      ),
+      this.offline ? this.handoutLine() : null
     );
     if (this.params.screen === "1") return this.screenView(snapshot);
+    if (this.offline) return this.attendanceView(head);
     const view = h(
       "div",
       { class: "sl-exam sl-exam-live" },
@@ -201,7 +212,8 @@ class LiveView extends ExamElement {
    * move away under the click.
    */
   sort() {
-    if (!this.participants || !this.body || this.params.screen === "1") return;
+    // The attendance table keeps the server's order by name: it is walked row by row.
+    if (!this.participants || !this.body || this.params.screen === "1" || this.offline) return;
     this.sortHeld = Boolean(this.body.querySelector("button:hover"));
     if (this.sortHeld) return;
     const ordered = [...this.participants.values()]
@@ -227,7 +239,8 @@ class LiveView extends ExamElement {
       h("p", { class: "sl-exam-screen-window" }, this.windowLine),
       h("div", { class: "sl-exam-screen-clock-label" }, t("exam.live.time")),
       h("div", { class: "sl-exam-screen-clock" }, this.serverClock),
-      h("div", { class: "sl-exam-screen-summary" }, this.summary),
+      // An offline sitting's screen shows no counts: nothing that tells presence or groups.
+      this.offline ? null : h("div", { class: "sl-exam-screen-summary" }, this.summary),
       h("p", { class: "sl-exam-quiet sl-exam-screen-connection" }, this.state)
     );
     this.tick();
@@ -250,12 +263,16 @@ class LiveView extends ExamElement {
     const now = this.serverNow();
     const opens = Date.parse(this.sitting.opensAt);
     const closes = Date.parse(this.sitting.closesAt);
-    const state = now < opens ? "scheduled" : now < closes ? "open" : "over";
+    // An offline sitting opens when it is started, never by the clock.
+    const notStarted = this.offline && !this.sitting.startedAt;
+    const state = notStarted ? "scheduled" : now < opens ? "scheduled" : now < closes ? "open" : "over";
     this.dataset.sitting = state;
-    this.badge.textContent = stateLabels[state]();
+    this.badge.textContent = notStarted ? t("exam.offline.notStarted") : stateLabels[state]();
     this.badge.dataset.state = state;
-    const remaining =
-      state === "scheduled"
+    if (this.startButton) this.startButton.hidden = !notStarted;
+    const remaining = notStarted
+      ? t("exam.offline.planned")
+      : state === "scheduled"
         ? t("exam.live.opensIn", { time: span(opens - now) })
         : state === "open"
           ? t("exam.live.closesIn", { time: span(closes - now) })
@@ -270,6 +287,11 @@ class LiveView extends ExamElement {
       this.windowShown.replaceChildren(displayWindow(this.sitting, this.periods));
     }
     if (this.bigRemaining) {
+      if (notStarted) {
+        this.bigLabel.textContent = t("exam.offline.notStartedYet");
+        this.bigRemaining.textContent = "–";
+        return;
+      }
       this.bigLabel.textContent = state === "scheduled" ? t("exam.live.bigOpensIn") : state === "open" ? t("exam.live.bigClosesIn") : t("exam.live.bigClosed");
       this.bigRemaining.textContent = state === "over" ? "–" : span(state === "scheduled" ? opens - now : closes - now);
       return;
@@ -307,6 +329,112 @@ class LiveView extends ExamElement {
     );
   }
 
+  /**
+   * Start, for an offline sitting not yet started: its window opens now for
+   * the test's duration. Disabled, with the reason beside it, while a handout
+   * does not resolve - the server refuses it too.
+   */
+  startControl(sitting) {
+    const broken = this.handouts.find((handout) => !handout.resolves);
+    this.startButton = button({
+      label: t("exam.offline.start"),
+      kind: "primary",
+      class: "sl-exam-live-start",
+      disabled: Boolean(broken),
+      title: broken ? t("exam.offline.startBlocked", { group: broken.group, path: broken.path }) : null,
+      hidden: Boolean(sitting.startedAt),
+      action: async () => {
+        this.windowMessage.textContent = "";
+        try {
+          await examApi(`/sittings/${sitting.id}/start`, { method: "POST" });
+          await this.poll();
+        } catch (error) {
+          this.windowMessage.textContent = error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.frame.saveFailed");
+        }
+      },
+    });
+    return [
+      this.startButton,
+      broken ? h("span", { class: "sl-exam-message sl-exam-live-start-blocked", role: "status" }, ` ${t("exam.offline.startBlocked", { group: broken.group, path: broken.path })}`) : null,
+    ];
+  }
+
+  /** The test's handouts, a path that does not resolve in red. */
+  handoutLine() {
+    if (this.handouts.length === 0) return h("p", { class: "sl-exam-quiet sl-exam-live-handouts" }, t("exam.offline.noHandout"));
+    return h(
+      "p",
+      { class: "sl-exam-quiet sl-exam-live-handouts" },
+      this.handouts.flatMap((handout, index) => [
+        index ? " · " : null,
+        `${t("exam.offline.handoutLabel", { group: handout.group })} `,
+        h("code", { class: handout.resolves ? "sl-exam-handout-path" : "sl-exam-handout-path is-broken", "data-group": handout.group }, handout.path),
+      ])
+    );
+  }
+
+  /** The teacher's page of an offline sitting: the attendance table under the controls. */
+  attendanceView(head) {
+    const groups = this.handouts.length > 1;
+    const view = h(
+      "div",
+      { class: "sl-exam sl-exam-live sl-exam-attendance" },
+      head,
+      this.summary,
+      h(
+        "table",
+        { class: "sl-exam-table sl-exam-attendance-table" },
+        h("thead", {}, h("tr", {}, h("th", {}, t("exam.live.columnStudent")), h("th", {}, t("exam.offline.columnPresent")), groups ? h("th", {}, t("exam.offline.columnGroup")) : null)),
+        this.body
+      ),
+      this.message
+    );
+    this.tick();
+    return view;
+  }
+
+  /** One row of the attendance table: present or absent, and the group when there are two handouts. */
+  attendanceRow(participant) {
+    const username = participant.username;
+    const save = async (body) => {
+      this.message.textContent = "";
+      try {
+        this.update(await examApi(`/sittings/${this.sitting.id}/participants/${encodeURIComponent(username)}`, { method: "PUT", body }).then((saved) => ({ ...participant, ...saved })));
+      } catch (error) {
+        this.message.textContent = error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.frame.saveFailed");
+        this.update(participant);
+      }
+    };
+    const present = h("input", {
+      type: "checkbox",
+      class: "sl-exam-attendance-present",
+      checked: participant.present,
+      "aria-label": t("exam.offline.presentLabel", { name: displayPerson(participant) }),
+      onChange: (event) => save({ present: event.target.checked }),
+    });
+    const groupButton = (group) =>
+      h(
+        "button",
+        {
+          type: "button",
+          class: "sl-exam-action sl-exam-attendance-group",
+          "data-group": group,
+          "aria-pressed": String(participant.group === group),
+          onClick: () => (participant.group === group ? null : save({ group })),
+        },
+        group
+      );
+    const tr = h(
+      "tr",
+      { "data-username": username, "data-present": participant.present ? "1" : "0", "data-group": this.handouts.length > 1 ? participant.group : null },
+      participant.examParticipant ? h("td", candidateMark(), displayPerson(participant), candidateNote()) : h("td", {}, displayPerson(participant)),
+      h("td", {}, h("label", {}, present, " ", participant.present ? t("exam.offline.present") : t("exam.offline.absent"))),
+      this.handouts.length > 1 ? h("td", { class: "sl-exam-actions" }, groupButton("A"), groupButton("B")) : null
+    );
+    this.rows.set(username, tr);
+    return tr;
+  }
+
   /** Draws a whole snapshot. */
   draw(snapshot) {
     this.syncClock(snapshot.serverTime);
@@ -322,6 +450,7 @@ class LiveView extends ExamElement {
   /** One participant's row, drawn from what is known of them now. */
   row(username) {
     const participant = this.participants.get(username);
+    if (this.offline) return this.attendanceRow(participant);
     const release =
       participant.status === "writing" && participant.attemptId !== null
         ? h("button", { type: "button", class: "sl-exam-action sl-exam-live-release", onClick: () => this.release(participant) }, t("exam.live.release"))
@@ -443,6 +572,11 @@ class LiveView extends ExamElement {
   }
 
   summarize() {
+    if (this.offline) {
+      const present = [...this.participants.values()].filter((participant) => participant.present).length;
+      this.summary.textContent = t("exam.offline.summary", { present, absent: this.participants.size - present });
+      return;
+    }
     const counts = { "not started": 0, writing: 0, submitted: 0 };
     for (const participant of this.participants.values()) counts[participant.status] += 1;
     this.summary.textContent = t("exam.live.summary", { writing: counts.writing, submitted: counts.submitted, notStarted: counts["not started"] });

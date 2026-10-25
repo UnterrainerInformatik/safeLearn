@@ -34,6 +34,8 @@ import { purgeUploads, QuestionProblemsError } from "./pool-edit.js";
 import { registerTestRoutes } from "./routes-tests.js";
 import { registerAttemptRoutes } from "./routes-attempts.js";
 import { registerLiveRoutes } from "./routes-live.js";
+import { registerHandoutRoutes } from "./routes-handout.js";
+import { handoutAttachmentCheck } from "./handout.js";
 import { openTestsOf, scheduleSweep } from "./attempts.js";
 import { parsePeriods } from "./client/periods.js";
 import { parseRetentionYears } from "./retention.js";
@@ -81,7 +83,7 @@ function refusalStatus(error) {
   return null;
 }
 
-function buildRouter(db, startPage, periods, retentionYears) {
+function buildRouter(db, startPage, periods, retentionYears, renderHandout) {
   const router = express.Router();
 
   // The module's client: its directory and nothing beside it. Mounted here, so
@@ -113,6 +115,7 @@ function buildRouter(db, startPage, periods, retentionYears) {
   registerTestRoutes(router, { db, handle, startPage });
   registerAttemptRoutes(router, { db, handle, startPage });
   registerLiveRoutes(router, { db, handle, startPage });
+  registerHandoutRoutes(router, { db, handle, startPage, renderHandout });
 
   // The module's home page, for teachers: the classes of one school year -
   // the current one unless `?year=` names another - which the bar chooses.
@@ -182,9 +185,11 @@ function buildRouter(db, startPage, periods, retentionYears) {
 }
 
 /**
- * `startPage` is `app.js`'s own resolver, for the page frame's "Home" link.
+ * `startPage` is `app.js`'s own resolver, for the page frame's "Home" link;
+ * `renderHandout` its rendering of a corpus file as an exam handout
+ * (`exam-handout`).
  */
-export async function init({ startPage }) {
+export async function init({ startPage, renderHandout }) {
   // The school's periods, checked before anything is opened: a value nobody
   // can read would otherwise fall back to clock times unnoticed.
   let periods;
@@ -224,7 +229,7 @@ export async function init({ startPage }) {
   scheduleSweep(db);
   return {
     active: true,
-    router: buildRouter(db, startPage, periods, retentionYears),
+    router: buildRouter(db, startPage, periods, retentionYears, renderHandout),
     embedHandlers: buildEmbedHandlers(),
     clientScript,
     // Whether the session has a test open for it right now, for the colour of
@@ -233,6 +238,10 @@ export async function init({ startPage }) {
       const username = identityOf(req);
       return username !== null && openTestsOf(db, username).length > 0;
     },
+    // Whether a handout this session is served right now references an
+    // attachment (`attachment-access`, exam-offline-sittings design D7).
+    handoutAttachmentCheck: async (req, attachment) =>
+      handoutAttachmentCheck(db, req, attachment, { username: identityOf(req), teacher: await actsAsTeacher(req) }),
     dbPath,
   };
 }
