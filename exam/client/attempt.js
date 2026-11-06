@@ -10,7 +10,10 @@
  * time the server says is left, refreshed by every save, so the reader's
  * clock never matters; at zero the page asks the server, which has submitted
  * the attempt. The page reports leaving it and coming back (the focus log),
- * which a teacher sees and which never changes the grade.
+ * and sends a heartbeat that tells the server, independently of the
+ * browser's visibility and focus properties, whether the page was shown, and
+ * whether those properties were replaced. A teacher sees both; neither ever
+ * changes the grade.
  *
  * The controls - buttons, countdown, messages - are in the reader's own
  * language; questions and answers stay in the course's language and are
@@ -38,6 +41,85 @@
 
 import { defineExamElement, ExamApiError, ExamElement, examApi, h, t } from "./frame.js";
 import { displayClass } from "./classes.js";
+
+/** How often the writing page sends its heartbeat (exam-hidden-page-signals design D2). */
+const beatMs = 5000;
+
+const nativeCode = /\{\s*\[native code\]\s*\}\s*$/;
+
+/**
+ * The check whether `document.visibilityState`, `document.hidden` and
+ * `document.hasFocus` are still the browser's own (exam-hidden-page-signals
+ * design D1). The untouched references come from a hidden, same-origin
+ * `about:blank` frame that stays for the whole attempt: its `Document`
+ * prototype's getter and function, and its `Function.prototype.toString`,
+ * which a patch made in this page alone does not reach. A property is
+ * replaced when `document` has an own property of its name, when this page's
+ * prototype holds something that is not native code, or when the untouched
+ * reference answers differently. The names found are kept until the attempt
+ * ends; the server merges them anyway.
+ */
+function pageIntegrity() {
+  const holder = document.createElement("iframe");
+  holder.hidden = true;
+  holder.tabIndex = -1;
+  holder.setAttribute("aria-hidden", "true");
+  holder.className = "sl-exam-attempt-reference";
+  document.body.append(holder);
+  const realm = holder.contentWindow;
+  const found = new Set();
+  if (!realm) return { check() {}, hidden: () => document.visibilityState === "hidden", tampered: () => [], remove: () => holder.remove() };
+  const describe = realm.Object.getOwnPropertyDescriptor;
+  const toString = realm.Function.prototype.toString;
+  const untouched = realm.Document.prototype;
+  const reference = {
+    visibilityState: describe(untouched, "visibilityState")?.get,
+    hidden: describe(untouched, "hidden")?.get,
+    hasFocus: describe(untouched, "hasFocus")?.value,
+  };
+  const native = (fn) => {
+    try {
+      return typeof fn === "function" && nativeCode.test(toString.call(fn));
+    } catch {
+      return false;
+    }
+  };
+  const ownOf = (name) => {
+    const own = describe(Document.prototype, name);
+    return name === "hasFocus" ? own?.value : own?.get;
+  };
+  const read = {
+    visibilityState: () => [reference.visibilityState.call(document), document.visibilityState],
+    hidden: () => [reference.hidden.call(document), document.hidden],
+    hasFocus: () => [reference.hasFocus.call(document), document.hasFocus()],
+  };
+  return {
+    check() {
+      for (const name of Object.keys(reference)) {
+        if (found.has(name) || typeof reference[name] !== "function") continue;
+        let replaced = describe(document, name) !== undefined || !native(ownOf(name));
+        if (!replaced) {
+          try {
+            const [truth, claim] = read[name]();
+            replaced = truth !== claim;
+          } catch {
+            // A reference that cannot be asked proves nothing.
+          }
+        }
+        if (replaced) found.add(name);
+      }
+    },
+    hidden() {
+      try {
+        return reference.visibilityState.call(document) === "hidden";
+      } catch {
+        return false;
+      }
+    },
+    tampered: () => [...found],
+    remove: () => holder.remove(),
+  };
+}
 
 /** "12:05" or "1:02:05" for a number of milliseconds left. */
 function clock(ms) {
@@ -365,12 +447,22 @@ class WriteTest extends ExamElement {
     this.timer = setInterval(tick, 500);
   }
 
-  /** Reports leaving the page and coming back; a beacon when the page goes away. */
+  /**
+   * Reports leaving the page and coming back; a beacon when the page goes
+   * away. Beside it the heartbeat (exam-hidden-page-signals design D1/D2):
+   * every few seconds the animation frames drawn since the last beat, the
+   * page's visibility as an untouched reference reads it, whether the focus
+   * log reported an absence meanwhile, and the visibility and focus
+   * properties found replaced. The server judges; the student sees nothing.
+   */
   watchFocus() {
     let away = document.visibilityState === "hidden";
+    // Whether the focus log reported an absence since the last beat.
+    let reportedAway = away;
     const report = (state) => {
       if ((state === "away") === away) return;
       away = state === "away";
+      if (away) reportedAway = true;
       examApi(`/attempts/${this.attempt}/focus`, { method: "POST", body: { state } }).catch(() => {});
     };
     const onVisibility = () => report(document.visibilityState === "hidden" ? "away" : "back");
@@ -379,15 +471,38 @@ class WriteTest extends ExamElement {
     const onHide = () => {
       if (away) return;
       away = true;
+      reportedAway = true;
       navigator.sendBeacon(`/exam/api/attempts/${this.attempt}/focus`, new Blob([JSON.stringify({ state: "away" })], { type: "application/json" }));
     };
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("blur", onBlur);
     window.addEventListener("focus", onFocus);
     window.addEventListener("pagehide", onHide);
+
+    const integrity = pageIntegrity();
+    integrity.check();
+    let frames = 0;
+    let frame = 0;
+    const count = () => {
+      frames += 1;
+      frame = requestAnimationFrame(count);
+    };
+    frame = requestAnimationFrame(count);
+    const beat = () => {
+      integrity.check();
+      const body = { frames, hidden: integrity.hidden(), reportedAway: reportedAway || away, tampered: integrity.tampered() };
+      frames = 0;
+      reportedAway = away;
+      examApi(`/attempts/${this.attempt}/beat`, { method: "POST", body }).catch(() => {});
+    };
+    const heartbeat = setInterval(beat, beatMs);
+
     this.stop = () => {
       clearInterval(this.timer);
       this.timer = null;
+      clearInterval(heartbeat);
+      cancelAnimationFrame(frame);
+      integrity.remove();
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("blur", onBlur);
       window.removeEventListener("focus", onFocus);

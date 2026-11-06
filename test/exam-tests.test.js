@@ -47,6 +47,7 @@ import {
   finalizeDue,
   openTestsOf,
   ownAttempt,
+  recordBeat,
   recordFocus,
   releaseAttempt,
   saveAnswer,
@@ -57,7 +58,7 @@ import {
 } from "../exam/attempts.js";
 import { studentMaySeeImage } from "../exam/pool.js";
 import { deleteQuestion, saveQuestion } from "../exam/pool-edit.js";
-import { liveParticipant, liveSnapshot } from "../exam/live.js";
+import { listen, liveParticipant, liveSnapshot } from "../exam/live.js";
 import { browserLabel, parseUserAgent } from "../exam/user-agent.js";
 
 const temporaryDirs = [];
@@ -206,6 +207,35 @@ describe("the migration to bound browsers", () => {
     assert.deepEqual(migrate(db, dbPath, readMigrations().slice(0, 9)), { from: 8, to: 9 });
     assert.deepEqual(rows("attempt"), before.attempt.map((row) => ({ ...row, device_user_agent: null })));
     assert.deepEqual(rows("refused_device"), before.refused_device.map((row) => ({ ...row, user_agent: null })));
+  });
+});
+
+describe("the migration to hidden-page signals", () => {
+  test("a database at schema 14 with an attempt migrates with every row unchanged and the attempt clean", () => {
+    const dbPath = temporaryPath();
+    const db = new DatabaseSync(dbPath);
+    openDatabases.push(db);
+    db.exec("PRAGMA foreign_keys = ON");
+    migrate(db, dbPath, readMigrations().slice(0, 14));
+    importPool(db, poolXml("de"), poolXml("en"));
+    const year = createYear(db, { name: "2026/27", startsOn: "2026-09-07", summerStartsOn: "2027-02-15", endsOn: "2027-07-02" });
+    const klass = createClass(db, year.id, { name: "4bhif", students: [{ username: "anna" }, { username: "ben" }] });
+    const course = createCourse(db, klass.id, { subject: "WMC", language: "en" });
+    const test = createTest(db, course.id, { name: "T", questionIds: listQuestions(db).map((q) => q.id) });
+    fakeAttempt(db, test.id, "anna");
+    db.prepare("UPDATE attempt SET focus_count = 2, focus_ms = 4000").run();
+    const rows = () => db.prepare("SELECT * FROM attempt ORDER BY id").all().map((row) => ({ ...row }));
+    const before = rows();
+
+    assert.deepEqual(migrate(db, dbPath, readMigrations().slice(0, 15)), { from: 14, to: 15 });
+    assert.deepEqual(
+      rows(),
+      before.map((row) => ({ ...row, tamper_detail: null, tamper_at: null, beat_at: null, beat_hidden: 0, hidden_count: 0, hidden_ms: 0 }))
+    );
+    const sitting = db.prepare("SELECT sitting_id FROM attempt").get().sitting_id;
+    db.prepare("INSERT INTO sitting_participant (sitting_id, username) VALUES (?, 'anna')").run(sitting);
+    const anna = liveSnapshot(db, sitting).participants.find((p) => p.username === "anna");
+    assert.deepEqual([anna.tampered, anna.hiddenCount, anna.hiddenMs], [[], 0, 0], "an existing attempt reads as clean");
   });
 });
 
@@ -560,6 +590,126 @@ describe("attempts", () => {
     const row = attemptRow(db, attemptId);
     assert.deepEqual([row.focus_count, row.focus_ms, row.away_since], [2, 20000 + 100000, null]);
     assert.equal(row.score, 0, "nothing answered, nothing gained or lost by leaving");
+  });
+
+  describe("the heartbeat", () => {
+    /** Anna's attempt, a clock `at(seconds)` from its start, a beat sender and the `suspicious` events heard. */
+    function beating() {
+      const { db, test, sitting } = running();
+      const started = new Date().toISOString();
+      const { attemptId } = startAttempt(db, "anna", test.id, started);
+      const at = (seconds) => new Date(Date.parse(started) + seconds * 1000).toISOString();
+      const events = [];
+      const stop = listen(sitting.id, (event) => events.push(event.type));
+      const beat = (seconds, body = {}) =>
+        recordBeat(db, attemptRow(db, attemptId), { frames: 300, hidden: false, reportedAway: false, tampered: [], ...body }, at(seconds));
+      const figures = () => {
+        const row = attemptRow(db, attemptId);
+        return [row.hidden_count, row.hidden_ms, row.beat_hidden];
+      };
+      return { db, sitting, attemptId, at, beat, figures, suspicious: () => events.filter((type) => type === "suspicious").length, stop };
+    }
+
+    test("the first beat only starts the clock, a visible page counts nothing", () => {
+      const { db, attemptId, at, beat, figures, stop } = beating();
+      assert.deepEqual(beat(5, { frames: 0, hidden: true }), { recorded: true });
+      assert.equal(attemptRow(db, attemptId).beat_at, at(5));
+      assert.deepEqual(figures(), [0, 0, 0], "a first beat has no span to judge");
+      beat(10);
+      assert.deepEqual(figures(), [0, 0, 0]);
+      stop();
+    });
+
+    test("a span with too few frames, or a beat saying hidden, counts as hidden by timing; a run of them is one stretch", () => {
+      const { beat, figures, suspicious, stop } = beating();
+      beat(5);
+      beat(10, { frames: 24 }); // 5 s at 5 fps would be 25
+      assert.deepEqual(figures(), [1, 5000, 1]);
+      beat(70, { frames: 0 }); // a throttled timer, late and without frames
+      assert.deepEqual(figures(), [1, 65000, 1], "one stretch");
+      beat(75);
+      beat(80, { frames: 300, hidden: true });
+      assert.deepEqual(figures(), [2, 70000, 1], "hidden: true counts whatever the frames");
+      assert.equal(suspicious(), 2, "an event per new stretch, none for its continuation");
+      stop();
+    });
+
+    test("what the focus log counts is not counted again", () => {
+      const { db, attemptId, at, beat, figures, stop } = beating();
+      beat(5);
+      beat(10, { frames: 0, reportedAway: true });
+      assert.deepEqual(figures(), [0, 0, 0], "the page's own listeners reported the absence");
+      recordFocus(db, attemptRow(db, attemptId), "away", at(12));
+      beat(15, { frames: 0 });
+      assert.deepEqual(figures(), [0, 0, 0], "the attempt is away by the focus log");
+      recordFocus(db, attemptRow(db, attemptId), "back", at(16));
+      beat(20, { frames: 0 });
+      assert.deepEqual(figures(), [1, 5000, 1], "afterwards it counts again");
+      stop();
+    });
+
+    test("an over-frequent beat, a beat after the deadline and one of a submitted attempt are ignored", () => {
+      const { db, attemptId, beat, figures, stop } = beating();
+      beat(5);
+      assert.deepEqual(beat(5.5, { frames: 0 }), { recorded: false }, "under a second after the last");
+      assert.deepEqual(figures(), [0, 0, 0]);
+      const deadline = attemptRow(db, attemptId).deadline;
+      const pastDeadline = (Date.parse(deadline) - Date.parse(attemptRow(db, attemptId).started_at)) / 1000 + 1;
+      assert.deepEqual(beat(pastDeadline, { frames: 0 }), { recorded: false });
+      submitAttempt(db, attemptRow(db, attemptId));
+      assert.deepEqual(beat(20, { frames: 0, tampered: ["hidden"] }), { recorded: false });
+      assert.deepEqual([...figures(), attemptRow(db, attemptId).tamper_detail], [0, 0, 0, null]);
+      stop();
+    });
+
+    test("the replaced properties are merged and never shrink; an event only when the set grows", () => {
+      const { db, attemptId, at, beat, suspicious, stop } = beating();
+      beat(5, { tampered: ["hasFocus"] });
+      beat(10, { tampered: [] });
+      beat(15, { tampered: ["visibilityState", "hasFocus"] });
+      beat(20, { tampered: ["hasFocus"] });
+      const row = attemptRow(db, attemptId);
+      assert.deepEqual([row.tamper_detail, row.tamper_at], ["visibilityState,hasFocus", at(5)]);
+      assert.equal(suspicious(), 2);
+      stop();
+    });
+
+    test("an ordinary beat emits nothing", () => {
+      const { beat, suspicious, stop } = beating();
+      for (let seconds = 5; seconds <= 60; seconds += 5) beat(seconds);
+      assert.equal(suspicious(), 0);
+      stop();
+    });
+
+    test("a body of any other shape is refused", () => {
+      const { beat, stop } = beating();
+      for (const body of [
+        { frames: -1 },
+        { frames: 1.5 },
+        { frames: "300" },
+        { hidden: "no" },
+        { reportedAway: 1 },
+        { tampered: "hasFocus" },
+        { tampered: ["onblur"] },
+        { tampered: null },
+      ]) {
+        assert.throws(() => beat(5, body), InvalidInputError, JSON.stringify(body));
+      }
+      stop();
+    });
+
+    test("the live view carries the signal; no student response does", () => {
+      const { db, sitting, attemptId, beat, stop } = beating();
+      beat(5, { tampered: ["visibilityState"] });
+      beat(10, { frames: 0 });
+      const anna = liveParticipant(db, sitting.id, "anna");
+      assert.deepEqual([anna.tampered, anna.hiddenCount, anna.hiddenMs], [["visibilityState"], 1, 5000]);
+      assert.equal(typeof anna.silentMs, "number");
+      const seen = [openTestsOf(db, "anna"), writingView(db, attemptRow(db, attemptId)), submitAttempt(db, attemptRow(db, attemptId))];
+      assert.doesNotMatch(JSON.stringify(seen), /tamper|hidden_?(count|ms)|hiddenCount|hiddenMs|beat|silent|visibilityState/i);
+      assert.equal(liveParticipant(db, sitting.id, "anna").silentMs, null, "no heartbeat warning once submitted");
+      stop();
+    });
   });
 
   test("an attempt is bound to its browser, a stranger is refused and recorded, a release binds the next one", () => {

@@ -1,7 +1,7 @@
 /**
  * The routes a student writes an online test through (`online-test`): the
  * tests open for them, starting or resuming an attempt, saving an answer,
- * submitting, and the focus log.
+ * submitting, the focus log and the heartbeat.
  *
  * Every write is the asker's own: the routes take no username, and an attempt
  * of somebody else is answered like one that does not exist. A session acting
@@ -13,7 +13,7 @@
  * memory and does not survive a restart.
  */
 
-import { checkDevice, keptUserAgent, nextOpenTestsChange, openTestsOf, ownAttempt, recordFocus, resultView, saveAnswer, startAttempt, submitAttempt, writingView } from "./attempts.js";
+import { checkDevice, keptUserAgent, nextOpenTestsChange, openTestsOf, ownAttempt, recordBeat, recordFocus, resultView, saveAnswer, startAttempt, submitAttempt, writingView } from "./attempts.js";
 import { NotFoundError } from "./classes.js";
 import { actsAsTeacher, identityOf, requireStudent, sessionNow } from "./gate.js";
 import { listenTests } from "./live.js";
@@ -203,6 +203,16 @@ export function registerAttemptRoutes(router, { db, handle, startPage }) {
     requireStudent,
     handle(async (req, res) => {
       res.json(recordFocus(db, attemptOf(req, res), req.body?.state));
+    })
+  );
+
+  // The writing page's heartbeat: frames drawn, visibility and replaced
+  // properties (exam-hidden-page-signals design D5). Guarded like the focus log.
+  router.post(
+    "/api/attempts/:id/beat",
+    requireStudent,
+    handle(async (req, res) => {
+      res.json(recordBeat(db, attemptOf(req, res), req.body));
     })
   );
 

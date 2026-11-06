@@ -5,7 +5,8 @@
  * for changes; a listener hears of every change as it is written.
  *
  * An event names the participant and what happened - started, saved (with the
- * remaining time only), submitted, away, back, refused device, released,
+ * remaining time only), submitted, away, back, suspicious (a new stretch
+ * hidden by timing or a replaced property), refused device, released,
  * bound to the next browser after a release -
  * never an answer. An offline sitting (`offline-test`) has no attempts: its
  * events are the window's and the attendance's.
@@ -59,7 +60,9 @@ export function listen(sittingId, listener) {
 /**
  * One participant as the live view shows them: not started, writing (with the
  * time left) or submitted; how often and how long they left the page; how
- * many requests from another browser were refused; and which browser the
+ * many requests from another browser were refused; the suspicious signal -
+ * the replaced properties, the time hidden by timing and, while writing, the
+ * time since the last heartbeat; and which browser the
  * attempt is bound to and which was refused last (exam-live-bound-browser
  * D4) - `boundBrowser` null while the attempt is unbound or there is none,
  * its `full` null for a binding from before browser strings were kept.
@@ -84,6 +87,11 @@ function participantFrom(row, attempt, { count: refused, userAgent: refusedAgent
     away: Boolean(attempt?.away_since) && status === "writing",
     focusCount: attempt?.focus_count ?? 0,
     focusMs: (attempt?.focus_ms ?? 0) + awayNow,
+    // The suspicious signal (exam-hidden-page-signals design D3/D6): teachers only, never the student's.
+    tampered: attempt?.tamper_detail ? attempt.tamper_detail.split(",") : [],
+    hiddenCount: attempt?.hidden_count ?? 0,
+    hiddenMs: attempt?.hidden_ms ?? 0,
+    silentMs: status === "writing" ? Math.max(0, Date.parse(at) - Date.parse(attempt.beat_at ?? attempt.started_at)) : null,
     refused,
     bound: attempt ? attempt.device_hash !== null : null,
     boundBrowser: attempt && attempt.device_hash !== null ? browserLabel(attempt.device_user_agent) : null,
@@ -135,6 +143,19 @@ export function liveParticipant(db, sittingId, username, at = now()) {
   const attempt = db.prepare("SELECT * FROM attempt WHERE test_id = ? AND username = ?").get(sitting.test_id, username);
   const refused = attempt ? refusalsOf(db, "WHERE r.attempt_id = ?", attempt.id).get(username) : undefined;
   return participantFrom(row, attempt, refused ?? noRefusals, at);
+}
+
+/**
+ * How long each writing attempt of a sitting has gone without a heartbeat at
+ * `at`, per username (exam-hidden-page-signals design D3): what the live
+ * stream's periodic `beats` tick carries, since an ordinary heartbeat emits
+ * no change. Empty for an offline sitting, which has no attempts.
+ */
+export function liveSilence(db, sittingId, at = now()) {
+  const rows = db
+    .prepare("SELECT username, beat_at, started_at FROM attempt WHERE sitting_id = ? AND submitted_at IS NULL")
+    .all(sittingId);
+  return Object.fromEntries(rows.map((row) => [row.username, Math.max(0, Date.parse(at) - Date.parse(row.beat_at ?? row.started_at))]));
 }
 
 /**

@@ -511,6 +511,72 @@ export function recordFocus(db, row, state, at = now()) {
   return { recorded: true };
 }
 
+/** The properties the writing page checks for replacement (exam-hidden-page-signals design D1). */
+export const tamperNames = ["visibilityState", "hidden", "hasFocus"];
+
+/** Beats closer than this to the previous one are ignored, so a flood of them cannot add up. */
+const beatMinGapMs = 1000;
+
+/** A visible page draws 30-60 frames a second; fewer than this many in a beat's span count as hidden. */
+const hiddenFramesPerSecond = 5;
+
+/** A heartbeat's body as the server takes it, or an InvalidInputError. */
+function beatOf(body) {
+  const { frames, hidden, reportedAway, tampered } = body ?? {};
+  const valid =
+    Number.isSafeInteger(frames) &&
+    frames >= 0 &&
+    typeof hidden === "boolean" &&
+    typeof reportedAway === "boolean" &&
+    Array.isArray(tampered) &&
+    tampered.length <= tamperNames.length &&
+    tampered.every((name) => tamperNames.includes(name));
+  if (!valid) throw new InvalidInputError("exam.errors.attempts.beatShape");
+  return { frames, hidden, reportedAway, tampered: new Set(tampered) };
+}
+
+/**
+ * Records a heartbeat of the writing page (exam-hidden-page-signals design
+ * D2): the animation frames drawn since the previous beat, the page's
+ * visibility as read through an untouched reference, whether its own focus
+ * listeners reported an absence meanwhile, and the replaced properties it
+ * found. The span is the server's time since the previous beat; a span with
+ * too few frames, or a beat saying hidden, is hidden by timing - unless the
+ * focus log already counts it. A run of hidden beats is one stretch. The
+ * first beat only starts the clock. Emits `suspicious` only when the count of
+ * stretches or the set of replaced properties changed. Never read by the
+ * scoring, never shown to the student.
+ */
+export function recordBeat(db, row, body, at = now()) {
+  const beat = beatOf(body);
+  if (row.submitted_at !== null || row.deadline <= at) return { recorded: false };
+  if (row.beat_at !== null && msBetween(row.beat_at, at) < beatMinGapMs) return { recorded: false };
+
+  const known = new Set(row.tamper_detail ? row.tamper_detail.split(",") : []);
+  const merged = tamperNames.filter((name) => known.has(name) || beat.tampered.has(name));
+  const tamperGrew = merged.length > known.size;
+
+  let { hidden_count: count, hidden_ms: hiddenMs, beat_hidden: lastHidden } = row;
+  if (row.beat_at !== null) {
+    const spanMs = Math.max(0, Math.min(msBetween(row.beat_at, at), msBetween(row.started_at, at)));
+    const hidden = beat.hidden || beat.frames < (spanMs / 1000) * hiddenFramesPerSecond;
+    const countedByFocusLog = beat.reportedAway || row.away_since !== null;
+    if (hidden && !countedByFocusLog) {
+      if (lastHidden === 0) count += 1;
+      hiddenMs += Math.round(spanMs);
+      lastHidden = 1;
+    } else {
+      lastHidden = 0;
+    }
+  }
+  db.prepare(
+    `UPDATE attempt SET beat_at = ?, beat_hidden = ?, hidden_count = ?, hidden_ms = ?, tamper_detail = ?, tamper_at = COALESCE(tamper_at, ?)
+     WHERE id = ?`
+  ).run(at, lastHidden, count, hiddenMs, merged.length > 0 ? merged.join(",") : null, merged.length > 0 ? at : null, row.id);
+  if (count !== row.hidden_count || tamperGrew) notify(row.sitting_id, "suspicious", row.username);
+  return { recorded: true };
+}
+
 /**
  * Releases an attempt from the browser it is bound to, at the teacher's
  * request; the next browser that opens it is bound instead. The answers and

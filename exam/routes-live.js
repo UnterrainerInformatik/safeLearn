@@ -13,7 +13,7 @@
  */
 
 import { getSitting } from "./tests.js";
-import { listen, liveParticipant, liveSnapshot } from "./live.js";
+import { listen, liveParticipant, liveSilence, liveSnapshot } from "./live.js";
 import { flagParticipant, participantHolders } from "./participants.js";
 import { NotFoundError } from "./classes.js";
 import { requireTeacher, sessionNow, teacherPage } from "./gate.js";
@@ -34,6 +34,9 @@ function idParam(value) {
 }
 
 const heartbeatMs = 25000;
+// How often the stream tells the view how long each writing attempt has gone
+// without a heartbeat (exam-hidden-page-signals design D3/D5).
+const silenceMs = 5000;
 
 /** A snapshot with the course's Matura candidates marked (exam-participant-role D5). */
 function markedSnapshot(db, sittingId, at) {
@@ -59,12 +62,14 @@ export function registerLiveRoutes(router, { db, handle, startPage }) {
       const snapshot = markedSnapshot(db, sittingId);
       let stop = () => {};
       let heartbeat = null;
+      let silence = null;
       const stream = openEventStream(req, res, {
         // A proxy that buffers would hold the events back (task 6.4).
         headers: { "X-Accel-Buffering": "no" },
         onClose: () => {
           stop();
           clearInterval(heartbeat);
+          clearInterval(silence);
         },
       });
       stream.send("snapshot", snapshot);
@@ -105,6 +110,16 @@ export function registerLiveRoutes(router, { db, handle, startPage }) {
         })
       );
       heartbeat = setInterval(() => checked(() => stream.comment("heartbeat")), heartbeatMs);
+      // An ordinary heartbeat emits no change, so the view learns here that they still arrive.
+      silence = setInterval(
+        () =>
+          checked(() => {
+            const at = new Date().toISOString();
+            const silent = liveSilence(db, sittingId, at);
+            if (Object.keys(silent).length > 0) stream.send("beats", { serverTime: at, silent });
+          }),
+        silenceMs
+      );
     })
   );
 

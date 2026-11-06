@@ -94,6 +94,17 @@ function focusText(participant, awayMs) {
   return participant.away ? `${left} ${t("exam.live.awayNow")}` : left;
 }
 
+/** "47 s", "4 min 12 s" from a minute on, "4 min" on the minute: a stretch written like the time away. */
+function duration(ms) {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const [minutes, seconds] = [Math.floor(total / 60), total % 60];
+  if (minutes === 0) return t("exam.live.durationSeconds", { seconds });
+  return seconds === 0 ? t("exam.live.durationWholeMinutes", { minutes }) : t("exam.live.durationMinutes", { minutes, seconds });
+}
+
+/** A writing attempt without a heartbeat for longer than this is shown as such (exam-hidden-page-signals design D3). */
+const silentWarnMs = 20000;
+
 /** The colour of a focus share: above 98 % good, from 70 % a warning, below that bad. */
 function focusLevel(share) {
   if (share > 0.98) return "good";
@@ -116,8 +127,9 @@ const resortMs = 10000;
 
 /**
  * The participants are always ordered the same way: by status, not started
- * first and submitted last; within a status by the net time out of focus,
- * longest first; and then by name, as the server sends them.
+ * first and submitted last; within a status by the net time out of focus
+ * plus the time hidden by timing, longest first; and then by name, as the
+ * server sends them.
  */
 const statusRank = { "not started": 0, writing: 1, submitted: 2 };
 
@@ -197,7 +209,7 @@ class LiveView extends ExamElement {
       h(
         "table",
         { class: "sl-exam-table sl-exam-live-table" },
-        h("thead", {}, h("tr", {}, h("th", {}, t("exam.live.columnStudent")), h("th", {}, t("exam.live.columnStatus")), h("th", {}, t("exam.live.columnTimeLeft")), h("th", {}, t("exam.live.columnInFocus")), h("th", {}, t("exam.live.columnBoundBrowser")), h("th", {}, t("exam.live.columnOtherBrowsers")), h("th", {}, ""))),
+        h("thead", {}, h("tr", {}, h("th", {}, t("exam.live.columnStudent")), h("th", {}, t("exam.live.columnStatus")), h("th", {}, t("exam.live.columnTimeLeft")), h("th", {}, t("exam.live.columnInFocus")), h("th", {}, t("exam.live.columnSuspicious")), h("th", {}, t("exam.live.columnBoundBrowser")), h("th", {}, t("exam.live.columnOtherBrowsers")), h("th", {}, ""))),
         this.body
       ),
       this.message
@@ -217,7 +229,7 @@ class LiveView extends ExamElement {
     this.sortHeld = Boolean(this.body.querySelector("button:hover"));
     if (this.sortHeld) return;
     const ordered = [...this.participants.values()]
-      .map((participant) => ({ participant, rank: statusRank[participant.status], away: this.focusFigures(participant)?.awayMs ?? 0 }))
+      .map((participant) => ({ participant, rank: statusRank[participant.status], away: (this.focusFigures(participant)?.awayMs ?? 0) + (participant.hiddenMs ?? 0) }))
       .sort((a, b) => a.rank - b.rank || b.away - a.away || this.order.get(a.participant.username) - this.order.get(b.participant.username))
       .map(({ participant }) => this.rows.get(participant.username))
       .filter(Boolean);
@@ -472,6 +484,7 @@ class LiveView extends ExamElement {
       h("td", { class: "sl-exam-live-status" }, statusLabels[participant.status]()),
       h("td", { class: "sl-exam-live-left" }, participant.remainingMs === null ? "" : clock(participant.remainingMs)),
       this.focusCell(participant),
+      this.suspiciousCell(participant),
       this.boundCell(participant),
       h(
         "td",
@@ -558,6 +571,52 @@ class LiveView extends ExamElement {
     );
   }
 
+  /**
+   * The suspicious signal (exam-hidden-page-signals design D6), apart from the
+   * focus figures: a manipulated browser with the properties found, how often
+   * and how long the page was hidden by timing, and while writing how long no
+   * heartbeat has come. Empty for a clean attempt.
+   */
+  suspiciousCell(participant) {
+    const cell = h("td", { class: "sl-exam-live-suspicious" });
+    this.fillSuspicious(cell, participant);
+    return cell;
+  }
+
+  /** How long a writing attempt has gone without a heartbeat now; null once it is not writing. */
+  silentFor(participant) {
+    if (participant.status !== "writing" || participant.silentMs === null || participant.silentMs === undefined) return null;
+    return participant.silentMs + (performance.now() - (participant.silentAt ?? participant.at));
+  }
+
+  /** The stream's tick: the time without a heartbeat per writing attempt, counted on from now. */
+  silence({ serverTime, silent }) {
+    this.syncClock(serverTime);
+    for (const [username, silentMs] of Object.entries(silent)) {
+      const participant = this.participants?.get(username);
+      if (!participant || participant.status !== "writing") continue;
+      Object.assign(participant, { silentMs, silentAt: performance.now() });
+      this.fillSuspicious(this.rows.get(username)?.querySelector(".sl-exam-live-suspicious"), participant);
+    }
+  }
+
+  fillSuspicious(cell, participant) {
+    if (!cell) return;
+    const signs = [];
+    if (participant.tampered?.length > 0) {
+      signs.push(h("span", { class: "sl-exam-live-tampered" }, t("exam.live.browserManipulated", { names: participant.tampered.join(", ") })));
+    }
+    if (participant.hiddenCount > 0) {
+      signs.push(h("span", { class: "sl-exam-live-hidden" }, t("exam.live.hiddenByTiming", { count: participant.hiddenCount, time: duration(participant.hiddenMs) })));
+    }
+    const silent = this.silentFor(participant);
+    if (silent !== null && silent > silentWarnMs) {
+      signs.push(h("span", { class: "sl-exam-live-silent" }, t("exam.live.noHeartbeat", { time: duration(silent) })));
+    }
+    cell.dataset.suspicious = signs.length > 0 ? "1" : "0";
+    cell.replaceChildren(...signs.flatMap((sign, index) => (index === 0 ? [sign] : [h("br", {}), sign])));
+  }
+
   /** Puts a changed participant in place of their row. */
   update(participant) {
     if (!participant) return;
@@ -591,6 +650,7 @@ class LiveView extends ExamElement {
       const cell = row.querySelector(".sl-exam-live-left");
       if (cell && participant.remainingMs !== null) cell.textContent = clock(participant.remainingMs - (performance.now() - participant.at));
       this.fillFocus(row.querySelector(".sl-exam-live-focus"), participant);
+      this.fillSuspicious(row.querySelector(".sl-exam-live-suspicious"), participant);
     }
   }
 
@@ -659,6 +719,8 @@ class LiveView extends ExamElement {
       if (change.participant) this.update(change.participant);
       else this.poll();
     });
+    // How long each writing attempt has gone without a heartbeat, every few seconds.
+    source.addEventListener("beats", (event) => this.silence(JSON.parse(event.data)));
     source.addEventListener("renew", () => this.connect());
     source.addEventListener("refused", () => this.studentView());
     source.addEventListener("error", () => {

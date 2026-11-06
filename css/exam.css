@@ -1317,6 +1317,30 @@ a.sl-exam-button.sl-exam-open:hover,
   font-variant-numeric: tabular-nums;
 }
 
+/* The suspicious signal beside the focus figures: a red badge for a
+   manipulated browser, the time hidden by timing and a missing heartbeat in
+   the warning colour. */
+
+.sl-exam-live-tampered {
+  display: inline-block;
+  padding: 0 8px;
+  border-radius: 10px;
+  font-weight: 700;
+  color: #ffffff;
+  background-color: #c0392b;
+}
+
+.sl-exam-live-hidden,
+.sl-exam-live-silent {
+  color: #b35900;
+  font-variant-numeric: tabular-nums;
+}
+
+#markdown-content.dark-mode .sl-exam-live-hidden,
+#markdown-content.dark-mode .sl-exam-live-silent {
+  color: #f0a050;
+}
+
 /* The browser an attempt is bound to, and the one refused last: the short
    label on one line, a small round toggle beside it, and the full string
    wrapping in place below when it is shown. */

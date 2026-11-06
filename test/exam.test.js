@@ -2052,6 +2052,59 @@ describe("online tests: writing", () => {
     assert.equal(!!(await student.page.$("#slExamsButton.sl-exam-open")), stillOpen, "and the button is violet only while another test is still open");
   });
 
+  test("an extension that keeps the page 'visible' is found by name; a clean page is not flagged", async () => {
+    /** Opens test `id` on `page`'s writing page and waits for the server to have a heartbeat of it. */
+    const writeUntilBeat = async (page, id) => {
+      await page.goto(`${applicationUrl}/exam/my`, { waitUntil: "domcontentloaded" });
+      await page.waitForSelector(`.sl-exam-attempt-open[data-test="${id}"] button`, { timeout: 20000 });
+      await page.click(`.sl-exam-attempt-open[data-test="${id}"] button`);
+      await page.waitForSelector(".sl-exam-attempt-question", { timeout: 20000 });
+      const until = Date.now() + 20000;
+      let row;
+      do {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        row = database((db) => db.prepare("SELECT * FROM attempt WHERE test_id = ?").get(id));
+      } while (!row?.beat_at && Date.now() < until);
+      assert.ok(row?.beat_at, "a heartbeat arrived");
+      return row;
+    };
+
+    const clean = await openTest("Clean browser");
+    try {
+      const cleanRow = await writeUntilBeat(student.page, clean.id);
+      assert.deepEqual([cleanRow.tamper_detail, cleanRow.tamper_at], [null, null], "a clean page produces no finding");
+      assert.equal(await student.page.$eval("iframe.sl-exam-attempt-reference", (el) => el.hidden), true, "the reference frame is hidden");
+    } finally {
+      // Submitted whatever happened above: an attempt left open would hide the next tests' results.
+      database((db) => db.prepare("UPDATE attempt SET submitted_at = ? WHERE test_id = ? AND submitted_at IS NULL").run(new Date().toISOString(), clean.id));
+    }
+
+    // Named so the page's own text does not match what the student must not be told.
+    const patched = await openTest("Kept in focus");
+    const page = await student.context.newPage();
+    try {
+      // What extensions of the "always active window" kind do, before the page's own code.
+      await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(Document.prototype, "visibilityState", { get: () => "visible", configurable: true });
+        Object.defineProperty(Document.prototype, "hidden", { get: () => false, configurable: true });
+        Object.defineProperty(document, "hasFocus", { value: () => true, configurable: true });
+        for (const type of ["blur", "visibilitychange"]) {
+          window.addEventListener(type, (event) => event.stopImmediatePropagation(), true);
+          document.addEventListener(type, (event) => event.stopImmediatePropagation(), true);
+        }
+      });
+      const row = await writeUntilBeat(page, patched.id);
+      assert.deepEqual(row.tamper_detail?.split(",").sort(), ["hasFocus", "hidden", "visibilityState"], `the replaced properties are named: ${row.tamper_detail}`);
+      assert.ok(row.tamper_at, "with the time of the finding");
+      assert.equal(row.focus_count, 0, "the focus log saw nothing");
+      const own = await page.evaluate(() => document.body.innerText);
+      assert.doesNotMatch(own, /manipulat|visibilityState|hasFocus|heartbeat/i, "the student is not told");
+    } finally {
+      database((db) => db.prepare("UPDATE attempt SET submitted_at = ? WHERE test_id = ? AND submitted_at IS NULL").run(new Date().toISOString(), patched.id));
+      await page.close();
+    }
+  });
+
   /** Whether the Exams page's results section is shown, and what it holds. */
   const resultsSection = (page) =>
     page.evaluate(() => {
@@ -2471,6 +2524,37 @@ describe("online tests: writing", () => {
       await setPreferences(teacher, {});
     }
   });
+
+  test("the heartbeat is guarded like the focus log and refuses a body of any other shape", async () => {
+    const test = await openTest("Heartbeat");
+    const sitting = database((db) => db.prepare("SELECT id FROM sitting WHERE test_id = ?").get(test.id).id);
+    const foreign = database((db) => {
+      const at = new Date().toISOString();
+      return Number(
+        db
+          .prepare("INSERT INTO attempt (test_id, sitting_id, username, started_at, deadline, question_count, device_hash) VALUES (?, ?, 'gb-other-student', ?, ?, 2, 'x')")
+          .run(test.id, sitting, at, new Date(Date.now() + 600000).toISOString()).lastInsertRowid
+      );
+    });
+    const clean = { frames: 300, hidden: false, reportedAway: false, tampered: [] };
+    const beat = (session, id, body = clean) => fetchAs(session, `/exam/api/attempts/${id}/beat`, { method: "POST", body });
+    assert.equal((await beat(student, foreign)).status, 404, "somebody else's attempt does not exist");
+    assert.equal((await beat(teacher, foreign)).status, 403, "a teacher is refused");
+
+    const own = (await fetchAs(student, `/exam/api/tests/${test.id}/attempt`, { method: "POST" })).json.attempt;
+    const first = await beat(student, own);
+    assert.deepEqual([first.status, first.json], [200, { recorded: true }]);
+    for (const body of [{}, { ...clean, frames: -3 }, { ...clean, hidden: "yes" }, { ...clean, tampered: ["onblur"] }]) {
+      assert.equal((await beat(student, own, body)).status, 400, JSON.stringify(body));
+    }
+    const cookie = (await student.context.cookies()).find((c) => c.name === `sl-attempt-${own}`);
+    await student.context.deleteCookie(cookie);
+    try {
+      assert.equal((await beat(student, own)).status, 409, "another browser is refused");
+    } finally {
+      database((db) => db.prepare("UPDATE attempt SET submitted_at = ? WHERE id = ?").run(new Date().toISOString(), own));
+    }
+  });
 });
 
 describe("online tests: the live view", () => {
@@ -2759,6 +2843,46 @@ describe("online tests: the live view", () => {
     assert.equal(await shownAs(1, 60000), " · left 1×, 1 min");
   });
 
+  test("the live view shows the suspicious signal apart from the focus figures, and a missing heartbeat only while it lasts", async () => {
+    await openLive("Live suspicious");
+    const username = student.username.toLowerCase();
+    const writing = (await fetchAs(student, `/exam/api/tests/${written.id}/attempt`, { method: "POST" })).json;
+    const cell = `sl-exam-live tr[data-username="${username}"] .sl-exam-live-suspicious`;
+    await teacher.page.waitForFunction((u) => document.querySelector(`sl-exam-live tr[data-username="${u}"]`)?.dataset.status === "writing", { timeout: 10000 }, username);
+    const write = (sql, ...values) => {
+      const { db } = openDatabase(run.databasePath);
+      try {
+        db.prepare(sql).run(...values);
+      } finally {
+        db.close();
+      }
+    };
+    const shown = async () => {
+      await teacher.page.evaluate(() => document.querySelector("sl-exam-live").poll());
+      return teacher.page.$eval(cell, (el) => [el.dataset.suspicious, el.innerText.trim()]);
+    };
+    write("UPDATE attempt SET beat_at = ? WHERE id = ?", new Date().toISOString(), writing.attempt);
+    assert.deepEqual(await shown(), ["0", ""], "a clean attempt shows nothing");
+
+    write("UPDATE attempt SET tamper_detail = 'visibilityState,hasFocus', hidden_count = 2, hidden_ms = 90000 WHERE id = ?", writing.attempt);
+    const [, text] = await shown();
+    assert.equal(text, "browser manipulated (visibilityState, hasFocus)\nhidden by timing 2×, 1 min 30 s");
+    assert.match(await teacher.page.$eval(`sl-exam-live tr[data-username="${username}"] .sl-exam-live-left-page`, (el) => el.textContent), /never left/, "the focus figures are unchanged");
+
+    write("UPDATE attempt SET beat_at = ? WHERE id = ?", new Date(Date.now() - 45000).toISOString(), writing.attempt);
+    assert.match((await shown())[1], /no heartbeat for 4[5-7] s$/);
+    // The stream's tick brings the next heartbeat without a snapshot.
+    write("UPDATE attempt SET beat_at = ? WHERE id = ?", new Date().toISOString(), writing.attempt);
+    await teacher.page.waitForFunction((selector) => !/no heartbeat/.test(document.querySelector(selector).innerText), { timeout: 12000, polling: 250 }, cell);
+
+    write("UPDATE attempt SET beat_at = ? WHERE id = ?", new Date(Date.now() - 600000).toISOString(), writing.attempt);
+    await fetchAs(student, `/exam/api/attempts/${writing.attempt}/submit`, { method: "POST" });
+    await teacher.page.waitForFunction((u) => document.querySelector(`sl-exam-live tr[data-username="${u}"]`)?.dataset.status === "submitted", { timeout: 10000 }, username);
+    const after = await teacher.page.$eval(cell, (el) => el.innerText);
+    assert.match(after, /browser manipulated/, "kept after the attempt");
+    assert.doesNotMatch(after, /no heartbeat/, "no heartbeat warning once submitted");
+  });
+
   test("the live view orders by status, then by time out of focus, then by name, and holds still under the mouse on a button", async () => {
     await openLive("Live sorting");
     const username = student.username.toLowerCase();
@@ -2780,6 +2904,13 @@ describe("online tests: the live view", () => {
         view.sort();
       }, second);
       assert.deepEqual((await rows()).slice(0, 2), [second, first], "longer out of focus first");
+      // Hidden by timing counts for the order: 3 min hidden beats 30 s away by the focus log.
+      await teacher.page.evaluate((u) => {
+        const view = document.querySelector("sl-exam-live");
+        Object.assign(view.participants.get(u), { startedAt: new Date(Date.now() - 300000).toISOString(), focusMs: 0, away: false, hiddenMs: 180000 });
+        view.sort();
+      }, first);
+      assert.deepEqual((await rows()).slice(0, 2), [first, second], "the time hidden by timing is added to the time away");
       await teacher.page.evaluate(() => document.querySelector("sl-exam-live").poll());
     }
     // With the mouse on Unbind the rows stay put, and follow once it leaves.
