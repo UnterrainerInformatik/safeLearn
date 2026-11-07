@@ -2822,7 +2822,7 @@ describe("online tests: the live view", () => {
     }));
     assert.deepEqual(
       [row.timing, row.title, row.legend],
-      ["done", "done", ["soon", "later", "done"]],
+      ["done", "done", ["open", "soon", "later", "done"]],
       "a test whose only sitting is over is done in the list, with the legend above"
     );
     assert.notEqual(row.background, "rgba(0, 0, 0, 0)", "and its row is coloured");

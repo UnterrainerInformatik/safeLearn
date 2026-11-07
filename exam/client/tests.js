@@ -81,6 +81,7 @@ function sittingLinks(sitting, offline = false) {
 }
 
 const timingLabels = {
+  open: () => t("exam.tests.timingOpen"),
   done: () => t("exam.tests.timingDone"),
   soon: () => t("exam.tests.timingSoon"),
   later: () => t("exam.tests.timingLater"),
@@ -91,7 +92,7 @@ function timingLegend() {
   return h(
     "p",
     { class: "sl-exam-quiet sl-exam-tests-legend" },
-    ["soon", "later", "done"].map((timing) => h("span", { class: "sl-exam-tests-legend-item", "data-timing": timing }, timingLabels[timing]()))
+    ["open", "soon", "later", "done"].map((timing) => h("span", { class: "sl-exam-tests-legend-item", "data-timing": timing }, timingLabels[timing]()))
   );
 }
 

@@ -1160,6 +1160,28 @@ describe("deleting a question from the pool", () => {
     assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
   });
 
+  test("a course's tests are newest first: without a sitting on top, then by their first sitting, latest first", () => {
+    const { db, course, ids } = seeded();
+    const make = (name, ...hours) => {
+      const test = createTest(db, course.id, { name, questionIds: [ids[0]] });
+      for (const hour of hours) createSitting(db, test.id, { opensAt: inMinutes(hour * 60), closesAt: inMinutes(hour * 60 + 50), durationMinutes: 15 });
+      return test;
+    };
+    make("Early", 1);
+    make("Late", 48);
+    make("Unplanned A");
+    // A make-up far ahead does not move a test: its first sitting dates it.
+    const middle = make("Middle", 24);
+    createSitting(db, middle.id, { opensAt: inMinutes(96 * 60), closesAt: inMinutes(96 * 60 + 50), durationMinutes: 15, participants: ["anna"] });
+    make("Unplanned B");
+    db.prepare("UPDATE test SET created_at = ? WHERE name = ?").run("2026-01-01T00:00:00.000Z", "Unplanned A");
+    db.prepare("UPDATE test SET created_at = ? WHERE name = ?").run("2026-01-02T00:00:00.000Z", "Unplanned B");
+    assert.deepEqual(
+      listTests(db, { courseId: course.id }).groups[0].tests.map((t) => t.name),
+      ["Unplanned B", "Unplanned A", "Late", "Middle", "Early"]
+    );
+  });
+
   test("a test whose last question is deleted stays, without questions, until it is given some again", () => {
     const { db, course, ids } = seeded();
     const test = createTest(db, course.id, { name: "Alone", questionIds: [ids[0]] });

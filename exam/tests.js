@@ -485,14 +485,18 @@ export function getTest(db, id) {
   };
 }
 
-/** A course's tests for a list: name, number of questions, sittings and counts. */
+/**
+ * A course's tests for a list: name, number of questions, sittings and
+ * counts. Newest first: a test without a sitting yet on top, the newest
+ * created first, then by the start of the first sitting, latest first.
+ */
 function courseTests(db, courseId) {
   return db
     .prepare(
       `SELECT t.id, t.name, t.kind, t.handout_a, t.handout_b, (SELECT COUNT(*) FROM test_question q WHERE q.test_id = t.id) AS questions
        FROM test t WHERE t.course_id = ?
-       ORDER BY (SELECT MIN(opens_at) FROM sitting s WHERE s.test_id = t.id) IS NULL,
-         (SELECT MIN(opens_at) FROM sitting s WHERE s.test_id = t.id), t.created_at, t.id`
+       ORDER BY (SELECT MIN(opens_at) FROM sitting s WHERE s.test_id = t.id) IS NOT NULL,
+         (SELECT MIN(opens_at) FROM sitting s WHERE s.test_id = t.id) DESC, t.created_at DESC, t.id DESC`
     )
     .all(courseId)
     .map(({ handout_a, handout_b, ...test }) => ({

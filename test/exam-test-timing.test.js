@@ -1,6 +1,6 @@
 /**
  * Where a test stands in the teacher's list of tests, unit by unit: done,
- * coming up within seven days, or later.
+ * open right now, coming up within seven days, or later.
  *
  * No browser, no login, no server: `exam/client/test-timing.js` is the very
  * file the browser loads. The list itself against a running instance is
@@ -25,8 +25,10 @@ describe("testTiming", () => {
     assert.equal(testTiming({ sittings: [sitting("over", at - 3 * day), sitting("over", at - day)] }, at), "done");
   });
 
-  test("a test open now is soon", () => {
-    assert.equal(testTiming({ sittings: [sitting("open", at - 60_000)] }, at), "soon");
+  test("a test open now is open, even beside a sitting over or one coming up", () => {
+    assert.equal(testTiming({ sittings: [sitting("open", at - 60_000)] }, at), "open");
+    assert.equal(testTiming({ sittings: [sitting("over", at - 5 * day), sitting("open", at - 60_000)] }, at), "open");
+    assert.equal(testTiming({ sittings: [sitting("open", at - 60_000), sitting("scheduled", at + day)] }, at), "open");
   });
 
   test("a sitting opening within seven days is soon, at seven days or more it is later", () => {
