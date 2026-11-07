@@ -704,6 +704,8 @@
       "leftPageWholeMinutes_other": "{count}× verlassen, {minutes} min",
       "leftPage_one": "{count}× verlassen, {seconds} s",
       "leftPage_other": "{count}× verlassen, {seconds} s",
+      "legendSubmitted": "abgegeben",
+      "legendSuspicious": "auffälliges Signal",
       "makeupSitting": "Nachtermin",
       "netInFocus": "Netto im Fokus: {time}",
       "neverLeft": "nie verlassen",

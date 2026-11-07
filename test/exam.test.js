@@ -662,6 +662,11 @@ describe("the gradebook", () => {
     assert.match(page, /grade 1/);
     assert.match(page, /strong oral exam/);
     assert.match(page, /1st test/, "the result is shown by its column's name");
+    const rows = await student.page.$$eval(".sl-exam-results .sl-exam-entries tbody tr", (all) => all.map((tr) => [tr.cells[tr.cells.length - 1].textContent, tr.dataset.tone ?? null]));
+    const expected = (grade) => (grade === "5" ? "bad" : grade === "1" || grade === "2" ? "good" : null);
+    assert.ok(rows.length > 0, "the results are listed");
+    for (const [grade, tone] of rows) assert.equal(tone, expected(grade), `a result graded "${grade}" carries the tone of its grade`);
+    assert.ok(rows.some(([grade, tone]) => grade === "2" && tone === "good"), "the 1st test's 2 is green");
   });
 
   test("a student reaches nobody else's data and no teacher route, nor does a teacher in student view", async () => {
@@ -862,6 +867,64 @@ describe("the gradebook", () => {
     await teacher.page.click(`tr[data-student="${other}"] .sl-exam-proposal`);
     const marked = await teacher.page.evaluate(() => [...document.querySelectorAll(".sl-exam-sheet tr.is-marked")].map((tr) => tr.dataset.student));
     assert.deepEqual(marked, [other], "only the second row is marked");
+  });
+
+  test("the sheet: a row is red for a 5, green for a 1 or 2, uncoloured otherwise, and follows every save without a reload", async () => {
+    const username = student.username.toLowerCase();
+    const tone = (who) => teacher.page.evaluate((w) => document.querySelector(`tr[data-student="${w}"]`).dataset.tone ?? null, who);
+    const grade = (who, override) => fetchAs(teacher, `/exam/api/courses/${course.id}/grades/${who}/ws`, { method: "PUT", body: { override } });
+    try {
+      assert.equal((await overviewRow(other)).effective, 5);
+      await grade(username, 2);
+      await openSheet();
+      assert.deepEqual([await tone(other), await tone(username)], ["bad", "good"], "a 5 is red, a 2 green");
+
+      // The sticky cells carry the tint like the cells that scroll; the marked row shows its own colour and keeps the stripe.
+      const colours = await teacher.page.evaluate((red, green) => {
+        const cells = (who) => document.querySelector(`tr[data-student="${who}"]`).cells;
+        const background = (cell) => getComputedStyle(cell).backgroundColor;
+        return {
+          sticky: background(cells(red)[0]),
+          scrolling: background(cells(red)[cells(red).length - 1]),
+          green: background(cells(green)[0]),
+          stripe: getComputedStyle(cells(red)[0]).boxShadow,
+        };
+      }, other, username);
+      assert.equal(colours.sticky, colours.scrolling, "the sticky name cell has the row's tint");
+      assert.notEqual(colours.sticky, "rgb(255, 255, 255)", "not the sticky cells' white");
+      assert.notEqual(colours.sticky, colours.green, "red and green differ");
+      assert.match(colours.stripe, /inset/, "with a stripe on its left edge");
+      await teacher.page.click(`tr[data-student="${other}"] .sl-exam-proposal`);
+      const marked = await teacher.page.evaluate((red) => {
+        const cell = document.querySelector(`tr[data-student="${red}"]`).cells[0];
+        return { background: getComputedStyle(cell).backgroundColor, stripe: getComputedStyle(cell).boxShadow };
+      }, other);
+      assert.equal(marked.background, "rgb(223, 239, 252)", "the marked row's highlight wins over the tint");
+      assert.match(marked.stripe, /inset/, "and the stripe stays");
+
+      await grade(username, 3);
+      await openSheet();
+      assert.equal(await tone(username), null, "a 3 is not coloured");
+
+      const select = `tr[data-student="${other}"] select.sl-exam-override`;
+      await teacher.page.select(select, "4");
+      await settled(select);
+      assert.equal(await tone(other), null, "an override from 5 to 4 clears the red at once");
+      await teacher.page.select(select, "");
+      await settled(select);
+      assert.equal(await tone(other), "bad", "and taking it back brings it back");
+
+      await enter(field(test1, other), "24");
+      assert.equal(await tone(other), "good", "a saved result recolours the row without a reload");
+
+      assert.equal((await fetchAs(teacher, `/exam/api/assessments/${test1.id}/results/${other}`, { method: "DELETE" })).status, 200);
+      await openSheet();
+      assert.equal((await overviewRow(other)).effective, null);
+      assert.equal(await tone(other), null, "a student without results is not coloured");
+    } finally {
+      await putResult(test1, other, { points: 6 });
+      await grade(username, 1);
+    }
   });
 
   test("the sheet: the leading columns keep their place while the sheet scrolls sideways", async () => {
@@ -2715,6 +2778,7 @@ describe("online tests: the live view", () => {
     const seen = await teacher.page.evaluate(() => ({
       navigation: Boolean(document.querySelector("#topbar, #sidebar, .sl-exam-bar")),
       list: Boolean(document.querySelector("sl-exam-live table, sl-exam-live button")),
+      colours: Boolean(document.querySelector("sl-exam-live [data-tone], sl-exam-live [data-flag], .sl-exam-legend")),
       badge: document.querySelector(".sl-exam-live-badge").textContent,
       label: document.querySelector(".sl-exam-screen-label").textContent,
       remaining: document.querySelector(".sl-exam-screen-remaining").textContent,
@@ -2725,6 +2789,7 @@ describe("online tests: the live view", () => {
     }));
     assert.equal(seen.navigation, false, "no top bar, sidebar or module bar");
     assert.equal(seen.list, false, "no list and nothing to click");
+    assert.equal(seen.colours, false, "no row colours and no legend");
     assert.deepEqual([seen.badge, seen.label], ["Live", "Closes in"]);
     assert.match(seen.remaining, /^\d+:\d\d$/);
     assert.match(seen.clock, /\d{1,2}:\d\d:\d\d/);
@@ -2816,13 +2881,14 @@ describe("online tests: the live view", () => {
     assert.deepEqual(await links(`/exam/tests?course=${course.id}`, `tr[data-test="${written.id}"] li[data-state="over"]`), expected, "the course's list");
     const row = await teacher.page.$eval(`tr[data-test="${written.id}"]`, (tr) => ({
       timing: tr.dataset.timing,
+      tone: tr.dataset.tone,
       title: tr.title,
       background: getComputedStyle(tr.cells[1]).backgroundColor,
-      legend: [...document.querySelectorAll(".sl-exam-tests-legend-item")].map((item) => item.dataset.timing),
+      legend: [...document.querySelectorAll(".sl-exam-tests .sl-exam-legend-item")].map((item) => item.dataset.timing),
     }));
     assert.deepEqual(
-      [row.timing, row.title, row.legend],
-      ["done", "done", ["open", "soon", "later", "done"]],
+      [row.timing, row.tone, row.title, row.legend],
+      ["done", "good", "done", ["open", "soon", "later", "done"]],
       "a test whose only sitting is over is done in the list, with the legend above"
     );
     assert.notEqual(row.background, "rgba(0, 0, 0, 0)", "and its row is coloured");
@@ -2873,12 +2939,25 @@ describe("online tests: the live view", () => {
       await teacher.page.evaluate(() => document.querySelector("sl-exam-live").poll());
       return teacher.page.$eval(cell, (el) => [el.dataset.suspicious, el.innerText.trim()]);
     };
+    const colour = () =>
+      teacher.page.$eval(`sl-exam-live tr[data-username="${username}"]`, (tr) => ({ tone: tr.dataset.tone ?? null, flag: tr.dataset.flag ?? null, title: tr.title, opacity: getComputedStyle(tr).opacity }));
     write("UPDATE attempt SET beat_at = ? WHERE id = ?", new Date().toISOString(), writing.attempt);
     assert.deepEqual(await shown(), ["0", ""], "a clean attempt shows nothing");
+    assert.deepEqual(await colour(), { tone: null, flag: null, title: "", opacity: "1" }, "a writing row is neutral");
+    assert.deepEqual(
+      await teacher.page.$$eval(".sl-exam-live-legend .sl-exam-legend-item", (items) => items.map((item) => [item.dataset.tone ?? null, item.dataset.flag ?? null, item.textContent])),
+      [["good", null, "submitted"], [null, "warn", "suspicious signal"]],
+      "the legend names the green row and the amber stripe"
+    );
 
     write("UPDATE attempt SET tamper_detail = 'visibilityState,hasFocus', hidden_count = 2, hidden_ms = 90000 WHERE id = ?", writing.attempt);
     const [, text] = await shown();
     assert.equal(text, "browser manipulated (visibilityState, hasFocus)\nhidden by timing 2×, 1 min 30 s");
+    assert.deepEqual(
+      await colour(),
+      { tone: null, flag: "warn", title: "Suspicious: browser manipulated (visibilityState, hasFocus), hidden by timing 2×, 1 min 30 s", opacity: "1" },
+      "a suspicious row is flagged with the signs as its tooltip, and not tinted"
+    );
     assert.match(await teacher.page.$eval(`sl-exam-live tr[data-username="${username}"] .sl-exam-live-left-page`, (el) => el.textContent), /never left/, "the focus figures are unchanged");
 
     write("UPDATE attempt SET beat_at = ? WHERE id = ?", new Date(Date.now() - 45000).toISOString(), writing.attempt);
@@ -2893,6 +2972,8 @@ describe("online tests: the live view", () => {
     const after = await teacher.page.$eval(cell, (el) => el.innerText);
     assert.match(after, /browser manipulated/, "kept after the attempt");
     assert.doesNotMatch(after, /no heartbeat/, "no heartbeat warning once submitted");
+    const submitted = await colour();
+    assert.deepEqual([submitted.tone, submitted.flag, submitted.opacity], ["good", "warn", "1"], "a submitted row is green at full opacity and keeps the flag");
   });
 
   test("the live view orders by status, then by time out of focus, then by name, and holds still under the mouse on a button", async () => {
@@ -5327,6 +5408,11 @@ describe("the module's actions", () => {
       await page.goto(`${applicationUrl}/exam/scale`, { waitUntil: "domcontentloaded" });
       await page.waitForSelector(field(2), { timeout: 20000 });
       assert.equal(await page.$$eval("sl-exam-scale button", (buttons) => buttons.length), 0, "the scale has no Save button");
+      assert.deepEqual(
+        await page.$$eval(".sl-exam-scale tbody tr", (rows) => rows.map((row) => row.dataset.tone ?? null)),
+        ["good", "good", null, null, "bad"],
+        "the scale shows the grade colours: 1 and 2 green, 5 red"
+      );
       assert.ok((await page.$eval("sl-exam-scale", (el) => el.textContent)).includes(text("en", "exam.classes.savedAsChanged")), "it says that it saves as it changes");
 
       await enter(2, "74.5");

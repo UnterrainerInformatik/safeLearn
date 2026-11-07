@@ -15,6 +15,7 @@
 
 import { parseNumber as parseTyped } from "../../i18n/format.js";
 import { viennaLocal } from "./periods.js";
+import { gradeTone, setTone } from "./row-tone.js";
 import { act, candidateNote, directoryNotice, displayClass, displayPerson, messageLine, personName } from "./classes.js";
 import { confirmButton, defineExamElement, ExamElement, examApi, format, h, linkButton, markRows, readOnlyFor, saveOnChange, stickyColumns, t } from "./frame.js";
 
@@ -417,13 +418,15 @@ class GradebookView extends ExamElement {
     const proposalCell = h("td", { class: "sl-exam-proposal" });
     const winterCell = semester === "ss" ? h("td", { class: "sl-exam-winter" }) : null;
     const gradeCell = h("td", { class: "sl-exam-grade" });
+    // The row exists before the first draw; every redraw recolours it by the effective grade.
+    let studentTr = null;
     const show = (values) => {
       proposalCell.textContent = proposalText(values.proposal);
       proposalCell.title = categoriesTitle(values.categories ?? {});
       if (winterCell) winterCell.textContent = winterText(values.winter);
       gradeCell.textContent = values.effective === null ? "–" : String(values.effective);
+      if (studentTr) setTone(studentTr, gradeTone(values.effective));
     };
-    show(row);
 
     let overrideCell;
     if (editable) {
@@ -471,7 +474,9 @@ class GradebookView extends ExamElement {
         ? group.columns.map((column) => this.resultCell(course, column, ordered.indexOf(column), row, rowIndex, editable, show))
         : h("td", {})
     );
-    return h("tr", { class: row.leftAt ? "sl-exam-left" : null, "data-student": row.username }, leadingCells, fieldCells);
+    studentTr = h("tr", { class: row.leftAt ? "sl-exam-left" : null, "data-student": row.username }, leadingCells, fieldCells);
+    show(row);
+    return studentTr;
   }
 
   /**
@@ -828,9 +833,11 @@ class GradebookStudent extends ExamElement {
       examApi(`/courses/${course.id}/grades/${encodeURIComponent(student.username)}/${semester}`, { method: "PUT", body });
     const proposalCell = h("td", {}, values.proposal ? proposalText(values.proposal) : t("exam.gradebook.noEntries"));
     const gradeCell = h("td", { class: "sl-exam-grade" });
+    const gradeRow = h("tr", {}, h("td", { "data-sticky": "0" }, t("exam.gradebook.actualGrade")), gradeCell);
     const showGrade = (current) => {
       const grade = current.effective === null ? "–" : String(current.effective);
       gradeCell.textContent = current.override !== null ? t("exam.gradebook.overridden", { grade }) : grade;
+      setTone(gradeRow, gradeTone(current.effective));
     };
     showGrade(values);
 
@@ -862,10 +869,19 @@ class GradebookStudent extends ExamElement {
           h(
             "tbody",
             {},
-            course.categoriesInUse.map((category) => h("tr", {}, h("td", { "data-sticky": "0" }, t("exam.gradebook.categoryWeight", { category: categoryLabels[category], weight: course.weights[category] })), categoryCell(values.categories[category]))),
-            semester === "ss" ? h("tr", {}, h("td", { "data-sticky": "0" }, t("exam.gradebook.winterShare", { share: course.winterShare })), h("td", {}, winterText(values.winter))) : null,
-            h("tr", {}, h("td", { "data-sticky": "0" }, t("exam.gradebook.proposal")), proposalCell),
-            h("tr", {}, h("td", { "data-sticky": "0" }, t("exam.gradebook.actualGrade")), gradeCell)
+            course.categoriesInUse.map((category) =>
+              h(
+                "tr",
+                { "data-tone": gradeTone(values.categories[category]?.grade) },
+                h("td", { "data-sticky": "0" }, t("exam.gradebook.categoryWeight", { category: categoryLabels[category], weight: course.weights[category] })),
+                categoryCell(values.categories[category])
+              )
+            ),
+            semester === "ss"
+              ? h("tr", { "data-tone": gradeTone(values.winter?.grade) }, h("td", { "data-sticky": "0" }, t("exam.gradebook.winterShare", { share: course.winterShare })), h("td", {}, winterText(values.winter)))
+              : null,
+            h("tr", { "data-tone": gradeTone(values.proposal?.grade) }, h("td", { "data-sticky": "0" }, t("exam.gradebook.proposal")), proposalCell),
+            gradeRow
           )
         )
       ),
@@ -934,7 +950,7 @@ function resultsTable(entries) {
         resultRows(entries).map((row) =>
           h(
             "tr",
-            { class: row.mark ? "sl-exam-project-mark" : null },
+            { class: row.mark ? "sl-exam-project-mark" : null, "data-tone": row.mark ? null : gradeTone(row.grade) },
             h("td", { "data-sticky": "0" }, row.name),
             h("td", {}, displayDate(row.date)),
             row.mark ? h("td", { class: "sl-exam-quiet" }, row.note) : h("td", {}, categoryLabels[row.category] ?? row.category),
@@ -976,7 +992,13 @@ class ScaleView extends ExamElement {
     const table = h(
       "table",
       { class: "sl-exam-table sl-exam-scale" },
-      h("tbody", {}, Object.entries(inputs).map(([grade, input]) => h("tr", {}, h("td", {}, t("exam.gradebook.gradeFrom", { grade })), h("td", {}, input, " %"))), h("tr", {}, h("td", {}, t("exam.gradebook.gradeFive")), h("td", {}, t("exam.gradebook.belowThat"))))
+      h(
+        "tbody",
+        {},
+        // The scale is the legend of the grade colours, independent of its thresholds.
+        Object.entries(inputs).map(([grade, input]) => h("tr", { "data-grade": grade, "data-tone": gradeTone(grade) }, h("td", {}, t("exam.gradebook.gradeFrom", { grade })), h("td", {}, input, " %"))),
+        h("tr", { "data-grade": "5", "data-tone": gradeTone(5) }, h("td", {}, t("exam.gradebook.gradeFive")), h("td", {}, t("exam.gradebook.belowThat")))
+      )
     );
     // One save for the four fields: their `change` events reach the table.
     saveOnChange(table, {

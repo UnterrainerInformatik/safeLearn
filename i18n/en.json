@@ -704,6 +704,8 @@
       "leftPageWholeMinutes_other": "left {count}×, {minutes} min",
       "leftPage_one": "left {count}×, {seconds} s",
       "leftPage_other": "left {count}×, {seconds} s",
+      "legendSubmitted": "submitted",
+      "legendSuspicious": "suspicious signal",
       "makeupSitting": "make-up sitting",
       "netInFocus": "Net in focus: {time}",
       "neverLeft": "never left",

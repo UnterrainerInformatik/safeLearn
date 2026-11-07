@@ -412,6 +412,7 @@
         "exam/routes-live.js",
         "exam/client/tests.js",
         "exam/client/test-timing.js",
+        "exam/client/row-tone.js",
         "exam/client/attempt.js",
         "exam/client/live.js",
         "exam/migrations/006-online-tests.sql",
@@ -553,6 +554,13 @@
       "what": "Where a test stands in the teacher's list of tests, unit by unit, without a browser, on the very file the browser loads: no sitting is later, every sitting over is done, an open sitting is open beside any other, one opening within seven days is soon and one at seven days or more is later, a coming make-up makes a written test soon again and a far one keeps it later, and a planned offline sitting past its time, never started, is soon.",
       "guards": [
         "exam/client/test-timing.js"
+      ],
+      "corpus": []
+    },
+    "test/exam-row-tone.test.js": {
+      "what": "The module's shared row colours unit by unit, without a browser, on the very file the browser loads: grades 1 and 2 are good, 5 bad, 3 and 4 neutral, as numbers and as strings; null, undefined and an empty string are neutral; every state of a test in the list has its tone (open bad, soon warn, later info, done good); and setTone sets data-tone and removes it for neutral.",
+      "guards": [
+        "exam/client/row-tone.js"
       ],
       "corpus": []
     },

@@ -34,6 +34,7 @@
 import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, linkButton, t } from "./frame.js";
 import { candidateMark, candidateNote, displayClass, displayPerson } from "./classes.js";
 import { displayWindow } from "./tests.js";
+import { setTone } from "./row-tone.js";
 
 const stateLabels = {
   scheduled: () => t("exam.live.stateScheduled"),
@@ -104,6 +105,22 @@ function duration(ms) {
 
 /** A writing attempt without a heartbeat for longer than this is shown as such (exam-hidden-page-signals design D3). */
 const silentWarnMs = 20000;
+
+/**
+ * Flags a participant's row with the amber stripe while its suspicious cell
+ * shows a sign, with the signs as the row's tooltip; clears both otherwise.
+ * Nothing to do before the cell is in a row (`row()` calls it once it is).
+ */
+function flagRow(tr, cell) {
+  if (!tr || !cell) return;
+  if (cell.dataset.suspicious === "1") {
+    tr.dataset.flag = "warn";
+    tr.title = `${t("exam.live.columnSuspicious")}: ${[...cell.children].filter((sign) => sign.tagName !== "BR").map((sign) => sign.textContent).join(", ")}`;
+  } else {
+    delete tr.dataset.flag;
+    tr.removeAttribute("title");
+  }
+}
 
 /** The colour of a focus share: above 98 % good, from 70 % a warning, below that bad. */
 function focusLevel(share) {
@@ -206,6 +223,12 @@ class LiveView extends ExamElement {
       { class: "sl-exam sl-exam-live" },
       head,
       this.summary,
+      h(
+        "p",
+        { class: "sl-exam-quiet sl-exam-legend sl-exam-live-legend" },
+        h("span", { class: "sl-exam-legend-item", "data-tone": "good" }, t("exam.live.legendSubmitted")),
+        h("span", { class: "sl-exam-legend-item", "data-flag": "warn" }, t("exam.live.legendSuspicious"))
+      ),
       h(
         "table",
         { class: "sl-exam-table sl-exam-live-table" },
@@ -498,6 +521,9 @@ class LiveView extends ExamElement {
       ),
       h("td", {}, release, release && remove ? " " : null, remove)
     );
+    // A submitted row is green; the suspicious cell was filled before the row existed, so its flag follows here.
+    setTone(tr, participant.status === "submitted" ? "good" : null);
+    flagRow(tr, tr.querySelector(".sl-exam-live-suspicious"));
     this.rows.set(username, tr);
     return tr;
   }
@@ -615,6 +641,7 @@ class LiveView extends ExamElement {
     }
     cell.dataset.suspicious = signs.length > 0 ? "1" : "0";
     cell.replaceChildren(...signs.flatMap((sign, index) => (index === 0 ? [sign] : [h("br", {}), sign])));
+    flagRow(cell.closest("tr"), cell);
   }
 
   /** Puts a changed participant in place of their row. */

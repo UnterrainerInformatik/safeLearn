@@ -1043,94 +1043,91 @@ a.sl-exam-button.sl-exam-open:hover,
   list-style: none;
 }
 
-/* Where a test stands in the list (`data-timing`): open right now, coming up
-   within seven days, later, or done. Each row gets its colour and a stripe on its left
-   edge; the marked row's blue background still wins over the colour, the
-   stripe stays. Never the only carrier: the row's title and the legend
-   say it in words. */
-.sl-exam-tests {
-  --sl-exam-timing-open: #c0392b;
-  --sl-exam-timing-open-bg: #fbe3e0;
-  --sl-exam-timing-soon: #c77c00;
-  --sl-exam-timing-soon-bg: #fdf0d5;
-  --sl-exam-timing-later: #8a9bb0;
-  --sl-exam-timing-later-bg: #eef2f7;
-  --sl-exam-timing-done: #5f9b6a;
-  --sl-exam-timing-done-bg: #edf5ee;
+/* The module's row colours (`exam-ui-conventions`, `exam/client/row-tone.js`):
+   a row with `data-tone` gets a tint across the row and a stripe of the same
+   hue on its left edge; `data-flag="warn"` draws the amber stripe only, over
+   any tone's stripe. The tint is opaque and covers the sticky cells; the
+   marked row's highlight wins over it, the stripe stays; a Matura
+   candidate's cell keeps its own background. Never the only carrier: the
+   row shows its value, a tooltip or a legend says it in words. */
+#markdown-content {
+  --sl-exam-tone-good: #5f9b6a;
+  --sl-exam-tone-good-bg: #edf5ee;
+  --sl-exam-tone-bad: #c0392b;
+  --sl-exam-tone-bad-bg: #fbe3e0;
+  --sl-exam-tone-warn: #c77c00;
+  --sl-exam-tone-warn-bg: #fdf0d5;
+  --sl-exam-tone-info: #8a9bb0;
+  --sl-exam-tone-info-bg: #eef2f7;
 }
 
-#markdown-content.dark-mode .sl-exam-tests {
-  --sl-exam-timing-open: #ef6b5b;
-  --sl-exam-timing-open-bg: #4a1f1b;
-  --sl-exam-timing-soon: #f0a830;
-  --sl-exam-timing-soon-bg: #4a3510;
-  --sl-exam-timing-later: #6f8299;
-  --sl-exam-timing-later-bg: #262d36;
-  --sl-exam-timing-done: #6fbf7d;
-  --sl-exam-timing-done-bg: #1f3524;
+#markdown-content.dark-mode {
+  --sl-exam-tone-good: #6fbf7d;
+  --sl-exam-tone-good-bg: #1f3524;
+  --sl-exam-tone-bad: #ef6b5b;
+  --sl-exam-tone-bad-bg: #4a1f1b;
+  --sl-exam-tone-warn: #f0a830;
+  --sl-exam-tone-warn-bg: #4a3510;
+  --sl-exam-tone-info: #6f8299;
+  --sl-exam-tone-info-bg: #262d36;
 }
 
-.sl-exam-tests tr[data-timing] > td:first-child {
+#markdown-content [data-tone="good"] {
+  --sl-exam-tone: var(--sl-exam-tone-good);
+  --sl-exam-tone-bg: var(--sl-exam-tone-good-bg);
+}
+
+#markdown-content [data-tone="bad"] {
+  --sl-exam-tone: var(--sl-exam-tone-bad);
+  --sl-exam-tone-bg: var(--sl-exam-tone-bad-bg);
+}
+
+#markdown-content [data-tone="warn"] {
+  --sl-exam-tone: var(--sl-exam-tone-warn);
+  --sl-exam-tone-bg: var(--sl-exam-tone-warn-bg);
+}
+
+#markdown-content [data-tone="info"] {
+  --sl-exam-tone: var(--sl-exam-tone-info);
+  --sl-exam-tone-bg: var(--sl-exam-tone-info-bg);
+}
+
+#markdown-content .sl-exam-table tr[data-tone] > td:first-child,
+#markdown-content .sl-exam-table tr[data-flag="warn"] > td:first-child {
   padding-left: 12px;
 }
 
-.sl-exam-tests tr[data-timing="open"] > td:first-child {
-  box-shadow: inset 5px 0 0 var(--sl-exam-timing-open);
+#markdown-content .sl-exam-table tr[data-tone] > td:first-child {
+  box-shadow: inset 5px 0 0 var(--sl-exam-tone);
 }
 
-.sl-exam-tests tr[data-timing="soon"] > td:first-child {
-  box-shadow: inset 5px 0 0 var(--sl-exam-timing-soon);
+/* Above `#markdown-content.dark-mode .sl-exam-sticky` in specificity. */
+#markdown-content .sl-exam-table tr[data-tone]:not(.is-marked) > td:not(.sl-exam-participant) {
+  background-color: var(--sl-exam-tone-bg);
 }
 
-.sl-exam-tests tr[data-timing="later"] > td:first-child {
-  box-shadow: inset 5px 0 0 var(--sl-exam-timing-later);
+#markdown-content .sl-exam-table tr[data-flag="warn"] > td:first-child {
+  box-shadow: inset 5px 0 0 var(--sl-exam-tone-warn);
 }
 
-.sl-exam-tests tr[data-timing="done"] > td:first-child {
-  box-shadow: inset 5px 0 0 var(--sl-exam-timing-done);
-}
-
-.sl-exam-tests tr[data-timing="open"]:not(.is-marked) > td {
-  background-color: var(--sl-exam-timing-open-bg);
-}
-
-.sl-exam-tests tr[data-timing="soon"]:not(.is-marked) > td {
-  background-color: var(--sl-exam-timing-soon-bg);
-}
-
-.sl-exam-tests tr[data-timing="later"]:not(.is-marked) > td {
-  background-color: var(--sl-exam-timing-later-bg);
-}
-
-.sl-exam-tests tr[data-timing="done"]:not(.is-marked) > td {
-  background-color: var(--sl-exam-timing-done-bg);
-}
-
-.sl-exam-tests-legend {
+/* A legend of the row colours, where the row does not show its value. */
+.sl-exam-legend {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 16px;
 }
 
-.sl-exam-tests-legend-item {
+.sl-exam-legend-item {
   padding: 1px 8px;
-  border-left: 5px solid var(--sl-exam-timing-later);
-  background-color: var(--sl-exam-timing-later-bg);
 }
 
-.sl-exam-tests-legend-item[data-timing="open"] {
-  border-left-color: var(--sl-exam-timing-open);
-  background-color: var(--sl-exam-timing-open-bg);
+.sl-exam-legend-item[data-tone] {
+  border-left: 5px solid var(--sl-exam-tone);
+  background-color: var(--sl-exam-tone-bg);
 }
 
-.sl-exam-tests-legend-item[data-timing="soon"] {
-  border-left-color: var(--sl-exam-timing-soon);
-  background-color: var(--sl-exam-timing-soon-bg);
-}
-
-.sl-exam-tests-legend-item[data-timing="done"] {
-  border-left-color: var(--sl-exam-timing-done);
-  background-color: var(--sl-exam-timing-done-bg);
+.sl-exam-legend-item[data-flag="warn"] {
+  border-left: 5px solid var(--sl-exam-tone-warn);
 }
 
 .sl-exam-test-delete[data-armed="1"],
@@ -1312,10 +1309,6 @@ a.sl-exam-button.sl-exam-open:hover,
 }
 
 /* The live view of a sitting. */
-
-.sl-exam-live-table tr[data-status="submitted"] {
-  opacity: 0.7;
-}
 
 .sl-exam-live-table tr[data-status="writing"] .sl-exam-live-status {
   font-weight: 600;

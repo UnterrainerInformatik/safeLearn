@@ -28,6 +28,7 @@ import { openCreatorOf } from "./bar.js";
 import { defaultPeriods, matchWindow, nextWeekday, periodTimes, viennaInstant, viennaLocal, windowFor } from "./periods.js";
 import { pickHandout } from "./handout-picker.js";
 import { testTiming } from "./test-timing.js";
+import { timingTone } from "./row-tone.js";
 
 const stateLabels = {
   scheduled: () => t("exam.tests.stateScheduled"),
@@ -91,8 +92,10 @@ const timingLabels = {
 function timingLegend() {
   return h(
     "p",
-    { class: "sl-exam-quiet sl-exam-tests-legend" },
-    ["open", "soon", "later", "done"].map((timing) => h("span", { class: "sl-exam-tests-legend-item", "data-timing": timing }, timingLabels[timing]()))
+    { class: "sl-exam-quiet sl-exam-legend" },
+    ["open", "soon", "later", "done"].map((timing) =>
+      h("span", { class: "sl-exam-legend-item", "data-timing": timing, "data-tone": timingTone[timing] }, timingLabels[timing]())
+    )
   );
 }
 
@@ -161,7 +164,7 @@ class TestList extends ExamElement {
                   const timing = testTiming(test);
                   return h(
                     "tr",
-                    { "data-test": String(test.id), "data-kind": test.kind, "data-timing": timing, title: timingLabels[timing]() },
+                    { "data-test": String(test.id), "data-kind": test.kind, "data-timing": timing, "data-tone": timingTone[timing], title: timingLabels[timing]() },
                     h(
                       "td",
                       {},
