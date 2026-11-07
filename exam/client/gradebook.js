@@ -71,8 +71,9 @@ function parseNumber(text) {
   return value === null || value < 0 ? Number.NaN : value;
 }
 
-/** A result as it was entered: "17/24", "75 %", "+", "−" or "grade 2". */
+/** A result as it was entered: "17/24", "75 %", "+", "−" or "grade 2"; a dash for a cell holding only a note. */
 function entryResult(entry) {
+  if (entry.value === null) return "–";
   if (isMark(entry)) return entry.value === 1 ? "+" : "−";
   if (isGraded(entry)) return t("exam.gradebook.gradeValue", { grade: entry.grade });
   if (entry.maxPoints !== null) return `${format.number(entry.points)}/${format.number(entry.maxPoints)}`;
@@ -198,6 +199,62 @@ function readCell(column, text) {
   return { body: column.maxPoints !== null ? { points: value } : { percent: value } };
 }
 
+/**
+ * Makes the column `key` the sheet's active one, the one showing its note
+ * fields, and closes the one that was (gradebook-result-notes D5); null closes
+ * it. Only classes change, so focus, fields in flight and scrolling stay.
+ */
+function openNotes(table, key) {
+  const was = table.dataset.noteOpen ?? null;
+  if (was === key) return;
+  if (was !== null) for (const cell of table.querySelectorAll(`[data-column="${was}"]`)) cell.classList.remove("is-note-open");
+  if (key === null) delete table.dataset.noteOpen;
+  else {
+    table.dataset.noteOpen = key;
+    for (const cell of table.querySelectorAll(`[data-column="${key}"]`)) cell.classList.add("is-note-open");
+  }
+}
+
+/** Puts the focus into a note field, opening its column first, with the cursor at its `caret` end. */
+function focusNote(field, caret = "end") {
+  const cell = field.closest("td[data-column]");
+  openNotes(field.closest("table"), cell.dataset.column);
+  field.focus();
+  const at = caret === "start" ? 0 : field.value.length;
+  field.setSelectionRange(at, at);
+}
+
+/** The most lines a focused note field grows to; more scroll inside it. */
+const noteLines = 6;
+
+/**
+ * Lets a note field grow with its text while focused, up to `noteLines`
+ * lines, where the browser cannot (`field-sizing: content`): the height is
+ * set from the text and dropped again on leaving.
+ */
+function growNote(field) {
+  if (typeof CSS !== "undefined" && CSS.supports?.("field-sizing", "content")) return;
+  const fit = () => {
+    field.style.height = "auto";
+    const line = parseFloat(getComputedStyle(field).lineHeight) || 18;
+    field.style.height = `${Math.min(field.scrollHeight, line * noteLines + 8)}px`;
+  };
+  field.addEventListener("focus", fit);
+  field.addEventListener("input", fit);
+  field.addEventListener("blur", () => {
+    field.style.height = "";
+  });
+}
+
+/** What a column's delete asks before it goes: its results, its notes, both, or neither. */
+function deleteColumnArmed(column) {
+  const notes = column.notes ?? 0;
+  if (column.results > 0 && notes > 0) return t("exam.gradebook.deleteColumnResultsNotesArmed", { results: column.results, count: notes });
+  if (notes > 0) return t("exam.gradebook.deleteColumnNotesArmed", { count: notes });
+  if (column.results > 0) return t("exam.gradebook.deleteColumnArmed", { count: column.results });
+  return t("exam.gradebook.deleteEmptyColumnArmed");
+}
+
 class GradebookView extends ExamElement {
   /** The course's id: given directly, or looked up by class and subject. */
   async courseId() {
@@ -259,7 +316,8 @@ class GradebookView extends ExamElement {
         { class: "sl-exam-quiet" },
         t("exam.gradebook.hintSaving"),
         " ",
-        t("exam.gradebook.hintArrows")
+        t("exam.gradebook.hintArrows"),
+        open ? [" ", t("exam.gradebook.hintNotes")] : null
       ),
       overview.students.length
         ? this.sheet(overview, groups, overview.students, open)
@@ -340,7 +398,15 @@ class GradebookView extends ExamElement {
       rows.map((row, rowIndex) => this.studentRow(overview, groups, ordered, row, rowIndex, editable, toggle))
     );
     const table = h("table", { class: "sl-exam-table sl-exam-sheet sl-exam-gradebook", "data-columns": String(ordered.length) }, h("thead", {}, headRow, columnRow, projectRow), body);
-    if (editable) table.addEventListener("keydown", (event) => this.arrowKey(table, event));
+    if (editable) {
+      table.addEventListener("keydown", (event) => this.arrowKey(table, event));
+      // The active column: the one holding the focus opens its note fields,
+      // by a class and without a redraw (gradebook-result-notes D5).
+      table.addEventListener("focusin", (event) => openNotes(table, event.target.closest("td[data-column]")?.dataset.column ?? null));
+      table.addEventListener("focusout", (event) => {
+        if (!table.contains(event.relatedTarget)) openNotes(table, null);
+      });
+    }
     return scrollingTable(table);
   }
 
@@ -543,12 +609,40 @@ class GradebookView extends ExamElement {
     return toggle;
   }
 
-  /** A student's field in one column, saved as it changes; read-only text for someone who left. */
+  /**
+   * A student's field in one column, saved as it changes, with the cell's note
+   * field beside it - shown only while the column is the active one - and the
+   * note's mark while it holds one (gradebook-result-notes D5). Read-only text
+   * for someone who left. An online test's result is the attempt's, shown as
+   * text; its note is the one thing set there, and a click on the cell opens it.
+   */
   resultCell(course, column, columnIndex, row, rowIndex, editable, show) {
     const result = row.results[column.id] ?? null;
-    // An online test's result is the attempt's; the sheet shows it as text.
-    if (column.readOnly) return h("td", { class: "sl-exam-online-result", "data-column": String(column.id), "data-student": row.username }, cellText(column, result));
-    if (!editable) return h("td", {}, cellText(column, result));
+    const noted = row.notes?.[column.id] ?? null;
+    if (!editable) {
+      const mark = noted === null ? null : h("span", { class: "sl-exam-note-mark", title: noted, "aria-label": noted });
+      if (column.readOnly) return h("td", { class: mark ? "sl-exam-online-result sl-exam-noted-cell" : "sl-exam-online-result", "data-column": String(column.id), "data-student": row.username }, cellText(column, result), mark);
+      return h("td", { class: mark ? "sl-exam-noted-cell" : null }, cellText(column, result), mark);
+    }
+    const note = this.noteField(course, column, columnIndex, row, rowIndex, noted);
+    if (column.readOnly) {
+      const cell = h(
+        "td",
+        { class: "sl-exam-online-result sl-exam-noted-cell", "data-column": String(column.id), "data-student": row.username },
+        h("span", { class: "sl-exam-online-text" }, cellText(column, result)),
+        note.mark,
+        note.field
+      );
+      // The press itself moves no focus: closing the column open so far would
+      // shift the sheet under the pointer before the click arrives.
+      cell.addEventListener("mousedown", (event) => {
+        if (event.target !== note.field) event.preventDefault();
+      });
+      cell.addEventListener("click", (event) => {
+        if (event.target !== note.field) focusNote(note.field);
+      });
+      return cell;
+    }
     const mark = isMark(column);
     const graded = isGraded(column);
     let stored = result;
@@ -589,19 +683,73 @@ class GradebookView extends ExamElement {
         field.saveNow();
       });
     }
-    return h("td", {}, field);
+    return h("td", { class: "sl-exam-noted-cell", "data-column": String(column.id) }, field, note.mark, note.field);
+  }
+
+  /**
+   * A cell's note field and its mark. The field is saved as it changes, an
+   * emptied one removing the note; the mark shows while the cell holds a note,
+   * with the note as its tooltip, and a click on it opens the note field. It
+   * stays out of Tab order: an open column's note fields are reached anyway.
+   */
+  noteField(course, column, columnIndex, row, rowIndex, noted) {
+    const label = { person: displayPerson(row), column: column.name };
+    const field = h("textarea", {
+      class: "sl-exam-note",
+      rows: "1",
+      "data-part": "note",
+      "data-row": String(rowIndex),
+      "data-col": String(columnIndex),
+      "data-student": row.username,
+      "aria-label": t("exam.gradebook.noteFor", label),
+    });
+    field.value = noted ?? "";
+    const mark = h("button", {
+      type: "button",
+      class: "sl-exam-note-mark",
+      tabindex: "-1",
+      hidden: noted === null,
+      title: noted ?? "",
+      "aria-label": t("exam.gradebook.noteMark", label),
+    });
+    // As for an online test's cell: no focus on the press, so the column opens on the click.
+    mark.addEventListener("mousedown", (event) => event.preventDefault());
+    mark.addEventListener("click", (event) => {
+      event.stopPropagation();
+      focusNote(field);
+    });
+    const path = `/courses/${course.id}/notes/${encodeURIComponent(String(column.id))}/${encodeURIComponent(row.username)}`;
+    saveOnChange(field, {
+      save: (text) => examApi(path, { method: "PUT", body: { text } }),
+      onSaved: (answer) => {
+        mark.hidden = !answer?.note;
+        mark.title = answer?.note ?? "";
+      },
+    });
+    growNote(field);
+    return { field, mark };
   }
 
   /**
    * The arrow keys between result fields (design.md, D9): up and down along a
    * column, left and right along a row - but only with the cursor at the
    * value's end or start, so they still move the cursor inside a value. The
-   * focus leaving a field fires its `change`, which saves it.
+   * focus leaving a field fires its `change`, which saves it. Enter in a result
+   * field moves down like the down arrow.
+   *
+   * In the active column each cell has a second position, its note field
+   * (gradebook-result-notes D6): right from the result goes into it, right from
+   * it to the next column's result, left back the same way. Up and down move
+   * between the column's note fields, but only from the note's first or last
+   * line. Enter in a note is the textarea's own: a new line.
    */
   arrowKey(table, event) {
     const field = event.target;
-    if (!(field instanceof HTMLInputElement) || !field.classList.contains("sl-exam-cell")) return;
+    const note = field instanceof HTMLTextAreaElement && field.classList.contains("sl-exam-note");
+    if (!note && !(field instanceof HTMLInputElement && field.classList.contains("sl-exam-cell"))) return;
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (note && event.key === "Enter") return;
+    const key = event.key === "Enter" ? "ArrowDown" : event.key;
     const row = Number(field.dataset.row);
     const col = Number(field.dataset.col);
     const { selectionStart: start, selectionEnd: end, value } = field;
@@ -609,25 +757,56 @@ class GradebookView extends ExamElement {
     // and a + or − field, which is never edited character by character, stand
     // at both edges.
     const whole = field.classList.contains("sl-exam-mark") || (start === 0 && end === value.length);
-    let target;
-    if (event.key === "ArrowDown") target = [row + 1, col];
-    else if (event.key === "ArrowUp") target = [row - 1, col];
-    else if (event.key === "ArrowRight" && (whole || (start === end && end === value.length))) target = [row, col + 1];
-    else if (event.key === "ArrowLeft" && (whole || (start === end && start === 0))) target = [row, col - 1];
-    else return;
-    // Nothing is stepped or moved inside the field; at the sheet's edge the focus stays.
-    event.preventDefault();
-    // An online test's column has no fields; left and right pass over it.
-    const step = target[1] - col;
-    const columns = Number(table.dataset.columns);
-    let next = table.querySelector(`input.sl-exam-cell[data-row="${target[0]}"][data-col="${target[1]}"]`);
-    while (!next && step !== 0 && target[1] >= 0 && target[1] < columns) {
-      target[1] += step;
-      next = table.querySelector(`input.sl-exam-cell[data-row="${target[0]}"][data-col="${target[1]}"]`);
+    const atEnd = whole || (start === end && end === value.length);
+    const atStart = whole || (start === end && start === 0);
+    const resultAt = (r, c) => table.querySelector(`input.sl-exam-cell[data-row="${r}"][data-col="${c}"]`);
+    const noteAt = (r, c) => table.querySelector(`textarea.sl-exam-note[data-row="${r}"][data-col="${c}"]`);
+    let next = null;
+    let caret = "end";
+    if (note && (key === "ArrowUp" || key === "ArrowDown")) {
+      // Only from the first line up, and from the last line down.
+      const edge = key === "ArrowUp" ? whole || !value.slice(0, start).includes("\n") : whole || !value.slice(end).includes("\n");
+      if (!edge) return;
+      event.preventDefault();
+      next = noteAt(key === "ArrowUp" ? row - 1 : row + 1, col);
+      caret = key === "ArrowUp" ? "end" : "start";
+    } else if (key === "ArrowDown" || key === "ArrowUp") {
+      event.preventDefault();
+      next = resultAt(key === "ArrowUp" ? row - 1 : row + 1, col);
+    } else if (key === "ArrowRight" && atEnd) {
+      event.preventDefault();
+      next = note ? this.alongRow(table, row, col, 1) : noteAt(row, col);
+    } else if (key === "ArrowLeft" && atStart) {
+      event.preventDefault();
+      // From a note back to its own result; an online test's cell has none.
+      next = (note ? resultAt(row, col) : null) ?? this.alongRow(table, row, col, -1);
+    } else {
+      return;
     }
-    if (!next) return;
+    // At the sheet's edge the focus stays; an Enter there still saves the field.
+    if (!next) {
+      if (event.key === "Enter") field.saveNow?.();
+      return;
+    }
+    if (next instanceof HTMLTextAreaElement) {
+      focusNote(next, caret);
+      return;
+    }
     next.focus();
     next.select();
+  }
+
+  /**
+   * The result field `step` columns along `row` from `col`, passing over the
+   * online tests' columns, which have none; null at the sheet's edge.
+   */
+  alongRow(table, row, col, step) {
+    const columns = Number(table.dataset.columns);
+    for (let target = col + step; target >= 0 && target < columns; target += step) {
+      const next = table.querySelector(`input.sl-exam-cell[data-row="${row}"][data-col="${target}"]`);
+      if (next) return next;
+    }
+    return null;
   }
 
   /**
@@ -728,7 +907,7 @@ class GradebookView extends ExamElement {
               : confirmButton({
                   class: "sl-exam-delete-column",
                   label: t("exam.gradebook.deleteColumn"),
-                  armed: column.results > 0 ? t("exam.gradebook.deleteColumnArmed", { count: column.results }) : t("exam.gradebook.deleteEmptyColumnArmed"),
+                  armed: deleteColumnArmed(column),
                   action: remove,
                 })
         ),
@@ -772,13 +951,17 @@ class GradebookView extends ExamElement {
   /** A project's delete, which takes its mark columns and every result in the project with it. */
   deleteProjectButton(project, marks, remove) {
     const results = project.results + marks.reduce((sum, mark) => sum + mark.results, 0);
+    // A project's note count holds its mark columns' notes already.
+    const notes = project.notes ?? 0;
     return confirmButton({
       class: "sl-exam-delete-column sl-exam-delete-project",
       label: t("exam.gradebook.deleteProject"),
       armed:
-        results > 0 || marks.length > 0
-          ? t("exam.gradebook.deleteProjectArmed", { columns: marks.length, count: results })
-          : t("exam.gradebook.deleteEmptyProjectArmed"),
+        notes > 0
+          ? t("exam.gradebook.deleteProjectNotesArmed", { columns: marks.length, count: results, notes })
+          : results > 0 || marks.length > 0
+            ? t("exam.gradebook.deleteProjectArmed", { columns: marks.length, count: results })
+            : t("exam.gradebook.deleteEmptyProjectArmed"),
       action: remove,
     });
   }
@@ -858,6 +1041,8 @@ class GradebookStudent extends ExamElement {
     saveOnChange(visible, { value: () => visible.checked, save: (checked) => put({ commentVisible: checked }) });
 
     const own = entries.filter((entry) => entry.semester === semester);
+    // A cell holding only a note is listed, but is no result.
+    const results = own.filter((entry) => entry.value !== null).length;
     return h(
       "section",
       {},
@@ -888,7 +1073,7 @@ class GradebookStudent extends ExamElement {
       h("p", {}, h("label", {}, `${t("exam.gradebook.teacherOverride")} `, override)),
       h("p", {}, h("label", {}, t("exam.gradebook.comment"), h("br"), comment)),
       h("p", {}, h("label", {}, visible, ` ${t("exam.gradebook.commentVisible")}`)),
-      h("h3", {}, t("exam.gradebook.resultsHeading", { count: own.length })),
+      h("h3", {}, t("exam.gradebook.resultsHeading", { count: results })),
       own.length ? resultsTable(own) : h("p", { class: "sl-exam-quiet" }, t("exam.gradebook.noSemesterResults")),
       h("p", {}, linkButton({ label: t("exam.gradebook.enterResults"), href: `/exam/courses/${course.id}/gradebook?semester=${semester}`, class: "sl-exam-enter-results" }))
     );
@@ -914,7 +1099,7 @@ function resultRows(entries) {
       rows.push(...marksOf(entry.projectId).map(markRow));
       continue;
     }
-    rows.push({ name: entry.name, date: entry.date, category: entry.category, result: entryResult(entry), grade: entry.grade === null ? "" : String(entry.grade) });
+    rows.push({ name: entry.name, date: entry.date, category: entry.category, result: entryResult(entry), grade: entry.grade === null ? "" : String(entry.grade), cellNote: entry.note ?? null });
     if (entry.kind === "project") rows.push(...marksOf(entry.columnId).map(markRow));
   }
   return rows;
@@ -922,10 +1107,14 @@ function resultRows(entries) {
 
 /** A project's mark as a row of the results table. */
 function markRow(entry) {
-  return { name: entry.name, date: entry.date, note: t("exam.gradebook.projectMarksNote"), result: entryResult(entry), grade: "", mark: true };
+  return { name: entry.name, date: entry.date, note: t("exam.gradebook.projectMarksNote"), result: entryResult(entry), grade: "", mark: true, cellNote: entry.note ?? null };
 }
 
-/** Results by column, read-only: the column's name and date, the category, the result and its grade. */
+/**
+ * Results by column, read-only: the column's name and date, the category, the
+ * result and its grade, and the cell's note on a line of its own below,
+ * with its line breaks (gradebook-result-notes D7).
+ */
 function resultsTable(entries) {
   return scrollingTable(
     h(
@@ -947,7 +1136,7 @@ function resultsTable(entries) {
       h(
         "tbody",
         {},
-        resultRows(entries).map((row) =>
+        resultRows(entries).map((row) => [
           h(
             "tr",
             { class: row.mark ? "sl-exam-project-mark" : null, "data-tone": row.mark ? null : gradeTone(row.grade) },
@@ -956,8 +1145,15 @@ function resultsTable(entries) {
             row.mark ? h("td", { class: "sl-exam-quiet" }, row.note) : h("td", {}, categoryLabels[row.category] ?? row.category),
             h("td", {}, row.result),
             h("td", {}, row.grade)
-          )
-        )
+          ),
+          row.cellNote
+            ? h(
+                "tr",
+                { class: row.mark ? "sl-exam-result-note-row sl-exam-project-mark" : "sl-exam-result-note-row" },
+                h("td", { colspan: "5" }, h("p", { class: "sl-exam-result-note", "aria-label": t("exam.gradebook.note") }, row.cellNote))
+              )
+            : null,
+        ])
       )
     )
   );

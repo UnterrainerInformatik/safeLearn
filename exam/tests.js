@@ -329,9 +329,13 @@ export function deleteTest(db, id, { admin = false } = {}) {
         throw new ConflictError("exam.errors.tests.offlineHasResults");
       }
       db.prepare("UPDATE test SET assessment_id = NULL WHERE id = ?").run(id);
+      // Notes alone keep no test alive; they go with its column (gradebook-result-notes D4).
+      db.prepare("DELETE FROM result_note WHERE assessment_id = ?").run(test.assessment_id);
       db.prepare("DELETE FROM assessment WHERE id = ?").run(test.assessment_id);
     }
-    // An attempt's questions, tokens, answers and refused browsers go with it.
+    // An attempt's questions, tokens, answers and refused browsers go with it,
+    // and so do the notes in the test's column.
+    db.prepare("DELETE FROM result_note WHERE test_id = ?").run(id);
     db.prepare("DELETE FROM attempt WHERE test_id = ?").run(id);
     dropSnapshot(db, id);
     db.prepare("DELETE FROM sitting WHERE test_id = ?").run(id);

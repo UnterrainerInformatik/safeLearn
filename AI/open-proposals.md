@@ -17,3 +17,8 @@ Die Pipeline schreibt `SESSION_SECRET` und den `KEYCLOAK_FILE`-Inhalt (inkl. Cli
 
 ## Hot-Reload-Kanal nennt geänderte gesperrte Files
 Der unauthentifizierte `/hot-reload`-Kanal schickt bei einer Änderung (`type: "page"`) die Liste der geänderten Files an **alle** verbundenen Clients, egal ob sie die Files sehen dürfen. Der Inhalt bleibt geheim, der Pfad nicht: Wird am Vorabend eine unter `@@@ teacher` liegende Testangabe editiert und gesynct, steht z. B. `md/POS/LT1-A.md` im Stream. Aufgefallen beim Explore zu `exam-offline-sittings` (2026-10-25). Zu klären: pro Client nach Sichtbarkeit filtern (der Kanal kennt keine Session) oder nur ein „deine Seite hat sich geändert“ ohne Pfade schicken.
+
+# Online-Tests
+
+## Lehrer-Notizen in der Live-Ansicht
+Gerald, 2026-11-07 (während `gradebook-result-notes`): In der Live-Ansicht eines laufenden Online-Tests soll der Lehrer pro Teilnehmer eine Notiz machen können („Hat, glaub ich, geschummelt … genauer ansehen … evtl. abgeschrieben von xxx“). Anders als die Zellen-Notizen im Sheet ist sie **nur für Lehrer**: Sie taucht nie beim Schüler auf, sondern steht als Anmerkung in der Live-Liste (und vermutlich auch später beim Versuch). Zu klären: gehört sie zum Versuch (`attempt`) oder zur Sitzungsteilnahme (`sitting_participant`), wie sie zur Zellen-Notiz des Tests im Sheet steht (getrennt halten oder dort anzeigen), und dass sie als personenbezogene Freitext-Daten in Retention-Purge und Closed-Year-Triggern mitlaufen muss.

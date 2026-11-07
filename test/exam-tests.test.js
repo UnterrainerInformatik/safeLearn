@@ -17,7 +17,7 @@ import { afterEach, describe, test } from "node:test";
 
 import { addToRoster, ConflictError, createClass, createCourse, createYear, ForbiddenError, InvalidInputError, removeFromRoster } from "../exam/classes.js";
 import { migrate, openDatabase, readMigrations } from "../exam/db.js";
-import { courseOverview, createColumn, readScale, resultsOf, setResult, studentRecord } from "../exam/gradebook.js";
+import { courseOverview, createColumn, readScale, resultsOf, setNote, setResult, studentRecord } from "../exam/gradebook.js";
 import { entryCategory, proposal } from "../exam/grading.js";
 import { getQuestion, listQuestions } from "../exam/pool.js";
 import { NotFoundError } from "../exam/classes.js";
@@ -855,6 +855,29 @@ describe("an admin's corrections of a written test", () => {
     for (const table of ["attempt", "attempt_question", "attempt_token", "response", "sitting", "test_question", "test_answer", "test_image", "question_usage", "test"]) {
       assert.equal(count(db, `SELECT COUNT(*) AS n FROM ${table}`), 0, `${table} is empty`);
     }
+    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+  });
+
+  test("an online test's cell takes a note without an attempt, shown to that student only, and gone with the test", () => {
+    const { db, course, test } = written();
+    const key = `test-${test.id}`;
+    const before = studentRecord(db, course.id, "ben").semesters;
+    // Ben started but never submitted: no result in the column, and a note all the same.
+    assert.deepEqual(setNote(db, course.id, key, "ben", "Ill, make-up on 12 Dec"), { note: "Ill, make-up on 12 Dec" });
+    setNote(db, course.id, key, "anna", "Well done");
+    assert.deepEqual(studentRecord(db, course.id, "ben").semesters, before, "the note moves no proposal");
+    const semester = ["ws", "ss"].find((s) => courseOverview(db, course.id, s).columns.some((c) => c.id === key));
+    const sheet = courseOverview(db, course.id, semester);
+    assert.deepEqual(sheet.students.map((row) => [row.username, row.results[key]?.points ?? null, row.notes[key]]), [
+      ["anna", 3, "Well done"],
+      ["ben", null, "Ill, make-up on 12 Dec"],
+    ]);
+    const own = resultsOf(db, "ben").courses[0].entries;
+    assert.deepEqual(own.map((e) => [e.columnId, e.kind, e.value, e.note]), [[key, "online", null, "Ill, make-up on 12 Dec"]], "the column is shown to ben by its note");
+
+    assert.throws(() => deleteTest(db, test.id), ConflictError, "notes change nothing about who may delete");
+    deleteTest(db, test.id, { admin: true });
+    assert.equal(count(db, "SELECT COUNT(*) AS n FROM result_note"), 0, "the notes go with the test");
     assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
   });
 

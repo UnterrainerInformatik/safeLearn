@@ -142,7 +142,7 @@ function columnMax(value, kind) {
   return value;
 }
 
-function columnFromRow(row, results = 0) {
+function columnFromRow(row, results = 0, notes = 0) {
   return {
     id: row.id,
     courseId: row.course_id,
@@ -152,6 +152,8 @@ function columnFromRow(row, results = 0) {
     date: row.held_on,
     maxPoints: row.max_points,
     results,
+    // How many notes the column holds, for the delete confirmation (gradebook-result-notes D4).
+    notes,
     // A mark column's project, whose group it stands in (design D5).
     projectId: row.project_id ?? null,
     // The offline test this column belongs to, which its header links to (`offline-test`).
@@ -185,8 +187,25 @@ function resultCount(db, id) {
   return db.prepare("SELECT COUNT(*) AS n FROM manual_entry WHERE assessment_id = ?").get(id).n;
 }
 
+/**
+ * Whether the database holds notes yet (migration 016). A database before it
+ * still answers every read, with no notes.
+ */
+function hasNotes(db) {
+  return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'result_note'").get());
+}
+
+/** How many notes a column holds; a project's count includes its mark columns' (design D4). */
+function noteCount(db, row) {
+  if (!hasNotes(db)) return 0;
+  const own = db.prepare("SELECT COUNT(*) AS n FROM result_note WHERE assessment_id = ?").get(row.id).n;
+  if (row.kind !== "project") return own;
+  return own + db.prepare("SELECT COUNT(*) AS n FROM result_note WHERE assessment_id IN (SELECT id FROM assessment WHERE project_id = ?)").get(row.id).n;
+}
+
 export function getColumn(db, id) {
-  return columnFromRow(getColumnRow(db, id), resultCount(db, id));
+  const row = getColumnRow(db, id);
+  return columnFromRow(row, resultCount(db, id), noteCount(db, row));
 }
 
 /**
@@ -219,10 +238,9 @@ export function courseColumns(db, courseId, semester = null) {
   );
   const order = (column) => weightCategories.indexOf(column.category);
   const tests = testsByColumn(db, courseId);
-  const manual = db
-    .prepare("SELECT * FROM assessment WHERE course_id = ? ORDER BY held_on, created_at, id")
-    .all(courseId)
-    .map((row) => columnFromRow({ ...row, test_id: tests.get(row.id) ?? null }, counts.get(row.id) ?? 0));
+  const rows = db.prepare("SELECT * FROM assessment WHERE course_id = ? ORDER BY held_on, created_at, id").all(courseId);
+  const notes = columnNoteCounts(db, courseId, rows);
+  const manual = rows.map((row) => columnFromRow({ ...row, test_id: tests.get(row.id) ?? null }, counts.get(row.id) ?? 0, notes.get(row.id) ?? 0));
   const projectDates = new Map(manual.filter((column) => column.kind === "project").map((column) => [column.id, column.date]));
   const sorted = [...onlineColumns(db, courseId), ...manual]
     .filter((column) => kindInUse(course, column.kind))
@@ -232,6 +250,30 @@ export function courseColumns(db, courseId, semester = null) {
   return sorted
     .filter((column) => column.kind !== "projectmark")
     .flatMap((column) => (column.kind === "project" ? [...marks.filter((mark) => mark.projectId === column.id), column] : [column]));
+}
+
+/**
+ * How many notes each manual column of a course holds, by column id; a
+ * project's count includes its mark columns', as its delete takes them too.
+ */
+function columnNoteCounts(db, courseId, rows) {
+  if (!hasNotes(db)) return new Map();
+  const counts = new Map(
+    db
+      .prepare(
+        `SELECT n.assessment_id AS id, COUNT(*) AS n FROM result_note n JOIN assessment a ON a.id = n.assessment_id
+         WHERE a.course_id = ? GROUP BY n.assessment_id`
+      )
+      .all(courseId)
+      .map((row) => [row.id, row.n])
+  );
+  const totals = new Map(counts);
+  for (const row of rows) {
+    if (row.project_id !== null && row.project_id !== undefined && counts.has(row.id)) {
+      totals.set(row.project_id, (totals.get(row.project_id) ?? 0) + counts.get(row.id));
+    }
+  }
+  return totals;
 }
 
 /**
@@ -328,8 +370,9 @@ export function updateColumn(db, id, input = {}) {
 }
 
 /**
- * Deletes a column and every result in it. A project goes with its mark
- * columns and their results (design D5); `columns` counts the mark columns.
+ * Deletes a column and every result and note in it. A project goes with its
+ * mark columns and their results and notes (design D5); `columns` counts the
+ * mark columns.
  */
 export function deleteColumn(db, id) {
   const row = getColumnRow(db, id);
@@ -337,14 +380,18 @@ export function deleteColumn(db, id) {
   if (row.test_id !== null) throw new ConflictError("exam.errors.gradebook.columnOfTest");
   return inTransaction(db, () => {
     let results = 0;
+    let notes = 0;
     let columns = 0;
     if (row.kind === "project") {
-      results += db.prepare("DELETE FROM manual_entry WHERE assessment_id IN (SELECT id FROM assessment WHERE project_id = ?)").run(id).changes;
+      const marks = "SELECT id FROM assessment WHERE project_id = ?";
+      results += db.prepare(`DELETE FROM manual_entry WHERE assessment_id IN (${marks})`).run(id).changes;
+      if (hasNotes(db)) notes += db.prepare(`DELETE FROM result_note WHERE assessment_id IN (${marks})`).run(id).changes;
       columns = db.prepare("DELETE FROM assessment WHERE project_id = ?").run(id).changes;
     }
     results += db.prepare("DELETE FROM manual_entry WHERE assessment_id = ?").run(id).changes;
+    if (hasNotes(db)) notes += db.prepare("DELETE FROM result_note WHERE assessment_id = ?").run(id).changes;
     db.prepare("DELETE FROM assessment WHERE id = ?").run(id);
-    return { deleted: id, courseId: row.course_id, results, columns };
+    return { deleted: id, courseId: row.course_id, results, notes, columns };
   });
 }
 
@@ -416,6 +463,142 @@ export function deleteResult(db, columnId, username) {
   const student = requireRosterEntry(db, course, username);
   db.prepare("DELETE FROM manual_entry WHERE assessment_id = ? AND username = ?").run(columnId, student.username);
   return sheetRow(db, course, student.username, semesterOf(semesterDate(db, column), course.year));
+}
+
+// ---------------------------------------------------------------- the notes
+
+/** The longest note, in characters (`gradebook-sheet`). */
+const noteMaxLength = 4000;
+
+/**
+ * A cell's column from the sheet's column id: a number for a manual column of
+ * the course, `test-<id>` for one of its online tests (gradebook-result-notes
+ * design D2). Answers which key of `result_note` it is stored under.
+ */
+function noteColumn(db, courseId, columnKey) {
+  const key = String(columnKey ?? "");
+  const online = /^test-([1-9]\d{0,9})$/.exec(key);
+  if (online) {
+    const test = db.prepare("SELECT * FROM test WHERE id = ?").get(Number(online[1]));
+    if (!test || test.course_id !== courseId || test.kind === "offline") throw new NotFoundError("exam.errors.gradebook.noColumn", { id: key });
+    return { assessmentId: null, testId: test.id };
+  }
+  const id = /^[1-9]\d{0,9}$/.test(key) ? Number(key) : null;
+  const column = id === null ? null : db.prepare("SELECT * FROM assessment WHERE id = ?").get(id);
+  if (!column || column.course_id !== courseId) throw new NotFoundError("exam.errors.gradebook.noColumn", { id: key });
+  return { assessmentId: column.id, testId: null };
+}
+
+/** The note of one cell, or null. */
+function readNote(db, cell, username) {
+  const row =
+    cell.testId === null
+      ? db.prepare("SELECT text FROM result_note WHERE assessment_id = ? AND username = ?").get(cell.assessmentId, username)
+      : db.prepare("SELECT text FROM result_note WHERE test_id = ? AND username = ?").get(cell.testId, username);
+  return row?.text ?? null;
+}
+
+/**
+ * Sets the note of one student's cell, replacing the one there was. The text
+ * is stored as typed, line endings as `\n`; one that is empty or white space
+ * only removes the note, so the sheet can always send what its field holds.
+ * Answers `{ note }`, null once removed: a note moves no proposal, so there is
+ * no row to recompute (design D2).
+ */
+export function setNote(db, courseId, columnKey, username, text) {
+  const course = getCourse(db, courseId);
+  const cell = noteColumn(db, course.id, columnKey);
+  const student = requireRosterEntry(db, course, username);
+  if (text !== null && text !== undefined && typeof text !== "string") throw new InvalidInputError("exam.errors.gradebook.noteText");
+  const normalized = (text ?? "").replace(/\r\n?/g, "\n");
+  if (!normalized.trim()) return deleteNote(db, courseId, columnKey, username);
+  if ([...normalized].length > noteMaxLength) throw new InvalidInputError("exam.errors.gradebook.noteTooLong", { max: noteMaxLength });
+  const stamp = now();
+  if (cell.testId === null) {
+    db.prepare(
+      `INSERT INTO result_note (assessment_id, username, text, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (assessment_id, username) WHERE assessment_id IS NOT NULL DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at`
+    ).run(cell.assessmentId, student.username, normalized, stamp, stamp);
+  } else {
+    db.prepare(
+      `INSERT INTO result_note (test_id, username, text, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (test_id, username) WHERE test_id IS NOT NULL DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at`
+    ).run(cell.testId, student.username, normalized, stamp, stamp);
+  }
+  return { note: readNote(db, cell, student.username) };
+}
+
+/** Removes the note of one student's cell, if there is one. Answers `{ note: null }`. */
+export function deleteNote(db, courseId, columnKey, username) {
+  const course = getCourse(db, courseId);
+  const cell = noteColumn(db, course.id, columnKey);
+  const student = requireRosterEntry(db, course, username);
+  if (cell.testId === null) {
+    db.prepare("DELETE FROM result_note WHERE assessment_id = ? AND username = ?").run(cell.assessmentId, student.username);
+  } else {
+    db.prepare("DELETE FROM result_note WHERE test_id = ? AND username = ?").run(cell.testId, student.username);
+  }
+  return { note: null };
+}
+
+/**
+ * The notes of a course in its columns in use, for one student or for all:
+ * `[{ column, username, text, semesterDate, projectName }]`, where `column` is
+ * the column as `courseColumns` answers it, `semesterDate` the date deciding
+ * its semester and `projectName` a mark column's project's name. A note of a category the course does
+ * not use is left out with its column (design D3).
+ */
+export function courseNotes(db, course, username = null) {
+  if (!hasNotes(db)) return [];
+  const columns = courseColumns(db, course.id);
+  const byKey = new Map(columns.map((column) => [String(column.id), column]));
+  const projects = new Map(columns.filter((column) => column.kind === "project").map((column) => [column.id, column]));
+  const select = `SELECT n.assessment_id, n.test_id, n.username, n.text FROM result_note n
+    LEFT JOIN assessment a ON a.id = n.assessment_id LEFT JOIN test t ON t.id = n.test_id
+    WHERE (a.course_id = ? OR t.course_id = ?)`;
+  const rows =
+    username === null
+      ? db.prepare(`${select} ORDER BY n.id`).all(course.id, course.id)
+      : db.prepare(`${select} AND n.username = ? ORDER BY n.id`).all(course.id, course.id, username);
+  return rows.flatMap((row) => {
+    const column = byKey.get(row.test_id === null ? String(row.assessment_id) : `test-${row.test_id}`);
+    if (!column) return [];
+    const project = projects.get(column.projectId) ?? null;
+    return [{ column, username: row.username, text: row.text, semesterDate: project?.date ?? column.date, projectName: project?.name ?? null }];
+  });
+}
+
+/**
+ * Entries with the notes of their cells: each entry gains `note` (null where
+ * there is none), and a note without an entry becomes an item of its own with
+ * no result, in its column's kind, category, name and date (design D3).
+ * Applied only after the proposals are computed, so a note moves no grade.
+ */
+function withNotes(entries, notes) {
+  const byColumn = new Map(notes.map((note) => [String(note.column.id), note]));
+  const noted = entries.map((entry) => ({ ...entry, note: byColumn.get(String(entry.columnId))?.text ?? null }));
+  const taken = new Set(entries.map((entry) => String(entry.columnId)));
+  const extra = notes
+    .filter((note) => !taken.has(String(note.column.id)))
+    .map(({ column, username, text, semesterDate, projectName }) => ({
+      id: `note-${column.id}`,
+      columnId: column.id,
+      username,
+      kind: column.kind,
+      category: entryCategory[column.kind] ?? null,
+      value: null,
+      points: null,
+      maxPoints: column.maxPoints,
+      grade: null,
+      date: column.date,
+      semesterDate,
+      projectId: column.projectId ?? null,
+      projectName,
+      name: column.name,
+      note: text,
+    }));
+  if (extra.length === 0) return noted;
+  return [...noted, ...extra].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
 /**
@@ -675,12 +858,18 @@ function resultsByColumn(entries, semester, year) {
   );
 }
 
+/** A student's notes by column id, for the columns of `semester`: `{ id: text }`. */
+function notesByColumn(notes, semester, year) {
+  return Object.fromEntries(notes.filter((note) => semesterOf(note.semesterDate, year) === semester).map((note) => [note.column.id, note.text]));
+}
+
 /** One student's row of the sheet, as `courseOverview` answers it. */
-function overviewRow(student, entries, grades, semester, course, scale) {
+function overviewRow(student, entries, grades, semester, course, scale, notes = []) {
   return {
     ...student,
     entries: entries.length,
     results: resultsByColumn(entries, semester, course.year),
+    notes: notesByColumn(notes, semester, course.year),
     ...teacherSemester(entries, grades, student.username, semester, course, scale),
   };
 }
@@ -689,7 +878,8 @@ function overviewRow(student, entries, grades, semester, course, scale) {
 function sheetRow(db, course, username, semester) {
   const scale = readScale(db);
   const student = rosterEntry(db, course, username);
-  return overviewRow(student, courseEntries(db, course, scale, username), courseGrades(db, course.id), semester, course, scale);
+  const notes = courseNotes(db, course, username);
+  return overviewRow(student, courseEntries(db, course, scale, username), courseGrades(db, course.id), semester, course, scale, notes);
 }
 
 /**
@@ -708,8 +898,13 @@ export function courseOverview(db, courseId, semester) {
     if (!byStudent.has(entry.username)) byStudent.set(entry.username, []);
     byStudent.get(entry.username).push(entry);
   }
+  const notesOf = new Map();
+  for (const note of courseNotes(db, course)) {
+    if (!notesOf.has(note.username)) notesOf.set(note.username, []);
+    notesOf.get(note.username).push(note);
+  }
   const rows = rosterOf(db, course.classId).map((student) =>
-    overviewRow(student, byStudent.get(student.username) ?? [], grades, semester, course, scale)
+    overviewRow(student, byStudent.get(student.username) ?? [], grades, semester, course, scale, notesOf.get(student.username) ?? [])
   );
   return {
     course,
@@ -745,7 +940,11 @@ export function studentRecord(db, courseId, username) {
     scale,
     previous: neighbour(order[at - 1]),
     next: neighbour(order[at + 1]),
-    entries: entries.map(({ semesterDate: decides, ...entry }) => ({ ...entry, semester: semesterOf(decides, course.year) })),
+    // Notes join only after the proposals below are computed from `entries` alone (design D3).
+    entries: withNotes(entries, courseNotes(db, course, key)).map(({ semesterDate: decides, ...entry }) => ({
+      ...entry,
+      semester: semesterOf(decides, course.year),
+    })),
     semesters: Object.fromEntries(
       semesters.map((semester) => [semester, teacherSemester(entries, grades, key, semester, course, scale)])
     ),
@@ -814,7 +1013,8 @@ export function resultsOf(db, username, { yearId = null, today = now().slice(0, 
       subject: course.subject,
       className: course.className,
       leftAt: row.left_at,
-      entries: entries.map(({ id, columnId, kind, category, value, points, maxPoints, grade, date, semesterDate: decides, projectId, projectName, name }) => ({
+      // Only this student's notes, by construction; joined after the proposals (design D3).
+      entries: withNotes(entries, courseNotes(db, course, key)).map(({ id, columnId, kind, category, value, points, maxPoints, grade, date, semesterDate: decides, projectId, projectName, name, note }) => ({
         id,
         columnId,
         kind,
@@ -828,6 +1028,7 @@ export function resultsOf(db, username, { yearId = null, today = now().slice(0, 
         projectId,
         projectName,
         name,
+        note,
       })),
       semesters: Object.fromEntries(
         shown.map((semester) => {

@@ -20,3 +20,5 @@ Measured 2026-10-17 while building exam-module P0, across seven full `test/conte
 
 **Why:** a red run with only these two is not evidence against a change.
 **How to apply:** if only these fail, re-run the content suite once before investigating; if one fails reproducibly, compare against HEAD in a `git worktree` (symlink `node_modules`, copy `keycloak.json` and `.env`) before blaming the change. See [[browser-verification]].
+
+- 2026-11-07 (gradebook-result-notes): the same two exam checks (live-view order, handout from its page) red in 3 of 3 `test/exam.test.js` runs again. Also seen once: the offline make-up check fails with `CHECK constraint failed: opens_at < closes_at` in `endSitting`, a same-millisecond timing case; the file alone passes. A HEAD worktree run that day timed out whole suites (180 s) and gave no comparison - the worktree setup is not reliable enough to be the default check.

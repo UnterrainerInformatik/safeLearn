@@ -1,0 +1,29 @@
+## 1. Data
+
+- [x] 1.1 `exam/migrations/016-result-notes.sql`: table `result_note` with the CHECK of exactly one of `assessment_id`/`test_id`, `length(text) BETWEEN 1 AND 4000`, the two partial unique indexes and the username index. Closed-year triggers for insert, update and delete (delete passes during `purge_in_progress`), reaching the year through `assessment → course` or `test → course` (design D1). Comments in the style of `015`
+- [x] 1.2 `exam/gradebook.js`: `setNote`/`deleteNote(db, courseId, columnKey, username, text)`. They resolve `columnKey` (number → `assessment` of the course, `test-<id>` → online test of the course). They require the student on the roster, normalize line endings, treat a text that is empty after trim as a delete, refuse more than 4000 characters (`exam.errors.gradebook.noteTooLong`), upsert, and answer `{ note }` (D2)
+- [x] 1.3 `exam/routes-gradebook.js`: `PUT`/`DELETE /courses/:id/notes/:column/:username`, teacher only like the result routes (D2)
+- [x] 1.4 `exam/gradebook.js`: `courseNotes(db, course, username = null)`. `overviewRow` answers `notes` by column id for the semester's columns (mark columns by their project's date). `studentRecord` and `resultsOf` give each entry its `note` and append note-only items after the proposals are computed, built from the columns in use only (D3)
+- [x] 1.5 `exam/gradebook.js`: `deleteColumn` removes the notes of the column, and of a project's mark columns, in the same transaction. `columnFromRow` answers `notes` beside `results` for the delete confirmation (D4)
+- [x] 1.6 `exam/tests.js` `deleteTest`: removes the test's notes with its attempts, and an offline test's column notes with its column, without making notes block the delete (D4)
+- [x] 1.7 `exam/retention.js`: record kind `notes` in `recordKinds` and its delete in the purge before `manual_entry` (D4)
+- [x] 1.8 `i18n/de.json` / `i18n/en.json` (same keys, BabelEdit): note field label, note mark label, `exam.errors.gradebook.noteTooLong`, the delete confirmation with notes, `exam.retention.kinds.notes`
+
+## 2. Client
+
+- [x] 2.1 `exam/client/gradebook.js` `resultCell`: every editable cell, online-test cells included, gets a hidden `<textarea class="sl-exam-note" rows="1" data-part="note">` with `saveOnChange` against the note route, and a note mark (`tabindex="-1"`, `title` = note) while the cell holds a note, kept current from `onSaved`. A click on the mark, or on an online-test cell, focuses the note field (D5)
+- [x] 2.2 `exam/client/gradebook.js`: the active column. A `focusin` on the table toggles `is-note-open` on every cell and the header of the focused column, and a `focusout` leaving the table closes it. No re-render (D5)
+- [x] 2.3 `exam/client/gradebook.js` `arrowKey`: note fields as a second horizontal position per cell. Right/left between the result and note fields at the text edges. Up/down from a note field only on its first/last line. Enter in a note field is left to the textarea (line break, no move). Enter in a result field moves down like `ArrowDown`. Online-test result cells are still skipped, and their note fields are reachable while open (D6)
+- [x] 2.4 `exam/client/gradebook.js`: the column dialog's delete confirmation counts notes as well as results (spec "Deleting a column holding only notes")
+- [x] 2.5 `exam/client/gradebook.js`: the student's own results and the teacher's student page show `note` under its entry (`pre-line`), and note-only items with `–` as result (D7)
+- [x] 2.6 `css/exam.css`: the note mark, the note field at `20ch` in an open column and growing to six lines while focused (with a JS height fallback where `field-sizing` is missing), and the note in the results, in light and dark mode
+
+## 3. Verification
+
+- [x] 3.1 `test/exam-gradebook.test.js`: migration from version 15 adds an empty table and changes no proposal. A note without a result, a result emptied with its note kept, a note removed with its value kept. A whitespace-only text removes the note, and 4001 characters are refused. A note on an online test without an attempt. A note never moves a proposal. Notes in `overviewRow`, `studentRecord`, `resultsOf`: note-only items, a hidden category hiding its notes, and no other student's note in `resultsOf`. A column delete and a project delete take their notes. A write in a closed year is refused
+- [x] 3.2 `test/exam-tests.test.js` / `test/exam-offline.test.js`: deleting an online test (admin) and an offline test removes their notes, and notes alone do not block an offline test's delete
+- [x] 3.3 `test/exam-year-change.test.js`: the retention report counts `notes`, the purge removes them, and a changed note count refuses a confirmed purge
+- [x] 3.4 `test/exam.test.js` (browser): focus in a homework column opens note fields for every row, and leaving it closes them and shows the mark. Enter in a result field saves and moves to the next student's result field. Typing a value, right arrow into the note, typing, then down arrow to the next student's note. Enter in a note makes two lines without moving, and up on line two stays in the field. A click on an online-test cell opens its note field. The student's page shows the note and a note-only column
+- [x] 3.5 `docs-exam-module.md`: notes in the gradebook section (active column, keys, what the student sees, retention)
+- [x] 3.6 Run `npm test` in full and record the result here (known flaky checks: see memory `flaky-content-checks`)
+  - 2026-11-07: `npm test` 949/952. Red: "the live view orders by status…" and "started from its page, a present student sees their handout…" (both on the flaky list, red in 3 of 3 `test/exam.test.js` runs today as on 2026-10-25; a HEAD comparison in a worktree did not get past its setup), and the offline make-up check once by a same-millisecond `opens_at = closes_at` (`test/exam-offline.test.js` alone: 22/22). `test/exam.test.js` alone: 172/174 with only the two above red; every new notes check green.

@@ -40,7 +40,7 @@ Starting a school year SHALL offer, for each class of the previous year, the cla
 
 ### Requirement: Data of students who have left is kept for the retention period, then removed
 
-Records of a student who is on no roster of the current year SHALL be kept until the retention period has passed since the end of the last school year they were on a roster, and then deleted by the year change: their results, overrides, attempts, sitting participations, roster entries and the student record. The year change SHALL state, before it deletes anything, how many students and how many records of each kind it is about to remove, without names, and SHALL delete only after the teacher confirms. If the counts have changed since the report, the deletion SHALL be refused.
+Records of a student who is on no roster of the current year SHALL be kept until the retention period has passed since the end of the last school year they were on a roster, and then deleted by the year change: their results, notes, overrides, attempts, sitting participations, roster entries and the student record. The year change SHALL state, before it deletes anything, how many students and how many records of each kind it is about to remove, without names, and SHALL delete only after the teacher confirms. If the counts have changed since the report, the deletion SHALL be refused.
 
 #### Scenario: Retention elapsed
 
@@ -56,6 +56,11 @@ Records of a student who is on no roster of the current year SHALL be kept until
 
 - **WHEN** a student is on a roster of the current year
 - **THEN** none of their records are reported or removed, however old
+
+#### Scenario: Notes are counted
+
+- **WHEN** a leaver who is due holds three results and two notes
+- **THEN** the report counts the three results and, as a kind of its own, the two notes, and both are removed after confirmation
 
 ### Requirement: The retention period is deployment configuration
 

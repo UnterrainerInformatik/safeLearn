@@ -662,7 +662,7 @@ describe("the gradebook", () => {
     assert.match(page, /grade 1/);
     assert.match(page, /strong oral exam/);
     assert.match(page, /1st test/, "the result is shown by its column's name");
-    const rows = await student.page.$$eval(".sl-exam-results .sl-exam-entries tbody tr", (all) => all.map((tr) => [tr.cells[tr.cells.length - 1].textContent, tr.dataset.tone ?? null]));
+    const rows = await student.page.$$eval(".sl-exam-results .sl-exam-entries tbody tr:not(.sl-exam-result-note-row)", (all) => all.map((tr) => [tr.cells[tr.cells.length - 1].textContent, tr.dataset.tone ?? null]));
     const expected = (grade) => (grade === "5" ? "bad" : grade === "1" || grade === "2" ? "good" : null);
     assert.ok(rows.length > 0, "the results are listed");
     for (const [grade, tone] of rows) assert.equal(tone, expected(grade), `a result graded "${grade}" carries the tone of its grade`);
@@ -986,6 +986,8 @@ describe("the gradebook", () => {
     assert.deepEqual(await focused(), { student: second, column: test2.id, value: "17.5" }, "the cursor moved inside the value");
     await page.keyboard.press("End");
     await page.keyboard.press("ArrowRight");
+    assert.equal(await page.evaluate(() => document.activeElement?.dataset.part), "note", "right at the end goes into the cell's note first");
+    await page.keyboard.press("ArrowRight");
     const secondMark = await page.evaluate((s) => document.querySelector(s).value, field(round, second));
     assert.deepEqual(await focused(), { student: second, column: round.id, value: secondMark }, "right at the end crosses into participation");
     await settled(field(test2, second));
@@ -993,7 +995,8 @@ describe("the gradebook", () => {
     await page.keyboard.press("ArrowLeft");
     assert.equal((await focused()).column, test2.id, "left from a + or − field goes back");
     await page.keyboard.press("ArrowRight");
-    assert.equal((await focused()).column, round.id, "and right again from a value arrived at");
+    await page.keyboard.press("ArrowRight");
+    assert.equal((await focused()).column, round.id, "and right again from a value arrived at, through its empty note");
 
     // Participation down the list: typed, never changed by an arrow.
     await page.keyboard.press("ArrowUp");
@@ -1009,6 +1012,92 @@ describe("the gradebook", () => {
     assert.equal((await overviewRow(second)).results[round.id].value, 0);
     assert.equal(await page.evaluate((s) => document.querySelector(s).value, field(round, first)), "+");
     assert.ok([first, second].includes(username));
+  });
+
+  test("the sheet: the active column opens a note field per student, the arrows and Enter move through it, and the student sees the note", async () => {
+    const page = teacher.page;
+    const homework = await addColumn({ kind: "homework", name: "Greeting service", date: year.startsOn, maxPoints: 10 });
+    const late = await addColumn({ kind: "homework", name: "Late lab", date: year.startsOn });
+    const { students } = (await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=ws`)).json;
+    const [first, second] = students.map((row) => row.username);
+    const username = student.username.toLowerCase();
+    const note = (column, who) => `td[data-column="${column.id}"]:has(${field(column, who)}) textarea.sl-exam-note`;
+    const mark = (column, who) => `td[data-column="${column.id}"]:has(${field(column, who)}) .sl-exam-note-mark`;
+    const visible = (selector) => page.$eval(selector, (element) => element.offsetParent !== null && !element.hidden);
+    const active = () => page.evaluate(() => ({ part: document.activeElement?.dataset.part ?? "result", student: document.activeElement?.dataset.student, value: document.activeElement?.value }));
+    try {
+      await openSheet();
+      assert.equal(await visible(note(homework, first)), false, "no note field before the column is active");
+
+      // Focus in the column opens its note fields for every student.
+      await page.focus(field(homework, first));
+      await page.evaluate((s) => document.querySelector(s).select(), field(homework, first));
+      assert.deepEqual([await visible(note(homework, first)), await visible(note(homework, second)), await visible(note(late, first))], [true, true, false]);
+
+      // A value, right into the note, a note, down to the next student's note.
+      await page.keyboard.type("9");
+      await page.keyboard.press("ArrowRight");
+      assert.deepEqual(await active(), { part: "note", student: first, value: "" });
+      await page.keyboard.type("You forgot GreetingService.java (-1)");
+      await page.keyboard.press("ArrowDown");
+      assert.deepEqual(await active(), { part: "note", student: second, value: "" });
+      await settled(note(homework, first));
+      await settled(field(homework, first));
+      const row = await overviewRow(first);
+      assert.deepEqual([row.results[homework.id].points, row.notes[homework.id]], [9, "You forgot GreetingService.java (-1)"], "both saved without a further action");
+      assert.equal(await visible(mark(homework, first)), true, "the first student's cell shows the note mark");
+
+      // Enter in a note is a line break; up on its second line stays in it.
+      await page.keyboard.type("Line one");
+      await page.keyboard.press("Enter");
+      await page.keyboard.type("Line two");
+      await page.keyboard.press("ArrowUp");
+      assert.deepEqual(await active(), { part: "note", student: second, value: "Line one\nLine two" }, "two lines, and the focus stayed");
+
+      // Leaving the column closes its note fields and leaves the marks.
+      await page.focus(field(late, first));
+      await settled(note(homework, second));
+      assert.deepEqual([await visible(note(homework, first)), await visible(note(late, first))], [false, true]);
+      assert.deepEqual([await visible(mark(homework, first)), await visible(mark(homework, second))], [true, true]);
+      assert.equal((await overviewRow(second)).notes[homework.id], "Line one\nLine two");
+      assert.equal(await page.$eval(mark(homework, first), (button) => button.title), "You forgot GreetingService.java (-1)", "hovering the mark shows the note");
+
+      // Enter in a result field saves it and moves down.
+      await page.focus(field(homework, first));
+      await page.evaluate((s) => document.querySelector(s).select(), field(homework, first));
+      await page.keyboard.type("8");
+      await page.keyboard.press("Enter");
+      assert.deepEqual(await focused(), { student: second, column: homework.id, value: "" });
+      await settled(field(homework, first));
+      assert.equal((await overviewRow(first)).results[homework.id].points, 8);
+
+      // A click on a mark opens the note field.
+      await page.focus(field(late, first));
+      await page.click(mark(homework, first));
+      assert.deepEqual(await active(), { part: "note", student: first, value: "You forgot GreetingService.java (-1)" });
+
+      // The student sees their note, and a column holding only a note for them.
+      const own = username === first ? "You forgot GreetingService.java (-1)" : "Line one\nLine two";
+      assert.equal((await fetchAs(teacher, `/exam/api/courses/${course.id}/notes/${late.id}/${username}`, { method: "PUT", body: { text: "Not handed in, due Friday" } })).status, 200);
+      const { gb } = await ownResults();
+      assert.deepEqual(
+        gb.entries.filter((e) => [homework.id, late.id].includes(e.columnId)).map((e) => [e.name, e.points, e.note]),
+        [
+          ["Greeting service", username === first ? 8 : null, own],
+          ["Late lab", null, "Not handed in, due Friday"],
+        ]
+      );
+      assert.ok(!JSON.stringify(gb).includes(username === first ? "Line one" : "GreetingService"), "nobody else's note");
+      await student.page.goto(`${applicationUrl}/exam/my`, { waitUntil: "domcontentloaded" });
+      await student.page.waitForFunction(() => document.querySelector(".sl-exam-results .sl-exam-result-note"), { timeout: 20000 });
+      const shown = await student.page.$$eval(".sl-exam-results .sl-exam-result-note-row", (rows) =>
+        rows.map((tr) => ({ entry: tr.previousElementSibling.cells[0].textContent, result: tr.previousElementSibling.cells[3].textContent, note: tr.textContent, lines: getComputedStyle(tr.querySelector("p")).whiteSpace }))
+      );
+      assert.deepEqual(shown.find((n) => n.entry === "Late lab"), { entry: "Late lab", result: "–", note: "Not handed in, due Friday", lines: "pre-line" });
+      assert.equal(shown.find((n) => n.entry === "Greeting service")?.note, own);
+    } finally {
+      for (const column of [homework, late]) await fetchAs(teacher, `/exam/api/assessments/${column.id}`, { method: "DELETE" });
+    }
   });
 
   test("the year view shows the winter grade beside the year proposal, combined by the winter share", async () => {
@@ -2388,9 +2477,10 @@ describe("online tests: writing", () => {
     await teacher.page.waitForSelector(".sl-exam-sheet", { timeout: 20000 });
     const cell = await teacher.page.$eval(`td.sl-exam-online-result[data-column="${column.id}"][data-student="${username}"]`, (td) => ({
       text: td.textContent,
-      fields: td.querySelectorAll("input, select, textarea").length,
+      fields: td.querySelectorAll("input, select").length,
+      notes: td.querySelectorAll("textarea.sl-exam-note").length,
     }));
-    assert.deepEqual(cell, { text: "2/2", fields: 0 }, "shown, and nothing to type into");
+    assert.deepEqual(cell, { text: "2/2", fields: 0, notes: 1 }, "shown, nothing to type into but a note field");
     const head = await teacher.page.$eval(`th[data-column="${column.id}"]`, (th) => ({
       link: th.querySelector("a")?.getAttribute("href"),
       linked: [...th.children].map((child) => child.localName).join() === "a" && Boolean(th.querySelector("a > .sl-exam-column-day")),
@@ -2410,10 +2500,29 @@ describe("online tests: writing", () => {
     await teacher.page.keyboard.press("ArrowLeft");
     assert.equal(await teacher.page.evaluate(() => Number(document.activeElement.dataset.col)), online, "left stays in the first field");
     await teacher.page.keyboard.press("ArrowRight");
+    assert.equal(await teacher.page.evaluate(() => document.activeElement.dataset.part), "note", "into the field's own note first");
+    await teacher.page.keyboard.press("ArrowRight");
     assert.equal(await teacher.page.evaluate(() => Number(document.activeElement.dataset.col)), Math.min(...fields.filter((col) => col > online)));
     await teacher.page.keyboard.press("ArrowLeft");
     await teacher.page.keyboard.press("ArrowLeft");
     assert.equal(await teacher.page.evaluate(() => Number(document.activeElement.dataset.col)), online, "and back, never into an online column");
+
+    // A click on an online test's cell opens its note field, also for a student without an attempt.
+    const otherCell = `td.sl-exam-online-result[data-column="${column.id}"][data-student="gb-other-student"]`;
+    await teacher.page.evaluate(() => {
+      document.querySelector(".sl-exam-scroll").scrollLeft = 0;
+    });
+    await teacher.page.click(otherCell);
+    assert.deepEqual(
+      await teacher.page.evaluate((s) => ({ note: document.activeElement === document.querySelector(`${s} textarea.sl-exam-note`), open: document.querySelector(s).classList.contains("is-note-open") }), otherCell),
+      { note: true, open: true }
+    );
+    await teacher.page.keyboard.type("Ill, make-up on 12 Dec");
+    await teacher.page.keyboard.press("Tab");
+    await teacher.page.waitForFunction((s) => !document.querySelector(`${s} textarea`).classList.contains("is-saving"), { timeout: 10000 }, otherCell);
+    const noted = (await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=ws`)).json.students.find((r) => r.username === "gb-other-student");
+    assert.deepEqual([noted.results[column.id], noted.notes[column.id]], [undefined, "Ill, make-up on 12 Dec"], "a note and still no result");
+    assert.equal((await fetchAs(teacher, `/exam/api/courses/${course.id}/notes/${column.id}/gb-other-student`, { method: "DELETE" })).status, 200);
 
     // The column head shows the test's name as it was written: the corpus
     // tables' capitalize must not reach the module's tables.

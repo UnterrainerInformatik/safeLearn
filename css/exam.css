@@ -2290,6 +2290,99 @@ sl-date-input .sl-date-input-grid button.is-disabled {
   text-align: center;
 }
 
+/* A cell's note (gradebook-result-notes D5): a mark in the cell's corner
+   while it holds one, its text on hover, and a note field that only the
+   active column - the one holding the focus - shows, right of the result. */
+
+.sl-exam-sheet .sl-exam-noted-cell {
+  position: relative;
+}
+
+/* The button is a corner large enough to hit; the triangle is drawn in it. */
+.sl-exam-sheet .sl-exam-note-mark {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 1.1em;
+  height: 1.1em;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.sl-exam-sheet .sl-exam-note-mark::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0.65em;
+  height: 0.65em;
+  background: #c98a00;
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
+}
+
+.sl-exam-sheet .sl-exam-note-mark[hidden] {
+  display: none;
+}
+
+#markdown-content.dark-mode .sl-exam-sheet .sl-exam-note-mark::after {
+  background: #f0b429;
+}
+
+.sl-exam-sheet .sl-exam-note {
+  display: none;
+}
+
+.sl-exam-sheet .is-note-open .sl-exam-note {
+  display: inline-block;
+  width: 20ch;
+  height: calc(1lh + 6px);
+  margin-left: 4px;
+  vertical-align: top;
+  resize: none;
+  overflow: hidden;
+  font: inherit;
+  white-space: pre-wrap;
+}
+
+/* Focused, it grows with its text up to six lines, so the line the arrows
+   move to stays in view; `growNote` does the same where `field-sizing` is
+   missing. */
+.sl-exam-sheet .is-note-open .sl-exam-note:focus {
+  field-sizing: content;
+  height: auto;
+  min-height: calc(1lh + 6px);
+  max-height: calc(6lh + 6px);
+  overflow-y: auto;
+}
+
+/* The online test's result text keeps its place beside an open note field. */
+.sl-exam-sheet .sl-exam-online-result.is-note-open {
+  text-align: left;
+  cursor: text;
+}
+
+.sl-exam-sheet .sl-exam-online-result.sl-exam-noted-cell:has(.sl-exam-note) {
+  cursor: pointer;
+}
+
+/* A note in a results table: below its entry, with its line breaks. */
+.sl-exam-result-note-row td {
+  white-space: normal;
+  padding-left: 2em;
+}
+
+.sl-exam-result-note {
+  margin: 0;
+  white-space: pre-line;
+  color: rgba(27, 31, 35, 0.7);
+}
+
+#markdown-content.dark-mode .sl-exam-result-note {
+  color: rgba(255, 255, 255, 0.7);
+}
+
 /* A comment in the gradebook: its mark opens a row with the text. */
 
 .sl-exam-comment-toggle {

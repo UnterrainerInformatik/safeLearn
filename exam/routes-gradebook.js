@@ -12,11 +12,13 @@ import {
   courseOverview,
   createColumn,
   deleteColumn,
+  deleteNote,
   deleteResult,
   findCourse,
   readScale,
   resultsOf,
   semesterToday,
+  setNote,
   setResult,
   setSemesterGrade,
   studentRecord,
@@ -119,6 +121,15 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
   );
   api("delete", "/assessments/:id/results/:username", (req) =>
     deleteResult(db, idParam(req.params.id), req.params.username)
+  );
+  // A cell's note, beside its result and written on its own (gradebook-result-notes
+  // D2). `:column` is the sheet's column id: a number, or `test-<id>` for an
+  // online test. Answers `{ note }`, since a note changes no proposal.
+  api("put", "/courses/:id/notes/:column/:username", (req) =>
+    setNote(db, idParam(req.params.id), req.params.column, req.params.username, req.body?.text ?? null)
+  );
+  api("delete", "/courses/:id/notes/:column/:username", (req) =>
+    deleteNote(db, idParam(req.params.id), req.params.column, req.params.username)
   );
 
   // ---------------------------------------------------- a student's own view

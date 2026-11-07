@@ -21,7 +21,7 @@ import { after, afterEach, before, describe, test } from "node:test";
 
 import { createClass, createCourse, createYear, updateCourse } from "../exam/classes.js";
 import { migrate, openDatabase, readMigrations } from "../exam/db.js";
-import { courseColumns, deleteColumn, setResult, updateColumn } from "../exam/gradebook.js";
+import { courseColumns, deleteColumn, setNote, setResult, updateColumn } from "../exam/gradebook.js";
 import { importPool } from "../exam/pool-import.js";
 import { listQuestions } from "../exam/pool.js";
 import {
@@ -275,6 +275,18 @@ describe("an offline test", () => {
     assert.ok(courseColumns(db, course.id).some((c) => c.id === column.id), "the column is unchanged");
     deleteTest(db, first.id);
     assert.ok(!courseColumns(db, course.id).some((c) => c.name === "A"), "an empty column goes with its test");
+  });
+
+  test("notes alone do not keep an offline test, and go with its column", () => {
+    const { db, course } = seeded();
+    const offline = createOfflineTest(db, course.id, { name: "A", durationMinutes: 50, gradebookKind: "test" });
+    const column = courseColumns(db, course.id).find((c) => c.testId === offline.id);
+    setNote(db, course.id, column.id, "anna", "Cheat sheet found");
+    setNote(db, course.id, column.id, "ben", "Left early");
+    assert.equal(courseColumns(db, course.id).find((c) => c.id === column.id).notes, 2);
+    deleteTest(db, offline.id);
+    assert.ok(!courseColumns(db, course.id).some((c) => c.id === column.id), "the column went with its test");
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM result_note").get().n, 0, "and its notes with it");
   });
 
   test("keeps away from every question path", () => {

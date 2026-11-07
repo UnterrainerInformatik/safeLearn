@@ -16,18 +16,20 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, test } from "node:test";
 
-import { addToRoster, createClass, createCourse, createYear, InvalidInputError, NotFoundError, removeFromRoster, updateCourse } from "../exam/classes.js";
+import { addToRoster, asRefusal, closeYear, ConflictError, createClass, createCourse, createYear, InvalidInputError, NotFoundError, removeFromRoster, setCurrentYear, updateCourse } from "../exam/classes.js";
 import { migrate, openDatabase, readMigrations } from "../exam/db.js";
 import {
   courseColumns,
   courseOverview,
   createColumn,
   deleteColumn,
+  deleteNote,
   deleteResult,
   findCourse,
   readScale,
   resultsOf,
   semesterToday,
+  setNote,
   setResult,
   setSemesterGrade,
   studentRecord,
@@ -512,7 +514,7 @@ describe("columns and their results", () => {
   test("deleting a column removes its results", () => {
     const { db, course } = gradebookFixture();
     const test1 = column(db, course, { kind: "test", date: "2026-11-03", maxPoints: 24 }, [["anna", { points: 20 }], ["ben", { points: 10 }]]);
-    assert.deepEqual(deleteColumn(db, test1.id), { deleted: test1.id, courseId: course.id, results: 2, columns: 0 });
+    assert.deepEqual(deleteColumn(db, test1.id), { deleted: test1.id, courseId: course.id, results: 2, notes: 0, columns: 0 });
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM manual_entry").get().n, 0);
     assert.throws(() => deleteColumn(db, test1.id), NotFoundError);
   });
@@ -711,7 +713,7 @@ describe("a student's own results", () => {
       [[18, 24, 2, "1st test", "2026-11-03"]],
       "each result with its column's name and date"
     );
-    assert.ok(!("note" in proposed.entries[0]), "a result carries no note of its own");
+    assert.equal(proposed.entries[0].note, null, "a result without a note says so");
 
     setSemesterGrade(db, course.id, "anna", "ws", { override: 1, comment: "strong oral exam", commentVisible: false });
     const overridden = resultsOf(db, "anna", winter).courses[0].semesters.ws;
@@ -902,8 +904,8 @@ describe("presentations and projects", () => {
     column(db, course, { kind: "projectmark", projectId: webshop.id, date: "2027-01-12" }, [["anna", { mark: "+" }]]);
     const other = column(db, course, { kind: "project", name: "Blog", date: "2027-01-21" });
     const otherMark = column(db, course, { kind: "projectmark", projectId: other.id, date: "2027-01-12" }, [["ben", { mark: "+" }]]);
-    assert.deepEqual(deleteColumn(db, otherMark.id), { deleted: otherMark.id, courseId: course.id, results: 1, columns: 0 }, "a mark column goes alone");
-    assert.deepEqual(deleteColumn(db, webshop.id), { deleted: webshop.id, courseId: course.id, results: 4, columns: 2 });
+    assert.deepEqual(deleteColumn(db, otherMark.id), { deleted: otherMark.id, courseId: course.id, results: 1, notes: 0, columns: 0 }, "a mark column goes alone");
+    assert.deepEqual(deleteColumn(db, webshop.id), { deleted: webshop.id, courseId: course.id, results: 4, notes: 0, columns: 2 });
     assert.deepEqual(courseColumns(db, course.id).map((c) => c.id), [other.id]);
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM manual_entry").get().n, 0);
   });
@@ -978,5 +980,213 @@ describe("presentations and projects", () => {
       ]
     );
     close(own.semesters.ws.categories.projects.fraction, 0.815);
+  });
+});
+
+describe("notes", () => {
+  const greeting = "You forgot GreetingService.java (-1)\nOtherwise great.";
+  const keyOf = (fn) => {
+    try {
+      fn();
+    } catch (error) {
+      return error.key;
+    }
+    return null;
+  };
+  const noteRows = (db) => db.prepare("SELECT COUNT(*) AS n FROM result_note").get().n;
+  /** A record's semesters - its categories and proposals - which no note may move. */
+  const grades = (db, course, username) => studentRecord(db, course.id, username).semesters;
+
+  test("migrating from schema 15 adds an empty table of notes and changes no record or proposal", () => {
+    const dbPath = temporaryPath();
+    const db = new DatabaseSync(dbPath);
+    openDatabases.push(db);
+    db.exec("PRAGMA foreign_keys = ON");
+    migrate(db, dbPath, readMigrations().slice(0, 15));
+    db.exec(`
+      INSERT INTO school_year (id, name, starts_on, summer_starts_on, ends_on, is_current) VALUES (1, '2026/27', '2026-09-07', '2027-02-15', '2027-07-02', 1);
+      INSERT INTO class (id, school_year_id, name) VALUES (1, 1, '4bhif');
+      INSERT INTO student (username) VALUES ('anna'), ('ben');
+      INSERT INTO roster_entry (class_id, username, joined_at) VALUES (1, 'anna', 'x'), (1, 'ben', 'x');
+      INSERT INTO course (id, class_id, subject, weights) VALUES
+        (1, 1, 'WMC', '{"onlineTests":40,"manualTests":30,"shortTests":0,"presentations":0,"projects":0,"participation":15,"homework":15}');
+      INSERT INTO assessment (id, course_id, kind, name, held_on, max_points, created_at) VALUES
+        (3, 1, 'test', '1st test', '2026-11-03', 24, 'x'), (4, 1, 'homework', 'Essay', '2027-03-01', NULL, 'x');
+      INSERT INTO manual_entry (id, assessment_id, username, value, points, created_at, updated_at) VALUES
+        (10, 3, 'anna', 0.75, 18, 'x', 'x'), (11, 3, 'ben', 0.25, 6, 'x', 'x'), (12, 4, 'ben', 0.9, NULL, 'x', 'x');
+    `);
+    const records = () => ["anna", "ben"].map((username) => studentRecord(db, 1, username));
+    const sheets = () => ["ws", "ss"].map((semester) => courseOverview(db, 1, semester));
+    const before = { records: records(), sheets: sheets() };
+
+    assert.deepEqual(migrate(db, dbPath), { from: 15, to: readMigrations().length });
+    assert.equal(noteRows(db), 0, "the table is there, and empty");
+    assert.deepEqual(
+      records(),
+      before.records.map((record) => ({ ...record, entries: record.entries.map((entry) => ({ ...entry, note: null })) })),
+      "every record and proposal is what it was, each entry now saying it has no note"
+    );
+    assert.deepEqual(
+      sheets(),
+      before.sheets.map((sheet) => ({
+        ...sheet,
+        columns: sheet.columns.map((c) => ({ ...c, notes: 0 })),
+        students: sheet.students.map((row) => ({ ...row, notes: {} })),
+        left: sheet.left.map((row) => ({ ...row, notes: {} })),
+      }))
+    );
+    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+  });
+
+  test("a note beside a result, without one, kept when the value goes, and gone while the value stays", () => {
+    const { db, course } = gradebookFixture();
+    const homework = column(db, course, { kind: "homework", name: "Greeting service", date: "2026-11-05", maxPoints: 10 });
+    const before = grades(db, course, "anna");
+
+    setResult(db, homework.id, "anna", { points: 9 });
+    const withResult = grades(db, course, "anna");
+    assert.deepEqual(setNote(db, course.id, homework.id, "anna", greeting.replace("\n", "\r\n")), { note: greeting }, "stored with its line break as \\n");
+    assert.deepEqual(grades(db, course, "anna"), withResult, "the note moves no proposal");
+    assert.deepEqual(setNote(db, course.id, String(homework.id), "anna", greeting), { note: greeting }, "a second write replaces it");
+    assert.equal(noteRows(db), 1, "one note per cell");
+
+    deleteResult(db, homework.id, "anna");
+    assert.equal(courseOverview(db, course.id, "ws").students[0].notes[homework.id], greeting, "emptying the value keeps the note");
+    assert.deepEqual(grades(db, course, "anna"), before, "the homework category is computed without the column");
+
+    setResult(db, homework.id, "anna", { points: 9 });
+    assert.deepEqual(deleteNote(db, course.id, homework.id, "anna"), { note: null });
+    const row = courseOverview(db, course.id, "ws").students[0];
+    assert.deepEqual([row.results[homework.id].points, row.notes[homework.id]], [9, undefined], "removing the note keeps the value");
+
+    setNote(db, course.id, homework.id, "ben", "Not handed in, due Friday");
+    assert.deepEqual(setNote(db, course.id, homework.id, "ben", "  \n\t "), { note: null }, "white space only removes it");
+    assert.equal(noteRows(db), 0);
+  });
+
+  test("a note is at most 4000 characters, and a refused one leaves the stored note as it was", () => {
+    const { db, course } = gradebookFixture();
+    const homework = column(db, course, { kind: "homework", date: "2026-11-05" });
+    const long = "é".repeat(4000);
+    assert.deepEqual(setNote(db, course.id, homework.id, "anna", long), { note: long }, "4000 characters, whatever their bytes");
+    assert.equal(keyOf(() => setNote(db, course.id, homework.id, "anna", `${long}x`)), "exam.errors.gradebook.noteTooLong");
+    assert.equal(courseOverview(db, course.id, "ws").students[0].notes[homework.id], long);
+    assert.equal(keyOf(() => setNote(db, course.id, homework.id, "anna", 42)), "exam.errors.gradebook.noteText");
+  });
+
+  test("a note needs a column of the course and a student on its roster", () => {
+    const { db, klass, course } = gradebookFixture();
+    const homework = column(db, course, { kind: "homework", date: "2026-11-05" });
+    const other = createCourse(db, klass.id, { subject: "NVS", language: "en", weights });
+    const foreign = column(db, other, { kind: "homework", date: "2026-11-05" });
+    assert.throws(() => setNote(db, course.id, foreign.id, "anna", "x"), NotFoundError, "a column of another course");
+    assert.throws(() => setNote(db, course.id, "test-999", "anna", "x"), NotFoundError, "no such online test");
+    assert.throws(() => setNote(db, course.id, "nonsense", "anna", "x"), NotFoundError);
+    assert.equal(keyOf(() => setNote(db, course.id, homework.id, "carla", "x")), "exam.errors.gradebook.notOnCourseRoster");
+    assert.equal(noteRows(db), 0);
+  });
+
+  test("notes in the sheet by semester, in the record and in the student's own results, never another student's", () => {
+    const { db, course } = gradebookFixture();
+    const test1 = column(db, course, { kind: "test", name: "1st test", date: "2026-11-03", maxPoints: 24 }, [["anna", { points: 18 }]]);
+    const homework = column(db, course, { kind: "homework", name: "Greeting service", date: "2026-11-05", maxPoints: 10 });
+    const summer = column(db, course, { kind: "homework", name: "Essay", date: "2027-03-01" });
+    const before = { anna: grades(db, course, "anna"), ben: grades(db, course, "ben") };
+    setNote(db, course.id, test1.id, "anna", greeting);
+    setNote(db, course.id, homework.id, "anna", "Not handed in, due Friday");
+    setNote(db, course.id, summer.id, "anna", "Summer");
+    setNote(db, course.id, homework.id, "ben", "Ben's secret");
+    assert.deepEqual({ anna: grades(db, course, "anna"), ben: grades(db, course, "ben") }, before, "no note moves a proposal");
+
+    const ws = courseOverview(db, course.id, "ws");
+    assert.deepEqual(ws.students.find((r) => r.username === "anna").notes, { [test1.id]: greeting, [homework.id]: "Not handed in, due Friday" });
+    assert.deepEqual(courseOverview(db, course.id, "ss").students.find((r) => r.username === "anna").notes, { [summer.id]: "Summer" });
+    assert.deepEqual([ws.columns.find((c) => c.id === homework.id).notes, ws.columns.find((c) => c.id === homework.id).results], [2, 0]);
+
+    const record = studentRecord(db, course.id, "anna");
+    assert.deepEqual(
+      record.entries.map((e) => [e.name, e.points, e.note, e.semester]),
+      [
+        ["1st test", 18, greeting, "ws"],
+        ["Greeting service", null, "Not handed in, due Friday", "ws"],
+        ["Essay", null, "Summer", "ss"],
+      ],
+      "a note-only cell is an item with no result"
+    );
+    const item = record.entries[1];
+    assert.deepEqual([item.value, item.grade, item.kind, item.category, item.date, item.maxPoints], [null, null, "homework", "homework", "2026-11-05", 10]);
+    assert.equal(record.semesters.ws.categories.homework, undefined, "and is no entry of its category");
+
+    const [own] = resultsOf(db, "anna", { today: "2027-03-02" }).courses;
+    assert.deepEqual(own.entries.map((e) => [e.name, e.points, e.note]), record.entries.map((e) => [e.name, e.points, e.note]));
+    assert.ok(!JSON.stringify(resultsOf(db, "anna", { today: "2027-03-02" })).includes("Ben's secret"), "nobody else's note");
+    const [bens] = resultsOf(db, "ben", { today: "2027-03-02" }).courses;
+    assert.deepEqual(bens.entries.map((e) => [e.name, e.note]), [["Greeting service", "Ben's secret"]]);
+  });
+
+  test("a category weighted 0 % hides its notes with it, and shows them again above 0 %", () => {
+    const { db, course } = gradebookFixture();
+    const homework = column(db, course, { kind: "homework", name: "Essay", date: "2026-11-05" });
+    setNote(db, course.id, homework.id, "anna", "Not handed in");
+    updateCourse(db, course.id, { weights: { ...weights, homework: 0, participation: 30 } });
+    assert.deepEqual(courseOverview(db, course.id, "ws").students[0].notes, {});
+    assert.deepEqual(studentRecord(db, course.id, "anna").entries, []);
+    assert.deepEqual(resultsOf(db, "anna", { today: "2026-11-20" }).courses[0].entries, []);
+    updateCourse(db, course.id, { weights });
+    assert.deepEqual(resultsOf(db, "anna", { today: "2026-11-20" }).courses[0].entries.map((e) => e.note), ["Not handed in"]);
+  });
+
+  test("a project's mark columns carry notes, shown under the project, and both go when the project is deleted", () => {
+    const { db, course } = gradebookFixture();
+    updateCourse(db, course.id, { weights: { onlineTests: 30, manualTests: 20, shortTests: 0, presentations: 10, projects: 10, participation: 15, homework: 15 } });
+    const webshop = column(db, course, { kind: "project", name: "Webshop", date: "2026-11-20" });
+    const mark = column(db, course, { kind: "projectmark", projectId: webshop.id, date: "2026-11-10" }, [["anna", { mark: "+" }]]);
+    setNote(db, course.id, mark.id, "anna", "Good stand-up");
+    setNote(db, course.id, mark.id, "ben", "Missing");
+    setNote(db, course.id, webshop.id, "ben", "Ask about the cart");
+    const [own] = resultsOf(db, "ben", { today: "2026-11-25" }).courses;
+    assert.deepEqual(
+      own.entries.map((e) => [e.kind, e.value, e.projectId, e.projectName, e.note]),
+      [
+        ["projectmark", null, webshop.id, "Webshop", "Missing"],
+        ["project", null, null, null, "Ask about the cart"],
+      ]
+    );
+    assert.equal(courseColumns(db, course.id).find((c) => c.id === webshop.id).notes, 3, "a project counts its marks' notes");
+    assert.deepEqual(deleteColumn(db, webshop.id), { deleted: webshop.id, courseId: course.id, results: 1, notes: 3, columns: 1 });
+    assert.equal(noteRows(db), 0);
+  });
+
+  test("deleting a column takes its notes, a column holding notes only included", () => {
+    const { db, course } = gradebookFixture();
+    const homework = column(db, course, { kind: "homework", date: "2026-11-05" });
+    const kept = column(db, course, { kind: "homework", date: "2026-11-06" });
+    setNote(db, course.id, homework.id, "anna", "a");
+    setNote(db, course.id, homework.id, "ben", "b");
+    setNote(db, course.id, kept.id, "ben", "c");
+    assert.deepEqual(deleteColumn(db, homework.id), { deleted: homework.id, courseId: course.id, results: 0, notes: 2, columns: 0 });
+    assert.deepEqual(db.prepare("SELECT text FROM result_note").all().map((row) => row.text), ["c"]);
+  });
+
+  test("a closed year refuses a note being set, changed or removed", () => {
+    const { db, schoolYear, course } = gradebookFixture();
+    const homework = column(db, course, { kind: "homework", date: "2026-11-05" });
+    setNote(db, course.id, homework.id, "anna", "kept");
+    const next = createYear(db, { name: "2027/28", startsOn: "2027-09-06", summerStartsOn: "2028-02-14", endsOn: "2028-07-07" });
+    setCurrentYear(db, next.id);
+    closeYear(db, schoolYear.id, "2027-07-10");
+    const refused = (fn) => {
+      try {
+        fn();
+      } catch (error) {
+        const refusal = asRefusal(error);
+        return refusal instanceof ConflictError ? refusal.key : null;
+      }
+      return null;
+    };
+    assert.equal(refused(() => setNote(db, course.id, homework.id, "ben", "new")), "exam.errors.years.closed");
+    assert.equal(refused(() => setNote(db, course.id, homework.id, "anna", "changed")), "exam.errors.years.closed");
+    assert.equal(refused(() => deleteNote(db, course.id, homework.id, "anna")), "exam.errors.years.closed");
+    assert.deepEqual(db.prepare("SELECT username, text FROM result_note").all().map((row) => ({ ...row })), [{ username: "anna", text: "kept" }]);
   });
 });
