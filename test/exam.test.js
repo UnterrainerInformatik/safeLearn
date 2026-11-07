@@ -2814,6 +2814,18 @@ describe("online tests: the live view", () => {
     };
     const expected = { live: `/exam/sittings/${sitting.id}/live`, screen: false };
     assert.deepEqual(await links(`/exam/tests?course=${course.id}`, `tr[data-test="${written.id}"] li[data-state="over"]`), expected, "the course's list");
+    const row = await teacher.page.$eval(`tr[data-test="${written.id}"]`, (tr) => ({
+      timing: tr.dataset.timing,
+      title: tr.title,
+      background: getComputedStyle(tr.cells[1]).backgroundColor,
+      legend: [...document.querySelectorAll(".sl-exam-tests-legend-item")].map((item) => item.dataset.timing),
+    }));
+    assert.deepEqual(
+      [row.timing, row.title, row.legend],
+      ["done", "done", ["soon", "later", "done"]],
+      "a test whose only sitting is over is done in the list, with the legend above"
+    );
+    assert.notEqual(row.background, "rgba(0, 0, 0, 0)", "and its row is coloured");
     assert.deepEqual(await links(`/exam/tests/${written.id}`, `li[data-sitting="${sitting.id}"][data-state="over"]`), expected, "the test's page");
 
     await teacher.page.click(`li[data-sitting="${sitting.id}"] a.sl-exam-live-link`);

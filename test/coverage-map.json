@@ -411,6 +411,7 @@
         "exam/routes-attempts.js",
         "exam/routes-live.js",
         "exam/client/tests.js",
+        "exam/client/test-timing.js",
         "exam/client/attempt.js",
         "exam/client/live.js",
         "exam/migrations/006-online-tests.sql",
@@ -545,6 +546,13 @@
       "what": "The school's periods unit by unit, without a browser, on the very file the browser loads: SCHOOL_PERIODS with the school's full list (period 12 directly after 11), unset or blank, whitespace and order; an overlap, a malformed entry, a number listed twice and a period not ending after it starts, each refused naming the entry; every range round-trips through its window, a window one minute off, across midnight or reversed does not match; the DST changeover days 2026-10-25 and 2027-03-28; and what the form proposes during a lesson, in a break, at a back-to-back boundary, before the first period and in the evening.",
       "guards": [
         "exam/client/periods.js"
+      ],
+      "corpus": []
+    },
+    "test/exam-test-timing.test.js": {
+      "what": "Where a test stands in the teacher's list of tests, unit by unit, without a browser, on the very file the browser loads: no sitting is later, every sitting over is done, an open sitting or one opening within seven days is soon and one at seven days or more is later, a coming make-up makes a written test soon again and a far one keeps it later, and a planned offline sitting past its time, never started, is soon.",
+      "guards": [
+        "exam/client/test-timing.js"
       ],
       "corpus": []
     },

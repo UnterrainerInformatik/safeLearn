@@ -27,6 +27,7 @@ import { displayClass, personName } from "./classes.js";
 import { openCreatorOf } from "./bar.js";
 import { defaultPeriods, matchWindow, nextWeekday, periodTimes, viennaInstant, viennaLocal, windowFor } from "./periods.js";
 import { pickHandout } from "./handout-picker.js";
+import { testTiming } from "./test-timing.js";
 
 const stateLabels = {
   scheduled: () => t("exam.tests.stateScheduled"),
@@ -79,6 +80,21 @@ function sittingLinks(sitting, offline = false) {
   ];
 }
 
+const timingLabels = {
+  done: () => t("exam.tests.timingDone"),
+  soon: () => t("exam.tests.timingSoon"),
+  later: () => t("exam.tests.timingLater"),
+};
+
+/** The legend of the list's row colours. */
+function timingLegend() {
+  return h(
+    "p",
+    { class: "sl-exam-quiet sl-exam-tests-legend" },
+    ["soon", "later", "done"].map((timing) => h("span", { class: "sl-exam-tests-legend-item", "data-timing": timing }, timingLabels[timing]()))
+  );
+}
+
 /** A list of tests, one group per course. */
 class TestList extends ExamElement {
   async load() {
@@ -109,6 +125,7 @@ class TestList extends ExamElement {
     return h(
       "div",
       { class: "sl-exam sl-exam-tests" },
+      list.groups.some((group) => group.tests.length > 0) ? timingLegend() : null,
       list.groups.map((group) => this.group(group, list.scope === "course"))
     );
   }
@@ -139,10 +156,11 @@ class TestList extends ExamElement {
               h(
                 "tbody",
                 {},
-                group.tests.map((test) =>
-                  h(
+                group.tests.map((test) => {
+                  const timing = testTiming(test);
+                  return h(
                     "tr",
-                    { "data-test": String(test.id), "data-kind": test.kind },
+                    { "data-test": String(test.id), "data-kind": test.kind, "data-timing": timing, title: timingLabels[timing]() },
                     h(
                       "td",
                       {},
@@ -175,8 +193,8 @@ class TestList extends ExamElement {
                           )
                     ),
                     h("td", {}, test.kind === "offline" ? "–" : String(test.submitted))
-                  )
-                )
+                  );
+                })
               )
             )
           )
