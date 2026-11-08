@@ -339,6 +339,31 @@
   }
 }
 
+/* While a student's own attempt is open (`sl-writing` on <html>, set by the
+   server for a reload and by the `sl-exam-writing` listener otherwise), the
+   page offers no way off it: no sidebar, no burger, none of the top bar's
+   buttons on the right and no settings menu; the title stays. `!important`
+   beats the inline styles the mobile overlay and the settings menu set. The
+   content takes the freed width as it does with the column folded (sidebar.css);
+   below 1024px it is full width anyway. */
+
+html.sl-writing #sidebar,
+html.sl-writing .topbar-burger,
+html.sl-writing .topbar-menu,
+html.sl-writing #topdown-menu {
+  display: none !important;
+}
+
+@media screen and (min-width: 1025px) {
+  html.sl-writing #markdown-content {
+    padding-left: 0;
+  }
+
+  html.sl-writing #markdown-content.sl-wide {
+    padding-left: 20px;
+  }
+}
+
 /* An anchor drawn as the top bar's buttons are, in their ink: the buttons stay
    light in the dark theme, so the theme's link colours (`movement.css`, at a
    higher specificity) would paint a pale icon on a light button. */

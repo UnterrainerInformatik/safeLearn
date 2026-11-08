@@ -58,11 +58,17 @@ function mountAll() {
 // and draws them anew once it is submitted, so they hold the new result. Only
 // that page carries the section, so a content page's results stay as placed.
 // A section the server rendered hidden belongs to an attempt already running.
-let writing = document.querySelector(".sl-exam-my-results[hidden]") ? true : null;
+// The same events hide the page's chrome (`sl-writing` on <html>, css/exam.css):
+// the server renders the class for a reload of the Exams page, and this sets it
+// for every other page once its element announces the attempt.
+let writing = document.querySelector(".sl-exam-my-results[hidden]") ||
+  document.documentElement.classList.contains("sl-writing") ? true : null;
+if (writing) document.documentElement.classList.add("sl-writing");
 window.addEventListener("sl-exam-writing", (event) => {
   const now = event.detail?.writing === true;
   const ended = writing === true && !now;
   writing = now;
+  document.documentElement.classList.toggle("sl-writing", now);
   for (const section of document.querySelectorAll(".sl-exam-my-results")) {
     section.hidden = now;
     if (ended) for (const results of section.querySelectorAll("sl-exam-results")) results.reload();

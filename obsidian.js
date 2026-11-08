@@ -3446,6 +3446,15 @@ function getAutoReloadScript() {
         const payload = JSON.parse(event.data || '{}');
         console.log('[SSE] Reload event:', payload);
 
+        // A page on which a test is being written (wrapInPage's writing) is
+        // not reloaded: a reload would put the writer behind "Continue in
+        // full screen". Nothing is queued either - after the test it would
+        // replace the result just shown; the next page opened is current.
+        if (document.documentElement.classList.contains('sl-writing')) {
+          console.log('[SSE] Skipping reload: a test is being written');
+          return;
+        }
+
         // Save position before reload
         if (window.Reveal && Reveal.getIndices) {
           const slideIndices = Reveal.getIndices();
@@ -3595,6 +3604,11 @@ function getAutoReloadScript() {
  * /exam/ - in the top bar and the tab, where a corpus page shows its path.
  * `options.wide` lets the content use the whole width beside the sidebar
  * instead of the reading column, for the module's tables.
+ * `options.writing` marks a page on which a test is being written: `<html>`
+ * carries `sl-writing` from the first byte, which hides the sidebar, the
+ * burger, the top bar's buttons and the settings menu (css/exam.css) and makes
+ * the hot-reload client skip its reloads. The core does not know why; the exam
+ * module's client keeps the class in step afterwards.
  */
 export async function wrapInPage(html, startPage, req, options = {}) {
   const title = options.title ?? null;
@@ -3604,7 +3618,7 @@ export async function wrapInPage(html, startPage, req, options = {}) {
   // draws anything.
   const pre = `
       <!DOCTYPE html>
-      <html lang="${lang}" data-sl-locale="${loc}">
+      <html lang="${lang}" data-sl-locale="${loc}"${options.writing ? ' class="sl-writing"' : ""}>
       <head>
         <meta charset="UTF-8">
         <!-- Lay the page out at the device's own width rather than at an assumed

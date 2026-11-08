@@ -243,7 +243,7 @@ export function registerAttemptRoutes(router, { db, handle, startPage }) {
           <h2>${escapeHtml(t("exam.my.results"))}</h2>
           ${embedPlaceholder("results", { page: "1" }, loading)}
         </section>`;
-      res.send(await wrapInPage(body, startPage(), req, { title, wide: true }));
+      res.send(await wrapInPage(body, startPage(), req, { title, wide: true, writing }));
     })
   );
 

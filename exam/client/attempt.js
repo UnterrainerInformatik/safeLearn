@@ -21,7 +21,15 @@
  * a page that left full screen shows a bar with the way back, which never
  * covers the questions. A browser that refuses full screen still writes; the
  * server flags it. The heartbeat also carries the timer ticks and whether the
- * page was out of full screen.
+ * page was out of full screen. Once the attempt is submitted - by the student
+ * or by the server at the deadline - the page leaves full screen by itself
+ * and shows the result (exam-fullscreen-chrome D4); a teacher's try never does.
+ *
+ * While the attempt is open the page around it offers no way off it: the
+ * element announces writing (`sl-exam-writing`), the module's client sets
+ * `sl-writing` on <html>, which hides the sidebar, the burger, the top bar's
+ * buttons and the settings menu, and makes the hot-reload client skip its
+ * reloads (exam-fullscreen-chrome D1-D3). A preview announces nothing.
  *
  * The controls - buttons, countdown, messages - are in the reader's own
  * language; questions and answers stay in the course's language and are
@@ -84,6 +92,18 @@ async function enterFullscreen() {
   } catch {
     return false;
   }
+}
+
+/**
+ * Leaves full screen once an attempt has been submitted (exam-fullscreen-chrome
+ * D4). Called after `stop()`, so the `fullscreenchange` that follows sends no
+ * beat and shows no bar. A page not in full screen stays as it is; a refusal
+ * changes nothing worth reporting. Needs no user gesture, so the deadline path
+ * works without a click.
+ */
+function leaveFullscreen() {
+  if (!document.fullscreenElement || typeof document.exitFullscreen !== "function") return;
+  document.exitFullscreen().catch(() => {});
 }
 
 const nativeCode = /\{\s*\[native code\]\s*\}\s*$/;
@@ -659,6 +679,7 @@ class WriteTest extends ExamElement {
     try {
       this.stop?.();
       this.show(this.resultPage(await examApi(`/attempts/${this.attempt}/submit`, { method: "POST" })));
+      leaveFullscreen();
     } catch (error) {
       this.status.textContent = refusal(error);
       if (error instanceof ExamApiError && error.status === 409) this.finish();
@@ -683,6 +704,7 @@ class WriteTest extends ExamElement {
       if (answer.submitted) {
         this.stop?.();
         this.show(this.resultPage(answer));
+        leaveFullscreen();
         return;
       }
       // The server's clock is a little behind: it says how long is left.

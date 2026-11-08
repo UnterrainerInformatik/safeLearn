@@ -2447,6 +2447,147 @@ describe("online tests: writing", () => {
     assert.ok(database((db) => db.prepare("SELECT submitted_at FROM attempt WHERE id = ?").get(writing.attempt).submitted_at), "the server submitted it");
   });
 
+  /**
+   * The page's chrome (exam-fullscreen-chrome): whether <html> carries
+   * `sl-writing`, which of the sidebar, the burger, the top bar's buttons and
+   * the settings menu are displayed, and whether the title is.
+   */
+  const chromeOf = (page) =>
+    page.evaluate(() => {
+      const title = document.querySelector(".topbar-title");
+      return {
+        writing: document.documentElement.classList.contains("sl-writing"),
+        shown: ["#sidebar", ".topbar-burger", ".topbar-menu", "#topdown-menu"].filter((selector) => {
+          const element = document.querySelector(selector);
+          return element !== null && getComputedStyle(element).display !== "none";
+        }),
+        title: title !== null && getComputedStyle(title).display !== "none" && title.textContent.trim() !== "",
+      };
+    });
+  const chromeHidden = { writing: true, shown: [], title: true };
+  const chromeShown = { writing: false, shown: ["#sidebar", ".topbar-burger", ".topbar-menu", "#topdown-menu"], title: true };
+
+  /**
+   * A page whose hot-reload stream can be fed by hand: the client's
+   * `EventSource` is kept, so a `reload` event of the server's shape can be
+   * dispatched on it, and every navigation of the main frame is counted.
+   */
+  const hotReloadPage = async (session) => {
+    const page = await session.context.newPage();
+    await page.setViewport({ width: 1280, height: 800 });
+    await page.evaluateOnNewDocument(() => {
+      const Original = window.EventSource;
+      window.EventSource = class extends Original {
+        constructor(...args) {
+          super(...args);
+          window.__slHotReload = this;
+        }
+      };
+    });
+    const navigations = { count: 0 };
+    page.on("framenavigated", (frame) => {
+      if (frame === page.mainFrame()) navigations.count += 1;
+    });
+    const sendNav = async () => {
+      await page.waitForFunction(() => window.__slHotReload instanceof EventSource, { timeout: 10000 });
+      const before = navigations.count;
+      await page.evaluate(() => {
+        window.__slStay = true;
+        window.__slHotReload.dispatchEvent(new MessageEvent("reload", { data: JSON.stringify({ type: "nav" }) }));
+      });
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      return navigations.count === before && (await page.evaluate(() => window.__slStay === true));
+    };
+    return { page, sendNav, navigations };
+  };
+
+  test("while a student writes, the page offers no way off it: no chrome from the start, out of full screen and after a reload, no hot reload; submitting leaves full screen and brings it all back", async () => {
+    const test = await openTest("No way off");
+    const correct = await correctTexts(test.id);
+    const { page, sendNav, navigations } = await hotReloadPage(student);
+    try {
+      await page.goto(`${applicationUrl}/exam/my`, { waitUntil: "domcontentloaded" });
+      await page.waitForSelector(`.sl-exam-attempt-open[data-test="${test.id}"] button`, { timeout: 20000 });
+      assert.deepEqual(await chromeOf(page), chromeShown, "before the start the page has its chrome");
+      await page.click(`.sl-exam-attempt-open[data-test="${test.id}"] button`);
+      await page.waitForSelector(".sl-exam-attempt-question", { visible: true, timeout: 20000 });
+      assert.deepEqual(await chromeOf(page), chromeHidden, "once started only the title is left");
+      // The padding has a transition of its own (markdown.css), so its end is waited for.
+      await page.waitForFunction(() => getComputedStyle(document.querySelector("#markdown-content")).paddingLeft === "20px", { timeout: 5000 });
+
+      await page.evaluate(() => document.exitFullscreen());
+      await page.waitForFunction(() => document.querySelector(".sl-exam-attempt-fullscreen-bar").offsetParent !== null, { timeout: 5000 });
+      assert.deepEqual(await chromeOf(page), chromeHidden, "out of full screen it stays hidden");
+
+      assert.equal(await sendNav(), true, "a hot reload during the attempt does not reload the page");
+
+      const served = await page.evaluate(async () => (await fetch("/exam/my", { credentials: "include" })).text());
+      assert.match(served, /<html [^>]*class="sl-writing"/, "a reload during the attempt is served with the chrome hidden");
+      await page.reload({ waitUntil: "domcontentloaded" });
+      assert.equal(await page.evaluate(() => document.documentElement.classList.contains("sl-writing")), true, "from the first byte");
+      await page.waitForSelector(".sl-exam-attempt-continue", { visible: true, timeout: 20000 });
+      assert.deepEqual(await chromeOf(page), chromeHidden, "behind Continue in full screen");
+
+      // At a phone's width nothing is left to open, and nothing runs off the side.
+      await page.setViewport({ width: 390, height: 800 });
+      assert.deepEqual(
+        await page.evaluate(() => ({ fits: document.documentElement.scrollWidth <= window.innerWidth })),
+        { fits: true },
+        "390 px: no horizontal scroll"
+      );
+      assert.deepEqual(await chromeOf(page), chromeHidden, "390 px: the chrome stays hidden");
+      await page.setViewport({ width: 1280, height: 800 });
+
+      await page.click(".sl-exam-attempt-continue");
+      await page.waitForSelector(".sl-exam-attempt-question", { visible: true, timeout: 10000 });
+      assert.equal(await page.evaluate(() => document.fullscreenElement !== null), true, "in full screen again");
+      await choose(page, correct[0][0]);
+      // Skipped once more on the resumed page, so a reload caught up after submitting would show.
+      assert.equal(await sendNav(), true, "a hot reload on the resumed attempt does not reload the page either");
+      const navigated = navigations.count;
+      await page.click(".sl-exam-attempt-submit");
+      await page.click(".sl-exam-attempt-submit");
+      await page.waitForSelector(".sl-exam-attempt-result", { timeout: 10000 });
+      await page.waitForFunction(() => document.fullscreenElement === null, { timeout: 5000 });
+      assert.deepEqual(await chromeOf(page), chromeShown, "after submitting the chrome is back, without a reload");
+      assert.equal(await page.$(".sl-exam-attempt-fullscreen-bar"), null, "and no bar asks for full screen");
+
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      assert.deepEqual(
+        [navigations.count, await page.evaluate(() => window.__slStay === true)],
+        [navigated, true],
+        "the skipped hot reloads are not caught up after submitting"
+      );
+      assert.match(await page.$eval(".sl-exam-attempt-result", (el) => el.textContent), /1 of 2 questions correct/, "the result stays on the page");
+    } finally {
+      submitAll(test.id);
+      await page.close();
+    }
+  });
+
+  test("at the deadline the page leaves full screen and brings the chrome back", async () => {
+    const test = await openTest("Chrome until the deadline");
+    const writing = (await fetchAs(student, `/exam/api/tests/${test.id}/attempt`, { method: "POST" })).json;
+    database((db) => db.prepare("UPDATE attempt SET deadline = ? WHERE id = ?").run(new Date(Date.now() + 8000).toISOString(), writing.attempt));
+    const page = await student.context.newPage();
+    await page.setViewport({ width: 1280, height: 800 });
+    try {
+      await page.goto(`${applicationUrl}/exam/my`, { waitUntil: "domcontentloaded" });
+      await page.waitForSelector(".sl-exam-attempt-continue", { visible: true, timeout: 20000 });
+      await page.click(".sl-exam-attempt-continue");
+      await page.waitForSelector(".sl-exam-attempt-question", { visible: true, timeout: 10000 });
+      assert.equal(await page.evaluate(() => document.fullscreenElement !== null), true, "written in full screen");
+      assert.deepEqual(await chromeOf(page), chromeHidden, "without the chrome");
+      await page.waitForSelector(".sl-exam-attempt-result", { timeout: 20000 });
+      await page.waitForFunction(() => document.fullscreenElement === null, { timeout: 5000 });
+      assert.deepEqual(await chromeOf(page), chromeShown, "the chrome is back with the result");
+      assert.ok(database((db) => db.prepare("SELECT submitted_at FROM attempt WHERE id = ?").get(writing.attempt).submitted_at), "the server submitted it");
+    } finally {
+      submitAll(test.id);
+      await page.close();
+    }
+  });
+
   test("a content page that places a test beside results keeps the results visible while the student writes", async () => {
     const test = await openTest("Beside results");
     const page = student.page;
@@ -2512,11 +2653,14 @@ describe("online tests: writing", () => {
       assert.equal(await teacher.page.$eval(".sl-exam-attempt-continue", (el) => el.textContent), "Start the test in full screen", "the student's button, in front of the questions");
       await teacher.page.click(".sl-exam-attempt-continue");
       await teacher.page.waitForSelector(".sl-exam-attempt-question", { visible: true, timeout: 10000 });
+      assert.deepEqual(await chromeOf(teacher.page), chromeShown, "the preview hides nothing");
       await teacher.page.click(".sl-exam-attempt-answers label");
       await teacher.page.click(".sl-exam-attempt-submit");
       await teacher.page.click(".sl-exam-attempt-submit");
       assert.match(await teacher.page.$eval(".sl-exam-writing .sl-exam-message", (el) => el.textContent), /nothing is submitted/);
       assert.equal(await teacher.page.$(".sl-exam-attempt-result"), null, "no result");
+      assert.equal(await teacher.page.evaluate(() => document.fullscreenElement !== null), true, "and keeps full screen");
+      await teacher.page.evaluate(() => document.exitFullscreen());
     } finally {
       teacher.page.off("request", watch);
     }
