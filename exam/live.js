@@ -6,7 +6,8 @@
  *
  * An event names the participant and what happened - started, saved (with the
  * remaining time only), submitted, away, back, suspicious (a new stretch
- * hidden by timing or a replaced property), refused device, released,
+ * hidden by timing, out of full screen or with the tick rate down, a replaced
+ * property, or full screen not available), refused device, released,
  * bound to the next browser after a release -
  * never an answer. An offline sitting (`offline-test`) has no attempts: its
  * events are the window's and the attendance's.
@@ -62,7 +63,9 @@ export function listen(sittingId, listener) {
  * time left) or submitted; how often and how long they left the page; how
  * many requests from another browser were refused; the suspicious signal -
  * the replaced properties, the time hidden by timing and, while writing, the
- * time since the last heartbeat; and which browser the
+ * time since the last heartbeat, the time out of full screen, whether full
+ * screen was not available, and the time with the tick rate down beside its
+ * current share; and which browser the
  * attempt is bound to and which was refused last (exam-live-bound-browser
  * D4) - `boundBrowser` null while the attempt is unbound or there is none,
  * its `full` null for a binding from before browser strings were kept.
@@ -92,6 +95,13 @@ function participantFrom(row, attempt, { count: refused, userAgent: refusedAgent
     hiddenCount: attempt?.hidden_count ?? 0,
     hiddenMs: attempt?.hidden_ms ?? 0,
     silentMs: status === "writing" ? Math.max(0, Date.parse(at) - Date.parse(attempt.beat_at ?? attempt.started_at)) : null,
+    // Full screen and the tick rate (exam-fullscreen-tick-rate design D7), as teacher-only as the rest.
+    fullscreenUnavailable: attempt?.fullscreen_unavailable === 1,
+    outCount: attempt?.out_count ?? 0,
+    outMs: attempt?.out_ms ?? 0,
+    slowCount: attempt?.slow_count ?? 0,
+    slowMs: attempt?.slow_ms ?? 0,
+    tickShare: attempt?.tick_share === null || attempt?.tick_share === undefined ? null : attempt.tick_share / 1000,
     refused,
     bound: attempt ? attempt.device_hash !== null : null,
     boundBrowser: attempt && attempt.device_hash !== null ? browserLabel(attempt.device_user_agent) : null,
@@ -147,15 +157,20 @@ export function liveParticipant(db, sittingId, username, at = now()) {
 
 /**
  * How long each writing attempt of a sitting has gone without a heartbeat at
- * `at`, per username (exam-hidden-page-signals design D3): what the live
- * stream's periodic `beats` tick carries, since an ordinary heartbeat emits
- * no change. Empty for an offline sitting, which has no attempts.
+ * `at`, per username (exam-hidden-page-signals design D3), and each one's
+ * current tick rate (exam-fullscreen-tick-rate D7): what the live stream's
+ * periodic `beats` tick carries, since an ordinary heartbeat emits no change.
+ * Both empty for an offline sitting, which has no attempts.
  */
 export function liveSilence(db, sittingId, at = now()) {
   const rows = db
-    .prepare("SELECT username, beat_at, started_at FROM attempt WHERE sitting_id = ? AND submitted_at IS NULL")
+    .prepare("SELECT username, beat_at, started_at, tick_share FROM attempt WHERE sitting_id = ? AND submitted_at IS NULL")
     .all(sittingId);
-  return Object.fromEntries(rows.map((row) => [row.username, Math.max(0, Date.parse(at) - Date.parse(row.beat_at ?? row.started_at))]));
+  return {
+    silent: Object.fromEntries(rows.map((row) => [row.username, Math.max(0, Date.parse(at) - Date.parse(row.beat_at ?? row.started_at))])),
+    // The tick rate changes with every beat without an event of its own (exam-fullscreen-tick-rate D7).
+    share: Object.fromEntries(rows.map((row) => [row.username, row.tick_share === null ? null : row.tick_share / 1000])),
+  };
 }
 
 /**

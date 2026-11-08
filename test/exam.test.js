@@ -2141,8 +2141,21 @@ describe("online tests: writing", () => {
       assert.equal(await page.$(".sl-exam-bar"), null, "no bar on the student's page");
       assert.ok(await page.$("#slExamsButton.sl-exam-open"), "the Exams button is violet while a test is open");
       await page.waitForSelector(`.sl-exam-attempt-open[data-test="${test.id}"] button`, { timeout: 20000 });
+      assert.deepEqual(
+        await page.$eval(`.sl-exam-attempt-open[data-test="${test.id}"]`, (section) => ({
+          buttons: [...section.querySelectorAll("button, a, input")].map((control) => control.textContent.trim()),
+          notice: section.querySelector(".sl-exam-attempt-fullscreen-notice")?.textContent,
+        })),
+        {
+          buttons: ["Start the test in full screen"],
+          notice: "Please stay in full screen and do not switch tabs until you have finished and submitted, or it may look suspicious. Thank you.",
+        },
+        "the only way in is the full-screen button, with the request above it"
+      );
       await page.click(`.sl-exam-attempt-open[data-test="${test.id}"] button`);
-      await page.waitForSelector(".sl-exam-attempt-question", { timeout: 20000 });
+      await page.waitForSelector(".sl-exam-attempt-question", { visible: true, timeout: 20000 });
+      assert.equal(await page.evaluate(() => document.fullscreenElement === document.documentElement), true, "the page is in full screen");
+      assert.equal(await page.$(".sl-exam-attempt-gate"), null, "no gate after the start itself");
       await page.waitForFunction(() => [...document.querySelectorAll(".sl-exam-writing img")].every((img) => img.complete && img.naturalWidth === 1), { timeout: 10000 });
       assert.equal(await imageStatus(student), 200, "the image of an open attempt is served");
 
@@ -2159,7 +2172,19 @@ describe("online tests: writing", () => {
       }
 
       await page.reload({ waitUntil: "domcontentloaded" });
-      await page.waitForSelector(".sl-exam-attempt-question", { timeout: 20000 });
+      await page.waitForSelector(".sl-exam-attempt-continue", { visible: true, timeout: 20000 });
+      assert.deepEqual(
+        await page.evaluate(() => ({
+          label: document.querySelector(".sl-exam-attempt-continue").textContent,
+          questionsShown: [...document.querySelectorAll(".sl-exam-attempt-question")].some((field) => field.offsetParent !== null),
+          countdown: /^1[45]:\d\d$/.test(document.querySelector(".sl-exam-countdown").textContent),
+        })),
+        { label: "Continue in full screen", questionsShown: false, countdown: true },
+        "a reload shows the gate with the countdown running, not the questions"
+      );
+      await page.click(".sl-exam-attempt-continue");
+      await page.waitForSelector(".sl-exam-attempt-question", { visible: true, timeout: 10000 });
+      assert.equal(await page.evaluate(() => document.fullscreenElement === document.documentElement), true, "back in full screen");
       const resumed = await page.evaluate(() => [...document.querySelectorAll(".sl-exam-attempt-answers input:checked")].map((input) => input.closest("label").textContent.trim()));
       assert.deepEqual(resumed, [correct[0][0]], "the reload resumes with the saved answer");
       assert.match(await page.$eval(".sl-exam-countdown", (el) => el.textContent), /^1[45]:\d\d$/, "and the time left");
@@ -2257,6 +2282,106 @@ describe("online tests: writing", () => {
     }
   });
 
+  /** Polls the attempt of test `id` until `done(row)` holds, for up to `ms`; answers the last row read. */
+  const attemptWhen = async (id, done, ms = 20000) => {
+    const until = Date.now() + ms;
+    let row;
+    do {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      row = database((db) => db.prepare("SELECT * FROM attempt WHERE test_id = ?").get(id));
+    } while (!(row && done(row)) && Date.now() < until);
+    return row;
+  };
+
+  /** Starts test `id` on `page` with the full-screen button and waits for the questions. */
+  const startOn = async (page, id) => {
+    await page.goto(`${applicationUrl}/exam/my`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(`.sl-exam-attempt-open[data-test="${id}"] button`, { timeout: 20000 });
+    await page.click(`.sl-exam-attempt-open[data-test="${id}"] button`);
+    await page.waitForSelector(".sl-exam-attempt-question", { visible: true, timeout: 20000 });
+  };
+
+  const submitAll = (id) =>
+    database((db) => db.prepare("UPDATE attempt SET submitted_at = ? WHERE test_id = ? AND submitted_at IS NULL").run(new Date().toISOString(), id));
+
+  test("leaving full screen shows the way back above the questions, which stay usable, and the stretch counts as out", async () => {
+    const test = await openTest("Leaving full screen");
+    const correct = await correctTexts(test.id);
+    const page = student.page;
+    const bar = () => page.$eval(".sl-exam-attempt-fullscreen-bar", (el) => el.offsetParent !== null);
+    try {
+      await startOn(page, test.id);
+      assert.equal(await page.evaluate(() => document.fullscreenElement !== null), true);
+      assert.equal(await bar(), false, "no bar in full screen");
+      assert.ok((await attemptWhen(test.id, (row) => row.beat_at !== null)).beat_at, "a heartbeat arrived");
+      // What Esc does: the browser ends full screen (a headless browser has no Esc of its own).
+      await page.evaluate(() => document.exitFullscreen());
+      await page.waitForFunction(() => document.querySelector(".sl-exam-attempt-fullscreen-bar").offsetParent !== null, { timeout: 5000 });
+      assert.equal(await page.$eval(".sl-exam-attempt-back", (el) => el.textContent), "Back to full screen");
+      const layout = await page.evaluate(() => {
+        const barBox = document.querySelector(".sl-exam-attempt-fullscreen-bar").getBoundingClientRect();
+        const first = document.querySelector(".sl-exam-attempt-question").getBoundingClientRect();
+        return { above: barBox.bottom <= first.top, position: getComputedStyle(document.querySelector(".sl-exam-attempt-fullscreen-bar")).position };
+      });
+      assert.deepEqual(layout, { above: true, position: "static" }, "the bar stands above the questions, not over them");
+      await choose(page, correct[0][0]);
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await page.click(".sl-exam-attempt-back");
+      await page.waitForFunction(() => document.fullscreenElement !== null, { timeout: 5000 });
+      assert.equal(await bar(), false, "the bar goes once full screen is back");
+      const row = await attemptWhen(test.id, (candidate) => candidate.out_count > 0, 15000);
+      assert.equal(row.out_count, 1, "one stretch out of full screen");
+      assert.ok(row.out_ms >= 1500, `timed: ${row.out_ms} ms`);
+      assert.deepEqual([row.focus_count, row.fullscreen_unavailable], [0, 0], "the focus figures are unchanged");
+    } finally {
+      submitAll(test.id);
+    }
+  });
+
+  test("a browser that refuses full screen still starts the attempt, which is flagged", async () => {
+    const test = await openTest("No full screen here");
+    const page = await student.context.newPage();
+    try {
+      await page.evaluateOnNewDocument(() => {
+        Element.prototype.requestFullscreen = () => Promise.reject(new TypeError("Permissions check failed"));
+      });
+      await startOn(page, test.id);
+      assert.equal(await page.evaluate(() => document.fullscreenElement), null, "not in full screen");
+      const row = database((db) => db.prepare("SELECT * FROM attempt WHERE test_id = ?").get(test.id));
+      assert.equal(row.fullscreen_unavailable, 1, "flagged as full screen not available");
+      assert.doesNotMatch(await page.evaluate(() => document.body.innerText), /not available|Tickrate/i, "the student is not told");
+    } finally {
+      submitAll(test.id);
+      await page.close();
+    }
+  });
+
+  test("a page whose animation frames are throttled reads as tick rate down", async () => {
+    const test = await openTest("Throttled frames");
+    const page = await student.context.newPage();
+    try {
+      // About 8 frames a second whatever the display: above the 5 of hidden by timing, far below any baseline.
+      await page.evaluateOnNewDocument(() => {
+        window.requestAnimationFrame = (callback) => setTimeout(() => callback(performance.now()), 125);
+        window.cancelAnimationFrame = (handle) => clearTimeout(handle);
+      });
+      await startOn(page, test.id);
+      await attemptWhen(test.id, (row) => row.beat_at !== null);
+      // The baseline a 60 Hz display would have formed over the first spans.
+      database((db) => db.prepare("UPDATE attempt SET frame_baseline = 60, rate_samples = NULL WHERE test_id = ?").run(test.id));
+      const row = await attemptWhen(test.id, (candidate) => candidate.slow_count > 0, 15000);
+      assert.equal(row.slow_count, 1, `tick rate down: ${row.slow_count}×, ${row.slow_ms} ms, share ${row.tick_share}‰`);
+      assert.ok(row.tick_share < 500, `the share is below the threshold: ${row.tick_share}‰`);
+      assert.deepEqual([row.hidden_count, row.out_count, row.focus_count], [0, 0, 0], "and nothing else is counted for it");
+      const live = (await fetchAs(teacher, `/exam/api/sittings/${test.sitting.id}/live`)).json;
+      const shown = live.participants.find((p) => p.username === student.username.toLowerCase());
+      assert.deepEqual([shown.slowCount > 0, shown.tickShare < 0.5], [true, true], "the live view carries it");
+    } finally {
+      submitAll(test.id);
+      await page.close();
+    }
+  });
+
   /** Whether the Exams page's results section is shown, and what it holds. */
   const resultsSection = (page) =>
     page.evaluate(() => {
@@ -2283,7 +2408,9 @@ describe("online tests: writing", () => {
 
     await page.reload({ waitUntil: "domcontentloaded" });
     assert.equal((await resultsSection(page)).hidden, true, "a reload during the attempt renders them hidden from the start");
-    await page.waitForSelector(".sl-exam-attempt-question", { timeout: 20000 });
+    await page.waitForSelector(".sl-exam-attempt-continue", { visible: true, timeout: 20000 });
+    await page.click(".sl-exam-attempt-continue");
+    await page.waitForSelector(".sl-exam-attempt-question", { visible: true, timeout: 20000 });
     assert.equal((await resultsSection(page)).hidden, true, "and they stay hidden once the attempt is resumed");
 
     await choose(page, correct[0][0]);
@@ -2382,6 +2509,9 @@ describe("online tests: writing", () => {
       assert.equal(await teacher.page.$(".sl-exam-bar"), null, "as a student sees it, without the bar");
       assert.match(await teacher.page.$eval(".sl-exam-attempt-preview", (el) => el.textContent), /Teacher preview/, "the controls follow the teacher's language, English by default");
       assert.match(await teacher.page.$eval(".sl-exam-countdown", (el) => el.textContent), /^1[45]:\d\d$/, "the sitting's duration");
+      assert.equal(await teacher.page.$eval(".sl-exam-attempt-continue", (el) => el.textContent), "Start the test in full screen", "the student's button, in front of the questions");
+      await teacher.page.click(".sl-exam-attempt-continue");
+      await teacher.page.waitForSelector(".sl-exam-attempt-question", { visible: true, timeout: 10000 });
       await teacher.page.click(".sl-exam-attempt-answers label");
       await teacher.page.click(".sl-exam-attempt-submit");
       await teacher.page.click(".sl-exam-attempt-submit");
@@ -2716,15 +2846,41 @@ describe("online tests: writing", () => {
     const own = (await fetchAs(student, `/exam/api/tests/${test.id}/attempt`, { method: "POST" })).json.attempt;
     const first = await beat(student, own);
     assert.deepEqual([first.status, first.json], [200, { recorded: true }]);
-    for (const body of [{}, { ...clean, frames: -3 }, { ...clean, hidden: "yes" }, { ...clean, tampered: ["onblur"] }]) {
+    for (const body of [
+      {},
+      { ...clean, frames: -3 },
+      { ...clean, hidden: "yes" },
+      { ...clean, tampered: ["onblur"] },
+      { ...clean, ticks: -1 },
+      { ...clean, ticks: 2.5 },
+      { ...clean, ticks: "20" },
+      { ...clean, out: "yes" },
+      { ...clean, noFullscreen: 1 },
+    ]) {
       assert.equal((await beat(student, own, body)).status, 400, JSON.stringify(body));
     }
+    assert.equal((await beat(student, own, { ...clean, ticks: 20, out: false, noFullscreen: false })).status, 200, "the full beat of a current page");
     const cookie = (await student.context.cookies()).find((c) => c.name === `sl-attempt-${own}`);
     await student.context.deleteCookie(cookie);
     try {
       assert.equal((await beat(student, own)).status, 409, "another browser is refused");
     } finally {
       database((db) => db.prepare("UPDATE attempt SET submitted_at = ? WHERE id = ?").run(new Date().toISOString(), own));
+    }
+  });
+
+  test("a start without full screen flags the attempt; a start of any other shape is refused", async () => {
+    const test = await openTest("Refused full screen");
+    const start = (body) => fetchAs(student, `/exam/api/tests/${test.id}/attempt`, { method: "POST", body });
+    assert.equal((await start({ fullscreen: "no" })).status, 400, "not a yes/no");
+    const started = await start({ fullscreen: false });
+    try {
+      assert.equal(started.status, 200, "the attempt starts anyway");
+      const row = database((db) => db.prepare("SELECT fullscreen_unavailable FROM attempt WHERE id = ?").get(started.json.attempt));
+      assert.equal(row.fullscreen_unavailable, 1, "and is flagged as full screen not available");
+      assert.doesNotMatch(JSON.stringify(started.json), /full_?screen/i, "the student is not told");
+    } finally {
+      database((db) => db.prepare("UPDATE attempt SET submitted_at = ? WHERE test_id = ? AND submitted_at IS NULL").run(new Date().toISOString(), test.id));
     }
   });
 });
@@ -3055,18 +3211,50 @@ describe("online tests: the live view", () => {
     assert.deepEqual(await colour(), { tone: null, flag: null, title: "", opacity: "1" }, "a writing row is neutral");
     assert.deepEqual(
       await teacher.page.$$eval(".sl-exam-live-legend .sl-exam-legend-item", (items) => items.map((item) => [item.dataset.tone ?? null, item.dataset.flag ?? null, item.textContent])),
-      [["good", null, "submitted"], [null, "warn", "suspicious signal"]],
+      [["good", null, "submitted"], [null, "warn", "suspicious signal or tick rate down"]],
       "the legend names the green row and the amber stripe"
     );
 
-    write("UPDATE attempt SET tamper_detail = 'visibilityState,hasFocus', hidden_count = 2, hidden_ms = 90000 WHERE id = ?", writing.attempt);
+    const tickCell = `sl-exam-live tr[data-username="${username}"] .sl-exam-live-tick`;
+    const tick = () => teacher.page.$eval(tickCell, (el) => [el.dataset.down, el.innerText.trim()]);
+    assert.deepEqual(await tick(), ["0", "–"], "no tick rate before the first span");
+    assert.equal(
+      await teacher.page.$eval(tickCell, (td) => td.closest("table").querySelectorAll("thead th")[td.cellIndex].textContent),
+      "Tick rate",
+      "its own column"
+    );
+    write("UPDATE attempt SET tick_share = 970 WHERE id = ?", writing.attempt);
+    await shown();
+    assert.deepEqual(await tick(), ["0", "97%"], "the share while writing, no warning");
+    assert.deepEqual((await colour()).flag, null, "a normal tick rate does not flag the row");
+
+    write("UPDATE attempt SET tamper_detail = 'visibilityState,hasFocus', hidden_count = 2, hidden_ms = 90000, out_count = 1, out_ms = 25000, fullscreen_unavailable = 1 WHERE id = ?", writing.attempt);
     const [, text] = await shown();
-    assert.equal(text, "browser manipulated (visibilityState, hasFocus)\nhidden by timing 2×, 1 min 30 s");
+    assert.equal(text, "browser manipulated (visibilityState, hasFocus)\nhidden by timing 2×, 1 min 30 s\nout of full screen 1×, 25 s\nfull screen not available");
     assert.deepEqual(
       await colour(),
-      { tone: null, flag: "warn", title: "Suspicious: browser manipulated (visibilityState, hasFocus), hidden by timing 2×, 1 min 30 s", opacity: "1" },
+      {
+        tone: null,
+        flag: "warn",
+        title: "Suspicious: browser manipulated (visibilityState, hasFocus), hidden by timing 2×, 1 min 30 s, out of full screen 1×, 25 s, full screen not available",
+        opacity: "1",
+      },
       "a suspicious row is flagged with the signs as its tooltip, and not tinted"
     );
+    write("UPDATE attempt SET tamper_detail = NULL, hidden_count = 0, hidden_ms = 0, out_count = 0, out_ms = 0, fullscreen_unavailable = 0, slow_count = 1, slow_ms = 40000, tick_share = 200 WHERE id = ?", writing.attempt);
+    assert.deepEqual(await shown(), ["0", ""], "tick rate down is not a sign of the suspicious cell");
+    assert.deepEqual(await tick(), ["1", "Tickrate Down! 1×, 40 s\n20%"], "the red warning with the share below it");
+    assert.deepEqual(
+      [(await colour()).flag, (await colour()).title],
+      ["warn", "Tick rate: Tickrate Down! 1×, 40 s"],
+      "tick rate down flags the row like a suspicious sign"
+    );
+    assert.equal(await teacher.page.$eval(`${tickCell} .sl-exam-live-tickdown`, (el) => getComputedStyle(el).color), "rgb(192, 57, 43)", "in red");
+    // The stream's tick carries the share without a snapshot.
+    write("UPDATE attempt SET tick_share = 1000 WHERE id = ?", writing.attempt);
+    await teacher.page.waitForFunction((selector) => /100%$/.test(document.querySelector(selector).innerText), { timeout: 12000, polling: 250 }, tickCell);
+    write("UPDATE attempt SET tamper_detail = 'visibilityState,hasFocus', hidden_count = 2, hidden_ms = 90000 WHERE id = ?", writing.attempt);
+    await shown();
     assert.match(await teacher.page.$eval(`sl-exam-live tr[data-username="${username}"] .sl-exam-live-left-page`, (el) => el.textContent), /never left/, "the focus figures are unchanged");
 
     write("UPDATE attempt SET beat_at = ? WHERE id = ?", new Date(Date.now() - 45000).toISOString(), writing.attempt);
@@ -3080,6 +3268,7 @@ describe("online tests: the live view", () => {
     await teacher.page.waitForFunction((u) => document.querySelector(`sl-exam-live tr[data-username="${u}"]`)?.dataset.status === "submitted", { timeout: 10000 }, username);
     const after = await teacher.page.$eval(cell, (el) => el.innerText);
     assert.match(after, /browser manipulated/, "kept after the attempt");
+    assert.deepEqual(await tick(), ["1", "Tickrate Down! 1×, 40 s"], "after the attempt the figures without the share");
     assert.doesNotMatch(after, /no heartbeat/, "no heartbeat warning once submitted");
     const submitted = await colour();
     assert.deepEqual([submitted.tone, submitted.flag, submitted.opacity], ["good", "warn", "1"], "a submitted row is green at full opacity and keeps the flag");
@@ -3115,6 +3304,25 @@ describe("online tests: the live view", () => {
       assert.deepEqual((await rows()).slice(0, 2), [first, second], "the time hidden by timing is added to the time away");
       await teacher.page.evaluate(() => document.querySelector("sl-exam-live").poll());
     }
+    // Full screen and tick rate count for the order: tick rate down 60 s, out of full screen 40 s, away 20 s.
+    await teacher.page.evaluate((u) => {
+      const view = document.querySelector("sl-exam-live");
+      const base = view.participants.get(u);
+      const startedAt = new Date(Date.now() - 300000).toISOString();
+      const figures = { "zz-away": { focusMs: 20000 }, "zz-out": { outMs: 40000 }, "zz-slow": { slowMs: 60000 } };
+      for (const [name, own] of Object.entries(figures)) {
+        view.participants.set(name, { ...base, username: name, status: "writing", startedAt, away: false, focusMs: 0, hiddenMs: 0, outMs: 0, slowMs: 0, ...own, at: performance.now() });
+        view.order.set(name, view.order.size);
+        view.body.append(view.row(name));
+      }
+      view.sort();
+    }, username);
+    assert.deepEqual(
+      (await rows()).filter((u) => u.startsWith("zz-")),
+      ["zz-slow", "zz-out", "zz-away"],
+      "tick rate down, then out of full screen, then away by the focus log"
+    );
+    await teacher.page.evaluate(() => document.querySelector("sl-exam-live").poll());
     // With the mouse on Unbind the rows stay put, and follow once it leaves.
     await teacher.page.hover(`sl-exam-live tr[data-username="${username}"] .sl-exam-live-release`);
     await teacher.page.evaluate((u) => {

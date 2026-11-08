@@ -302,13 +302,16 @@ export function nextOpenTestsChange(db, username, at = now()) {
  * for the browser's cookie. `UNIQUE (test_id, username)` makes a second start
  * of the same attempt impossible, across all sittings.
  */
-export function startAttempt(db, username, testId, at = now(), { userAgent = null } = {}) {
+export function startAttempt(db, username, testId, at = now(), { userAgent = null, fullscreen = true } = {}) {
+  // A missing field is an old page's start, which knew nothing of full screen (exam-fullscreen-tick-rate D1).
+  if (typeof fullscreen !== "boolean") throw new InvalidInputError("exam.errors.attempts.startShape");
   finalizeDue(db, at, username);
   // An offline test is written on paper or elsewhere, never here (design D1).
   if (db.prepare("SELECT * FROM test WHERE id = ?").get(testId)?.kind === "offline") throw new ConflictError("exam.errors.attempts.offlineTest");
   const existing = db.prepare("SELECT * FROM attempt WHERE test_id = ? AND username = ?").get(testId, username);
   if (existing) {
     if (existing.submitted_at !== null) throw new ConflictError("exam.errors.attempts.submittedByYou");
+    if (!fullscreen) flagFullscreenUnavailable(db, existing);
     return { attemptId: existing.id, created: false };
   }
   const sitting = db
@@ -334,6 +337,7 @@ export function startAttempt(db, username, testId, at = now(), { userAgent = nul
       )
       .run(testId, sitting.id, username, at, deadline, questions.length, hashSecret(secret), keptUserAgent(userAgent));
     const id = Number(lastInsertRowid);
+    if (!fullscreen) db.prepare("UPDATE attempt SET fullscreen_unavailable = 1 WHERE id = ?").run(id);
     const placeQuestion = db.prepare("INSERT INTO attempt_question (attempt_id, position, test_question_id) VALUES (?, ?, ?)");
     const placeAnswer = db.prepare("INSERT INTO attempt_token (attempt_id, token, test_answer_id, position) VALUES (?, ?, ?, ?)");
     const answersOf = db.prepare("SELECT id FROM test_answer WHERE test_question_id = ? ORDER BY position");
@@ -345,6 +349,13 @@ export function startAttempt(db, username, testId, at = now(), { userAgent = nul
   });
   notify(sitting.id, "started", username);
   return { attemptId, created: true, secret };
+}
+
+/** Sets the full-screen-not-available finding of an open attempt for good, telling the live view once. */
+function flagFullscreenUnavailable(db, row) {
+  if (row.fullscreen_unavailable === 1) return;
+  db.prepare("UPDATE attempt SET fullscreen_unavailable = 1 WHERE id = ?").run(row.id);
+  notify(row.sitting_id, "suspicious", row.username);
 }
 
 // ------------------------------------------------------ one's own attempt
@@ -520,32 +531,68 @@ const beatMinGapMs = 1000;
 /** A visible page draws 30-60 frames a second; fewer than this many in a beat's span count as hidden. */
 const hiddenFramesPerSecond = 5;
 
-/** A heartbeat's body as the server takes it, or an InvalidInputError. */
+/** The writing page's timer runs every 250 ms, so a page at full rate ticks this often a second (exam-fullscreen-tick-rate D3). */
+const ticksPerSecond = 4;
+
+/** Below this share of its own rate a span counts as tick rate down (exam-fullscreen-tick-rate D3/D6). */
+export const tickDownShare = 0.5;
+
+/** How many normal spans make the baseline, and how long one must be to count (exam-fullscreen-tick-rate D3). */
+const baselineSpans = 6;
+const baselineMinSpanMs = 3000;
+
+/** A heartbeat's body as the server takes it, or an InvalidInputError. `ticks`, `out` and `noFullscreen` are missing from an old page's beat. */
 function beatOf(body) {
-  const { frames, hidden, reportedAway, tampered } = body ?? {};
+  const { frames, ticks, hidden, reportedAway, tampered, out = false, noFullscreen = false } = body ?? {};
   const valid =
     Number.isSafeInteger(frames) &&
     frames >= 0 &&
+    (ticks === undefined || (Number.isSafeInteger(ticks) && ticks >= 0)) &&
     typeof hidden === "boolean" &&
     typeof reportedAway === "boolean" &&
+    typeof out === "boolean" &&
+    typeof noFullscreen === "boolean" &&
     Array.isArray(tampered) &&
     tampered.length <= tamperNames.length &&
     tampered.every((name) => tamperNames.includes(name));
   if (!valid) throw new InvalidInputError("exam.errors.attempts.beatShape");
-  return { frames, hidden, reportedAway, tampered: new Set(tampered) };
+  return { frames, ticks: ticks ?? null, hidden, reportedAway, out, noFullscreen, tampered: new Set(tampered) };
+}
+
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+/**
+ * The tick rate of a span of `seconds` as a share of the page's own rate
+ * (exam-fullscreen-tick-rate D3): the lower of the timer ticks against their
+ * nominal rate and the frames against the attempt's baseline, capped at 1.
+ * Either is unknown when the beat sent no ticks or there is no baseline yet;
+ * null when both are.
+ */
+export function tickShareOf(frames, ticks, seconds, baseline) {
+  const shares = [];
+  if (ticks !== null) shares.push(ticks / (seconds * ticksPerSecond));
+  if (baseline !== null && baseline > 0) shares.push(frames / seconds / baseline);
+  return shares.length === 0 ? null : Math.min(1, ...shares);
 }
 
 /**
  * Records a heartbeat of the writing page (exam-hidden-page-signals design
- * D2): the animation frames drawn since the previous beat, the page's
- * visibility as read through an untouched reference, whether its own focus
- * listeners reported an absence meanwhile, and the replaced properties it
- * found. The span is the server's time since the previous beat; a span with
- * too few frames, or a beat saying hidden, is hidden by timing - unless the
- * focus log already counts it. A run of hidden beats is one stretch. The
- * first beat only starts the clock. Emits `suspicious` only when the count of
- * stretches or the set of replaced properties changed. Never read by the
- * scoring, never shown to the student.
+ * D2, exam-fullscreen-tick-rate D2-D4): the animation frames and timer ticks
+ * since the previous beat, the page's visibility as read through an untouched
+ * reference, whether its own focus listeners reported an absence meanwhile,
+ * whether it was out of full screen or was refused full screen, and the
+ * replaced properties it found. The span is the server's time since the
+ * previous beat, and it lands in the first of these that matches: the focus
+ * log already counts it; hidden by timing (a beat saying hidden, or too few
+ * frames); out of full screen, unless full screen is not available at all;
+ * tick rate down; normal, which may feed the baseline. A run of spans in one category is one stretch. The first beat
+ * only starts the clock. Emits `suspicious` only when a count of stretches,
+ * the set of replaced properties or the full-screen finding changed. Never
+ * read by the scoring, never shown to the student.
  */
 export function recordBeat(db, row, body, at = now()) {
   const beat = beatOf(body);
@@ -555,25 +602,82 @@ export function recordBeat(db, row, body, at = now()) {
   const known = new Set(row.tamper_detail ? row.tamper_detail.split(",") : []);
   const merged = tamperNames.filter((name) => known.has(name) || beat.tampered.has(name));
   const tamperGrew = merged.length > known.size;
+  const unavailable = row.fullscreen_unavailable === 1 || beat.noFullscreen ? 1 : 0;
 
-  let { hidden_count: count, hidden_ms: hiddenMs, beat_hidden: lastHidden } = row;
+  const next = {
+    hidden_count: row.hidden_count,
+    hidden_ms: row.hidden_ms,
+    out_count: row.out_count,
+    out_ms: row.out_ms,
+    slow_count: row.slow_count,
+    slow_ms: row.slow_ms,
+    tick_share: row.tick_share,
+    frame_baseline: row.frame_baseline,
+    rate_samples: row.rate_samples,
+  };
+  let category = null;
   if (row.beat_at !== null) {
     const spanMs = Math.max(0, Math.min(msBetween(row.beat_at, at), msBetween(row.started_at, at)));
-    const hidden = beat.hidden || beat.frames < (spanMs / 1000) * hiddenFramesPerSecond;
-    const countedByFocusLog = beat.reportedAway || row.away_since !== null;
-    if (hidden && !countedByFocusLog) {
-      if (lastHidden === 0) count += 1;
-      hiddenMs += Math.round(spanMs);
-      lastHidden = 1;
-    } else {
-      lastHidden = 0;
+    const seconds = spanMs / 1000;
+    const share = seconds > 0 ? tickShareOf(beat.frames, beat.ticks, seconds, row.frame_baseline) : null;
+    if (share !== null) next.tick_share = Math.round(share * 1000);
+    if (beat.reportedAway || row.away_since !== null) category = "away";
+    else if (beat.hidden || beat.frames < seconds * hiddenFramesPerSecond) category = "hidden";
+    // A browser without full screen carries that finding instead of the time out of it.
+    else if (beat.out && unavailable === 0) category = "out";
+    else if (share !== null && share < tickDownShare) category = "slow";
+    else category = "normal";
+
+    const stretch = (name, last) => {
+      if (category !== name) return;
+      if (last === 0) next[`${name}_count`] += 1;
+      next[`${name}_ms`] += Math.round(spanMs);
+    };
+    stretch("hidden", row.beat_hidden);
+    stretch("out", row.beat_out);
+    stretch("slow", row.beat_slow);
+
+    if (category === "normal" && row.frame_baseline === null && spanMs >= baselineMinSpanMs) {
+      const samples = [...(row.rate_samples ? row.rate_samples.split(",").map(Number) : []), beat.frames / seconds];
+      if (samples.length >= baselineSpans) {
+        next.frame_baseline = median(samples);
+        next.rate_samples = null;
+      } else {
+        next.rate_samples = samples.map((rate) => rate.toFixed(2)).join(",");
+      }
     }
   }
   db.prepare(
-    `UPDATE attempt SET beat_at = ?, beat_hidden = ?, hidden_count = ?, hidden_ms = ?, tamper_detail = ?, tamper_at = COALESCE(tamper_at, ?)
+    `UPDATE attempt SET beat_at = ?, beat_hidden = ?, hidden_count = ?, hidden_ms = ?, beat_out = ?, out_count = ?, out_ms = ?,
+       beat_slow = ?, slow_count = ?, slow_ms = ?, tick_share = ?, frame_baseline = ?, rate_samples = ?, fullscreen_unavailable = ?,
+       tamper_detail = ?, tamper_at = COALESCE(tamper_at, ?)
      WHERE id = ?`
-  ).run(at, lastHidden, count, hiddenMs, merged.length > 0 ? merged.join(",") : null, merged.length > 0 ? at : null, row.id);
-  if (count !== row.hidden_count || tamperGrew) notify(row.sitting_id, "suspicious", row.username);
+  ).run(
+    at,
+    category === "hidden" ? 1 : 0,
+    next.hidden_count,
+    next.hidden_ms,
+    category === "out" ? 1 : 0,
+    next.out_count,
+    next.out_ms,
+    category === "slow" ? 1 : 0,
+    next.slow_count,
+    next.slow_ms,
+    next.tick_share,
+    next.frame_baseline,
+    next.rate_samples,
+    unavailable,
+    merged.length > 0 ? merged.join(",") : null,
+    merged.length > 0 ? at : null,
+    row.id
+  );
+  const changed =
+    next.hidden_count !== row.hidden_count ||
+    next.out_count !== row.out_count ||
+    next.slow_count !== row.slow_count ||
+    unavailable !== row.fullscreen_unavailable ||
+    tamperGrew;
+  if (changed) notify(row.sitting_id, "suspicious", row.username);
   return { recorded: true };
 }
 

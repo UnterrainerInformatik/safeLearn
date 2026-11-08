@@ -115,8 +115,8 @@ export function registerLiveRoutes(router, { db, handle, startPage }) {
         () =>
           checked(() => {
             const at = new Date().toISOString();
-            const silent = liveSilence(db, sittingId, at);
-            if (Object.keys(silent).length > 0) stream.send("beats", { serverTime: at, silent });
+            const { silent, share } = liveSilence(db, sittingId, at);
+            if (Object.keys(silent).length > 0) stream.send("beats", { serverTime: at, silent, share });
           }),
         silenceMs
       );

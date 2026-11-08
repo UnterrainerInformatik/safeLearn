@@ -1414,14 +1414,35 @@ a.sl-exam-button.sl-exam-open:hover,
 }
 
 .sl-exam-live-hidden,
-.sl-exam-live-silent {
+.sl-exam-live-silent,
+.sl-exam-live-out,
+.sl-exam-live-unavailable {
   color: #b35900;
   font-variant-numeric: tabular-nums;
 }
 
 #markdown-content.dark-mode .sl-exam-live-hidden,
-#markdown-content.dark-mode .sl-exam-live-silent {
+#markdown-content.dark-mode .sl-exam-live-silent,
+#markdown-content.dark-mode .sl-exam-live-out,
+#markdown-content.dark-mode .sl-exam-live-unavailable {
   color: #f0a050;
+}
+
+/* The tick rate of the writing page (exam-fullscreen-tick-rate D7): the
+   share as a plain figure, and once it was down the red warning above it. */
+
+.sl-exam-live-tick {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.sl-exam-live-tickdown {
+  font-weight: 700;
+  color: #c0392b;
+}
+
+#markdown-content.dark-mode .sl-exam-live-tickdown {
+  color: #ff6b5b;
 }
 
 /* The browser an attempt is bound to, and the one refused last: the short
@@ -1506,6 +1527,41 @@ a.sl-exam-button.sl-exam-open:hover,
   border: 2px dashed #e0b000;
   border-radius: 6px;
   font-weight: 600;
+}
+
+/* Writing in full screen (exam-fullscreen-tick-rate D1/D2): the request to
+   stay in it above the start, the gate in front of a resumed attempt, and the
+   bar with the way back - in the flow above the questions, never over them. */
+
+.sl-exam-attempt-fullscreen-notice {
+  max-width: 40em;
+}
+
+.sl-exam-attempt-gate {
+  margin: 24px 0;
+  padding: 16px;
+  border: 1px solid rgba(27, 31, 35, 0.15);
+  border-radius: 6px;
+}
+
+.sl-exam-attempt-fullscreen-bar {
+  margin: 8px 0;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background-color: #fff4e0;
+}
+
+#markdown-content.dark-mode .sl-exam-attempt-gate {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+#markdown-content.dark-mode .sl-exam-attempt-fullscreen-bar {
+  background-color: #3a2a10;
+}
+
+.sl-exam-attempt-fullscreen-bar[hidden],
+.sl-exam-attempt-body[hidden] {
+  display: none;
 }
 
 .sl-exam-pool-questions .sl-exam-quiet {

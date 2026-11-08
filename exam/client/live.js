@@ -4,7 +4,9 @@
  * - `live`: at the top whether the sitting is live, its window with the time
  *   until it opens or closes, and the server's time in Vienna; per participant not started, writing with the time left, or
  *   submitted; the share of their attempt they kept the page in focus as a
- *   bar, with how often and how long they left it; requests refused from
+ *   bar, with how often and how long they left it; the suspicious signal;
+ *   the tick rate of the writing page (exam-fullscreen-tick-rate design D7)
+ *   and how often and how long it was down; requests refused from
  *   another browser, with the browser refused last; the browser the attempt
  *   is bound to; and the button that unbinds it, so the next browser that
  *   opens the attempt is bound instead
@@ -108,14 +110,24 @@ const silentWarnMs = 20000;
 
 /**
  * Flags a participant's row with the amber stripe while its suspicious cell
- * shows a sign, with the signs as the row's tooltip; clears both otherwise.
- * Nothing to do before the cell is in a row (`row()` calls it once it is).
+ * shows a sign or its tick rate was down (exam-fullscreen-tick-rate D7), with
+ * the signs as the row's tooltip; clears both otherwise. Nothing to do before
+ * the cells are in a row (`row()` calls it once they are).
  */
-function flagRow(tr, cell) {
-  if (!tr || !cell) return;
-  if (cell.dataset.suspicious === "1") {
+function flagRow(tr) {
+  if (!tr) return;
+  const suspicious = tr.querySelector(".sl-exam-live-suspicious");
+  const tick = tr.querySelector(".sl-exam-live-tick");
+  if (!suspicious || !tick) return;
+  const lines = [];
+  if (suspicious.dataset.suspicious === "1") {
+    const signs = [...suspicious.children].filter((sign) => sign.tagName !== "BR").map((sign) => sign.textContent);
+    lines.push(`${t("exam.live.columnSuspicious")}: ${signs.join(", ")}`);
+  }
+  if (tick.dataset.down === "1") lines.push(`${t("exam.live.columnTickRate")}: ${tick.querySelector(".sl-exam-live-tickdown").textContent}`);
+  if (lines.length > 0) {
     tr.dataset.flag = "warn";
-    tr.title = `${t("exam.live.columnSuspicious")}: ${[...cell.children].filter((sign) => sign.tagName !== "BR").map((sign) => sign.textContent).join(", ")}`;
+    tr.title = lines.join(" · ");
   } else {
     delete tr.dataset.flag;
     tr.removeAttribute("title");
@@ -145,8 +157,8 @@ const resortMs = 10000;
 /**
  * The participants are always ordered the same way: by status, not started
  * first and submitted last; within a status by the net time out of focus
- * plus the time hidden by timing, longest first; and then by name, as the
- * server sends them.
+ * plus the time hidden by timing, out of full screen and with the tick rate
+ * down, longest first; and then by name, as the server sends them.
  */
 const statusRank = { "not started": 0, writing: 1, submitted: 2 };
 
@@ -232,7 +244,7 @@ class LiveView extends ExamElement {
       h(
         "table",
         { class: "sl-exam-table sl-exam-live-table" },
-        h("thead", {}, h("tr", {}, h("th", {}, t("exam.live.columnStudent")), h("th", {}, t("exam.live.columnStatus")), h("th", {}, t("exam.live.columnTimeLeft")), h("th", {}, t("exam.live.columnInFocus")), h("th", {}, t("exam.live.columnSuspicious")), h("th", {}, t("exam.live.columnBoundBrowser")), h("th", {}, t("exam.live.columnOtherBrowsers")), h("th", {}, ""))),
+        h("thead", {}, h("tr", {}, h("th", {}, t("exam.live.columnStudent")), h("th", {}, t("exam.live.columnStatus")), h("th", {}, t("exam.live.columnTimeLeft")), h("th", {}, t("exam.live.columnInFocus")), h("th", {}, t("exam.live.columnSuspicious")), h("th", {}, t("exam.live.columnTickRate")), h("th", {}, t("exam.live.columnBoundBrowser")), h("th", {}, t("exam.live.columnOtherBrowsers")), h("th", {}, ""))),
         this.body
       ),
       this.message
@@ -252,7 +264,7 @@ class LiveView extends ExamElement {
     this.sortHeld = Boolean(this.body.querySelector("button:hover"));
     if (this.sortHeld) return;
     const ordered = [...this.participants.values()]
-      .map((participant) => ({ participant, rank: statusRank[participant.status], away: (this.focusFigures(participant)?.awayMs ?? 0) + (participant.hiddenMs ?? 0) }))
+      .map((participant) => ({ participant, rank: statusRank[participant.status], away: this.orderKey(participant) }))
       .sort((a, b) => a.rank - b.rank || b.away - a.away || this.order.get(a.participant.username) - this.order.get(b.participant.username))
       .map(({ participant }) => this.rows.get(participant.username))
       .filter(Boolean);
@@ -508,6 +520,7 @@ class LiveView extends ExamElement {
       h("td", { class: "sl-exam-live-left" }, participant.remainingMs === null ? "" : clock(participant.remainingMs)),
       this.focusCell(participant),
       this.suspiciousCell(participant),
+      this.tickCell(participant),
       this.boundCell(participant),
       h(
         "td",
@@ -521,9 +534,9 @@ class LiveView extends ExamElement {
       ),
       h("td", {}, release, release && remove ? " " : null, remove)
     );
-    // A submitted row is green; the suspicious cell was filled before the row existed, so its flag follows here.
+    // A submitted row is green; the suspicious and tick-rate cells were filled before the row existed, so its flag follows here.
     setTone(tr, participant.status === "submitted" ? "good" : null);
-    flagRow(tr, tr.querySelector(".sl-exam-live-suspicious"));
+    flagRow(tr);
     this.rows.set(username, tr);
     return tr;
   }
@@ -600,8 +613,9 @@ class LiveView extends ExamElement {
   /**
    * The suspicious signal (exam-hidden-page-signals design D6), apart from the
    * focus figures: a manipulated browser with the properties found, how often
-   * and how long the page was hidden by timing, and while writing how long no
-   * heartbeat has come. Empty for a clean attempt.
+   * and how long the page was hidden by timing and out of full screen, full
+   * screen not available (exam-fullscreen-tick-rate D7), and while writing
+   * how long no heartbeat has come. Empty for a clean attempt.
    */
   suspiciousCell(participant) {
     const cell = h("td", { class: "sl-exam-live-suspicious" });
@@ -615,15 +629,60 @@ class LiveView extends ExamElement {
     return participant.silentMs + (performance.now() - (participant.silentAt ?? participant.at));
   }
 
-  /** The stream's tick: the time without a heartbeat per writing attempt, counted on from now. */
-  silence({ serverTime, silent }) {
+  /**
+   * The stream's tick: the time without a heartbeat per writing attempt,
+   * counted on from now, and its current tick rate (exam-fullscreen-tick-rate
+   * D7), which changes with every beat without an event of its own.
+   */
+  silence({ serverTime, silent, share = {} }) {
     this.syncClock(serverTime);
     for (const [username, silentMs] of Object.entries(silent)) {
       const participant = this.participants?.get(username);
       if (!participant || participant.status !== "writing") continue;
       Object.assign(participant, { silentMs, silentAt: performance.now() });
-      this.fillSuspicious(this.rows.get(username)?.querySelector(".sl-exam-live-suspicious"), participant);
+      if (username in share) participant.tickShare = share[username];
+      const row = this.rows.get(username);
+      this.fillSuspicious(row?.querySelector(".sl-exam-live-suspicious"), participant);
+      this.fillTick(row?.querySelector(".sl-exam-live-tick"), participant);
     }
+  }
+
+  /**
+   * The key a participant is ordered by within their status: net time out of
+   * focus, hidden by timing, out of full screen and with the tick rate down.
+   * The server counts each heartbeat span in at most one of them.
+   */
+  orderKey(participant) {
+    return (this.focusFigures(participant)?.awayMs ?? 0) + (participant.hiddenMs ?? 0) + (participant.outMs ?? 0) + (participant.slowMs ?? 0);
+  }
+
+  /**
+   * The tick rate of the writing page (exam-fullscreen-tick-rate D7): while
+   * writing its current share of the student's own rate; once it was down the
+   * red "Tickrate Down!" with how often and how long, and while writing the
+   * share below it. After the attempt only the figures. Nothing before the
+   * start or while the share is not known yet.
+   */
+  tickCell(participant) {
+    const cell = h("td", { class: "sl-exam-live-tick" });
+    this.fillTick(cell, participant);
+    return cell;
+  }
+
+  fillTick(cell, participant) {
+    if (!cell) return;
+    const down = (participant.slowCount ?? 0) > 0;
+    const writing = participant.status === "writing";
+    const share = writing && participant.tickShare !== null && participant.tickShare !== undefined
+      ? h("span", { class: "sl-exam-live-tick-share" }, format.percent(participant.tickShare, 0))
+      : null;
+    const warning = down
+      ? h("span", { class: "sl-exam-live-tickdown" }, t("exam.live.tickRateDown", { count: participant.slowCount, time: duration(participant.slowMs) }))
+      : null;
+    cell.dataset.down = down ? "1" : "0";
+    const parts = [warning, warning && share ? h("br", {}) : null, share].filter(Boolean);
+    cell.replaceChildren(...(parts.length > 0 ? parts : ["–"]));
+    flagRow(cell.closest("tr"));
   }
 
   fillSuspicious(cell, participant) {
@@ -635,13 +694,19 @@ class LiveView extends ExamElement {
     if (participant.hiddenCount > 0) {
       signs.push(h("span", { class: "sl-exam-live-hidden" }, t("exam.live.hiddenByTiming", { count: participant.hiddenCount, time: duration(participant.hiddenMs) })));
     }
+    if (participant.outCount > 0) {
+      signs.push(h("span", { class: "sl-exam-live-out" }, t("exam.live.outOfFullscreen", { count: participant.outCount, time: duration(participant.outMs) })));
+    }
+    if (participant.fullscreenUnavailable) {
+      signs.push(h("span", { class: "sl-exam-live-unavailable" }, t("exam.live.fullscreenUnavailable")));
+    }
     const silent = this.silentFor(participant);
     if (silent !== null && silent > silentWarnMs) {
       signs.push(h("span", { class: "sl-exam-live-silent" }, t("exam.live.noHeartbeat", { time: duration(silent) })));
     }
     cell.dataset.suspicious = signs.length > 0 ? "1" : "0";
     cell.replaceChildren(...signs.flatMap((sign, index) => (index === 0 ? [sign] : [h("br", {}), sign])));
-    flagRow(cell.closest("tr"), cell);
+    flagRow(cell.closest("tr"));
   }
 
   /** Puts a changed participant in place of their row. */

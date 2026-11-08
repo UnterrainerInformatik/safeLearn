@@ -239,6 +239,51 @@ describe("the migration to hidden-page signals", () => {
   });
 });
 
+describe("the migration to full screen and the tick rate", () => {
+  test("a database at schema 16 with an attempt migrates with every row unchanged, in full screen and without figures", () => {
+    const dbPath = temporaryPath();
+    const db = new DatabaseSync(dbPath);
+    openDatabases.push(db);
+    db.exec("PRAGMA foreign_keys = ON");
+    migrate(db, dbPath, readMigrations().slice(0, 16));
+    importPool(db, poolXml("de"), poolXml("en"));
+    const year = createYear(db, { name: "2026/27", startsOn: "2026-09-07", summerStartsOn: "2027-02-15", endsOn: "2027-07-02" });
+    const klass = createClass(db, year.id, { name: "4bhif", students: [{ username: "anna" }, { username: "ben" }] });
+    const course = createCourse(db, klass.id, { subject: "WMC", language: "en" });
+    const test = createTest(db, course.id, { name: "T", questionIds: listQuestions(db).map((q) => q.id) });
+    fakeAttempt(db, test.id, "anna");
+    db.prepare("UPDATE attempt SET focus_count = 2, focus_ms = 4000, hidden_count = 1, hidden_ms = 5000").run();
+    const rows = () => db.prepare("SELECT * FROM attempt ORDER BY id").all().map((row) => ({ ...row }));
+    const before = rows();
+
+    assert.deepEqual(migrate(db, dbPath, readMigrations().slice(0, 17)), { from: 16, to: 17 });
+    assert.deepEqual(
+      rows(),
+      before.map((row) => ({
+        ...row,
+        fullscreen_unavailable: 0,
+        out_count: 0,
+        out_ms: 0,
+        beat_out: 0,
+        slow_count: 0,
+        slow_ms: 0,
+        beat_slow: 0,
+        tick_share: null,
+        frame_baseline: null,
+        rate_samples: null,
+      }))
+    );
+    const sitting = db.prepare("SELECT sitting_id FROM attempt").get().sitting_id;
+    db.prepare("INSERT INTO sitting_participant (sitting_id, username) VALUES (?, 'anna')").run(sitting);
+    const anna = liveSnapshot(db, sitting).participants.find((p) => p.username === "anna");
+    assert.deepEqual(
+      [anna.fullscreenUnavailable, anna.outCount, anna.outMs, anna.slowCount, anna.slowMs, anna.tickShare],
+      [false, 0, 0, 0, 0, null],
+      "an existing attempt reads as in full screen, with no drop and no tick rate"
+    );
+  });
+});
+
 describe("the migration to tests that follow the pool", () => {
   test("a database at schema 10 with a planned and a written test migrates with every row unchanged", () => {
     const dbPath = temporaryPath();
@@ -709,6 +754,161 @@ describe("attempts", () => {
       assert.doesNotMatch(JSON.stringify(seen), /tamper|hidden_?(count|ms)|hiddenCount|hiddenMs|beat|silent|visibilityState/i);
       assert.equal(liveParticipant(db, sitting.id, "anna").silentMs, null, "no heartbeat warning once submitted");
       stop();
+    });
+
+    describe("full screen and the tick rate", () => {
+      /** The figures of all four categories: [hidden, out, slow] as [count, ms] each. */
+      const categories = (db, attemptId) => {
+        const row = attemptRow(db, attemptId);
+        return { hidden: [row.hidden_count, row.hidden_ms], out: [row.out_count, row.out_ms], slow: [row.slow_count, row.slow_ms] };
+      };
+      const none = { hidden: [0, 0], out: [0, 0], slow: [0, 0] };
+      // A page at full rate: 60 frames and 4 ticks a second over a 5 s span.
+      const full = { frames: 300, ticks: 20 };
+
+      test("each span lands in the first category that matches, never in two", () => {
+        const { db, attemptId, beat, stop } = beating();
+        beat(5, full);
+        beat(10, { frames: 0, ticks: 0, out: true, reportedAway: true });
+        assert.deepEqual(categories(db, attemptId), none, "the focus log takes it first");
+        beat(15, { frames: 0, ticks: 0, out: true });
+        assert.deepEqual(categories(db, attemptId), { ...none, hidden: [1, 5000] }, "hidden by timing before out of full screen");
+        beat(20, { frames: 300, ticks: 2, out: true });
+        assert.deepEqual(categories(db, attemptId), { ...none, hidden: [1, 5000], out: [1, 5000] }, "out of full screen before tick rate down");
+        beat(25, { frames: 300, ticks: 2 });
+        assert.deepEqual(categories(db, attemptId), { hidden: [1, 5000], out: [1, 5000], slow: [1, 5000] }, "tick rate down last");
+        beat(30, full);
+        assert.deepEqual(categories(db, attemptId), { hidden: [1, 5000], out: [1, 5000], slow: [1, 5000] }, "a normal span counts nothing");
+        stop();
+      });
+
+      test("a tab switch that also ends full screen counts only for the focus log; the time back on the page out of it counts as out", () => {
+        const { db, attemptId, at, beat, stop } = beating();
+        beat(5, full);
+        recordFocus(db, attemptRow(db, attemptId), "away", at(6));
+        beat(10, { frames: 0, ticks: 5, out: true, reportedAway: true });
+        beat(35, { frames: 0, ticks: 25, out: true, reportedAway: true });
+        recordFocus(db, attemptRow(db, attemptId), "back", at(36));
+        assert.deepEqual(categories(db, attemptId), none);
+        beat(41, { ...full, out: true });
+        assert.deepEqual(categories(db, attemptId), { ...none, out: [1, 6000] });
+        stop();
+      });
+
+      test("the baseline forms from the first 6 normal spans of at least 3 s, ignoring every other span", () => {
+        const { db, attemptId, beat, stop } = beating();
+        beat(5, full);
+        beat(10, { frames: 300, ticks: 20, out: true }); // out
+        beat(15, { frames: 0, ticks: 0 }); // hidden
+        beat(20, { frames: 300, ticks: 2 }); // tick rate down
+        beat(22, { frames: 120, ticks: 8 }); // normal, but too short
+        assert.equal(attemptRow(db, attemptId).rate_samples, null, "nothing sampled yet");
+        const rates = [58, 60, 61, 59, 62, 60];
+        rates.forEach((rate, index) => beat(27 + index * 5, { frames: rate * 5, ticks: 20 }));
+        const row = attemptRow(db, attemptId);
+        assert.deepEqual([row.frame_baseline, row.rate_samples], [60, null], "the median of the six");
+        beat(62, { frames: 30 * 5, ticks: 20 });
+        assert.equal(attemptRow(db, attemptId).frame_baseline, 60, "kept once formed");
+        stop();
+      });
+
+      test("60 Hz and 144 Hz displays both read about 100 %", () => {
+        for (const hz of [60, 144]) {
+          const { db, sitting, beat, stop } = beating();
+          for (let seconds = 5; seconds <= 40; seconds += 5) beat(seconds, { frames: hz * 5, ticks: 20 });
+          const anna = liveParticipant(db, sitting.id, "anna");
+          assert.ok(anna.tickShare >= 0.95, `${hz} Hz reads ${anna.tickShare}`);
+          assert.deepEqual([anna.slowCount, anna.slowMs], [0, 0]);
+          stop();
+        }
+      });
+
+      test("a page drawing at a fifth of its baseline for 40 s is one stretch of tick rate down, and the focus figures stay", () => {
+        const { db, sitting, attemptId, beat, suspicious, stop } = beating();
+        for (let seconds = 5; seconds <= 35; seconds += 5) beat(seconds, full);
+        assert.equal(attemptRow(db, attemptId).frame_baseline, 60);
+        for (let seconds = 40; seconds <= 75; seconds += 5) beat(seconds, { frames: 12 * 5, ticks: 20 });
+        beat(80, full);
+        const anna = liveParticipant(db, sitting.id, "anna");
+        assert.deepEqual([anna.slowCount, anna.slowMs, anna.hiddenCount, anna.focusCount, anna.focusMs], [1, 40000, 0, 0, 0]);
+        assert.equal(suspicious(), 1, "one event for the stretch");
+        assert.equal(anna.tickShare, 1, "back to full rate");
+        stop();
+      });
+
+      test("before there is a baseline the ticks alone flag a drop", () => {
+        const { db, attemptId, beat, stop } = beating();
+        beat(5, full);
+        beat(10, { frames: 300, ticks: 5 });
+        const row = attemptRow(db, attemptId);
+        assert.equal(row.frame_baseline, null);
+        assert.deepEqual([row.slow_count, row.slow_ms, row.tick_share], [1, 5000, 250]);
+        stop();
+      });
+
+      test("an old page's beat without ticks or full screen is taken as in full screen, frames only", () => {
+        const { db, attemptId, beat, stop } = beating();
+        beat(5);
+        beat(10);
+        const row = attemptRow(db, attemptId);
+        assert.deepEqual(categories(db, attemptId), none);
+        assert.equal(row.tick_share, null, "no ticks and no baseline: no tick rate yet");
+        stop();
+      });
+
+      test("a refused full screen is flagged for good, with one event", () => {
+        const { db, attemptId, beat, suspicious, stop } = beating();
+        beat(5, { ...full, noFullscreen: true });
+        assert.equal(attemptRow(db, attemptId).fullscreen_unavailable, 1, "even on the first beat");
+        beat(10, full);
+        beat(15, { ...full, noFullscreen: true });
+        assert.equal(attemptRow(db, attemptId).fullscreen_unavailable, 1);
+        assert.equal(suspicious(), 1);
+        beat(20, { ...full, out: true });
+        assert.deepEqual(categories(db, attemptId), none, "the finding stands instead of the time out of full screen");
+        stop();
+      });
+
+      test("a start without full screen flags the attempt, also when it resumes; any other value is refused", () => {
+        const { db, test, sitting } = running();
+        const events = [];
+        const stop = listen(sitting.id, (event) => events.push(event.type));
+        const anna = startAttempt(db, "anna", test.id, undefined, { fullscreen: false }).attemptId;
+        assert.equal(attemptRow(db, anna).fullscreen_unavailable, 1);
+        assert.equal(liveParticipant(db, sitting.id, "anna").fullscreenUnavailable, true);
+        const ben = startAttempt(db, "ben", test.id).attemptId;
+        assert.equal(attemptRow(db, ben).fullscreen_unavailable, 0, "a missing field is an old page's start");
+        startAttempt(db, "ben", test.id, undefined, { fullscreen: true });
+        assert.equal(attemptRow(db, ben).fullscreen_unavailable, 0);
+        startAttempt(db, "ben", test.id, undefined, { fullscreen: false });
+        assert.equal(attemptRow(db, ben).fullscreen_unavailable, 1, "resumed without full screen");
+        assert.equal(events.filter((type) => type === "suspicious").length, 1, "one event, for the resumed attempt");
+        assert.throws(() => startAttempt(db, "anna", test.id, undefined, { fullscreen: "no" }), InvalidInputError);
+        stop();
+      });
+
+      test("a beat whose ticks or full-screen fields have any other shape is refused", () => {
+        const { beat, stop } = beating();
+        for (const body of [{ ticks: -1 }, { ticks: 1.5 }, { ticks: "20" }, { ticks: null }, { out: "yes" }, { out: 1 }, { noFullscreen: 1 }, { noFullscreen: null }]) {
+          assert.throws(() => beat(5, body), InvalidInputError, JSON.stringify(body));
+        }
+        stop();
+      });
+
+      test("the live view carries full screen and the tick rate; no student response does", () => {
+        const { db, sitting, attemptId, beat, stop } = beating();
+        beat(5, full);
+        beat(10, { ...full, out: true });
+        beat(15, { frames: 300, ticks: 4, noFullscreen: true });
+        const anna = liveParticipant(db, sitting.id, "anna");
+        assert.deepEqual(
+          [anna.fullscreenUnavailable, anna.outCount, anna.outMs, anna.slowCount, anna.slowMs, anna.tickShare],
+          [true, 1, 5000, 1, 5000, 0.2]
+        );
+        const seen = [openTestsOf(db, "anna"), writingView(db, attemptRow(db, attemptId)), submitAttempt(db, attemptRow(db, attemptId))];
+        assert.doesNotMatch(JSON.stringify(seen), /full_?screen|out_?(count|ms)|outCount|outMs|slow|tick|baseline|rate_samples/i);
+        stop();
+      });
     });
   });
 

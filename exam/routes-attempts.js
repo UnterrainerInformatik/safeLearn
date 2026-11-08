@@ -158,7 +158,11 @@ export function registerAttemptRoutes(router, { db, handle, startPage }) {
     "/api/tests/:id/attempt",
     requireStudent,
     handle(async (req, res) => {
-      const started = startAttempt(db, identityOf(req), idParam(req.params.id), undefined, { userAgent: keptUserAgent(req.get("User-Agent")) });
+      // Whether the page got full screen (exam-fullscreen-tick-rate D1); a page from before it sends no body.
+      const started = startAttempt(db, identityOf(req), idParam(req.params.id), undefined, {
+        userAgent: keptUserAgent(req.get("User-Agent")),
+        fullscreen: req.body?.fullscreen ?? true,
+      });
       if (started.created) {
         const row = ownAttempt(db, started.attemptId, identityOf(req));
         bindBrowser(req, res, row.id, started.secret, row.deadline);
@@ -206,8 +210,9 @@ export function registerAttemptRoutes(router, { db, handle, startPage }) {
     })
   );
 
-  // The writing page's heartbeat: frames drawn, visibility and replaced
-  // properties (exam-hidden-page-signals design D5). Guarded like the focus log.
+  // The writing page's heartbeat: frames drawn, timer ticks, visibility, full
+  // screen and replaced properties (exam-hidden-page-signals design D5,
+  // exam-fullscreen-tick-rate D2/D3). Guarded like the focus log.
   router.post(
     "/api/attempts/:id/beat",
     requireStudent,

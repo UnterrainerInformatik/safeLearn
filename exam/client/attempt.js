@@ -15,6 +15,14 @@
  * whether those properties were replaced. A teacher sees both; neither ever
  * changes the grade.
  *
+ * An attempt is written in full screen (exam-fullscreen-tick-rate design
+ * D1/D2): the only way to start one is the button that requests full screen,
+ * a resumed attempt shows its questions behind "Continue in full screen", and
+ * a page that left full screen shows a bar with the way back, which never
+ * covers the questions. A browser that refuses full screen still writes; the
+ * server flags it. The heartbeat also carries the timer ticks and whether the
+ * page was out of full screen.
+ *
  * The controls - buttons, countdown, messages - are in the reader's own
  * language; questions and answers stay in the course's language and are
  * marked with it (`ui-language`, design.md, D7).
@@ -44,6 +52,39 @@ import { displayClass } from "./classes.js";
 
 /** How often the writing page sends its heartbeat (exam-hidden-page-signals design D2). */
 const beatMs = 5000;
+
+/**
+ * The extra beat at a change of full screen is only sent this long after the
+ * previous one (exam-fullscreen-tick-rate D2): above the server's 1 s minimum
+ * gap, with room for the network, so the server never drops a beat whose
+ * frames the page has already counted. A closer change is merged into the
+ * next span.
+ */
+const changeBeatGapMs = 1500;
+
+/** The timer the tick rate is counted with (exam-fullscreen-tick-rate D3): four ticks a second at full rate. */
+const tickMs = 250;
+
+/** Whether this browser offers element full screen at all (not on an iPhone). */
+function fullscreenOffered() {
+  return typeof document.documentElement.requestFullscreen === "function" && document.fullscreenEnabled !== false;
+}
+
+/**
+ * Puts the page into full screen, from the click that asked for it; true
+ * when the page is in full screen afterwards, false when the browser has no
+ * element full screen or refused it.
+ */
+async function enterFullscreen() {
+  if (document.fullscreenElement) return true;
+  if (!fullscreenOffered()) return false;
+  try {
+    await document.documentElement.requestFullscreen();
+    return document.fullscreenElement !== null;
+  } catch {
+    return false;
+  }
+}
 
 const nativeCode = /\{\s*\[native code\]\s*\}\s*$/;
 
@@ -263,7 +304,8 @@ class WriteTest extends ExamElement {
             { class: "sl-exam-quiet" },
             t("exam.attempt.openDetails", { subject: test.subject, className: displayClass(test.className), count: Math.round(test.durationS / 60) })
           ),
-          h("button", { type: "button", class: "sl-exam-primary", onClick: () => this.start(test.testId) }, t("exam.attempt.start"))
+          h("p", { class: "sl-exam-attempt-fullscreen-notice", role: "note" }, t("exam.attempt.fullscreenNotice")),
+          h("button", { type: "button", class: "sl-exam-primary sl-exam-attempt-start", onClick: () => this.start(test.testId) }, t("exam.attempt.startFullscreen"))
         )
       ),
       this.message
@@ -294,9 +336,15 @@ class WriteTest extends ExamElement {
     );
   }
 
+  /**
+   * The only way into an attempt (exam-fullscreen-tick-rate D1): full screen
+   * first, from this click, then the start - which says whether full screen
+   * was granted, and goes ahead either way.
+   */
   async start(testId) {
+    const fullscreen = await enterFullscreen();
     try {
-      this.show(this.writingPage(await examApi(`/tests/${testId}/attempt`, { method: "POST" })));
+      this.show(this.writingPage(await examApi(`/tests/${testId}/attempt`, { method: "POST", body: { fullscreen } }), { gate: false, refused: !fullscreen }));
     } catch (error) {
       this.message.textContent = refusal(error);
     }
@@ -304,7 +352,13 @@ class WriteTest extends ExamElement {
 
   // ------------------------------------------------------------ writing
 
-  writingPage(writing) {
+  /**
+   * The writing page. `gate` puts "Continue in full screen" in front of the
+   * questions, as after a reload; the countdown runs above it meanwhile. The
+   * teacher's try always starts behind the gate, with the student's start
+   * button. `refused` says full screen was refused at the start.
+   */
+  writingPage(writing, { gate = !document.fullscreenElement, refused = false } = {}) {
     this.listing = false;
     if (writing.submitted) return this.resultPage(writing);
     this.stop?.();
@@ -327,14 +381,16 @@ class WriteTest extends ExamElement {
       }
       this.submit();
     });
+    // The way back to full screen, above the questions and never over them (exam-fullscreen-tick-rate D2).
+    const back = h("button", { type: "button", class: "sl-exam-primary sl-exam-attempt-back", onClick: () => this.backToFullscreen() }, t("exam.attempt.backToFullscreen"));
+    this.fullscreenBar = h("div", { class: "sl-exam-attempt-fullscreen-bar", hidden: true }, back);
+    const body = h("div", { class: "sl-exam-attempt-body", hidden: gate }, questions, h("p", {}, submit), this.status);
+    this.gated = gate;
+    const gateView = gate ? this.fullscreenGate(body) : null;
+    this.showFullscreenBar();
     if (writing.remainingMs !== null) this.track(writing.remainingMs);
-    if (!this.preview) this.watchFocus();
-    else
-      this.stop = () => {
-        clearInterval(this.timer);
-        this.timer = null;
-        this.stop = null;
-      };
+    if (!this.preview) this.watchFocus({ refused });
+    else this.watchPreview();
     const notice = this.preview
       ? h(
           "p",
@@ -353,10 +409,65 @@ class WriteTest extends ExamElement {
         " · ",
         writing.remainingMs === null ? t("exam.attempt.noTimeLimit") : [t("exam.attempt.timeLeft"), " ", this.countdown]
       ),
-      questions,
-      h("p", {}, submit),
-      this.status
+      gateView,
+      this.fullscreenBar,
+      body
     );
+  }
+
+  /**
+   * "Continue in full screen" in front of the questions (exam-fullscreen-
+   * tick-rate D1): the questions are built behind it and shown on the click,
+   * in full screen if the browser grants it and anyway if it does not. The
+   * teacher's try reads like the student's start.
+   */
+  fullscreenGate(body) {
+    const label = this.preview ? t("exam.attempt.startFullscreen") : t("exam.attempt.continueFullscreen");
+    const gate = h(
+      "div",
+      { class: "sl-exam-attempt-gate" },
+      h("p", { class: "sl-exam-attempt-fullscreen-notice", role: "note" }, t("exam.attempt.fullscreenNotice")),
+      h(
+        "button",
+        {
+          type: "button",
+          class: "sl-exam-primary sl-exam-attempt-continue",
+          onClick: async () => {
+            const granted = await enterFullscreen();
+            if (!granted) this.fullscreenRefused?.();
+            this.gated = false;
+            gate.remove();
+            body.hidden = false;
+            this.showFullscreenBar();
+          },
+        },
+        label
+      )
+    );
+    return gate;
+  }
+
+  /** Shows the bar while the page is out of full screen, once the questions are shown, where full screen exists at all. */
+  showFullscreenBar() {
+    if (!this.fullscreenBar) return;
+    this.fullscreenBar.hidden = Boolean(document.fullscreenElement) || this.gated || !fullscreenOffered();
+  }
+
+  async backToFullscreen() {
+    if (!(await enterFullscreen())) this.fullscreenRefused?.();
+    this.showFullscreenBar();
+  }
+
+  /** The teacher's try: the countdown and the full-screen bar, nothing reported. */
+  watchPreview() {
+    const onFullscreen = () => this.showFullscreenBar();
+    document.addEventListener("fullscreenchange", onFullscreen);
+    this.stop = () => {
+      clearInterval(this.timer);
+      this.timer = null;
+      document.removeEventListener("fullscreenchange", onFullscreen);
+      this.stop = null;
+    };
   }
 
   /** One question: its number in the reader's language, its text and answers in the course's (`language`). */
@@ -449,13 +560,17 @@ class WriteTest extends ExamElement {
 
   /**
    * Reports leaving the page and coming back; a beacon when the page goes
-   * away. Beside it the heartbeat (exam-hidden-page-signals design D1/D2):
-   * every few seconds the animation frames drawn since the last beat, the
-   * page's visibility as an untouched reference reads it, whether the focus
-   * log reported an absence meanwhile, and the visibility and focus
-   * properties found replaced. The server judges; the student sees nothing.
+   * away. Beside it the heartbeat (exam-hidden-page-signals design D1/D2,
+   * exam-fullscreen-tick-rate D2/D3): every few seconds the animation frames
+   * drawn and the timer ticks run since the last beat, the page's visibility
+   * as an untouched reference reads it, whether the focus log reported an
+   * absence meanwhile, whether the page was out of full screen at any moment
+   * of the span, whether a request for full screen was refused, and the
+   * visibility and focus properties found replaced. A change of full screen
+   * sends a beat at once with the state from before it, so the spans follow
+   * the changes. The server judges; the student sees nothing but the bar.
    */
-  watchFocus() {
+  watchFocus({ refused = false } = {}) {
     let away = document.visibilityState === "hidden";
     // Whether the focus log reported an absence since the last beat.
     let reportedAway = away;
@@ -488,21 +603,50 @@ class WriteTest extends ExamElement {
       frame = requestAnimationFrame(count);
     };
     frame = requestAnimationFrame(count);
-    const beat = () => {
-      integrity.check();
-      const body = { frames, hidden: integrity.hidden(), reportedAway: reportedAway || away, tampered: integrity.tampered() };
-      frames = 0;
-      reportedAway = away;
-      examApi(`/attempts/${this.attempt}/beat`, { method: "POST", body }).catch(() => {});
+    let ticks = 0;
+    const ticker = setInterval(() => {
+      ticks += 1;
+    }, tickMs);
+    const inFullscreen = () => Boolean(document.fullscreenElement);
+    // Out of full screen at any moment of the current span; a reload reaches the gate out of it.
+    let out = !inFullscreen();
+    // A request for full screen was refused: at the start, at the gate or from the bar.
+    let noFullscreen = refused;
+    this.fullscreenRefused = () => {
+      noFullscreen = true;
     };
-    const heartbeat = setInterval(beat, beatMs);
+    let lastBeat = performance.now();
+    let heartbeat = null;
+    const beat = () => {
+      clearTimeout(heartbeat);
+      integrity.check();
+      const body = { frames, ticks, hidden: integrity.hidden(), reportedAway: reportedAway || away, out, noFullscreen, tampered: integrity.tampered() };
+      frames = 0;
+      ticks = 0;
+      reportedAway = away;
+      out = !inFullscreen();
+      lastBeat = performance.now();
+      examApi(`/attempts/${this.attempt}/beat`, { method: "POST", body }).catch(() => {});
+      heartbeat = setTimeout(beat, beatMs);
+    };
+    heartbeat = setTimeout(beat, beatMs);
+    const onFullscreen = () => {
+      this.showFullscreenBar();
+      // The span so far ends with the state it had; a change too close to the last beat goes into the next span.
+      if (performance.now() - lastBeat >= changeBeatGapMs) beat();
+      else out = out || !inFullscreen();
+    };
+    document.addEventListener("fullscreenchange", onFullscreen);
 
     this.stop = () => {
       clearInterval(this.timer);
       this.timer = null;
-      clearInterval(heartbeat);
+      clearTimeout(heartbeat);
+      clearInterval(ticker);
       cancelAnimationFrame(frame);
       integrity.remove();
+      document.removeEventListener("fullscreenchange", onFullscreen);
+      this.fullscreenRefused = null;
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("blur", onBlur);
       window.removeEventListener("focus", onFocus);
