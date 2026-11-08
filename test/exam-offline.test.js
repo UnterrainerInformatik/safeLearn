@@ -43,7 +43,8 @@ import {
   viennaDate,
 } from "../exam/tests.js";
 import { nextOpenTestsChange, openTestsOf, previewView, startAttempt } from "../exam/attempts.js";
-import { liveSnapshot } from "../exam/live.js";
+import { liveParticipant, liveSnapshot } from "../exam/live.js";
+import { setTeacherNote } from "../exam/teacher-notes.js";
 import { corpusFiles, handoutAttachmentCheck, handoutPath, servableHandout } from "../exam/handout.js";
 import { preParse, scanFiles } from "../obsidian.js";
 import { handoutViews } from "../permission-context.js";
@@ -393,7 +394,12 @@ describe("the attendance table", () => {
     const snapshot = liveSnapshot(db, sitting.id);
     assert.equal(snapshot.kind, "offline");
     assert.ok(snapshot.sitting.startedAt);
-    assert.deepEqual(Object.keys(snapshot.participants[0]).sort(), ["familyName", "givenName", "group", "present", "username"], "names only");
+    assert.deepEqual(Object.keys(snapshot.participants[0]).sort(), ["familyName", "givenName", "group", "present", "teacherNote", "username"], "names and the teacher's note only");
+    // The teacher's note is independent of presence and group (`offline-test`).
+    setTeacherNote(db, snapshot.test.id, "ben", "Phone on the desk, taken away at 10:12");
+    setAttendance(db, sitting.id, "ben", { present: false });
+    setAttendance(db, sitting.id, "ben", { present: true, group: "B" });
+    assert.equal(liveParticipant(db, sitting.id, "ben").teacherNote, "Phone on the desk, taken away at 10:12", "absent, present again and another group leave it");
   });
 
   test("refuses a non-participant, a group B without handout B, and values it cannot read", () => {

@@ -302,6 +302,7 @@ class ClassesHome extends ExamElement {
               { class: "sl-exam-retention-counts" },
               h("li", {}, t("exam.retention.results", { count: records.results })),
               h("li", {}, t("exam.retention.notes", { count: records.notes ?? 0 })),
+              h("li", {}, t("exam.retention.teacherNotes", { count: records.teacherNotes ?? 0 })),
               h("li", {}, t("exam.retention.overrides", { count: records.overrides })),
               h("li", {}, t("exam.retention.attempts", { count: records.attempts })),
               h("li", {}, t("exam.retention.sittings", { count: records.sittings })),

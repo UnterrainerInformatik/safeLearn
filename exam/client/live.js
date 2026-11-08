@@ -9,18 +9,31 @@
  *   and how often and how long it was down; requests refused from
  *   another browser, with the browser refused last; the browser the attempt
  *   is bound to; and the button that unbinds it, so the next browser that
- *   opens the attempt is bound instead
+ *   opens the attempt is bound instead; and at the end of the row the
+ *   teacher's note on them (exam-live-teacher-notes D3)
  *
  * For an offline sitting (`offline-test`) the table is the attendance table
  * instead: per participant present or absent and, with two handouts, group A
  * or B, each change saved as it is made; above it Start, until the sitting is
- * started, and Extend and End while it is open (exam-offline-sittings D8).
+ * started, and Extend and End while it is open (exam-offline-sittings D8),
+ * and the same teacher's note at the end of each row.
+ *
+ * The teacher's note belongs to the student and the test, so every sitting
+ * of the test shows the same one. It is saved as it changes, like a field of
+ * the sheet, and reaches the other open live views as a `note` change. A
+ * row's note cell is kept across redraws - the rest of the row is drawn anew
+ * around it - so a field being typed in keeps its focus and its text, and
+ * while a note field has the focus the rows do not move. A change from
+ * outside does not overwrite a field that has the focus; it shows once the
+ * field is left. In a closed year the field is disabled. The note counts in
+ * nothing: no order, status, colour or stripe reads it.
  *
  * With `screen: 1` it is the view for the class, on its own page
  * (`/exam/sittings/<id>/screen`) for a projector: whether the sitting is
  * live, its window, the time until it opens or closes and the server's time,
  * large enough to read from the back of the room, and how many are writing
- * and have submitted - no name, no list, nothing to click.
+ * and have submitted - no name, no list, nothing to click, and no note: its
+ * snapshot comes without them.
  *
  * Changes arrive over the sitting's own event stream as they happen. When the
  * stream fails three times in a row the view fetches snapshots every 5 s and
@@ -33,7 +46,7 @@
  * teacher - the student view switched on - is told so, and the view stops.
  */
 
-import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, linkButton, t } from "./frame.js";
+import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, linkButton, saveOnChange, t } from "./frame.js";
 import { candidateMark, candidateNote, displayClass, displayPerson } from "./classes.js";
 import { displayWindow } from "./tests.js";
 import { setTone } from "./row-tone.js";
@@ -167,8 +180,13 @@ class LiveView extends ExamElement {
     this.stopAll();
   }
 
+  /** The snapshot's path: the view for the class asks for the one without notes. */
+  snapshotPath() {
+    return `/sittings/${this.params.sitting}/live${this.params.screen === "1" ? "?screen=1" : ""}`;
+  }
+
   async load() {
-    const [snapshot, me] = await Promise.all([examApi(`/sittings/${this.params.sitting}/live`), examMe()]);
+    const [snapshot, me] = await Promise.all([examApi(this.snapshotPath()), examMe()]);
     this.periods = me.periods ?? [];
     this.admin = me.admin === true;
     return snapshot;
@@ -176,6 +194,10 @@ class LiveView extends ExamElement {
 
   render(snapshot) {
     this.rows = new Map();
+    // One note cell per participant, kept for as long as the view is (exam-live-teacher-notes D3).
+    this.notes = new Map();
+    this.yearClosed = snapshot.course.yearClosed === true;
+    this.testId = snapshot.test.id;
     this.sitting = snapshot.sitting;
     this.offline = snapshot.kind === "offline";
     this.handouts = snapshot.test.handouts ?? [];
@@ -195,6 +217,10 @@ class LiveView extends ExamElement {
     // A sort held back while the mouse was on a button follows once it leaves.
     this.body.addEventListener("pointerout", (event) => {
       if (this.sortHeld && event.target.closest?.("button")) setTimeout(() => this.sort());
+    });
+    // And one held back while a note field had the focus, once it is left.
+    this.body.addEventListener("focusout", (event) => {
+      if (this.sortHeld && event.target.classList?.contains("sl-exam-live-note")) setTimeout(() => this.sort());
     });
     this.summary = h("p", { class: "sl-exam-live-summary" });
     this.draw(snapshot);
@@ -244,7 +270,7 @@ class LiveView extends ExamElement {
       h(
         "table",
         { class: "sl-exam-table sl-exam-live-table" },
-        h("thead", {}, h("tr", {}, h("th", {}, t("exam.live.columnStudent")), h("th", {}, t("exam.live.columnStatus")), h("th", {}, t("exam.live.columnTimeLeft")), h("th", {}, t("exam.live.columnInFocus")), h("th", {}, t("exam.live.columnSuspicious")), h("th", {}, t("exam.live.columnTickRate")), h("th", {}, t("exam.live.columnBoundBrowser")), h("th", {}, t("exam.live.columnOtherBrowsers")), h("th", {}, ""))),
+        h("thead", {}, h("tr", {}, h("th", {}, t("exam.live.columnStudent")), h("th", {}, t("exam.live.columnStatus")), h("th", {}, t("exam.live.columnTimeLeft")), h("th", {}, t("exam.live.columnInFocus")), h("th", {}, t("exam.live.columnSuspicious")), h("th", {}, t("exam.live.columnTickRate")), h("th", {}, t("exam.live.columnBoundBrowser")), h("th", {}, t("exam.live.columnOtherBrowsers")), h("th", {}, ""), h("th", {}, t("exam.live.columnNote")))),
         this.body
       ),
       this.message
@@ -253,15 +279,23 @@ class LiveView extends ExamElement {
     return view;
   }
 
+  /** Whether a note field in the table has the focus. */
+  noteFocused() {
+    const active = document.activeElement;
+    return Boolean(active && this.body?.contains(active) && active.classList.contains("sl-exam-live-note"));
+  }
+
   /**
    * Puts the rows in order, moving them rather than drawing them
    * anew. Not while the mouse is on a button in the table: the button would
-   * move away under the click.
+   * move away under the click. Nor while a note field has the focus: moving
+   * its row would take the focus from it, and the field would jump away
+   * while it is typed in.
    */
   sort() {
     // The attendance table keeps the server's order by name: it is walked row by row.
     if (!this.participants || !this.body || this.params.screen === "1" || this.offline) return;
-    this.sortHeld = Boolean(this.body.querySelector("button:hover"));
+    this.sortHeld = Boolean(this.body.querySelector("button:hover")) || this.noteFocused();
     if (this.sortHeld) return;
     const ordered = [...this.participants.values()]
       .map((participant) => ({ participant, rank: statusRank[participant.status], away: this.orderKey(participant) }))
@@ -431,7 +465,7 @@ class LiveView extends ExamElement {
       h(
         "table",
         { class: "sl-exam-table sl-exam-attendance-table" },
-        h("thead", {}, h("tr", {}, h("th", {}, t("exam.live.columnStudent")), h("th", {}, t("exam.offline.columnPresent")), groups ? h("th", {}, t("exam.offline.columnGroup")) : null)),
+        h("thead", {}, h("tr", {}, h("th", {}, t("exam.live.columnStudent")), h("th", {}, t("exam.offline.columnPresent")), groups ? h("th", {}, t("exam.offline.columnGroup")) : null, h("th", {}, t("exam.live.columnNote")))),
         this.body
       ),
       this.message
@@ -446,10 +480,12 @@ class LiveView extends ExamElement {
     const save = async (body) => {
       this.message.textContent = "";
       try {
-        this.update(await examApi(`/sittings/${this.sitting.id}/participants/${encodeURIComponent(username)}`, { method: "PUT", body }).then((saved) => ({ ...participant, ...saved })));
+        const saved = await examApi(`/sittings/${this.sitting.id}/participants/${encodeURIComponent(username)}`, { method: "PUT", body });
+        // Merged into what is known of them now, so a note written meanwhile stays.
+        this.update({ ...this.participants.get(username), ...saved });
       } catch (error) {
         this.message.textContent = error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.frame.saveFailed");
-        this.update(participant);
+        this.update(this.participants.get(username) ?? participant);
       }
     };
     const present = h("input", {
@@ -476,7 +512,8 @@ class LiveView extends ExamElement {
       { "data-username": username, "data-present": participant.present ? "1" : "0", "data-group": this.handouts.length > 1 ? participant.group : null },
       participant.examParticipant ? h("td", candidateMark(), displayPerson(participant), candidateNote()) : h("td", {}, displayPerson(participant)),
       h("td", {}, h("label", {}, present, " ", participant.present ? t("exam.offline.present") : t("exam.offline.absent"))),
-      this.handouts.length > 1 ? h("td", { class: "sl-exam-actions" }, groupButton("A"), groupButton("B")) : null
+      this.handouts.length > 1 ? h("td", { class: "sl-exam-actions" }, groupButton("A"), groupButton("B")) : null,
+      this.noteCell(participant)
     );
     this.rows.set(username, tr);
     return tr;
@@ -489,7 +526,12 @@ class LiveView extends ExamElement {
     this.received = performance.now();
     this.participants = new Map(snapshot.participants.map((participant) => [participant.username, { ...participant, at: performance.now() }]));
     this.order = new Map(snapshot.participants.map((participant, index) => [participant.username, index]));
-    this.body.replaceChildren(...snapshot.participants.map((participant) => this.row(participant.username)));
+    const rows = snapshot.participants.map((participant) => this.place(participant.username));
+    if (this.noteFocused()) {
+      // Every row stays where it is; only those gone and those new change.
+      for (const row of [...this.body.children]) if (!rows.includes(row)) row.remove();
+      for (const row of rows) if (!row.isConnected) this.body.append(row);
+    } else this.body.replaceChildren(...rows);
     this.sort();
     this.summarize();
   }
@@ -532,13 +574,89 @@ class LiveView extends ExamElement {
             : t("exam.live.refused", { count: participant.refused }),
         participant.refused > 0 && participant.refusedBrowser ? [h("br", {}), browserCell(participant.refusedBrowser)] : null
       ),
-      h("td", {}, release, release && remove ? " " : null, remove)
+      h("td", {}, release, release && remove ? " " : null, remove),
+      this.noteCell(participant)
     );
     // A submitted row is green; the suspicious and tick-rate cells were filled before the row existed, so its flag follows here.
     setTone(tr, participant.status === "submitted" ? "good" : null);
     flagRow(tr);
     this.rows.set(username, tr);
     return tr;
+  }
+
+  /**
+   * The row of `username` drawn from what is known of them now, and kept as
+   * the row of record. A row already on the page is drawn anew around its
+   * note cell - its attributes and every other cell replaced in place - so
+   * the note field never leaves the page and keeps its focus (design D3).
+   */
+  place(username) {
+    const old = this.rows.get(username);
+    const fresh = this.row(username);
+    const slot = fresh.querySelector(":scope > [data-note-slot]");
+    if (old && slot) {
+      this.rows.set(username, old);
+      const note = this.notes.get(username).cell;
+      for (const name of old.getAttributeNames()) if (!fresh.hasAttribute(name)) old.removeAttribute(name);
+      for (const name of fresh.getAttributeNames()) old.setAttribute(name, fresh.getAttribute(name));
+      for (const cell of [...old.children]) if (cell !== note) cell.remove();
+      slot.remove();
+      note.before(...fresh.children);
+      return old;
+    }
+    return fresh;
+  }
+
+  /**
+   * The cell with the teacher's note on `participant` (exam-live-teacher-notes
+   * D3): a field that takes line breaks, saved as it changes with the marks
+   * of the sheet's fields, disabled in a closed year. Made once per
+   * participant and kept; drawing it again takes the note the server sent -
+   * into the field only while it is not being typed in. While the cell is on
+   * the page a placeholder stands in for it, and `place` keeps the cell.
+   * Nothing on the view for the class.
+   */
+  noteCell(participant) {
+    if (this.params.screen === "1") return null;
+    const username = participant.username;
+    let note = this.notes.get(username);
+    if (!note) {
+      const field = h("textarea", {
+        class: "sl-exam-live-note",
+        rows: "2",
+        maxlength: "4000",
+        placeholder: t("exam.live.notePlaceholder"),
+        "aria-label": t("exam.live.noteFor", { name: displayPerson(participant) }),
+      });
+      note = { field, cell: h("td", { class: "sl-exam-live-note-cell" }, field), stored: null };
+      // While it is typed in, saving or refused, the field holds what the teacher wrote.
+      note.busy = () => document.activeElement === field || field.classList.contains("is-saving") || field.classList.contains("is-refused");
+      note.show = () => {
+        field.value = note.stored ?? "";
+        field.markSaved(field.value);
+      };
+      saveOnChange(field, {
+        save: (text) => examApi(`/tests/${this.testId}/teacher-notes/${encodeURIComponent(username)}`, { method: "PUT", body: { text } }),
+        onSaved: (answer) => {
+          note.stored = answer?.teacherNote ?? null;
+          if (document.activeElement !== field) note.show();
+        },
+      });
+      // Left without a change: it takes the note as the server has it now.
+      // After the field's own `change`, which may come after the blur and
+      // starts the save of what was typed.
+      field.addEventListener("blur", () =>
+        setTimeout(() => {
+          if (!note.busy()) note.show();
+        })
+      );
+      this.notes.set(username, note);
+    }
+    note.stored = participant.teacherNote ?? null;
+    note.field.disabled = this.yearClosed;
+    note.cell.dataset.noted = note.stored === null ? "0" : "1";
+    if (!note.busy()) note.show();
+    return note.cell.isConnected ? h("td", { "data-note-slot": "" }) : note.cell;
   }
 
   /**
@@ -714,10 +832,10 @@ class LiveView extends ExamElement {
     if (!participant) return;
     this.participants.set(participant.username, { ...participant, at: performance.now() });
     const old = this.rows.get(participant.username);
-    const fresh = this.row(participant.username);
+    const row = this.place(participant.username);
     if (!this.order.has(participant.username)) this.order.set(participant.username, this.order.size);
-    if (old) old.replaceWith(fresh);
-    else this.body.append(fresh);
+    if (old && old !== row) old.replaceWith(row);
+    if (!row.isConnected) this.body.append(row);
     this.sort();
     this.summarize();
   }
@@ -847,7 +965,7 @@ class LiveView extends ExamElement {
 
   async poll() {
     try {
-      this.draw(await examApi(`/sittings/${this.params.sitting}/live`));
+      this.draw(await examApi(this.snapshotPath()));
       if (this.dataset.mode === "waiting") this.pollOnly();
     } catch (error) {
       if (error instanceof ExamApiError && error.status === 403) this.studentView();

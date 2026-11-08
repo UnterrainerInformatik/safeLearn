@@ -334,8 +334,10 @@ export function deleteTest(db, id, { admin = false } = {}) {
       db.prepare("DELETE FROM assessment WHERE id = ?").run(test.assessment_id);
     }
     // An attempt's questions, tokens, answers and refused browsers go with it,
-    // and so do the notes in the test's column.
+    // and so do the notes in the test's column and the teachers' notes on its
+    // participants (exam-live-teacher-notes D1).
     db.prepare("DELETE FROM result_note WHERE test_id = ?").run(id);
+    db.prepare("DELETE FROM teacher_note WHERE test_id = ?").run(id);
     db.prepare("DELETE FROM attempt WHERE test_id = ?").run(id);
     dropSnapshot(db, id);
     db.prepare("DELETE FROM sitting WHERE test_id = ?").run(id);

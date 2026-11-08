@@ -377,7 +377,9 @@ function refusal(error) {
  * behind it, and only the latest does, so a slow answer never overwrites a
  * newer value. The field shows `is-saving`, briefly `is-saved`, or `is-refused`
  * with the reason as its title - keeping the typed value, while the stored one
- * stays as it was. `field.saveNow()` saves the current value at once.
+ * stays as it was. `field.saveNow()` saves the current value at once;
+ * `field.markSaved(value)` takes a value set from outside - another
+ * teacher's, as the server sent it - as the one stored, and clears a refusal.
  */
 export function saveOnChange(field, { save, onSaved = () => {}, check = () => null, value = () => field.value }) {
   let inFlight = false;
@@ -447,5 +449,11 @@ export function saveOnChange(field, { save, onSaved = () => {}, check = () => nu
 
   field.addEventListener("change", changed);
   field.saveNow = changed;
+  field.markSaved = (stored) => {
+    sent = stored;
+    hasQueued = false;
+    // Only a refusal goes; a fresh "saved" mark stays for its moment.
+    if (!inFlight && field.classList.contains("is-refused")) state(null);
+  };
   return field;
 }

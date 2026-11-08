@@ -44,6 +44,7 @@ import { listQuestions } from "../exam/pool.js";
 import { createSitting, createTest } from "../exam/tests.js";
 import { finalizeDue, startAttempt } from "../exam/attempts.js";
 import { parseRetentionYears, purgeLeavers, retentionReport } from "../exam/retention.js";
+import { setTeacherNote, teacherNoteOf } from "../exam/teacher-notes.js";
 import { init } from "../exam/index.js";
 
 const temporaryDirs = [];
@@ -124,6 +125,10 @@ function filledYear(db) {
     setNote(db, course.id, column.id, "anna", "Well argued");
     setNote(db, course.id, homework.id, "anna", "Not handed in");
     setNote(db, course.id, `test-${quiz.id}`, "ben", "Ill, make-up on 12 Dec");
+  }
+  // A teacher's note from the live view once the schema has it (018).
+  if (db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'teacher_note'").get()) {
+    setTeacherNote(db, quiz.id, "anna", "Looked at the neighbour's screen twice\ncheck against Huber");
   }
   return { year, klass, course, column, quiz, sitting, attemptId, startedAt };
 }
@@ -454,7 +459,7 @@ describe("deleting the records of students who have left", () => {
 
   const counts = (db) =>
     Object.fromEntries(
-      ["student", "roster_entry", "manual_entry", "result_note", "semester_grade", "attempt", "attempt_question", "attempt_token", "response", "refused_device", "sitting_participant", "class", "course", "assessment", "test", "test_question", "sitting", "question_usage"].map((table) => [
+      ["student", "roster_entry", "manual_entry", "result_note", "teacher_note", "semester_grade", "attempt", "attempt_question", "attempt_token", "response", "refused_device", "sitting_participant", "class", "course", "assessment", "test", "test_question", "sitting", "question_usage"].map((table) => [
         table,
         db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n,
       ])
@@ -466,14 +471,14 @@ describe("deleting the records of students who have left", () => {
     assert.deepEqual(retentionReport(db, "2028-08-01", 2), {
       years: 2,
       students: 1,
-      records: { results: 0, notes: 0, overrides: 0, attempts: 0, sittings: 0, rosterEntries: 0 },
+      records: { results: 0, notes: 0, teacherNotes: 0, overrides: 0, attempts: 0, sittings: 0, rosterEntries: 0 },
     }, "only carla, who was never on a roster");
     assert.equal(retentionReport(db, "2029-07-02", 2).students, 1, "not on the last day of the period");
     assert.deepEqual(retentionReport(db, "2029-07-03", 2), {
       years: 2,
       students: 2,
-      records: { results: 1, notes: 2, overrides: 0, attempts: 1, sittings: 1, rosterEntries: 1 },
-    }, "anna and carla, counted per kind, anna's notes as a kind of their own");
+      records: { results: 1, notes: 2, teacherNotes: 1, overrides: 0, attempts: 1, sittings: 1, rosterEntries: 1 },
+    }, "anna and carla, counted per kind, anna's notes and her teacher note each as a kind of their own");
     assert.equal(retentionReport(db, "2028-07-03", 1).students, 2, "a shorter period from the deployment");
   });
 
@@ -496,6 +501,7 @@ describe("deleting the records of students who have left", () => {
       roster_entry: anna("roster_entry"),
       manual_entry: anna("manual_entry"),
       result_note: anna("result_note"),
+      teacher_note: anna("teacher_note"),
       semester_grade: anna("semester_grade"),
       attempt: anna("attempt"),
       sitting_participant: anna("sitting_participant"),
@@ -541,6 +547,30 @@ describe("deleting the records of students who have left", () => {
     const before = counts(db);
     assert.throws(() => purgeLeavers(db, "2029-07-03", report, 2), (error) => error instanceof ConflictError && error.key === "exam.errors.retention.changed");
     assert.deepEqual(counts(db), before);
+  });
+
+  test("a purge whose teacher note count changed since the report is refused and deletes nothing", () => {
+    const { db } = afterAYear();
+    const report = retentionReport(db, "2029-07-03", 2);
+    assert.equal(report.records.teacherNotes, 1);
+    db.exec("BEGIN");
+    db.prepare("INSERT INTO purge_in_progress (id) VALUES (1)").run();
+    db.prepare("DELETE FROM teacher_note WHERE username = 'anna'").run();
+    db.prepare("DELETE FROM purge_in_progress").run();
+    db.exec("COMMIT");
+    const before = counts(db);
+    assert.throws(() => purgeLeavers(db, "2029-07-03", report, 2), (error) => error instanceof ConflictError && error.key === "exam.errors.retention.changed");
+    assert.deepEqual(counts(db), before);
+  });
+
+  test("a closed year's teacher note is read, and its write is refused as closed", () => {
+    const { db, quiz } = afterAYear();
+    assert.equal(teacherNoteOf(db, quiz.id, "anna"), "Looked at the neighbour's screen twice\ncheck against Huber");
+    refusedAsClosed(() => setTeacherNote(db, quiz.id, "anna", "changed"), "a change");
+    refusedAsClosed(() => setTeacherNote(db, quiz.id, "anna", "  "), "a removal");
+    refusedAsClosed(() => setTeacherNote(db, quiz.id, "ben", "new"), "a new one");
+    assert.equal(teacherNoteOf(db, quiz.id, "anna"), "Looked at the neighbour's screen twice\ncheck against Huber");
+    assert.equal(teacherNoteOf(db, quiz.id, "ben"), null);
   });
 
   test("the marker lets deletes through, never an insert or an update", () => {

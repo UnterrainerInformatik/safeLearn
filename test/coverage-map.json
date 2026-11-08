@@ -442,7 +442,9 @@
         "exam/handout.js",
         "exam/routes-handout.js",
         "exam/client/handout-picker.js",
-        "exam/migrations/017-fullscreen-tick-rate.sql"
+        "exam/migrations/017-fullscreen-tick-rate.sql",
+        "exam/migrations/018-teacher-notes.sql",
+        "exam/teacher-notes.js"
       ],
       "corpus": [
         "md/test-exam-embedding.md",
@@ -515,7 +517,9 @@
         "exam/routes-tests.js",
         "exam/migrations/015-hidden-page-signals.sql",
         "exam/migrations/017-fullscreen-tick-rate.sql",
-        "exam/live.js"
+        "exam/live.js",
+        "exam/migrations/018-teacher-notes.sql",
+        "exam/teacher-notes.js"
       ],
       "corpus": []
     },
@@ -543,7 +547,9 @@
         "exam/index.js",
         "exam/roster-source.js",
         "exam/migrations/010-year-change.sql",
-        "exam/db.js"
+        "exam/db.js",
+        "exam/migrations/018-teacher-notes.sql",
+        "exam/teacher-notes.js"
       ],
       "corpus": []
     },

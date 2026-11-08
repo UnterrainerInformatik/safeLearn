@@ -1343,6 +1343,22 @@ a.sl-exam-button.sl-exam-open:hover,
   font-variant-numeric: tabular-nums;
 }
 
+/* The teacher's note at the end of a row: narrow, a few lines, growing with
+   its text up to six while focused (exam-live-teacher-notes D3). */
+.sl-exam-live-note {
+  width: 22ch;
+  min-height: calc(2lh + 6px);
+  max-height: calc(6lh + 6px);
+  resize: vertical;
+  font: inherit;
+  white-space: pre-wrap;
+  vertical-align: top;
+}
+
+.sl-exam-live-note:focus {
+  field-sizing: content;
+}
+
 .sl-exam-live-summary {
   font-weight: 600;
 }

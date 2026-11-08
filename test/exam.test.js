@@ -3234,7 +3234,8 @@ describe("online tests: the live view", () => {
       teacher.page.evaluate((failures) => {
         const real = window.fetch;
         window.fetch = (input, init) => {
-          if (String(input).endsWith("/live") && failures.length > 0) {
+          // The class's snapshot, the one without teacher notes.
+          if (String(input).endsWith("/live?screen=1") && failures.length > 0) {
             const failure = failures.shift();
             return failure === "network"
               ? Promise.reject(new TypeError("Failed to fetch"))
@@ -3369,7 +3370,7 @@ describe("online tests: the live view", () => {
     );
     write("UPDATE attempt SET tick_share = 970 WHERE id = ?", writing.attempt);
     await shown();
-    assert.deepEqual(await tick(), ["0", "97%"], "the share while writing, no warning");
+    assert.deepEqual(await tick(), ["0", "97\u00a0%"], "the share while writing, no warning, in the locale's percent like every share of the view");
     assert.deepEqual((await colour()).flag, null, "a normal tick rate does not flag the row");
 
     write("UPDATE attempt SET tamper_detail = 'visibilityState,hasFocus', hidden_count = 2, hidden_ms = 90000, out_count = 1, out_ms = 25000, fullscreen_unavailable = 1 WHERE id = ?", writing.attempt);
@@ -3387,7 +3388,7 @@ describe("online tests: the live view", () => {
     );
     write("UPDATE attempt SET tamper_detail = NULL, hidden_count = 0, hidden_ms = 0, out_count = 0, out_ms = 0, fullscreen_unavailable = 0, slow_count = 1, slow_ms = 40000, tick_share = 200 WHERE id = ?", writing.attempt);
     assert.deepEqual(await shown(), ["0", ""], "tick rate down is not a sign of the suspicious cell");
-    assert.deepEqual(await tick(), ["1", "Tickrate Down! 1×, 40 s\n20%"], "the red warning with the share below it");
+    assert.deepEqual(await tick(), ["1", "Tickrate Down! 1×, 40 s\n20\u00a0%"], "the red warning with the share below it");
     assert.deepEqual(
       [(await colour()).flag, (await colour()).title],
       ["warn", "Tick rate: Tickrate Down! 1×, 40 s"],
@@ -3396,7 +3397,7 @@ describe("online tests: the live view", () => {
     assert.equal(await teacher.page.$eval(`${tickCell} .sl-exam-live-tickdown`, (el) => getComputedStyle(el).color), "rgb(192, 57, 43)", "in red");
     // The stream's tick carries the share without a snapshot.
     write("UPDATE attempt SET tick_share = 1000 WHERE id = ?", writing.attempt);
-    await teacher.page.waitForFunction((selector) => /100%$/.test(document.querySelector(selector).innerText), { timeout: 12000, polling: 250 }, tickCell);
+    await teacher.page.waitForFunction((selector) => /100\u00a0%$/.test(document.querySelector(selector).innerText), { timeout: 12000, polling: 250 }, tickCell);
     write("UPDATE attempt SET tamper_detail = 'visibilityState,hasFocus', hidden_count = 2, hidden_ms = 90000 WHERE id = ?", writing.attempt);
     await shown();
     assert.match(await teacher.page.$eval(`sl-exam-live tr[data-username="${username}"] .sl-exam-live-left-page`, (el) => el.textContent), /never left/, "the focus figures are unchanged");
@@ -3468,16 +3469,186 @@ describe("online tests: the live view", () => {
     );
     await teacher.page.evaluate(() => document.querySelector("sl-exam-live").poll());
     // With the mouse on Unbind the rows stay put, and follow once it leaves.
+    // The row is sent to the top - not started, and longest out of focus - so
+    // it moves whatever the order by name is; by name it may well be last.
     await teacher.page.hover(`sl-exam-live tr[data-username="${username}"] .sl-exam-live-release`);
     await teacher.page.evaluate((u) => {
       const view = document.querySelector("sl-exam-live");
-      Object.assign(view.participants.get(u), { status: "not started", startedAt: null });
+      Object.assign(view.participants.get(u), { status: "not started", startedAt: new Date(Date.now() - 60000).toISOString(), focusMs: 30000, hiddenMs: 0, outMs: 0, slowMs: 0, away: false });
       view.sort();
     }, username);
     assert.deepEqual(await rows(), [...others, username], "held while the mouse is on a button");
     await teacher.page.mouse.move(0, 0);
-    await teacher.page.waitForFunction((u) => document.querySelector("sl-exam-live tbody tr:last-child")?.dataset.username !== u, { timeout: 2000 }, username);
-    assert.deepEqual(await rows(), byName, "sorted once it leaves");
+    await teacher.page.waitForFunction((u) => document.querySelector("sl-exam-live tbody tr:first-child")?.dataset.username === u, { timeout: 2000 }, username);
+    assert.deepEqual(await rows(), [username, ...others], "sorted once it leaves");
+  });
+
+  test("a teacher's note in the live view keeps its line break, holds the row still while typed, and reaches a second view", async () => {
+    await openLive("Live notes");
+    const username = student.username.toLowerCase();
+    const field = `sl-exam-live tr[data-username="${username}"] textarea.sl-exam-live-note`;
+    const rows = () => teacher.page.$$eval("sl-exam-live tbody tr", (all) => all.map((row) => row.dataset.username));
+    const stored = async () => (await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/live`)).json.participants.find((p) => p.username === username).teacherNote;
+    assert.equal(
+      await teacher.page.$eval(field, (td) => td.closest("table").querySelectorAll("thead th")[td.closest("td").cellIndex].textContent),
+      "Teacher note",
+      "its own column, at the end of the row"
+    );
+    // A second teacher's view of the same sitting, in another tab.
+    const second = await teacher.context.newPage();
+    try {
+      await second.goto(`${applicationUrl}/exam/sittings/${sitting.id}/live`, { waitUntil: "domcontentloaded" });
+      await second.waitForFunction(() => document.querySelector("sl-exam-live")?.dataset.mode === "stream", { timeout: 20000 });
+      await teacher.page.bringToFront();
+
+      const before = await rows();
+      await teacher.page.focus(field);
+      await teacher.page.keyboard.type("Looked at the neighbour's screen twice");
+      await teacher.page.keyboard.press("Enter");
+      await teacher.page.keyboard.type("check against Huber");
+      // The student starts meanwhile: a writing row goes last, but not while the note is typed in.
+      await fetchAs(student, `/exam/api/tests/${written.id}/attempt`, { method: "POST" });
+      await teacher.page.waitForFunction((u) => document.querySelector(`sl-exam-live tr[data-username="${u}"]`)?.dataset.status === "writing", { timeout: 10000 }, username);
+      await teacher.page.evaluate(() => document.querySelector("sl-exam-live").sort());
+      assert.deepEqual(await rows(), before, "the rows hold still while a note field has the focus");
+      assert.deepEqual(
+        await teacher.page.$eval(field, (el) => [document.activeElement === el, el.value]),
+        [true, "Looked at the neighbour's screen twice\ncheck against Huber"],
+        "the field kept its focus and its text through the change"
+      );
+      await teacher.page.$eval(field, (el) => el.blur());
+      await teacher.page.waitForFunction((s) => document.querySelector(s)?.classList.contains("is-saved"), { timeout: 10000 }, field);
+      assert.equal(await stored(), "Looked at the neighbour's screen twice\ncheck against Huber", "saved with its line break");
+      await teacher.page.waitForFunction((u) => document.querySelector("sl-exam-live tbody tr:last-child")?.dataset.username === u, { timeout: 12000, polling: 250 }, username);
+      assert.equal(await teacher.page.$eval(field, (el) => el.value), "Looked at the neighbour's screen twice\ncheck against Huber", "shown in the row once it is left");
+      const row = await teacher.page.$eval(`sl-exam-live tr[data-username="${username}"]`, (tr) => ({ tone: tr.dataset.tone ?? null, flag: tr.dataset.flag ?? null, status: tr.dataset.status }));
+      assert.deepEqual(row, { tone: null, flag: null, status: "writing" }, "the note changes neither colour, stripe nor status");
+
+      // The other view takes it from the stream, without a reload; polled on an interval, since its tab is in the background.
+      await second.waitForFunction(
+        (s, text) => document.querySelector(s)?.value === text,
+        { timeout: 10000, polling: 250 },
+        field,
+        "Looked at the neighbour's screen twice\ncheck against Huber"
+      );
+
+      // A change from the other view does not overwrite a field being typed in; it shows once the field is left.
+      await teacher.page.focus(field);
+      await teacher.page.keyboard.type(" (typing)");
+      const other = await fetchAs(teacher, `/exam/api/tests/${written.id}/teacher-notes/${username}`, { method: "PUT", body: { text: "Second teacher's version" } });
+      assert.deepEqual(other.json, { username, teacherNote: "Second teacher's version" });
+      await second.waitForFunction((s) => document.querySelector(s)?.value === "Second teacher's version", { timeout: 10000, polling: 250 }, field);
+      assert.equal(await teacher.page.$eval(field, (el) => el.value), "Looked at the neighbour's screen twice\ncheck against Huber (typing)", "not overwritten while typed in");
+      // Its own text is not sent: the field is emptied of the typing and left.
+      await teacher.page.$eval(field, (el) => {
+        el.value = "Looked at the neighbour's screen twice\ncheck against Huber";
+        el.markSaved(el.value);
+        el.blur();
+      });
+      await teacher.page.waitForFunction((s) => document.querySelector(s)?.value === "Second teacher's version", { timeout: 5000 }, field);
+
+      // Too long: refused with the reason, and the stored note stays.
+      await teacher.page.$eval(field, (el) => {
+        el.value = "x".repeat(4001);
+        el.dispatchEvent(new Event("change"));
+      });
+      await teacher.page.waitForFunction((s) => document.querySelector(s)?.classList.contains("is-refused"), { timeout: 10000 }, field);
+      assert.match(await teacher.page.$eval(field, (el) => el.title), /4000/, "the reason");
+      assert.equal(await stored(), "Second teacher's version", "the stored note stays as it was");
+    } finally {
+      await second.close();
+    }
+  });
+
+  test("a teacher note is shown to teachers only: never to the student, not on the view for the class, and apart from the cell note", async () => {
+    await openLive("Live notes private");
+    const username = student.username.toLowerCase();
+    const marker = "TEACHER-ONLY-7731 copied from xxx";
+    const cellMarker = "CELL-NOTE-4410";
+    assert.equal((await fetchAs(teacher, `/exam/api/tests/${written.id}/teacher-notes/${username}`, { method: "PUT", body: { text: marker } })).status, 200);
+    const cell = await fetchAs(teacher, `/exam/api/courses/${course.id}/notes/test-${written.id}/${username}`, { method: "PUT", body: { text: cellMarker } });
+    assert.equal(cell.status, 200, JSON.stringify(cell.json));
+
+    // Written by a student, or without a session: refused, nothing written.
+    const asStudent = await fetchAs(student, `/exam/api/tests/${written.id}/teacher-notes/${username}`, { method: "PUT", body: { text: "mine" } });
+    assert.equal(asStudent.status, 403);
+    const anonymous = await fetch(`${applicationUrl}/exam/api/tests/${written.id}/teacher-notes/${username}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "anyone" }),
+      redirect: "manual",
+    });
+    assert.notEqual(anonymous.status, 200);
+    const snapshot = (await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/live`)).json;
+    assert.equal(snapshot.participants.find((p) => p.username === username).teacherNote, marker, "nothing was written by either");
+    assert.ok(!JSON.stringify(snapshot).includes(cellMarker), "the live view carries no cell note");
+
+    // The student writes, submits and looks at their pages: no trace of the note.
+    const raw = async (reference, options) => JSON.stringify((await fetchAs(student, reference, options)).json ?? "");
+    const responses = [await raw("/exam/api/my/tests")];
+    const writing = (await fetchAs(student, `/exam/api/tests/${written.id}/attempt`, { method: "POST" })).json;
+    responses.push(JSON.stringify(writing), await raw(`/exam/api/tests/${written.id}/attempt`, { method: "POST" }));
+    responses.push(await raw(`/exam/api/attempts/${writing.attempt}/submit`, { method: "POST" }));
+    responses.push(await raw(`/exam/api/tests/${written.id}/attempt`, { method: "POST" }), await raw("/exam/api/my/tests"), await raw("/exam/api/my/results"));
+    for (const answer of responses) assert.ok(!answer.includes("TEACHER-ONLY") && !answer.includes("teacherNote"), `no note in ${answer.slice(0, 120)}`);
+    assert.ok(responses.at(-1).includes(cellMarker), "the student's results show the cell note");
+    await student.page.goto(`${applicationUrl}/exam/my`, { waitUntil: "domcontentloaded" });
+    await student.page.waitForSelector("sl-exam-my .sl-exam, sl-exam-test .sl-exam, .sl-exam", { timeout: 20000 });
+    assert.ok(!(await student.page.evaluate(() => document.body.innerHTML)).includes("TEACHER-ONLY"), "no page of the student shows it");
+
+    // The sheet shows only the cell note.
+    const sheets = await Promise.all(["ws", "ss"].map(async (semester) => JSON.stringify((await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=${semester}`)).json)));
+    assert.ok(sheets.every((sheet) => !sheet.includes("TEACHER-ONLY")), "the sheet carries no teacher note");
+    assert.ok(sheets.some((sheet) => sheet.includes(cellMarker)), "but its cell note");
+
+    // The view for the class: no note in its snapshot, not even an empty one, and none on its page.
+    const board = (await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/live?screen=1`)).json;
+    assert.ok(board.participants.every((p) => !("teacherNote" in p)), "the class's snapshot has no note key");
+    const screen = await teacher.context.newPage();
+    try {
+      const asked = [];
+      screen.on("request", (request) => asked.push(request.url()));
+      await screen.goto(`${applicationUrl}/exam/sittings/${sitting.id}/screen`, { waitUntil: "domcontentloaded" });
+      await screen.waitForSelector(".sl-exam-screen-label", { timeout: 20000 });
+      assert.ok(!(await screen.evaluate(() => document.body.innerHTML)).includes("TEACHER-ONLY"));
+      assert.equal(await screen.$("textarea"), null, "no note field");
+      assert.ok(asked.filter((url) => url.includes(`/sittings/${sitting.id}/live`)).every((url) => url.endsWith("?screen=1")), "it asks only for the snapshot without notes");
+    } finally {
+      await screen.close();
+    }
+    await teacher.page.bringToFront();
+
+    // White space removes the note.
+    const emptied = await fetchAs(teacher, `/exam/api/tests/${written.id}/teacher-notes/${username}`, { method: "PUT", body: { text: " \n\t " } });
+    assert.deepEqual(emptied.json, { username, teacherNote: null });
+    const tooLong = await fetchAs(teacher, `/exam/api/tests/${written.id}/teacher-notes/${username}`, { method: "PUT", body: { text: "x".repeat(4001) } });
+    assert.equal(tooLong.status, 400);
+    assert.match(tooLong.json.error, /4000/);
+    assert.equal((await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/live`)).json.participants.find((p) => p.username === username).teacherNote, null);
+  });
+
+  test("a teacher note stays after the sitting is over, can still be changed there, and shows in the make-up sitting", async () => {
+    await openLive("Live notes make-up");
+    const absentee = (await teacher.page.$$eval("sl-exam-live tbody tr", (all) => all.map((row) => row.dataset.username))).find((u) => u !== student.username.toLowerCase());
+    const field = `sl-exam-live tr[data-username="${absentee}"] textarea.sl-exam-live-note`;
+    assert.equal((await fetchAs(teacher, `/exam/api/tests/${written.id}/teacher-notes/${absentee}`, { method: "PUT", body: { text: "Ill today" } })).status, 200);
+    await teacher.page.waitForFunction((s) => document.querySelector(s)?.value === "Ill today", { timeout: 10000 }, field);
+    assert.equal((await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/end`, { method: "POST" })).status, 200);
+    await teacher.page.reload({ waitUntil: "domcontentloaded" });
+    await teacher.page.waitForFunction(() => document.querySelector("sl-exam-live .sl-exam-live-badge")?.dataset.state === "over", { timeout: 20000 });
+    assert.deepEqual(await teacher.page.$eval(field, (el) => [el.value, el.disabled]), ["Ill today", false], "after the sitting: shown and open to change");
+    await teacher.page.focus(field);
+    await teacher.page.keyboard.type(", make-up on Friday");
+    await teacher.page.$eval(field, (el) => el.blur());
+    await teacher.page.waitForFunction((s) => document.querySelector(s)?.classList.contains("is-saved"), { timeout: 10000 }, field);
+
+    const makeup = await fetchAs(teacher, `/exam/api/tests/${written.id}/sittings`, {
+      method: "POST",
+      body: { opensAt: new Date(Date.now() - 60000).toISOString(), closesAt: new Date(Date.now() + 50 * 60000).toISOString(), participants: [absentee] },
+    });
+    assert.equal(makeup.status, 200, JSON.stringify(makeup.json));
+    await teacher.page.goto(`${applicationUrl}/exam/sittings/${makeup.json.id}/live`, { waitUntil: "domcontentloaded" });
+    await teacher.page.waitForFunction((s) => document.querySelector(s)?.value === "Ill today, make-up on Friday", { timeout: 20000 }, field);
   });
 
   test("a teacher who switches to the student view gets refused, and the view says why", async () => {
@@ -3754,6 +3925,12 @@ describe("offline tests and their handouts", () => {
         })
       ).json;
     }
+    // A running attempt is resumed at once on /exam/my, in front of the list of
+    // open tests these checks look at: whatever an earlier suite left the
+    // shared student writing is submitted first.
+    for (const entry of (await fetchAs(student, "/exam/api/my/tests")).json?.tests ?? []) {
+      if (entry.attempt) await fetchAs(student, `/exam/api/attempts/${entry.attempt.attemptId}/submit`, { method: "POST" });
+    }
     const klass = await fetchAs(teacher, `/exam/api/years/${year.id}/classes`, { method: "POST", body: { name: "9XOF", students: [student.username, other] } });
     assert.equal(klass.status, 200, JSON.stringify(klass.json));
     const created = await fetchAs(teacher, `/exam/api/classes/${klass.json.id}/courses`, { method: "POST", body: { subject: "POS", language: "de" } });
@@ -3840,6 +4017,29 @@ describe("offline tests and their handouts", () => {
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.waitForSelector(`.sl-exam-attendance-table tr[data-username="${other}"][data-group="B"]`, { timeout: 20000 });
     assert.ok(await page.$(".sl-exam-live-start:not([hidden])"), "the start button is offered");
+  });
+
+  test("the attendance table holds the teacher's note, and presence leaves it as it was", async () => {
+    const page = teacher.page;
+    const row = `.sl-exam-attendance-table tr[data-username="${other}"]`;
+    const field = `${row} textarea.sl-exam-live-note`;
+    await page.waitForSelector(field, { timeout: 20000 });
+    assert.equal(await page.$eval(field, (td) => td.closest("table").querySelectorAll("thead th")[td.closest("td").cellIndex].textContent), "Teacher note");
+    await page.focus(field);
+    await page.keyboard.type("Phone on the desk");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("taken away at 10:12");
+    await page.$eval(field, (el) => el.blur());
+    await page.waitForFunction((s) => document.querySelector(s)?.classList.contains("is-saved"), { timeout: 10000 }, field);
+    const stored = async () => (await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/live`)).json.participants.find((p) => p.username === other).teacherNote;
+    assert.equal(await stored(), "Phone on the desk\ntaken away at 10:12");
+    for (const present of ["0", "1"]) {
+      await page.click(`${row} .sl-exam-attendance-present`);
+      await page.waitForSelector(`${row}[data-present="${present}"]`, { timeout: 10000 });
+      assert.equal(await page.$eval(field, (el) => el.value), "Phone on the desk\ntaken away at 10:12", `the note stays at present=${present}`);
+    }
+    assert.equal(await stored(), "Phone on the desk\ntaken away at 10:12", "present, absent and present again leave it");
+    assert.ok(await page.$(`${row}[data-group="B"]`), "and the group is as it was");
   });
 
   test("started from its page, a present student sees their handout as a student with the exam variant, and its attachments", async () => {
@@ -6485,6 +6685,8 @@ describe("the year change", () => {
   let pastClass;
   let pastCourse;
   let column;
+  let noted;
+  let notedSitting;
   // Usernames the directory does not know, so the checks need no directory:
   // one moves up to the next year, one leaves after the past year.
   const stays = "yc-stays";
@@ -6504,6 +6706,19 @@ describe("the year change", () => {
     for (const [username, points] of [[stays, 15], [leaves, 9]]) {
       const entered = await fetchAs(teacher, `/exam/api/assessments/${column.id}/results/${username}`, { method: "PUT", body: { points } });
       assert.equal(entered.status, 200, JSON.stringify(entered.json));
+    }
+    // An online test with a sitting, and a teacher's note on each of the two in its live view.
+    const questions = (await fetchAs(teacher, "/exam/api/pool/questions")).json;
+    noted = (await fetchAs(teacher, `/exam/api/courses/${pastCourse.id}/tests`, { method: "POST", body: { name: "Noted", questionIds: questions.map((q) => q.id) } })).json;
+    notedSitting = (
+      await fetchAs(teacher, `/exam/api/tests/${noted.id}/sittings`, {
+        method: "POST",
+        body: { opensAt: new Date(Date.now() - 60000).toISOString(), closesAt: new Date(Date.now() + 50 * 60000).toISOString(), durationMinutes: 15 },
+      })
+    ).json;
+    for (const username of [stays, leaves]) {
+      const written = await fetchAs(teacher, `/exam/api/tests/${noted.id}/teacher-notes/${username}`, { method: "PUT", body: { text: `Note on ${username}` } });
+      assert.equal(written.status, 200, JSON.stringify(written.json));
     }
   });
 
@@ -6554,6 +6769,21 @@ describe("the year change", () => {
       [[leaves, 9], [stays, 15]],
       "every result is as it was"
     );
+  });
+
+  test("a closed year's live view shows the teacher notes with their fields disabled, and refuses a write to one", async () => {
+    const page = teacher.page;
+    await page.goto(`${applicationUrl}/exam/sittings/${notedSitting.id}/live`, { waitUntil: "domcontentloaded" });
+    const field = `sl-exam-live tr[data-username="${stays}"] textarea.sl-exam-live-note`;
+    await page.waitForSelector(field, { timeout: 20000 });
+    assert.deepEqual(await page.$eval(field, (el) => [el.value, el.disabled]), [`Note on ${stays}`, true]);
+    for (const text of ["changed", " "]) {
+      const refused = await fetchAs(teacher, `/exam/api/tests/${noted.id}/teacher-notes/${stays}`, { method: "PUT", body: { text } });
+      assert.equal(refused.status, 409, JSON.stringify(refused.json));
+      assert.match(refused.json.error, /closed/);
+    }
+    const shown = (await fetchAs(teacher, `/exam/api/sittings/${notedSitting.id}/live`)).json.participants.find((p) => p.username === stays);
+    assert.equal(shown.teacherNote, `Note on ${stays}`, "nothing was written");
   });
 
   test("a closed year's sheet and class are shown read-only, with a note", async () => {
@@ -6612,6 +6842,7 @@ describe("the year change", () => {
     const report = (await fetchAs(teacher, "/exam/api/retention")).json;
     assert.equal(report.years, 2);
     assert.ok(report.students >= 1 && report.records.results >= 1 && report.records.rosterEntries >= 1, JSON.stringify(report));
+    assert.ok(report.records.teacherNotes >= 1, `the leaver's teacher note is counted as a kind of its own: ${JSON.stringify(report)}`);
 
     const changed = await fetchAs(teacher, "/exam/api/retention/purge", { method: "POST", body: { expected: { ...report, students: report.students + 1 } } });
     assert.equal(changed.status, 409, "counts other than the report's are refused");
@@ -6622,6 +6853,7 @@ describe("the year change", () => {
     await page.waitForSelector(".sl-exam-retention-remove", { timeout: 20000 });
     const listed = await page.$eval(".sl-exam-retention", (section) => section.textContent);
     assert.ok(!listed.includes(leaves), "the report names nobody");
+    assert.match(listed, new RegExp(`${report.records.teacherNotes} teacher notes? from (a )?live views?`), "the teacher notes on a line of their own");
     await page.click(".sl-exam-retention-remove");
     assert.deepEqual((await fetchAs(teacher, "/exam/api/retention")).json, report, "the first click only asks");
     await page.click(".sl-exam-retention-remove");
@@ -6630,6 +6862,8 @@ describe("the year change", () => {
     assert.equal((await fetchAs(teacher, "/exam/api/retention")).json.students, 0);
     const roster = (await fetchAs(teacher, `/exam/api/classes/${pastClass.id}`)).json.roster.map((entry) => entry.username);
     assert.deepEqual(roster, [stays], "the leaver is gone from the closed year, the one who moved up is not");
+    const notes = (await fetchAs(teacher, `/exam/api/sittings/${notedSitting.id}/live`)).json.participants.map((p) => [p.username, p.teacherNote]);
+    assert.deepEqual(notes, [[stays, `Note on ${stays}`]], "the leaver's teacher note went with them, the other one stays");
     const sheet = (await fetchAs(teacher, `/exam/api/courses/${pastCourse.id}/gradebook?semester=ss`)).json;
     assert.deepEqual(sheet.students.map((row) => [row.username, row.results[column.id]?.points]), [[stays, 15]], "the column keeps the other result");
     assert.match(applicationOutput(), /Removed the records of \d+ student\(s\) who left: \d+ result/, "the log records counts");

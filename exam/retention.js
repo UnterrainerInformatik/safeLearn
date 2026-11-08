@@ -5,8 +5,8 @@
  * of the last school year they were on a roster, and then deleted - only by a
  * teacher, after a report that names counts and never people.
  *
- * What goes: the student's results, notes, overrides, attempts (with everything an
- * attempt holds), sitting participations, roster entries and the student
+ * What goes: the student's results, notes, teachers' notes on them as
+ * participants, overrides, attempts (with everything an attempt holds), sitting participations, roster entries and the student
  * record itself. Courses, columns, tests and sittings stay; a column or a
  * test simply has one result fewer.
  *
@@ -73,6 +73,8 @@ function dueStudents(db, today, years) {
 const recordKinds = Object.freeze({
   results: "SELECT COUNT(*) AS n FROM manual_entry WHERE username = ?",
   notes: "SELECT COUNT(*) AS n FROM result_note WHERE username = ?",
+  // A kind of its own: free text only teachers saw (exam-live-teacher-notes D4).
+  teacherNotes: "SELECT COUNT(*) AS n FROM teacher_note WHERE username = ?",
   overrides: "SELECT COUNT(*) AS n FROM semester_grade WHERE username = ?",
   attempts: "SELECT COUNT(*) AS n FROM attempt WHERE username = ?",
   sittings: "SELECT COUNT(*) AS n FROM sitting_participant WHERE username = ?",
@@ -119,6 +121,7 @@ export function purgeLeavers(db, today, expected, years = defaultRetentionYears)
     db.prepare("INSERT INTO purge_in_progress (id) VALUES (1)").run();
     const statements = [
       "DELETE FROM result_note WHERE username = ?",
+      "DELETE FROM teacher_note WHERE username = ?",
       "DELETE FROM manual_entry WHERE username = ?",
       "DELETE FROM semester_grade WHERE username = ?",
       // An attempt's questions, tokens, answers and refused browsers go with it.

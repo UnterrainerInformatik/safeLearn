@@ -59,6 +59,7 @@ import {
 import { studentMaySeeImage } from "../exam/pool.js";
 import { deleteQuestion, saveQuestion } from "../exam/pool-edit.js";
 import { listen, liveParticipant, liveSnapshot } from "../exam/live.js";
+import { setTeacherNote, teacherNoteOf } from "../exam/teacher-notes.js";
 import { browserLabel, parseUserAgent } from "../exam/user-agent.js";
 
 const temporaryDirs = [];
@@ -989,6 +990,53 @@ describe("attempts", () => {
 });
 
 // ------------------------------------------------------- admin corrections
+
+describe("a teacher's note on a participant", () => {
+  test("one note per student and test, the same in every sitting of the test, and on no class view", () => {
+    const { db, course, ids } = seeded();
+    const test = createTest(db, course.id, { name: "T", questionIds: [ids[0]] });
+    const first = createSitting(db, test.id, { opensAt: inMinutes(60), closesAt: inMinutes(110), durationMinutes: 15 });
+    const makeup = createSitting(db, test.id, { opensAt: inMinutes(200), closesAt: inMinutes(260), durationMinutes: 15, participants: ["ben"] });
+    assert.deepEqual(setTeacherNote(db, test.id, "BEN", "Looked at the neighbour's screen twice\r\ncheck against Huber"), {
+      username: "ben",
+      teacherNote: "Looked at the neighbour's screen twice\ncheck against Huber",
+    }, "kept with its line break, as \\n");
+    const noteIn = (sitting) => liveSnapshot(db, sitting.id).participants.find((p) => p.username === "ben").teacherNote;
+    assert.equal(noteIn(first), "Looked at the neighbour's screen twice\ncheck against Huber");
+    assert.equal(noteIn(makeup), noteIn(first), "the make-up shows the same note");
+    assert.equal(liveParticipant(db, makeup.id, "ben").teacherNote, noteIn(first));
+    assert.equal(liveSnapshot(db, first.id).participants.find((p) => p.username === "anna").teacherNote, null);
+    assert.ok(
+      liveSnapshot(db, first.id, undefined, { screen: true }).participants.every((p) => !("teacherNote" in p)),
+      "the view for the class gets no note, not even an empty one"
+    );
+    setTeacherNote(db, test.id, "ben", "second");
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM teacher_note").get().n, 1, "replaced, not added");
+  });
+
+  test("white space removes it, more than 4000 characters is refused and keeps it, a non-participant is not found", () => {
+    const { db, course, ids } = seeded();
+    const test = createTest(db, course.id, { name: "T", questionIds: [ids[0]] });
+    createSitting(db, test.id, { opensAt: inMinutes(60), closesAt: inMinutes(110), durationMinutes: 15 });
+    setTeacherNote(db, test.id, "anna", "kept");
+    assert.throws(() => setTeacherNote(db, test.id, "anna", "x".repeat(4001)), (error) => error instanceof InvalidInputError && /4000/.test(error.message));
+    assert.equal(teacherNoteOf(db, test.id, "anna"), "kept", "the refused text left the note as it was");
+    assert.equal(setTeacherNote(db, test.id, "anna", "x".repeat(4000)).teacherNote.length, 4000, "4000 is allowed");
+    assert.deepEqual(setTeacherNote(db, test.id, "anna", " \n\t "), { username: "anna", teacherNote: null });
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM teacher_note").get().n, 0);
+    assert.throws(() => setTeacherNote(db, test.id, "carla", "x"), NotFoundError);
+    assert.throws(() => setTeacherNote(db, test.id + 1, "anna", "x"), NotFoundError);
+  });
+
+  test("deleting a test removes its teacher notes", () => {
+    const { db, course, ids } = seeded();
+    const test = createTest(db, course.id, { name: "T", questionIds: [ids[0]] });
+    createSitting(db, test.id, { opensAt: inMinutes(60), closesAt: inMinutes(110), durationMinutes: 15 });
+    setTeacherNote(db, test.id, "anna", "gone with the test");
+    deleteTest(db, test.id);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM teacher_note").get().n, 0);
+  });
+});
 
 describe("ending and extending an open sitting", () => {
   test("ending submits every running attempt at once, with its saved answers", () => {

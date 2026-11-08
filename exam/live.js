@@ -19,6 +19,7 @@ import { getCourse, NotFoundError, now } from "./classes.js";
 import { sittingState } from "./tests.js";
 import { handoutsOf } from "./handout.js";
 import { browserLabel } from "./user-agent.js";
+import { teacherNoteOf, teacherNotesOf } from "./teacher-notes.js";
 
 const emitter = new EventEmitter();
 // One listener per open live view; a class's teachers are a handful.
@@ -28,6 +29,16 @@ emitter.setMaxListeners(0);
 export function notify(sittingId, type, username, data = {}) {
   emitter.emit(`sitting:${sittingId}`, { type, username, ...data });
   emitter.emit("tests", { username });
+}
+
+/**
+ * Tells every live view of each of `sittingIds` that the teacher note of
+ * `username` changed (exam-live-teacher-notes D2). Only the live views hear
+ * of it: the student's stream of open tests is not told, so nothing on the
+ * student's side moves when a note is written.
+ */
+export function notifyNote(sittingIds, username) {
+  for (const sittingId of sittingIds) emitter.emit(`sitting:${sittingId}`, { type: "note", username });
 }
 
 /**
@@ -68,13 +79,13 @@ export function listen(sittingId, listener) {
  * current share; and which browser the
  * attempt is bound to and which was refused last (exam-live-bound-browser
  * D4) - `boundBrowser` null while the attempt is unbound or there is none,
- * its `full` null for a binding from before browser strings were kept.
- * Never an answer.
+ * its `full` null for a binding from before browser strings were kept; and
+ * the teacher's note on them in this test, null for none. Never an answer.
  */
-function participantFrom(row, attempt, { count: refused, userAgent: refusedAgent }, at, offline = false) {
+function participantFrom(row, attempt, { count: refused, userAgent: refusedAgent }, at, offline = false, teacherNote = null) {
   // An offline sitting's participant is a row of the attendance table (exam-offline-sittings design D8).
   if (offline) {
-    return { username: row.username, givenName: row.given_name, familyName: row.family_name, present: row.present === 1, group: row.handout_group };
+    return { username: row.username, givenName: row.given_name, familyName: row.family_name, present: row.present === 1, group: row.handout_group, teacherNote };
   }
   const status = attempt === undefined ? "not started" : attempt.submitted_at !== null ? "submitted" : "writing";
   const awayNow = attempt?.away_since && attempt.submitted_at === null ? Math.max(0, Date.parse(at) - Date.parse(attempt.away_since)) : 0;
@@ -106,6 +117,8 @@ function participantFrom(row, attempt, { count: refused, userAgent: refusedAgent
     bound: attempt ? attempt.device_hash !== null : null,
     boundBrowser: attempt && attempt.device_hash !== null ? browserLabel(attempt.device_user_agent) : null,
     refusedBrowser: refused > 0 && refusedAgent ? browserLabel(refusedAgent) : null,
+    // The teacher's note on them (exam-live-teacher-notes D2): read by nothing that orders, colours or grades.
+    teacherNote,
   };
 }
 
@@ -149,10 +162,11 @@ export function liveParticipant(db, sittingId, username, at = now()) {
   const sitting = sittingRow(db, sittingId);
   const [row] = participantRows(db, sittingId, username);
   if (!row) return null;
-  if (testKind(db, sitting) === "offline") return participantFrom(row, undefined, noRefusals, at, true);
+  const note = teacherNoteOf(db, sitting.test_id, row.username);
+  if (testKind(db, sitting) === "offline") return participantFrom(row, undefined, noRefusals, at, true, note);
   const attempt = db.prepare("SELECT * FROM attempt WHERE test_id = ? AND username = ?").get(sitting.test_id, username);
   const refused = attempt ? refusalsOf(db, "WHERE r.attempt_id = ?", attempt.id).get(username) : undefined;
-  return participantFrom(row, attempt, refused ?? noRefusals, at);
+  return participantFrom(row, attempt, refused ?? noRefusals, at, false, note);
 }
 
 /**
@@ -175,15 +189,18 @@ export function liveSilence(db, sittingId, at = now()) {
 
 /**
  * A sitting as its live view shows it: the server's clock, the test, the
- * window, its state, and every participant.
+ * window, its state, and every participant. `screen` is the snapshot for the
+ * view for the class: it carries no teacher note at all, so not even the
+ * projector's developer tools see one (exam-live-teacher-notes D2).
  */
-export function liveSnapshot(db, sittingId, at = now()) {
+export function liveSnapshot(db, sittingId, at = now(), { screen = false } = {}) {
   const sitting = sittingRow(db, sittingId);
   const test = db.prepare("SELECT id, name, course_id, kind, handout_a, handout_b FROM test WHERE id = ?").get(sitting.test_id);
   const offline = test.kind === "offline";
   const course = getCourse(db, test.course_id);
   const attempts = new Map(db.prepare("SELECT * FROM attempt WHERE test_id = ?").all(test.id).map((attempt) => [attempt.username, attempt]));
   const refused = refusalsOf(db, "WHERE a.test_id = ?", test.id);
+  const notes = screen ? new Map() : teacherNotesOf(db, test.id);
   return {
     serverTime: at,
     sitting: {
@@ -197,9 +214,17 @@ export function liveSnapshot(db, sittingId, at = now()) {
     },
     kind: test.kind,
     test: { id: test.id, name: test.name, kind: test.kind, handouts: offline ? handoutsOf(test) : [] },
-    course: { id: course.id, subject: course.subject, language: course.language, className: course.className },
+    // A closed year's notes are read-only (`school-year-change`); the view disables their fields.
+    course: { id: course.id, subject: course.subject, language: course.language, className: course.className, yearClosed: course.year.closed === true },
     participants: participantRows(db, sittingId).map((row) =>
-      participantFrom(row, attempts.get(row.username), refused.get(row.username) ?? noRefusals, at, offline)
+      withoutNoteOnScreen(participantFrom(row, attempts.get(row.username), refused.get(row.username) ?? noRefusals, at, offline, notes.get(row.username) ?? null), screen)
     ),
   };
+}
+
+/** A participant for the view for the class: without the teacher note's key, not just empty. */
+function withoutNoteOnScreen(participant, screen) {
+  if (!screen) return participant;
+  const { teacherNote, ...rest } = participant;
+  return rest;
 }

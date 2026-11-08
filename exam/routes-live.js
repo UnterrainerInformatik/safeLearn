@@ -10,10 +10,17 @@
  * check that fails sends `refused` and ends the stream; a session whose token
  * is about to expire gets `renew`, and the client reconnects through an
  * ordinary request, which renews it.
+ *
+ * A teacher's note on a participant (exam-live-teacher-notes D2) is written
+ * through a route of its own under the test, since it belongs to the test and
+ * not to one sitting, and reaches every open live view of the test as a
+ * `note` change. The snapshot for the view for the class (`?screen=1`)
+ * carries no note.
  */
 
 import { getSitting } from "./tests.js";
-import { listen, liveParticipant, liveSilence, liveSnapshot } from "./live.js";
+import { listen, liveParticipant, liveSilence, liveSnapshot, notifyNote } from "./live.js";
+import { setTeacherNote, sittingsOfTest } from "./teacher-notes.js";
 import { flagParticipant, participantHolders } from "./participants.js";
 import { NotFoundError } from "./classes.js";
 import { requireTeacher, sessionNow, teacherPage } from "./gate.js";
@@ -39,8 +46,8 @@ const heartbeatMs = 25000;
 const silenceMs = 5000;
 
 /** A snapshot with the course's Matura candidates marked (exam-participant-role D5). */
-function markedSnapshot(db, sittingId, at) {
-  const snapshot = liveSnapshot(db, sittingId, at);
+function markedSnapshot(db, sittingId, at, options) {
+  const snapshot = liveSnapshot(db, sittingId, at, options);
   const holders = participantHolders(snapshot.course);
   return { ...snapshot, participants: snapshot.participants.map((participant) => flagParticipant(participant, holders)) };
 }
@@ -50,7 +57,20 @@ export function registerLiveRoutes(router, { db, handle, startPage }) {
     "/api/sittings/:id/live",
     requireTeacher,
     handle(async (req, res) => {
-      res.json(markedSnapshot(db, idParam(req.params.id)));
+      res.json(markedSnapshot(db, idParam(req.params.id), undefined, { screen: req.query.screen === "1" }));
+    })
+  );
+
+  // The teacher's note on a participant: `{ text }`, empty or white space
+  // removes it. Answers `{ username, teacherNote }` as stored.
+  router.put(
+    "/api/tests/:testId/teacher-notes/:username",
+    requireTeacher,
+    handle(async (req, res) => {
+      const testId = idParam(req.params.testId);
+      const stored = setTeacherNote(db, testId, req.params.username, req.body?.text ?? null);
+      notifyNote(sittingsOfTest(db, testId), stored.username);
+      res.json(stored);
     })
   );
 
