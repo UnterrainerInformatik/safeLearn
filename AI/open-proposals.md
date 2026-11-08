@@ -22,3 +22,12 @@ Der unauthentifizierte `/hot-reload`-Kanal schickt bei einer Änderung (`type: "
 
 ## Lehrer-Notizen in der Live-Ansicht
 Gerald, 2026-11-07 (während `gradebook-result-notes`): In der Live-Ansicht eines laufenden Online-Tests soll der Lehrer pro Teilnehmer eine Notiz machen können („Hat, glaub ich, geschummelt … genauer ansehen … evtl. abgeschrieben von xxx“). Anders als die Zellen-Notizen im Sheet ist sie **nur für Lehrer**: Sie taucht nie beim Schüler auf, sondern steht als Anmerkung in der Live-Liste (und vermutlich auch später beim Versuch). Zu klären: gehört sie zum Versuch (`attempt`) oder zur Sitzungsteilnahme (`sitting_participant`), wie sie zur Zellen-Notiz des Tests im Sheet steht (getrennt halten oder dort anzeigen), und dass sie als personenbezogene Freitext-Daten in Retention-Purge und Closed-Year-Triggern mitlaufen muss.
+
+## Drei Exam-Harness-Checks scheitern stabil auf HEAD
+Aufgefallen 2026-11-08 beim Verifizieren von `exam-fullscreen-chrome`: In `test/exam.test.js` scheitern drei Checks in jedem Lauf. Das war fünfmal hintereinander so, einmal davon auf HEAD `757c494` ohne jede lokale Änderung und einmal im vollen `npm test` (967/970). Wackelig sind sie also nicht, und auf der Liste der bekannten Wackler ([[flaky-content-checks]]) stehen sie nicht:
+
+- **„the live view shows the suspicious signal apart from the focus figures, and a missing heartbeat only while it lasts“** – `the share while writing, no warning`: erwartet `['0', '97%']`, die Seite zeigt `['0', '97 %']`. Die Tick-Rate-Spalte formatiert den Anteil also mit Leerzeichen vor dem Prozentzeichen, der Check erwartet ihn ohne. Zu klären, ob die Anzeige oder der Check falsch ist; der Board-Deck-Check erwartet für den Anteil richtiger Antworten bewusst `100 %` mit Leerzeichen.
+- **„the live view orders by status, then by time out of focus, then by name, and holds still under the mouse on a button“** – `TimeoutError: Waiting failed: 2000ms exceeded`. Ursache noch nicht angesehen.
+- **„started from its page, a present student sees their handout as a student with the exam variant, and its attachments“** – wartet 20 s vergeblich auf `.sl-exam-attempt-offline[data-sitting="…"] .sl-exam-handout-link`. Ursache noch nicht angesehen.
+
+Naheliegender Verdacht: Alle drei hängen mit `exam-fullscreen-tick-rate` (`757c494`) zusammen, das die Live-Ansicht und die Liste der offenen Tests zuletzt angefasst hat. Bestätigt ist das noch nicht. Ein Lauf auf `28e968f` würde es klären.
