@@ -2448,15 +2448,17 @@ describe("online tests: writing", () => {
   });
 
   /**
-   * The page's chrome (exam-fullscreen-chrome): whether <html> carries
-   * `sl-writing`, which of the sidebar, the burger, the top bar's buttons and
-   * the settings menu are displayed, and whether the title is.
+   * The page's chrome (exam-fullscreen-chrome, exam-preview-chrome): whether
+   * <html> carries `sl-writing` and `sl-previewing`, which of the sidebar, the
+   * burger, the top bar's buttons and the settings menu are displayed, and
+   * whether the title is.
    */
   const chromeOf = (page) =>
     page.evaluate(() => {
       const title = document.querySelector(".topbar-title");
       return {
         writing: document.documentElement.classList.contains("sl-writing"),
+        previewing: document.documentElement.classList.contains("sl-previewing"),
         shown: ["#sidebar", ".topbar-burger", ".topbar-menu", "#topdown-menu"].filter((selector) => {
           const element = document.querySelector(selector);
           return element !== null && getComputedStyle(element).display !== "none";
@@ -2464,8 +2466,9 @@ describe("online tests: writing", () => {
         title: title !== null && getComputedStyle(title).display !== "none" && title.textContent.trim() !== "",
       };
     });
-  const chromeHidden = { writing: true, shown: [], title: true };
-  const chromeShown = { writing: false, shown: ["#sidebar", ".topbar-burger", ".topbar-menu", "#topdown-menu"], title: true };
+  const chromeHidden = { writing: true, previewing: false, shown: [], title: true };
+  const chromePreviewHidden = { writing: false, previewing: true, shown: [], title: true };
+  const chromeShown = { writing: false, previewing: false, shown: ["#sidebar", ".topbar-burger", ".topbar-menu", "#topdown-menu"], title: true };
 
   /**
    * A page whose hot-reload stream can be fed by hand: the client's
@@ -2630,7 +2633,7 @@ describe("online tests: writing", () => {
     );
   });
 
-  test("a teacher tries a test in a window of its own, and nothing is saved, submitted or graded", async () => {
+  test("a teacher tries a test in a window of its own, without the chrome; Submit ends it out of full screen with a restart, and nothing is saved, submitted or graded", async () => {
     const test = await openTest("Preview");
     await teacher.page.goto(`${applicationUrl}/exam/tests/${test.id}`, { waitUntil: "domcontentloaded" });
     await teacher.page.waitForSelector(".sl-exam-test-preview", { timeout: 20000 });
@@ -2639,6 +2642,8 @@ describe("online tests: writing", () => {
       [`/exam/tests/${test.id}/preview`, "_blank"],
       "it opens in a new window"
     );
+    const served = await teacher.page.evaluate(async (id) => (await fetch(`/exam/tests/${id}/preview`, { credentials: "include" })).text(), test.id);
+    assert.match(served, /<html [^>]*class="sl-previewing"/, "the preview page is served with the chrome hidden");
     const writes = [];
     const watch = (request) => {
       if (request.method() !== "GET" && new URL(request.url()).pathname.startsWith("/exam/api/")) writes.push(`${request.method()} ${new URL(request.url()).pathname}`);
@@ -2646,23 +2651,38 @@ describe("online tests: writing", () => {
     teacher.page.on("request", watch);
     try {
       await teacher.page.goto(`${applicationUrl}/exam/tests/${test.id}/preview`, { waitUntil: "domcontentloaded" });
-      await teacher.page.waitForSelector(".sl-exam-writing[data-preview='1'] .sl-exam-attempt-question", { timeout: 20000 });
+      await teacher.page.waitForSelector(".sl-exam-writing[data-preview='1'] .sl-exam-attempt-continue", { visible: true, timeout: 20000 });
       assert.equal(await teacher.page.$(".sl-exam-bar"), null, "as a student sees it, without the bar");
       assert.match(await teacher.page.$eval(".sl-exam-attempt-preview", (el) => el.textContent), /Teacher preview/, "the controls follow the teacher's language, English by default");
       assert.match(await teacher.page.$eval(".sl-exam-countdown", (el) => el.textContent), /^1[45]:\d\d$/, "the sitting's duration");
       assert.equal(await teacher.page.$eval(".sl-exam-attempt-continue", (el) => el.textContent), "Start the test in full screen", "the student's button, in front of the questions");
+      assert.deepEqual(await chromeOf(teacher.page), chromePreviewHidden, "behind the gate only the title is left");
       await teacher.page.click(".sl-exam-attempt-continue");
       await teacher.page.waitForSelector(".sl-exam-attempt-question", { visible: true, timeout: 10000 });
-      assert.deepEqual(await chromeOf(teacher.page), chromeShown, "the preview hides nothing");
+      assert.equal(await teacher.page.evaluate(() => document.fullscreenElement !== null), true, "in full screen");
+      assert.deepEqual(await chromeOf(teacher.page), chromePreviewHidden, "while trying it only the title is left");
       await teacher.page.click(".sl-exam-attempt-answers label");
       await teacher.page.click(".sl-exam-attempt-submit");
+      assert.equal(await teacher.page.$eval(".sl-exam-attempt-submit", (el) => el.dataset.armed), "1", "the first Submit asks again");
+      assert.equal(await teacher.page.$(".sl-exam-attempt-preview-ended"), null, "and does not end the preview yet");
       await teacher.page.click(".sl-exam-attempt-submit");
-      assert.match(await teacher.page.$eval(".sl-exam-writing .sl-exam-message", (el) => el.textContent), /nothing is submitted/);
+      await teacher.page.waitForSelector(".sl-exam-attempt-preview-ended", { timeout: 10000 });
+      await teacher.page.waitForFunction(() => document.fullscreenElement === null, { timeout: 5000 });
+      assert.deepEqual(await chromeOf(teacher.page), chromeShown, "the second ends it: the chrome is back, without a reload");
+      assert.match(await teacher.page.$eval(".sl-exam-attempt-preview-ended", (el) => el.textContent), /The preview has ended\. Nothing was submitted\./);
+      assert.equal(await teacher.page.$eval(".sl-exam-attempt-restart", (el) => el.textContent), "Start the preview again");
       assert.equal(await teacher.page.$(".sl-exam-attempt-result"), null, "no result");
-      assert.equal(await teacher.page.evaluate(() => document.fullscreenElement !== null), true, "and keeps full screen");
-      await teacher.page.evaluate(() => document.exitFullscreen());
+      assert.equal(await teacher.page.$(".sl-exam-attempt-fullscreen-bar"), null, "and no bar asks for full screen");
+
+      // The content slides back beside the returning sidebar (markdown.css's transition); a click meanwhile misses.
+      await teacher.page.waitForFunction(() => document.getAnimations().length === 0, { timeout: 5000 });
+      await teacher.page.click(".sl-exam-attempt-restart");
+      await teacher.page.waitForSelector(".sl-exam-writing[data-preview='1'] .sl-exam-attempt-continue", { visible: true, timeout: 10000 });
+      assert.deepEqual(await chromeOf(teacher.page), chromePreviewHidden, "started again, the chrome is hidden again");
+      assert.equal(await teacher.page.$$eval(".sl-exam-attempt-answers input:checked", (inputs) => inputs.length), 0, "with no answer chosen");
     } finally {
       teacher.page.off("request", watch);
+      await teacher.page.evaluate(() => document.fullscreenElement && document.exitFullscreen()).catch(() => {});
     }
     assert.deepEqual(writes, [], "the preview wrote nothing");
     const preview = (await fetchAs(teacher, `/exam/api/tests/${test.id}/preview`)).json;
@@ -2670,6 +2690,47 @@ describe("online tests: writing", () => {
     assert.equal(database((db) => db.prepare("SELECT COUNT(*) AS n FROM attempt WHERE test_id = ?").get(test.id).n), 0, "no attempt");
     assert.equal((await fetchAs(student, `/exam/api/tests/${test.id}/preview`)).status, 403, "a student is refused");
     assert.deepEqual(await fetchAs(student, `/exam/tests/${test.id}/preview`), await fetchAs(student, absent), "and finds no page");
+  });
+
+  test("when a teacher's preview runs out of time it ends out of full screen, with the chrome back and a restart", async () => {
+    const test = await openTest("Preview until the deadline");
+    database((db) => db.prepare("UPDATE sitting SET duration_s = 8 WHERE test_id = ?").run(test.id));
+    const page = await teacher.context.newPage();
+    await page.setViewport({ width: 1280, height: 800 });
+    try {
+      await page.goto(`${applicationUrl}/exam/tests/${test.id}/preview`, { waitUntil: "domcontentloaded" });
+      await page.waitForSelector(".sl-exam-attempt-continue", { visible: true, timeout: 20000 });
+      await page.click(".sl-exam-attempt-continue");
+      await page.waitForSelector(".sl-exam-attempt-question", { visible: true, timeout: 10000 });
+      assert.equal(await page.evaluate(() => document.fullscreenElement !== null), true, "tried in full screen");
+      assert.deepEqual(await chromeOf(page), chromePreviewHidden, "without the chrome");
+      await page.waitForSelector(".sl-exam-attempt-preview-ended", { timeout: 20000 });
+      await page.waitForFunction(() => document.fullscreenElement === null, { timeout: 5000 });
+      assert.deepEqual(await chromeOf(page), chromeShown, "the chrome is back");
+      assert.match(await page.$eval(".sl-exam-attempt-preview-ended", (el) => el.textContent), /Time is up/, "the note says the time is up");
+      assert.ok(await page.$(".sl-exam-attempt-restart"), "with the restart button");
+      assert.equal(database((db) => db.prepare("SELECT COUNT(*) AS n FROM attempt WHERE test_id = ?").get(test.id).n), 0, "no attempt");
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a hot reload during a teacher's preview reloads it, again without the chrome and behind the gate", async () => {
+    const test = await openTest("Preview with hot reload");
+    const { page, sendNav } = await hotReloadPage(teacher);
+    try {
+      await page.goto(`${applicationUrl}/exam/tests/${test.id}/preview`, { waitUntil: "domcontentloaded" });
+      await page.waitForSelector(".sl-exam-attempt-continue", { visible: true, timeout: 20000 });
+      await page.click(".sl-exam-attempt-continue");
+      await page.waitForSelector(".sl-exam-attempt-question", { visible: true, timeout: 10000 });
+      assert.equal(await sendNav(), false, "the preview page is reloaded");
+      assert.equal(await page.evaluate(() => document.documentElement.classList.contains("sl-previewing")), true, "from the first byte without the chrome");
+      await page.waitForSelector(".sl-exam-attempt-continue", { visible: true, timeout: 20000 });
+      assert.deepEqual(await chromeOf(page), chromePreviewHidden, "behind the gate, only the title is left");
+    } finally {
+      await page.evaluate(() => document.fullscreenElement && document.exitFullscreen()).catch(() => {});
+      await page.close();
+    }
   });
 
   test("a teacher shows a test's solution on the board: correct answers and the class's share, no names, no foreign host", async () => {

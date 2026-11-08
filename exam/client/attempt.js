@@ -23,13 +23,17 @@
  * server flags it. The heartbeat also carries the timer ticks and whether the
  * page was out of full screen. Once the attempt is submitted - by the student
  * or by the server at the deadline - the page leaves full screen by itself
- * and shows the result (exam-fullscreen-chrome D4); a teacher's try never does.
+ * and shows the result (exam-fullscreen-chrome D4). A teacher's try ends the
+ * same way at its confirmed Submit or its deadline, with a closing page in
+ * place of the result (exam-preview-chrome D4).
  *
  * While the attempt is open the page around it offers no way off it: the
  * element announces writing (`sl-exam-writing`), the module's client sets
  * `sl-writing` on <html>, which hides the sidebar, the burger, the top bar's
  * buttons and the settings menu, and makes the hot-reload client skip its
- * reloads (exam-fullscreen-chrome D1-D3). A preview announces nothing.
+ * reloads (exam-fullscreen-chrome D1-D3). A preview announces itself as one,
+ * so the client sets `sl-previewing` instead: the same chrome is hidden, but
+ * hot reload still reloads the page (exam-preview-chrome D1/D2).
  *
  * The controls - buttons, countdown, messages - are in the reader's own
  * language; questions and answers stay in the course's language and are
@@ -48,7 +52,8 @@
  * With `preview: 1` a teacher tries the test as a student would see it, on
  * the test's own preview page: shuffled, in the course's language, with the
  * first sitting's countdown - but nothing is saved, the focus is not
- * reported, and submitting is switched off.
+ * reported, and nothing is submitted: Submit and the deadline only end the
+ * preview, with a button to start it again (exam-preview-chrome D4/D5).
  *
  * Answers are identified by the tokens the server gave this attempt; the page
  * never learns which answer is correct. A question's text and answers are
@@ -220,12 +225,13 @@ class WriteTest extends ExamElement {
   }
 
   /**
-   * Tells the page whether a real attempt is being written, so the student's
-   * Exams page can hide its results meanwhile (`sl-exam-writing`). A preview
-   * never counts as writing.
+   * Tells the page whether a test is being written (`sl-exam-writing`), and
+   * whether it is a teacher's preview: the module's client hides the chrome
+   * for both, but only a real attempt holds back hot reload and hides the
+   * student's results meanwhile.
    */
   announce(writing) {
-    window.dispatchEvent(new CustomEvent("sl-exam-writing", { detail: { writing } }));
+    window.dispatchEvent(new CustomEvent("sl-exam-writing", { detail: { writing, preview: this.preview === true } }));
   }
 
   /**
@@ -384,22 +390,19 @@ class WriteTest extends ExamElement {
     this.stop?.();
     this.preview = writing.preview === true;
     this.attempt = writing.attempt;
-    if (!this.preview) this.announce(true);
+    this.announce(true);
     this.status = h("p", { class: "sl-exam-message", role: "status" });
     this.countdown = h("span", { class: "sl-exam-countdown", "aria-live": "off" });
     const questions = writing.questions.map((question) => this.questionField(question, writing.questions.length, writing.language));
     const submit = h("button", { type: "button", class: "sl-exam-primary sl-exam-attempt-submit" }, t("exam.attempt.submit"));
     submit.addEventListener("click", () => {
-      if (this.preview) {
-        this.status.textContent = t("exam.attempt.previewNotSubmitted");
-        return;
-      }
       if (submit.dataset.armed !== "1") {
         submit.dataset.armed = "1";
         submit.textContent = t("exam.attempt.confirmSubmit");
         return;
       }
-      this.submit();
+      if (this.preview) this.endPreview("submitted");
+      else this.submit();
     });
     // The way back to full screen, above the questions and never over them (exam-fullscreen-tick-rate D2).
     const back = h("button", { type: "button", class: "sl-exam-primary sl-exam-attempt-back", onClick: () => this.backToFullscreen() }, t("exam.attempt.backToFullscreen"));
@@ -695,8 +698,7 @@ class WriteTest extends ExamElement {
     this.finishing = true;
     for (const input of this.querySelectorAll(".sl-exam-writing input, .sl-exam-writing button")) input.disabled = true;
     if (this.preview) {
-      clearInterval(this.timer);
-      this.status.textContent = t("exam.attempt.timeIsUpPreview");
+      this.endPreview("timeUp");
       return;
     }
     try {
@@ -714,6 +716,49 @@ class WriteTest extends ExamElement {
     } catch (error) {
       this.status.textContent = refusal(error);
     }
+  }
+
+  /**
+   * Ends a teacher's try at its confirmed Submit (`submitted`) or its deadline
+   * (`timeUp`), as a submission ends an attempt (exam-preview-chrome D4):
+   * stop, show the closing page, show the chrome again, leave full screen.
+   * Nothing is sent to the server.
+   */
+  endPreview(reason) {
+    this.stop?.();
+    this.show(this.previewEndedPage(reason));
+    this.announce(false);
+    leaveFullscreen();
+    this.finishing = false;
+  }
+
+  /**
+   * The closing page of a teacher's try: why it ended, and the way to start
+   * it again (exam-preview-chrome D5). Starting again fetches a freshly
+   * shuffled preview and always puts it behind the gate - right after ending,
+   * `exitFullscreen()` may not have resolved yet.
+   */
+  previewEndedPage(reason) {
+    const message = h("p", { class: "sl-exam-message", role: "status" });
+    const restart = h("button", { type: "button", class: "sl-exam-primary sl-exam-attempt-restart" }, t("exam.attempt.restartPreview"));
+    restart.addEventListener("click", async () => {
+      restart.disabled = true;
+      message.textContent = "";
+      try {
+        const writing = await examApi(`/tests/${this.params.test}/preview`);
+        this.show(this.writingPage(writing, { gate: true }));
+      } catch (error) {
+        message.textContent = refusal(error);
+        restart.disabled = false;
+      }
+    });
+    return h(
+      "div",
+      { class: "sl-exam sl-exam-attempt sl-exam-attempt-preview-ended" },
+      h("p", { role: "note" }, h("strong", {}, reason === "timeUp" ? t("exam.attempt.timeIsUpPreview") : t("exam.attempt.previewEnded"))),
+      h("p", {}, restart),
+      message
+    );
   }
 
   resultPage(result) {

@@ -17,10 +17,3 @@ Die Pipeline schreibt `SESSION_SECRET` und den `KEYCLOAK_FILE`-Inhalt (inkl. Cli
 
 ## Hot-Reload-Kanal nennt geänderte gesperrte Files
 Der unauthentifizierte `/hot-reload`-Kanal schickt bei einer Änderung (`type: "page"`) die Liste der geänderten Files an **alle** verbundenen Clients, egal ob sie die Files sehen dürfen. Der Inhalt bleibt geheim, der Pfad nicht: Wird am Vorabend eine unter `@@@ teacher` liegende Testangabe editiert und gesynct, steht z. B. `md/POS/LT1-A.md` im Stream. Aufgefallen beim Explore zu `exam-offline-sittings` (2026-10-25). Zu klären: pro Client nach Sichtbarkeit filtern (der Kanal kennt keine Session) oder nur ein „deine Seite hat sich geändert“ ohne Pfade schicken.
-
-# Online-Tests
-
-## Lehrer-Vorschau: Chrome ausblenden und mit Submit beenden
-In der Lehrer-Vorschau (`preview: 1`) bleiben Sidebar, Burger, die Buttons rechts in der Top-Leiste und das Settings-Menü sichtbar, obwohl die Vorschau den Test so zeigen soll, wie ihn ein Schüler sieht. Ursache (2026-11-08 nachgesehen): `writingPage` in `exam/client/attempt.js` ruft `announce(true)` nur ohne Vorschau auf — ohne `sl-exam-writing`-Event setzt `exam/client/exam-client.js` kein `sl-writing` auf `<html>`, und genau diese Klasse blendet in `css/exam.css` das Chrome aus (Change `exam-fullscreen-chrome`, D1–D3: „A preview announces nothing“).
-
-Dazu: Submit in der Vorschau zeigt nur `exam.attempt.previewNotSubmitted` und lässt die Seite im Vollbild — der Lehrer kommt nur per Esc raus. Das Nicht-Abgeben ist richtig so; Submit soll aber die Vorschau beenden und `leaveFullscreen()` aufrufen, wie beim echten Abgeben (D4). Zu klären: Was zeigt die Seite danach (zurück zum Start der Vorschau, Hinweis „Vorschau beendet“?), und darf das Ausblenden nicht die Hot-Reload-Sperre mitziehen, die an `sl-writing` hängt (für einen Lehrer, der parallel die Angabe editiert, ist ein Reload der Vorschau eher erwünscht). Ein Countdown-Ende in der Vorschau (`timeIsUpPreview`) sollte vermutlich gleich behandelt werden.

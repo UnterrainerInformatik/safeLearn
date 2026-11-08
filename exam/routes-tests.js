@@ -201,7 +201,9 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
   );
 
   // A teacher trying a test as a student would see it, in a window of its
-  // own and without the bar. The element saves and submits nothing.
+  // own and without the bar. The element saves and submits nothing. The page
+  // is served without the chrome (`previewing`), as the element always opens
+  // straight into the preview, and hot reload still reloads it.
   router.get(
     "/tests/:id/preview",
     teacherPage,
@@ -212,7 +214,7 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
       const body = `
         <h1>${title.replaceAll("&", "&amp;").replaceAll("<", "&lt;")}</h1>
         ${embedPlaceholder("test", { test: String(test.id), preview: "1" }, t("app.embed.loading"))}`;
-      res.send(await wrapInPage(body, startPage(), req, { title, wide: true }));
+      res.send(await wrapInPage(body, startPage(), req, { title, wide: true, previewing: true }));
     })
   );
 }

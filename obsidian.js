@@ -3609,6 +3609,10 @@ function getAutoReloadScript() {
  * burger, the top bar's buttons and the settings menu (css/exam.css) and makes
  * the hot-reload client skip its reloads. The core does not know why; the exam
  * module's client keeps the class in step afterwards.
+ * `options.previewing` marks a page that opens into a teacher's preview of a
+ * test: `<html>` carries `sl-previewing`, which hides the same chrome but does
+ * not hold back hot reload, so a reload for a corpus change shows no flash of
+ * the sidebar.
  */
 export async function wrapInPage(html, startPage, req, options = {}) {
   const title = options.title ?? null;
@@ -3618,7 +3622,7 @@ export async function wrapInPage(html, startPage, req, options = {}) {
   // draws anything.
   const pre = `
       <!DOCTYPE html>
-      <html lang="${lang}" data-sl-locale="${loc}"${options.writing ? ' class="sl-writing"' : ""}>
+      <html lang="${lang}" data-sl-locale="${loc}"${options.writing ? ' class="sl-writing"' : options.previewing ? ' class="sl-previewing"' : ""}>
       <head>
         <meta charset="UTF-8">
         <!-- Lay the page out at the device's own width rather than at an assumed
