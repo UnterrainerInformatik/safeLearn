@@ -372,6 +372,26 @@ html.sl-previewing #topdown-menu {
   }
 }
 
+/* A violet frame around the whole screen while such a page is in full screen
+   (exam-fullscreen-frame D1/D2), so a teacher walking past sees a running test
+   and whether it is still in full screen. Pure CSS: the browser keeps
+   `:fullscreen` on <html> in step itself, so leaving full screen in any way
+   drops the frame without a listener; the gates, the result page, the end of a
+   preview and the offline handout lack a class or full screen. A fixed
+   pseudo-element on top that takes no clicks, in the violet of the open Exams
+   button in both themes; an outline or shadow would be painted below
+   positioned content, a border on body would shift the layout. */
+html.sl-writing:fullscreen body::after,
+html.sl-previewing:fullscreen body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  box-sizing: border-box;
+  border: 8px solid #7c3aed;
+  pointer-events: none;
+  z-index: 2147483647;
+}
+
 /* An anchor drawn as the top bar's buttons are, in their ink: the buttons stay
    light in the dark theme, so the theme's link colours (`movement.css`, at a
    higher specificity) would paint a pale icon on a light button. */

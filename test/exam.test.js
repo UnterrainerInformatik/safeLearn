@@ -85,6 +85,20 @@ async function moduleTraces(page) {
   }));
 }
 
+/**
+ * The violet frame of a page writing in full screen (exam-fullscreen-frame):
+ * the computed top border and pointer events of `body::after`. Without the
+ * frame the pseudo-element has no content and no border.
+ */
+async function frameOf(page) {
+  return page.evaluate(() => {
+    const style = getComputedStyle(document.body, "::after");
+    return { width: style.borderTopWidth, color: style.borderTopColor, pointerEvents: style.pointerEvents, content: style.content };
+  });
+}
+const framed = { width: "8px", color: "rgb(124, 58, 237)", pointerEvents: "none", content: '""' };
+const isFramed = (frame) => frame.content !== "none" && frame.width !== "0px";
+
 after(async () => {
   await shutdown();
   assert.ok(!existsSync(run.directory), `the run's database directory ${run.directory} should be gone after the run`);
@@ -2512,15 +2526,23 @@ describe("online tests: writing", () => {
       await page.goto(`${applicationUrl}/exam/my`, { waitUntil: "domcontentloaded" });
       await page.waitForSelector(`.sl-exam-attempt-open[data-test="${test.id}"] button`, { timeout: 20000 });
       assert.deepEqual(await chromeOf(page), chromeShown, "before the start the page has its chrome");
+      assert.equal(isFramed(await frameOf(page)), false, "no frame before the start");
       await page.click(`.sl-exam-attempt-open[data-test="${test.id}"] button`);
       await page.waitForSelector(".sl-exam-attempt-question", { visible: true, timeout: 20000 });
       assert.deepEqual(await chromeOf(page), chromeHidden, "once started only the title is left");
+      assert.deepEqual(await frameOf(page), framed, "in full screen the violet frame runs around the screen and takes no clicks");
       // The padding has a transition of its own (markdown.css), so its end is waited for.
       await page.waitForFunction(() => getComputedStyle(document.querySelector("#markdown-content")).paddingLeft === "20px", { timeout: 5000 });
 
       await page.evaluate(() => document.exitFullscreen());
       await page.waitForFunction(() => document.querySelector(".sl-exam-attempt-fullscreen-bar").offsetParent !== null, { timeout: 5000 });
       assert.deepEqual(await chromeOf(page), chromeHidden, "out of full screen it stays hidden");
+      assert.equal(isFramed(await frameOf(page)), false, "out of full screen the frame is gone, while the bar asks back");
+      await page.click(".sl-exam-attempt-back");
+      await page.waitForFunction(() => document.fullscreenElement !== null, { timeout: 5000 });
+      assert.deepEqual(await frameOf(page), framed, "Back to full screen brings the frame back");
+      await page.evaluate(() => document.exitFullscreen());
+      await page.waitForFunction(() => document.querySelector(".sl-exam-attempt-fullscreen-bar").offsetParent !== null, { timeout: 5000 });
 
       assert.equal(await sendNav(), true, "a hot reload during the attempt does not reload the page");
 
@@ -2530,6 +2552,7 @@ describe("online tests: writing", () => {
       assert.equal(await page.evaluate(() => document.documentElement.classList.contains("sl-writing")), true, "from the first byte");
       await page.waitForSelector(".sl-exam-attempt-continue", { visible: true, timeout: 20000 });
       assert.deepEqual(await chromeOf(page), chromeHidden, "behind Continue in full screen");
+      assert.equal(isFramed(await frameOf(page)), false, "and no frame behind it");
 
       // At a phone's width nothing is left to open, and nothing runs off the side.
       await page.setViewport({ width: 390, height: 800 });
@@ -2544,6 +2567,8 @@ describe("online tests: writing", () => {
       await page.click(".sl-exam-attempt-continue");
       await page.waitForSelector(".sl-exam-attempt-question", { visible: true, timeout: 10000 });
       assert.equal(await page.evaluate(() => document.fullscreenElement !== null), true, "in full screen again");
+      assert.deepEqual(await frameOf(page), framed, "framed again");
+      // Answer and Submit are clicked through the frame below.
       await choose(page, correct[0][0]);
       // Skipped once more on the resumed page, so a reload caught up after submitting would show.
       assert.equal(await sendNav(), true, "a hot reload on the resumed attempt does not reload the page either");
@@ -2553,6 +2578,7 @@ describe("online tests: writing", () => {
       await page.waitForSelector(".sl-exam-attempt-result", { timeout: 10000 });
       await page.waitForFunction(() => document.fullscreenElement === null, { timeout: 5000 });
       assert.deepEqual(await chromeOf(page), chromeShown, "after submitting the chrome is back, without a reload");
+      assert.equal(isFramed(await frameOf(page)), false, "and the result has no frame");
       assert.equal(await page.$(".sl-exam-attempt-fullscreen-bar"), null, "and no bar asks for full screen");
 
       await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -2657,11 +2683,15 @@ describe("online tests: writing", () => {
       assert.match(await teacher.page.$eval(".sl-exam-countdown", (el) => el.textContent), /^1[45]:\d\d$/, "the sitting's duration");
       assert.equal(await teacher.page.$eval(".sl-exam-attempt-continue", (el) => el.textContent), "Start the test in full screen", "the student's button, in front of the questions");
       assert.deepEqual(await chromeOf(teacher.page), chromePreviewHidden, "behind the gate only the title is left");
+      assert.equal(isFramed(await frameOf(teacher.page)), false, "and no frame behind the gate");
       await teacher.page.click(".sl-exam-attempt-continue");
       await teacher.page.waitForSelector(".sl-exam-attempt-question", { visible: true, timeout: 10000 });
       assert.equal(await teacher.page.evaluate(() => document.fullscreenElement !== null), true, "in full screen");
       assert.deepEqual(await chromeOf(teacher.page), chromePreviewHidden, "while trying it only the title is left");
+      assert.deepEqual(await frameOf(teacher.page), framed, "the preview in full screen is framed too");
+      // The answer and both clicks on Submit go through the frame.
       await teacher.page.click(".sl-exam-attempt-answers label");
+      assert.equal(await teacher.page.$$eval(".sl-exam-attempt-answers input:checked", (inputs) => inputs.length), 1, "the click on an answer reaches it");
       await teacher.page.click(".sl-exam-attempt-submit");
       assert.equal(await teacher.page.$eval(".sl-exam-attempt-submit", (el) => el.dataset.armed), "1", "the first Submit asks again");
       assert.equal(await teacher.page.$(".sl-exam-attempt-preview-ended"), null, "and does not end the preview yet");
@@ -2669,6 +2699,7 @@ describe("online tests: writing", () => {
       await teacher.page.waitForSelector(".sl-exam-attempt-preview-ended", { timeout: 10000 });
       await teacher.page.waitForFunction(() => document.fullscreenElement === null, { timeout: 5000 });
       assert.deepEqual(await chromeOf(teacher.page), chromeShown, "the second ends it: the chrome is back, without a reload");
+      assert.equal(isFramed(await frameOf(teacher.page)), false, "and the frame is gone");
       assert.match(await teacher.page.$eval(".sl-exam-attempt-preview-ended", (el) => el.textContent), /The preview has ended\. Nothing was submitted\./);
       assert.equal(await teacher.page.$eval(".sl-exam-attempt-restart", (el) => el.textContent), "Start the preview again");
       assert.equal(await teacher.page.$(".sl-exam-attempt-result"), null, "no result");
@@ -2707,6 +2738,7 @@ describe("online tests: writing", () => {
       await page.waitForSelector(".sl-exam-attempt-preview-ended", { timeout: 20000 });
       await page.waitForFunction(() => document.fullscreenElement === null, { timeout: 5000 });
       assert.deepEqual(await chromeOf(page), chromeShown, "the chrome is back");
+      assert.equal(isFramed(await frameOf(page)), false, "the frame is gone");
       assert.match(await page.$eval(".sl-exam-attempt-preview-ended", (el) => el.textContent), /Time is up/, "the note says the time is up");
       assert.ok(await page.$(".sl-exam-attempt-restart"), "with the restart button");
       assert.equal(database((db) => db.prepare("SELECT COUNT(*) AS n FROM attempt WHERE test_id = ?").get(test.id).n), 0, "no attempt");
@@ -4242,6 +4274,11 @@ describe("offline tests and their handouts", () => {
     assert.match(text, /HANDOUT-A-TASK/);
     assert.match(text, /HANDOUT-EXAM-VARIANT/);
     assert.doesNotMatch(text, /HANDOUT-PRACTICE-VARIANT|HANDOUT-ANSWER|HANDOUT-TEACHER-HINT|HANDOUT-B-TASK/);
+    assert.equal(isFramed(await frameOf(student.page)), false, "the handout page has no frame");
+    const fullscreen = await student.page.evaluate(() => document.documentElement.requestFullscreen().then(() => document.fullscreenElement === document.documentElement, () => false));
+    assert.equal(fullscreen, true, "the handout page in full screen");
+    assert.equal(isFramed(await frameOf(student.page)), false, "has no frame either");
+    await student.page.evaluate(() => document.exitFullscreen());
     const loaded = await student.page.$eval(".sl-exam-handout img", (img) => img.complete && img.naturalWidth > 0);
     assert.ok(loaded, "the image is loaded");
     assert.ok(await served(student, image), "the image is served");
