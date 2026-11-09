@@ -20,17 +20,6 @@ Der unauthentifizierte `/hot-reload`-Kanal schickt bei einer Änderung (`type: "
 
 # Exam
 
-## Schüler sehen nach einem Online-Test nach, was falsch war
-Schüler wollen nach einem Online-Test nachschauen können, was sie falsch gemacht haben. Heute zeigt `resultPage` (`exam/client/attempt.js`) nach dem Abgeben nur Punkte, Fragenanzahl und Note. Die Fragen und Antworten des Versuchs stehen in der DB, für den Schüler gibt es aber keine Ansicht dafür.
-
-Entschieden (Gerald, 2026-11-09):
-- Einsehbar aus der eigenen Notenübersicht des Schülers („Meine Ergebnisse“, `sl-exam-results` in `exam/client/gradebook.js`) über die Zeile des Online-Tests, **sobald der Durchgang (die Sitzung), in dem er geschrieben hat, vorbei ist**. Danach jederzeit. Keine Freigabe durch den Lehrer nötig.
-- **Alle Fragen mit allen Antworten**, jede Antwort markiert mit „hab ich so ausgewählt“ und „wäre so richtig gewesen“, farblich kodiert wie die **Lösung an der Tafel** (`/exam/tests/<id>/solution`, `solutionSlides` in `exam/routes-tests.js`: `sl-board-correct`/`sl-board-wrong`, ✓/✗).
-- **Der Lehrer sieht dieselbe Ansicht** auf der Seite des Schülers im Kurs (`/exam/courses/<id>/students/<username>`) als Detail zum Ergebnis des Online-Tests. Das hilft bei der Notengebung.
-- Die Ansicht gilt so lange, wie der Versuch selbst aufbewahrt wird (`exam/retention.js`).
-
-Ein Nachtermin ist damit heikler: Wer im ersten Durchgang geschrieben hat, sieht die Lösungen schon, während der Nachtermin noch aussteht. Das wird bewusst in Kauf genommen; beim Nachtermin muss der Lehrer darauf achten, dass nicht über den Platz hinweg geschummelt wird.
-
 ## Mitarbeitskontrollen als Noten 1–5
 Mitarbeitskontrollen werden künftig als **Note von 1 bis 5** eingetragen, mit derselben Bedeutung wie überall sonst (entschieden 2026-11-09; die ursprüngliche Idee war `++` / `+` / `o` / `−`). Heute nimmt eine Mitarbeitsspalte (`plusminus`) nur `+` oder `-` an (`normalizeResult` in `exam/gradebook.js`), gespeichert als 1 bzw. 0. Die Kategorie würde damit wie Präsentationen über `gradeKinds` laufen, der Wert ist die Bandmitte der Note.
 
@@ -47,7 +36,7 @@ Seit `exam-fullscreen-chrome` sind Navigation und Menüs der Seite während des 
 ## Lehrer-Session bleibt nach `vt: 0` in der Schüleransicht hängen
 In `test/exam.test.js` schalten zwei Checks die Lehrer-Session mit `setPreferences(teacher, { vt: 0 })` in die Schüleransicht und im `finally` mit `setPreferences(teacher, {})` zurück: „no student reaches another student's attempt, and a teacher cannot write a test“ (online tests: writing) und „no student, no teacher in student view and no username off the roster gets the role“ (Matura candidates). Das Zurückstellen scheitert jedes Mal mit *Preference "vt" of the teacher session was set to 1, but the application renders with 0*: Der Schreibweg in `setPreferences` (`test/harness.js`) meldet Erfolg, nach dem Reload rendert die App aber weiter mit `vt = 0`.
 
-Kein Wackler: am 2026-11-09 auf HEAD `d4bebe5` (ohne lokale Änderungen, eigener Worktree) und in drei Läufen mit `exam-attempt-review` immer dieselben Stellen. Die Session bleibt danach in der Schüleransicht, darum scheitern die folgenden Checks des Describes mit `403` (auf HEAD: „the heartbeat is guarded …“, „a start without full screen …“, „below the fifth year nobody is a candidate …“). Diese Folgefehler verdecken, ob die Checks selbst grün wären.
+Gesehen am 2026-11-09: Läuft `test/exam.test.js` allein, scheitert es in jedem Lauf an denselben Stellen (auf HEAD `d4bebe5` ohne lokale Änderungen in einem eigenen Worktree, und in drei Läufen mit `exam-attempt-review`). Im kompletten `npm test`, wo die Datei nach den anderen läuft, waren alle betroffenen Checks grün. Es hängt also an der Reihenfolge oder am Timing, ist aber beim Einzellauf verlässlich reproduzierbar. Die Session bleibt danach in der Schüleransicht, darum scheitern die folgenden Checks des Describes mit `403` (auf HEAD: „the heartbeat is guarded …“, „a start without full screen …“, „below the fifth year nobody is a candidate …“). Diese Folgefehler verdecken, ob die Checks selbst grün wären.
 
 Zu klären: ob die App die Präferenz nach dem Schreiben noch aus einem alten Stand liest (Session-Cache des Account-Lookups, Keycloak-Attribut noch nicht durch) oder der Schreibweg den Block nicht ersetzt. Die anderen Checks mit `vt: 0` stellen erfolgreich zurück; was die zwei unterscheidet, ist offen.
 
