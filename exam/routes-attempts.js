@@ -1,7 +1,8 @@
 /**
  * The routes a student writes an online test through (`online-test`): the
  * tests open for them, starting or resuming an attempt, saving an answer,
- * submitting, the focus log and the heartbeat.
+ * submitting, the focus log and the heartbeat - and, once the sitting is
+ * over, the student's review of what they wrote (`exam-attempt-review`).
  *
  * Every write is the asker's own: the routes take no username, and an attempt
  * of somebody else is answered like one that does not exist. A session acting
@@ -13,7 +14,7 @@
  * memory and does not survive a restart.
  */
 
-import { checkDevice, keptUserAgent, nextOpenTestsChange, openTestsOf, ownAttempt, recordBeat, recordFocus, resultView, saveAnswer, startAttempt, submitAttempt, writingView } from "./attempts.js";
+import { checkDevice, keptUserAgent, nextOpenTestsChange, openTestsOf, ownAttempt, recordBeat, recordFocus, resultView, saveAnswer, startAttempt, studentReview, submitAttempt, writingView } from "./attempts.js";
 import { NotFoundError } from "./classes.js";
 import { actsAsTeacher, identityOf, requireStudent, sessionNow } from "./gate.js";
 import { listenTests } from "./live.js";
@@ -201,6 +202,17 @@ export function registerAttemptRoutes(router, { db, handle, startPage }) {
     })
   );
 
+  // The review of the asker's own submitted attempt, once its sitting is over
+  // (exam-attempt-review design D3). The one response that carries correct
+  // flags to a student. No device check: a review may be read on any browser.
+  router.get(
+    "/api/attempts/:id/review",
+    requireStudent,
+    handle(async (req, res) => {
+      res.json(studentReview(db, idParam(req.params.id), identityOf(req)));
+    })
+  );
+
   // Also the target of `navigator.sendBeacon` when the page is left.
   router.post(
     "/api/attempts/:id/focus",
@@ -244,6 +256,23 @@ export function registerAttemptRoutes(router, { db, handle, startPage }) {
           ${embedPlaceholder("results", { page: "1" }, loading)}
         </section>`;
       res.send(await wrapInPage(body, startPage(), req, { title, wide: true, writing }));
+    })
+  );
+
+  // The review of one of the student's attempts, opened from their results:
+  // like `/my`, no bar, and a way back to it. The element asks the review
+  // route, which decides whether the asker may see it.
+  router.get(
+    "/my/attempts/:id",
+    (req, res, next) => (identityOf(req) ? next() : next("router")),
+    handle(async (req, res) => {
+      const { t } = await i18nOf(req);
+      const title = t("exam.review.title");
+      const body = `
+        <p class="sl-exam-review-back"><a href="/exam/my">${escapeHtml(t("exam.review.backToResults"))}</a></p>
+        <h1>${escapeHtml(title)}</h1>
+        ${embedPlaceholder("attempt-review", { attempt: String(idParam(req.params.id)) }, t("app.embed.loading"))}`;
+      res.send(await wrapInPage(body, startPage(), req, { title, wide: true }));
     })
   );
 

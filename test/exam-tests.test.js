@@ -3,8 +3,9 @@
  * assembling a test from the pool with its snapshot, and changing or deleting
  * a test only until it is first written.
  *
- * No browser, no login, no server: every database lives in a temporary
- * directory removed after the check. The same behaviour against a running
+ * No browser, no login: every database lives in a temporary directory removed
+ * after the check. Only the review's routes are asked through a local express
+ * app, with sessions made up in the request. The same behaviour against a running
  * instance is `test/exam.test.js`.
  */
 
@@ -15,7 +16,10 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, test } from "node:test";
 
-import { addToRoster, ConflictError, createClass, createCourse, createYear, ForbiddenError, InvalidInputError, removeFromRoster } from "../exam/classes.js";
+import { addToRoster, ConflictError, createClass, createCourse, createYear, ForbiddenError, InvalidInputError, removeFromRoster, setCurrentYear } from "../exam/classes.js";
+import { purgeLeavers, retentionReport } from "../exam/retention.js";
+import { init } from "../exam/index.js";
+import express from "express";
 import { migrate, openDatabase, readMigrations } from "../exam/db.js";
 import { courseOverview, createColumn, readScale, resultsOf, setNote, setResult, studentRecord } from "../exam/gradebook.js";
 import { entryCategory, proposal } from "../exam/grading.js";
@@ -50,6 +54,11 @@ import {
   recordBeat,
   recordFocus,
   releaseAttempt,
+  courseAttempt,
+  questionScores,
+  reviewOpen,
+  reviewView,
+  studentReview,
   saveAnswer,
   scoreAttempt,
   startAttempt,
@@ -112,8 +121,7 @@ function poolXml(lang) {
 }
 
 /** A database with a school year, the class 4bhif with two students, the course WMC and the pool. */
-function seeded() {
-  const db = freshDatabase();
+function seeded(db = freshDatabase()) {
   importPool(db, poolXml("de"), poolXml("en"));
   const year = createYear(db, { name: "2026/27", startsOn: "2026-09-07", summerStartsOn: "2027-02-15", endsOn: "2027-07-02" });
   const klass = createClass(db, year.id, { name: "4bhif", students: [{ username: "anna" }, { username: "ben" }] });
@@ -1595,5 +1603,241 @@ describe("shortening a browser string", () => {
     assert.deepEqual(browserLabel(""), { short: null, os: null, full: null });
     assert.deepEqual(browserLabel(null), { short: null, os: null, full: null });
     assert.deepEqual(parseUserAgent(undefined), { browser: null, version: null, os: null });
+  });
+});
+
+// ------------------------------------------------------- the attempt review
+
+describe("the review of an attempt", () => {
+  /** Anna and Ben write `running()`'s test; Anna answers question `n` of hers as `choose(correctTokens, allTokens)` says. */
+  function reviewed(options) {
+    const seed = running(options);
+    const anna = startAttempt(seed.db, "anna", seed.test.id).attemptId;
+    for (const [n, tokens] of Object.entries(correctTokens(seed.db, anna))) saveAnswer(seed.db, attemptRow(seed.db, anna), Number(n), tokens);
+    submitAttempt(seed.db, attemptRow(seed.db, anna));
+    return { ...seed, anna };
+  }
+  const afterWindow = (sitting) => new Date(Date.parse(sitting.closesAt) + 1000).toISOString();
+
+  test("the score is the sum of the per-question rule, which scoreAttempt and the review share", () => {
+    const { db, anna } = reviewed();
+    const scores = questionScores(db, anna);
+    assert.equal(scores.size, 3);
+    assert.deepEqual([...scores.values()], [1, 1, 1]);
+    assert.equal(scoreAttempt(db, anna), attemptRow(db, anna).score);
+  });
+
+  test("a student may review once the attempt's own sitting is over, and not before", () => {
+    const { db, test, sitting, anna } = reviewed();
+    const row = () => attemptRow(db, anna);
+    assert.equal(reviewOpen(db, row(), new Date().toISOString()), false, "submitted early, window still open");
+    assert.equal(reviewOpen(db, row(), afterWindow(sitting)), true, "window closed");
+
+    const ben = startAttempt(db, "ben", test.id).attemptId;
+    assert.equal(reviewOpen(db, attemptRow(db, ben), afterWindow(sitting)), false, "an attempt not submitted is never open");
+
+    extendSitting(db, sitting.id, { minutes: 10 });
+    assert.equal(reviewOpen(db, row(), afterWindow(sitting)), false, "extended: not until the new end");
+    assert.equal(reviewOpen(db, row(), new Date(Date.parse(sitting.closesAt) + 11 * 60000).toISOString()), true);
+
+    endSitting(db, sitting.id);
+    assert.equal(reviewOpen(db, row(), new Date(Date.now() + 1000).toISOString()), true, "ended by the teacher");
+  });
+
+  test("a make-up attempt follows its own sitting, and the first sitting's are open while it is ahead", () => {
+    const { db, test, sitting, anna } = reviewed();
+    const makeup = createSitting(db, test.id, { opensAt: inMinutes(120), closesAt: inMinutes(170), durationMinutes: 15, participants: ["ben"] });
+    const ben = startAttempt(db, "ben", test.id, inMinutes(125)).attemptId;
+    submitAttempt(db, attemptRow(db, ben), inMinutes(126));
+    const between = inMinutes(130);
+    assert.ok(between > afterWindow(sitting));
+    assert.equal(reviewOpen(db, attemptRow(db, anna), between), true, "the first sitting is over");
+    assert.equal(reviewOpen(db, attemptRow(db, ben), between), false, "the make-up still runs");
+    assert.equal(reviewOpen(db, attemptRow(db, ben), new Date(Date.parse(makeup.closesAt) + 1000).toISOString()), true);
+  });
+
+  test("the review shows every question and answer in the attempt's order, chosen and correct, and nothing to send back", () => {
+    const { db, test } = running();
+    const id = startAttempt(db, "anna", test.id).attemptId;
+    const writing = writingView(db, attemptRow(db, id));
+    const multi = writing.questions.find((q) => q.type === "multichoiceset");
+    const correct = correctTokens(db, id)[multi.n];
+    assert.equal(correct.length, 2);
+    // Only the first of the two correct answers.
+    saveAnswer(db, attemptRow(db, id), multi.n, [correct[0]]);
+    submitAttempt(db, attemptRow(db, id));
+
+    const review = reviewView(db, attemptRow(db, id));
+    assert.deepEqual(Object.keys(review).sort(), ["attempt", "grade", "language", "name", "questionCount", "questions", "score"]);
+    assert.deepEqual([review.name, review.language, review.questionCount], ["T", "en", 3]);
+    assert.deepEqual(review.questions.map((q) => [q.n, q.text]), writing.questions.map((q) => [q.n, q.text]), "the writing page's order");
+    for (const [index, question] of review.questions.entries()) {
+      assert.deepEqual(question.answers.map((a) => a.text), writing.questions[index].answers.map((a) => a.text), `answers of ${question.n} in order`);
+      assert.deepEqual(Object.keys(question).sort(), ["answers", "n", "scored", "text", "type"]);
+      for (const answer of question.answers) assert.deepEqual(Object.keys(answer).sort(), ["chosen", "correct", "text"], "no token, no id");
+    }
+    const reviewedMulti = review.questions[multi.n - 1];
+    const textOf = (token) => multi.answers.find((a) => a.token === token).text;
+    const byText = Object.fromEntries(reviewedMulti.answers.map((a) => [a.text, a]));
+    assert.deepEqual(byText[textOf(correct[0])], { text: textOf(correct[0]), chosen: true, correct: true });
+    assert.deepEqual(byText[textOf(correct[1])], { text: textOf(correct[1]), chosen: false, correct: true });
+    assert.deepEqual(reviewedMulti.answers.filter((a) => !a.correct).map((a) => a.chosen), [false], "the wrong answer, not chosen");
+    assert.equal(reviewedMulti.scored, false, "one correct answer missed");
+    assert.equal(review.score, 0);
+    assert.deepEqual(review.questions.map((q) => q.scored), [false, false, false]);
+  });
+
+  test("a question an admin removed is gone from the review, and the score stays the stored one", () => {
+    const { db, test, anna } = reviewed();
+    const multi = db.prepare("SELECT id FROM test_question WHERE test_id = ? AND type = 'multichoiceset'").get(test.id);
+    const textOf = db.prepare("SELECT text_en FROM test_question WHERE id = ?").get(multi.id).text_en;
+    removeWrittenQuestion(db, test.id, multi.id, scoreAttempt);
+    const review = reviewView(db, attemptRow(db, anna));
+    assert.deepEqual(review.questions.map((q) => q.n), [1, 2]);
+    assert.ok(review.questions.every((q) => q.text !== textOf));
+    assert.deepEqual([review.score, review.questionCount], [attemptRow(db, anna).score, attemptRow(db, anna).question_count]);
+    assert.deepEqual([review.score, review.questionCount], [2, 2]);
+  });
+
+  test("a student's review is refused while the sitting runs, and a classmate's attempt is not found", () => {
+    const { db, sitting, anna } = reviewed();
+    assert.throws(
+      () => studentReview(db, anna, "anna"),
+      (error) => error instanceof ConflictError && error.key === "exam.errors.attempts.reviewNotYet"
+    );
+    assert.equal(studentReview(db, anna, "anna", afterWindow(sitting)).attempt, anna);
+    assert.equal(studentReview(db, anna, "anna", new Date(Date.parse(sitting.closesAt) + 31 * 86400000).toISOString()).attempt, anna, "a month later");
+    const notFound = (fn) => assert.throws(fn, (error) => error instanceof NotFoundError && error.key === "exam.errors.attempts.noAttempt");
+    notFound(() => studentReview(db, anna, "ben", afterWindow(sitting)));
+    notFound(() => studentReview(db, anna + 100, "ben", afterWindow(sitting)));
+  });
+
+  test("a teacher's lookup needs the course, the student and a submitted attempt", () => {
+    const { db, klass, test, course, anna } = reviewed();
+    assert.equal(courseAttempt(db, course.id, "ANNA", anna).id, anna, "before the sitting is over");
+    const other = createCourse(db, klass.id, { subject: "DBI" });
+    const ben = startAttempt(db, "ben", test.id).attemptId;
+    for (const [courseId, username, id] of [[other.id, "anna", anna], [course.id, "ben", anna], [course.id, "ben", ben]]) {
+      assert.throws(() => courseAttempt(db, courseId, username, id), NotFoundError, `${courseId} ${username} ${id}`);
+    }
+  });
+
+  test("the images of a reviewed attempt are served to its student once the sitting is over", () => {
+    const { db, test, sitting, ids } = running();
+    const image = db.prepare("SELECT id FROM image WHERE question_id = ?").get(ids[0]).id;
+    const { attemptId } = startAttempt(db, "anna", test.id);
+    assert.equal(studentMaySeeImage(db, "anna", image), true, "while writing");
+    submitAttempt(db, attemptRow(db, attemptId));
+    assert.equal(studentMaySeeImage(db, "anna", image), false, "submitted early, the sitting still runs");
+    assert.equal(studentMaySeeImage(db, "anna", image, afterWindow(sitting)), true, "the review is open");
+    assert.equal(studentMaySeeImage(db, "ben", image, afterWindow(sitting)), false, "not for another student");
+  });
+
+  test("an online entry names its attempt and whether its review is open", () => {
+    const { db, course, sitting, anna } = reviewed();
+    const own = () => resultsOf(db, "anna").courses.find((c) => c.id === course.id).entries.find((e) => e.kind === "online");
+    assert.deepEqual([own().attemptId, own().reviewOpen], [anna, false]);
+    assert.equal(studentRecord(db, course.id, "anna").entries.find((e) => e.kind === "online").attemptId, anna);
+    endSitting(db, sitting.id);
+    assert.equal(own().reviewOpen, true);
+  });
+
+  test("the review goes with the attempt: deleted by an admin or purged with a leaver", () => {
+    const { db, course, sitting, anna } = reviewed();
+    endSitting(db, sitting.id);
+    deleteAttempt(db, anna);
+    assert.throws(() => studentReview(db, anna, "anna"), NotFoundError);
+    assert.equal(resultsOf(db, "anna").courses.find((c) => c.id === course.id).entries.length, 0);
+
+    const again = reviewed();
+    endSitting(again.db, again.sitting.id);
+    const next = createYear(again.db, { name: "2027/28", startsOn: "2027-09-06", summerStartsOn: "2028-02-14", endsOn: "2028-07-07" });
+    setCurrentYear(again.db, next.id);
+    createClass(again.db, next.id, { name: "5bhif", students: [{ username: "ben" }] });
+    const report = retentionReport(again.db, "2040-01-01", 2);
+    assert.equal(report.students, 1, "anna has left");
+    purgeLeavers(again.db, "2040-01-01", report, 2);
+    assert.throws(() => studentReview(again.db, again.anna, "anna"), NotFoundError);
+    assert.deepEqual(resultsOf(again.db, "anna").courses, [], "no entry left to link from");
+  });
+
+  test("the routes: the student's after the sitting only, the teacher's for teachers only", async () => {
+    const dbPath = temporaryPath();
+    const saved = { path: process.env.EXAM_DB_PATH, periods: process.env.SCHOOL_PERIODS, fetch: global.fetch };
+    process.env.EXAM_DB_PATH = dbPath;
+    delete process.env.SCHOOL_PERIODS;
+    const started = await init({ startPage: () => "/index.html" });
+    assert.equal(started.active, true);
+    const { db } = openDatabase(dbPath);
+    openDatabases.push(db);
+    const seed = seeded(db);
+    const test = createTest(db, seed.course.id, { name: "T", questionIds: seed.ids });
+    const sitting = createSitting(db, test.id, { opensAt: inMinutes(60), closesAt: inMinutes(110), durationMinutes: 15 });
+    db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ? WHERE id = ?").run(inMinutes(-1), inMinutes(49), sitting.id);
+    const anna = startAttempt(db, "anna", test.id).attemptId;
+    submitAttempt(db, attemptRow(db, anna));
+
+    // Who asks: `X-As` names the user, `X-Role` the role; the view preference is a teacher's view.
+    let view = { vt: 1 };
+    global.fetch = async () => ({ ok: true, json: async () => ({ attributes: { config: [JSON.stringify(view)] } }) });
+    const app = express();
+    app.use((req, res, next) => {
+      const username = req.get("X-As");
+      req.user = {
+        name: username,
+        preferred_username: username,
+        accessToken: "access-token",
+        accessTokenDecoded: { preferred_username: username },
+        keycloakConfig: { "auth-server-url": "https://identity.example/", realm: "demo", resource: "safelearn" },
+        rolesCalculated: JSON.stringify({ [req.get("X-Role")]: true }),
+      };
+      next();
+    });
+    app.use("/exam", started.router);
+    const server = app.listen(0);
+    try {
+      const base = `http://127.0.0.1:${server.address().port}/exam/api`;
+      const ask = (path, as, role) => saved.fetch(`${base}${path}`, { headers: { "X-As": as, "X-Role": role } });
+      const own = `/attempts/${anna}/review`;
+      const teachers = `/courses/${seed.course.id}/students/anna/attempts/${anna}`;
+
+      assert.equal((await ask(own, "anna", "student")).status, 409, "inside the window");
+      assert.equal((await ask(own, "ben", "student")).status, 404, "a classmate's attempt");
+      assert.equal((await ask(`/attempts/${anna + 100}/review`, "ben", "student")).status, 404, "the same as a missing one");
+      assert.equal((await ask(own, "tdent", "teacher")).status, 403, "a teacher");
+
+      const teacher = await ask(teachers, "tdent", "teacher");
+      assert.equal(teacher.status, 200, "the teacher before the sitting is over");
+      assert.equal((await teacher.json()).questions.length, 3);
+      assert.equal((await ask(teachers, "anna", "student")).status, 403, "a student at the teacher's address");
+      assert.equal((await ask(`/courses/${seed.course.id}/students/ben/attempts/${anna}`, "tdent", "teacher")).status, 404, "another student");
+      const other = createCourse(db, seed.klass.id, { subject: "DBI" });
+      assert.equal((await ask(`/courses/${other.id}/students/anna/attempts/${anna}`, "tdent", "teacher")).status, 404, "another course");
+      view = { vt: 0 };
+      assert.equal((await ask(teachers, "tdent", "teacher")).status, 403, "a teacher in student view");
+      view = { vt: 1 };
+
+      const page = await saved.fetch(`${base.replace(/\/api$/, "")}/my/attempts/${anna}`, { headers: { "X-As": "anna", "X-Role": "student" } });
+      assert.equal(page.status, 200, "the student's page");
+      const html = await page.text();
+      assert.match(html, new RegExp(`data-sl-embed="attempt-review" data-sl-attempt="${anna}"`));
+      assert.match(html, /href="\/exam\/my"/, "a way back to the results");
+      const teacherPage = await saved.fetch(`${base.replace(/\/api$/, "")}/courses/${seed.course.id}/students/anna/attempts/${anna}`, {
+        headers: { "X-As": "tdent", "X-Role": "teacher" },
+      });
+      assert.equal(teacherPage.status, 200, "the teacher's page");
+      assert.match(await teacherPage.text(), new RegExp(`data-sl-embed="attempt-review" data-sl-course="${seed.course.id}" data-sl-student="anna" data-sl-attempt="${anna}"`));
+
+      endSitting(db, sitting.id);
+      const after = await ask(own, "anna", "student");
+      assert.equal(after.status, 200, "after the sitting");
+      assert.deepEqual(await after.json(), reviewView(db, attemptRow(db, anna)));
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+      global.fetch = saved.fetch;
+      if (saved.path === undefined) delete process.env.EXAM_DB_PATH;
+      else process.env.EXAM_DB_PATH = saved.path;
+      if (saved.periods !== undefined) process.env.SCHOOL_PERIODS = saved.periods;
+    }
   });
 });

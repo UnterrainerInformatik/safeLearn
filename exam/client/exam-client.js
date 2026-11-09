@@ -22,6 +22,7 @@ import "./question-editor.js";
 import "./pool-import.js";
 import "./tests.js";
 import "./attempt.js";
+import "./review.js";
 import "./live.js";
 
 export { ExamElement, defineExamElement, examApi } from "./frame.js";

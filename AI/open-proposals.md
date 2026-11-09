@@ -44,6 +44,13 @@ Ein Schüler-Bildschirm mit laufendem Test soll im Klassenzimmer auf einen Blick
 
 Seit `exam-fullscreen-chrome` sind Navigation und Menüs der Seite während des Schreibens ohnehin ausgeblendet; der Rahmen hängt am selben Zustand wie die Vollbild-Erkennung in `exam/client/attempt.js`.
 
+## Lehrer-Session bleibt nach `vt: 0` in der Schüleransicht hängen
+In `test/exam.test.js` schalten zwei Checks die Lehrer-Session mit `setPreferences(teacher, { vt: 0 })` in die Schüleransicht und im `finally` mit `setPreferences(teacher, {})` zurück: „no student reaches another student's attempt, and a teacher cannot write a test“ (online tests: writing) und „no student, no teacher in student view and no username off the roster gets the role“ (Matura candidates). Das Zurückstellen scheitert jedes Mal mit *Preference "vt" of the teacher session was set to 1, but the application renders with 0*: Der Schreibweg in `setPreferences` (`test/harness.js`) meldet Erfolg, nach dem Reload rendert die App aber weiter mit `vt = 0`.
+
+Kein Wackler: am 2026-11-09 auf HEAD `d4bebe5` (ohne lokale Änderungen, eigener Worktree) und in drei Läufen mit `exam-attempt-review` immer dieselben Stellen. Die Session bleibt danach in der Schüleransicht, darum scheitern die folgenden Checks des Describes mit `403` (auf HEAD: „the heartbeat is guarded …“, „a start without full screen …“, „below the fifth year nobody is a candidate …“). Diese Folgefehler verdecken, ob die Checks selbst grün wären.
+
+Zu klären: ob die App die Präferenz nach dem Schreiben noch aus einem alten Stand liest (Session-Cache des Account-Lookups, Keycloak-Attribut noch nicht durch) oder der Schreibweg den Block nicht ersetzt. Die anderen Checks mit `vt: 0` stellen erfolgreich zurück; was die zwei unterscheidet, ist offen.
+
 # Präsentationen
 
 ## Jede Präsentation passt auf den Schirm

@@ -3,7 +3,8 @@
  * a text search, one question with its correct answers and its usage history,
  * and the images the questions embed. Everything here is a teacher's; the only
  * other reader of an image is a student inside an open attempt containing it,
- * which `studentMaySeeImage` decides.
+ * or in the review of such an attempt once its sitting is over, which
+ * `studentMaySeeImage` decides.
  *
  * Reads are synchronous, like every other read of the module (design.md, D2).
  * The pool is about a hundred questions, so the search filters in process
@@ -11,6 +12,7 @@
  */
 
 import { NotFoundError } from "./classes.js";
+import { reviewOpenCondition } from "./attempts.js";
 import { pendingTestsWith } from "./tests.js";
 
 const entities = { "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'", "&nbsp;": " " };
@@ -189,17 +191,20 @@ export function readImage(db, id) {
 }
 
 /**
- * Whether the student `username` may see the image `imageId` because the test
- * of an attempt they have open right now shows it. Once the attempt is
- * submitted or past its deadline, the answer is no.
+ * Whether the student `username` may see the image `imageId`: the test of an
+ * attempt they have open right now shows it, or the test of a submitted
+ * attempt of theirs whose review is open to them - its sitting is over
+ * (exam-attempt-review design D5). Between the two, while a submitted
+ * attempt's sitting still runs, the answer is no.
  */
 export function studentMaySeeImage(db, username, imageId, at = new Date().toISOString()) {
   return (
     db
       .prepare(
         `SELECT 1 FROM attempt a JOIN test_image ti ON ti.test_id = a.test_id
-         WHERE a.username = ? AND ti.image_id = ? AND a.submitted_at IS NULL AND ? < a.deadline LIMIT 1`
+         WHERE a.username = ? AND ti.image_id = ?
+           AND ((a.submitted_at IS NULL AND ? < a.deadline) OR ${reviewOpenCondition("a")}) LIMIT 1`
       )
-      .get(username, imageId, at) !== undefined
+      .get(username, imageId, at, at) !== undefined
   );
 }

@@ -1074,7 +1074,13 @@ class GradebookStudent extends ExamElement {
       h("p", {}, h("label", {}, t("exam.gradebook.comment"), h("br"), comment)),
       h("p", {}, h("label", {}, visible, ` ${t("exam.gradebook.commentVisible")}`)),
       h("h3", {}, t("exam.gradebook.resultsHeading", { count: results })),
-      own.length ? resultsTable(own) : h("p", { class: "sl-exam-quiet" }, t("exam.gradebook.noSemesterResults")),
+      own.length
+        ? resultsTable(own, {
+            // A teacher's entry of an online test exists only once the attempt is submitted.
+            reviewHref: (entry) =>
+              `/exam/courses/${course.id}/students/${encodeURIComponent(student.username)}/attempts/${entry.attemptId}`,
+          })
+        : h("p", { class: "sl-exam-quiet" }, t("exam.gradebook.noSemesterResults")),
       h("p", {}, linkButton({ label: t("exam.gradebook.enterResults"), href: `/exam/courses/${course.id}/gradebook?semester=${semester}`, class: "sl-exam-enter-results" }))
     );
   }
@@ -1099,10 +1105,17 @@ function resultRows(entries) {
       rows.push(...marksOf(entry.projectId).map(markRow));
       continue;
     }
-    rows.push({ name: entry.name, date: entry.date, category: entry.category, result: entryResult(entry), grade: entry.grade === null ? "" : String(entry.grade), cellNote: entry.note ?? null });
+    rows.push({ name: entry.name, date: entry.date, category: entry.category, result: entryResult(entry), grade: entry.grade === null ? "" : String(entry.grade), cellNote: entry.note ?? null, entry });
     if (entry.kind === "project") rows.push(...marksOf(entry.columnId).map(markRow));
   }
   return rows;
+}
+
+/** The link to an online test's review in its result cell, or nothing. */
+function reviewLink(row, reviewHref) {
+  const href = row.entry?.kind === "online" ? reviewHref(row.entry) : null;
+  if (!href) return null;
+  return [" ", h("a", { href, class: "sl-exam-review-link", "aria-label": t("exam.review.linkFor", { name: row.name }) }, t("exam.review.link"))];
 }
 
 /** A project's mark as a row of the results table. */
@@ -1113,9 +1126,11 @@ function markRow(entry) {
 /**
  * Results by column, read-only: the column's name and date, the category, the
  * result and its grade, and the cell's note on a line of its own below,
- * with its line breaks (gradebook-result-notes D7).
+ * with its line breaks (gradebook-result-notes D7). `reviewHref`, if given,
+ * answers the address of an entry's review, or null; the address is linked
+ * in the result cell (exam-attempt-review D4).
  */
-function resultsTable(entries) {
+function resultsTable(entries, { reviewHref = () => null } = {}) {
   return scrollingTable(
     h(
       "table",
@@ -1143,7 +1158,7 @@ function resultsTable(entries) {
             h("td", { "data-sticky": "0" }, row.name),
             h("td", {}, displayDate(row.date)),
             row.mark ? h("td", { class: "sl-exam-quiet" }, row.note) : h("td", {}, categoryLabels[row.category] ?? row.category),
-            h("td", {}, row.result),
+            h("td", {}, row.result, reviewLink(row, reviewHref)),
             h("td", {}, row.grade)
           ),
           row.cellNote
@@ -1298,7 +1313,9 @@ class ResultsView extends ExamElement {
           values.comment ? h("p", { class: "sl-exam-comment" }, values.comment) : null
         )
       ),
-      course.entries.length ? resultsTable(course.entries) : h("p", { class: "sl-exam-quiet" }, t("exam.gradebook.noResultsYet"))
+      course.entries.length
+        ? resultsTable(course.entries, { reviewHref: (entry) => (entry.reviewOpen ? `/exam/my/attempts/${entry.attemptId}` : null) })
+        : h("p", { class: "sl-exam-quiet" }, t("exam.gradebook.noResultsYet"))
     );
   }
 }

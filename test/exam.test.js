@@ -3003,6 +3003,113 @@ describe("online tests: writing", () => {
     assert.equal(database((db) => db.prepare("SELECT COUNT(*) AS n FROM response WHERE attempt_id = ?").get(writing.attempt).n), 1);
   });
 
+  test("the review opens once the sitting is over, from the student's results and from the student's page, with the chosen and the correct marks", async () => {
+    const name = "Reviewed";
+    const test = await openTest(name);
+    const username = student.username.toLowerCase();
+    // Nothing of this describe is still being written, so the Exams page shows the results.
+    database((db) => db.prepare("UPDATE attempt SET deadline = ? WHERE username = ? AND submitted_at IS NULL").run(new Date(Date.now() - 1000).toISOString(), username));
+    const writing = (await fetchAs(student, `/exam/api/tests/${test.id}/attempt`, { method: "POST" })).json;
+    // Question 1 right, question 2 with one wrong answer only.
+    const tokensOf = (n, correct) =>
+      database((db) =>
+        db
+          .prepare(
+            `SELECT t.token FROM attempt_question aq JOIN test_answer a ON a.test_question_id = aq.test_question_id AND a.correct = ?
+             JOIN attempt_token t ON t.attempt_id = aq.attempt_id AND t.test_answer_id = a.id WHERE aq.attempt_id = ? AND aq.position = ? ORDER BY t.position`
+          )
+          .all(correct ? 1 : 0, writing.attempt, n - 1)
+          .map((row) => row.token)
+      );
+    const save = (n, tokens) => fetchAs(student, `/exam/api/attempts/${writing.attempt}/questions/${n}`, { method: "PUT", body: { tokens } });
+    assert.equal((await save(1, tokensOf(1, true))).status, 200);
+    assert.equal((await save(2, tokensOf(2, false).slice(0, 1))).status, 200);
+    assert.equal((await fetchAs(student, `/exam/api/attempts/${writing.attempt}/submit`, { method: "POST" })).status, 200);
+
+    /** The student's results row of the test: its cells' text and the review link, if any. */
+    const resultRow = async () => {
+      await student.page.goto(`${applicationUrl}/exam/my`, { waitUntil: "domcontentloaded" });
+      await student.page.waitForSelector(".sl-exam-my-results sl-exam-results .sl-exam-results", { timeout: 20000 });
+      return student.page.$$eval(
+        ".sl-exam-results .sl-exam-entries tbody tr",
+        (rows, wanted) => {
+          const row = rows.find((tr) => tr.cells[0]?.textContent === wanted);
+          const link = row?.querySelector("a.sl-exam-review-link");
+          return row ? { link: link?.getAttribute("href") ?? null, label: link?.getAttribute("aria-label") ?? null, links: document.querySelectorAll(".sl-exam-results a.sl-exam-review-link").length } : null;
+        },
+        name
+      );
+    };
+    const before = await resultRow();
+    assert.ok(before, "the test is among the results");
+    assert.equal(before.link, null, "no review link while the sitting runs");
+    const review = `/exam/api/attempts/${writing.attempt}/review`;
+    const early = await fetchAs(student, review);
+    assert.equal(early.status, 409, "and the review is refused");
+    assert.doesNotMatch(JSON.stringify(early.json), /correct/, "without a word on what is correct");
+
+    assert.equal((await fetchAs(teacher, `/exam/api/sittings/${test.sitting.id}/end`, { method: "POST" })).status, 200);
+    const after = await resultRow();
+    assert.equal(after.link, `/exam/my/attempts/${writing.attempt}`, "the link once the sitting is over");
+    assert.ok(after.label.includes(name), `the link's label names the test: ${after.label}`);
+    assert.equal(after.links, before.links + 1, "no other row changed");
+
+    /** What a review page shows, per question: number, verdict, and each answer's marks. */
+    const shown = (page) =>
+      page.evaluate(() => ({
+        summary: document.querySelector(".sl-exam-review-summary")?.textContent ?? null,
+        questions: [...document.querySelectorAll(".sl-exam-review-question")].map((section) => ({
+          n: section.dataset.n,
+          text: section.querySelector(".sl-exam-pool-text").textContent.trim(),
+          scored: section.classList.contains("sl-exam-review-scored"),
+          verdict: section.querySelector(".sl-exam-review-verdict").getAttribute("aria-label"),
+          answers: [...section.querySelectorAll(".sl-exam-review-answers li")].map((li) => ({
+            text: li.querySelector(".sl-exam-pool-answer").textContent.trim(),
+            chosen: li.classList.contains("sl-exam-review-chosen"),
+            chosenLabel: li.querySelector(".sl-exam-review-choice").getAttribute("aria-label"),
+            correct: li.classList.contains("sl-exam-review-correct"),
+            mark: li.querySelector(".sl-exam-review-mark").textContent,
+            markLabel: li.querySelector(".sl-exam-review-mark").getAttribute("aria-label"),
+          })),
+        })),
+      }));
+    await student.page.click(`a.sl-exam-review-link[href="${after.link}"]`);
+    await student.page.waitForSelector(".sl-exam-review-question", { timeout: 20000 });
+    assert.equal(new URL(student.page.url()).pathname, after.link);
+    assert.equal(await student.page.$(".sl-exam-bar"), null, "no teacher's bar");
+    assert.ok(await student.page.$('.sl-exam-review-back a[href="/exam/my"]'), "a way back to the results");
+    const own = await shown(student.page);
+    assert.match(own.summary, /^1\/2 · /, "points out of questions, and the grade");
+    assert.deepEqual(own.questions.map((q) => [q.n, q.scored]), [["1", true], ["2", false]]);
+    assert.deepEqual(own.questions.map((q) => q.text), writing.questions.map((q) => q.text.replace(/<[^>]+>/g, "").trim()), "the attempt's own order");
+    for (const [index, question] of own.questions.entries()) {
+      assert.deepEqual(question.answers.map((a) => a.text), writing.questions[index].answers.map((a) => a.text.replace(/<[^>]+>/g, "").trim()), `answers of ${question.n} in the attempt's order`);
+      for (const answer of question.answers) {
+        assert.equal(answer.mark, answer.correct ? "✓" : "✗");
+        assert.ok(answer.markLabel, "the correctness mark is given as text too");
+        assert.equal(Boolean(answer.chosenLabel), answer.chosen, "a chosen answer says so as text");
+      }
+    }
+    assert.ok(own.questions[0].answers.filter((a) => a.correct).every((a) => a.chosen), "question 1: every correct answer chosen");
+    assert.deepEqual(own.questions[1].answers.filter((a) => a.chosen).map((a) => a.correct), [false], "question 2: one wrong answer chosen");
+
+    // The teacher opens the same review from the student's page.
+    await teacher.page.goto(`${applicationUrl}/exam/courses/${course.id}/students/${username}`, { waitUntil: "domcontentloaded" });
+    const teacherLink = `/exam/courses/${course.id}/students/${username}/attempts/${writing.attempt}`;
+    await teacher.page.waitForSelector(`a.sl-exam-review-link[href="${teacherLink}"]`, { timeout: 20000 });
+    await teacher.page.click(`a.sl-exam-review-link[href="${teacherLink}"]`);
+    await teacher.page.waitForSelector(".sl-exam-review-question", { timeout: 20000 });
+    assert.ok(await teacher.page.$(".sl-exam-bar"), "the teacher's page has the bar");
+    assert.ok(await teacher.page.$(`.sl-exam-review-back a[href="/exam/courses/${course.id}/students/${username}"]`), "and a way back to the student");
+    const theirs = await shown(teacher.page);
+    assert.deepEqual(
+      theirs.questions.map((q) => [q.n, q.text, q.scored, q.answers.map((a) => [a.text, a.chosen, a.correct])]),
+      own.questions.map((q) => [q.n, q.text, q.scored, q.answers.map((a) => [a.text, a.chosen, a.correct])]),
+      "the same questions, marks and order as the student's"
+    );
+    assert.equal((await fetchAs(student, `/exam/api/courses/${course.id}/students/${username}/attempts/${writing.attempt}`)).status, 403, "a student at the teacher's address");
+  });
+
   test("no student reaches another student's attempt, and a teacher cannot write a test", async () => {
     const test = await openTest("Others");
     const foreign = database((db) => {

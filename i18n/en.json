@@ -279,6 +279,7 @@
         "offlineTest": "An offline test is not written here.",
         "oneAnswer": "This question takes one answer.",
         "otherBrowser": "This test is open in another browser. Ask your teacher to release it to this one.",
+        "reviewNotYet": "The review of your test opens once its sitting is over.",
         "startShape": "Whether full screen was granted is a yes/no value.",
         "submittedAlready": "This attempt is submitted already.",
         "submittedByYou": "You have submitted this test.",
@@ -766,6 +767,7 @@
       "title": "Exams"
     },
     "pages": {
+      "attemptReview": "Test review",
       "class": "Class",
       "course": "Course",
       "editQuestion": "Edit: {name}",
@@ -1007,6 +1009,20 @@
       "sittings_other": "{count} sitting participations",
       "teacherNotes_one": "{count} teacher note from a live view",
       "teacherNotes_other": "{count} teacher notes from live views"
+    },
+    "review": {
+      "backToResults": "Back to my results",
+      "backToStudent": "Back to the student's page",
+      "chosen": "your choice",
+      "correct": "correct",
+      "link": "Review",
+      "linkFor": "Review the test {name}",
+      "notScored": "not scored",
+      "question": "Question {n}",
+      "scored": "scored",
+      "summary": "{score}/{count} · grade {grade}",
+      "title": "My test",
+      "wrong": "wrong"
     },
     "handouts": {
       "classReadable": "The class can read {path} already. Click it again to choose it anyway.",

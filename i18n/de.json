@@ -279,6 +279,7 @@
         "offlineTest": "Ein Offline-Test wird nicht hier geschrieben.",
         "oneAnswer": "Bei dieser Frage ist nur eine Antwort möglich.",
         "otherBrowser": "Dieser Test ist in einem anderen Browser geöffnet. Bitte die Lehrkraft, ihn für diesen Browser freizugeben.",
+        "reviewNotYet": "Die Ansicht deines Tests ist erst offen, wenn der Durchgang vorbei ist.",
         "startShape": "Ob das Vollbild gewährt wurde, ist ein Ja/Nein-Wert.",
         "submittedAlready": "Dieser Versuch ist bereits abgegeben.",
         "submittedByYou": "Du hast diesen Test bereits abgegeben.",
@@ -766,6 +767,7 @@
       "title": "Tests"
     },
     "pages": {
+      "attemptReview": "Testansicht",
       "class": "Klasse",
       "course": "Kurs",
       "editQuestion": "Bearbeiten: {name}",
@@ -1007,6 +1009,20 @@
       "sittings_other": "{count} Teilnahmen an Terminen",
       "teacherNotes_one": "{count} Lehrer-Notiz aus einer Live-Ansicht",
       "teacherNotes_other": "{count} Lehrer-Notizen aus Live-Ansichten"
+    },
+    "review": {
+      "backToResults": "Zurück zu meinen Ergebnissen",
+      "backToStudent": "Zurück zur Seite des Schülers",
+      "chosen": "deine Wahl",
+      "correct": "richtig",
+      "link": "Ansehen",
+      "linkFor": "Test {name} ansehen",
+      "notScored": "nicht gewertet",
+      "question": "Frage {n}",
+      "scored": "gewertet",
+      "summary": "{score}/{count} · Note {grade}",
+      "title": "Mein Test",
+      "wrong": "falsch"
     },
     "handouts": {
       "classReadable": "Die Klasse kann {path} schon lesen. Zum Wählen nochmals anklicken.",

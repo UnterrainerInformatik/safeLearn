@@ -25,6 +25,7 @@ import {
   weightCategories,
 } from "./classes.js";
 import { bandMidpoint, entryCategory, gradeFor, proposal, semesterOf, semesters, yearProposal } from "./grading.js";
+import { reviewOpenCondition } from "./attempts.js";
 import { viennaDate } from "./tests.js";
 
 /**
@@ -666,15 +667,21 @@ function onlineColumns(db, courseId) {
     }));
 }
 
-/** The submitted attempts of a course's online tests as entries - one student's, or everyone's. */
+/**
+ * The submitted attempts of a course's online tests as entries - one
+ * student's, or everyone's. Each names its attempt and whether its student
+ * may review it now, by the rule of `reviewOpen` (exam-attempt-review D4).
+ */
 function onlineEntries(db, courseId, scale, username = null) {
   const columns = new Map(onlineColumns(db, courseId).map((column) => [column.testId, column]));
-  const select = `SELECT a.id, a.test_id, a.username, a.score, a.question_count FROM attempt a JOIN test t ON t.id = a.test_id
+  const select = `SELECT a.id, a.test_id, a.username, a.score, a.question_count, ${reviewOpenCondition("a")} AS review_open
+    FROM attempt a JOIN test t ON t.id = a.test_id
     WHERE t.course_id = ? AND a.submitted_at IS NOT NULL`;
+  const at = now();
   const rows =
     username === null
-      ? db.prepare(`${select} ORDER BY a.id`).all(courseId)
-      : db.prepare(`${select} AND a.username = ? ORDER BY a.id`).all(courseId, username);
+      ? db.prepare(`${select} ORDER BY a.id`).all(at, courseId)
+      : db.prepare(`${select} AND a.username = ? ORDER BY a.id`).all(at, courseId, username);
   return rows.map((row) => {
     const column = columns.get(row.test_id);
     const value = row.question_count === 0 ? 0 : row.score / row.question_count;
@@ -693,6 +700,8 @@ function onlineEntries(db, courseId, scale, username = null) {
       projectId: null,
       projectName: null,
       name: column.name,
+      attemptId: row.id,
+      reviewOpen: row.review_open === 1,
     };
   });
 }
@@ -1014,7 +1023,7 @@ export function resultsOf(db, username, { yearId = null, today = now().slice(0, 
       className: course.className,
       leftAt: row.left_at,
       // Only this student's notes, by construction; joined after the proposals (design D3).
-      entries: withNotes(entries, courseNotes(db, course, key)).map(({ id, columnId, kind, category, value, points, maxPoints, grade, date, semesterDate: decides, projectId, projectName, name, note }) => ({
+      entries: withNotes(entries, courseNotes(db, course, key)).map(({ id, columnId, kind, category, value, points, maxPoints, grade, date, semesterDate: decides, projectId, projectName, name, note, attemptId, reviewOpen }) => ({
         id,
         columnId,
         kind,
@@ -1029,6 +1038,8 @@ export function resultsOf(db, username, { yearId = null, today = now().slice(0, 
         projectName,
         name,
         note,
+        // Only an online test's entry can be reviewed (exam-attempt-review D4).
+        ...(kind === "online" ? { attemptId, reviewOpen } : {}),
       })),
       semesters: Object.fromEntries(
         shown.map((semester) => {

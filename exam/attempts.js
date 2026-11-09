@@ -70,22 +70,31 @@ function msBetween(from, to) {
 // ---------------------------------------------------------- finalization
 
 /**
- * Scores an attempt: a question counts 1 when the set of chosen answers is
- * exactly the set of correct ones, 0 otherwise.
+ * Each question of an attempt and whether it scored: 1 when the set of chosen
+ * answers is exactly the set of correct ones, 0 otherwise. A Map of the
+ * snapshot's question id to 0 or 1. The one place this rule lives; the score
+ * and the review both read it, so they cannot drift apart.
  */
-export function scoreAttempt(db, attemptId) {
+export function questionScores(db, attemptId) {
   const questions = db.prepare("SELECT test_question_id AS id FROM attempt_question WHERE attempt_id = ?").all(attemptId);
   const correctOf = db.prepare("SELECT id FROM test_answer WHERE test_question_id = ? AND correct = 1 ORDER BY id");
   const chosenOf = db.prepare(
     `SELECT r.test_answer_id AS id FROM response r JOIN test_answer a ON a.id = r.test_answer_id
      WHERE r.attempt_id = ? AND a.test_question_id = ? ORDER BY r.test_answer_id`
   );
-  let score = 0;
+  const scores = new Map();
   for (const question of questions) {
     const correct = correctOf.all(question.id).map((row) => row.id);
     const chosen = chosenOf.all(attemptId, question.id).map((row) => row.id);
-    if (correct.length === chosen.length && correct.every((id, index) => id === chosen[index])) score += 1;
+    scores.set(question.id, correct.length === chosen.length && correct.every((id, index) => id === chosen[index]) ? 1 : 0);
   }
+  return scores;
+}
+
+/** Scores an attempt: the number of its questions that scored by `questionScores`. */
+export function scoreAttempt(db, attemptId) {
+  let score = 0;
+  for (const scored of questionScores(db, attemptId).values()) score += scored;
   return score;
 }
 
@@ -410,6 +419,101 @@ function requireOpen(row, at) {
 export function resultView(db, row) {
   const fraction = row.question_count === 0 ? 0 : row.score / row.question_count;
   return { submitted: true, score: row.score, questionCount: row.question_count, grade: gradeFor(fraction, readScale(db)) };
+}
+
+/**
+ * The SQL condition under which a student may review attempt `alias`, with one
+ * `?` for the moment asked about: it is submitted and its own sitting is over
+ * (exam-attempt-review design D1). `reviewOpen` and the image rule use it, so
+ * they cannot disagree.
+ */
+export function reviewOpenCondition(alias) {
+  return `(${alias}.submitted_at IS NOT NULL AND EXISTS (SELECT 1 FROM sitting rs WHERE rs.id = ${alias}.sitting_id AND rs.closes_at <= ?))`;
+}
+
+/**
+ * Whether the student of attempt `row` may review it at `at`: it is submitted
+ * and the sitting it was written in is over - its window has closed or the
+ * teacher ended it. A make-up attempt follows its own sitting.
+ */
+export function reviewOpen(db, row, at = now()) {
+  if (row.submitted_at === null) return false;
+  const sitting = db.prepare("SELECT closes_at FROM sitting WHERE id = ?").get(row.sitting_id);
+  return sitting !== undefined && sitting.closes_at <= at;
+}
+
+/**
+ * The review of a submitted attempt (exam-attempt-review design D2): its
+ * questions in the attempt's order, in the course's language, each with its
+ * answers in the attempt's order, whether the student chose each and whether
+ * it is correct, and whether the question scored. With the stored points, the
+ * number of questions and the grade. No tokens and no snapshot ids - nothing
+ * is sent back from a review. The router decides who may see it.
+ */
+export function reviewView(db, row) {
+  if (row.submitted_at === null) throw new NotFoundError("exam.errors.attempts.noAttempt");
+  const test = db.prepare("SELECT name, course_id FROM test WHERE id = ?").get(row.test_id);
+  const language = getCourse(db, test.course_id).language;
+  const text = language === "en" ? "text_en" : "text_de";
+  const questions = db
+    .prepare(
+      `SELECT aq.position, q.id, q.type, q.${text} AS text
+       FROM attempt_question aq JOIN test_question q ON q.id = aq.test_question_id
+       WHERE aq.attempt_id = ? ORDER BY aq.position`
+    )
+    .all(row.id);
+  const answersOf = db.prepare(
+    `SELECT a.${text} AS text, a.correct,
+       EXISTS (SELECT 1 FROM response r WHERE r.attempt_id = t.attempt_id AND r.test_answer_id = a.id) AS chosen
+     FROM attempt_token t JOIN test_answer a ON a.id = t.test_answer_id
+     WHERE t.attempt_id = ? AND a.test_question_id = ? ORDER BY t.position`
+  );
+  const scores = questionScores(db, row.id);
+  const { score, questionCount, grade } = resultView(db, row);
+  return {
+    attempt: row.id,
+    name: test.name,
+    language,
+    score,
+    questionCount,
+    grade,
+    questions: questions.map((question) => ({
+      n: question.position + 1,
+      type: question.type,
+      text: question.text,
+      scored: scores.get(question.id) === 1,
+      answers: answersOf.all(row.id, question.id).map((answer) => ({ text: answer.text, chosen: answer.chosen === 1, correct: answer.correct === 1 })),
+    })),
+  };
+}
+
+/**
+ * `username`'s review of their attempt `id` at `at` (exam-attempt-review
+ * design D3): somebody else's attempt is not found, and while the attempt's
+ * sitting is still open - submitted or not - the review is refused, so no
+ * correct flag reaches a student before it is over.
+ */
+export function studentReview(db, id, username, at = now()) {
+  const row = ownAttempt(db, id, username, at);
+  if (!reviewOpen(db, row, at)) throw new ConflictError("exam.errors.attempts.reviewNotYet");
+  return reviewView(db, row);
+}
+
+/**
+ * The submitted attempt `attemptId` of `username` at a test of course
+ * `courseId`, for that course's teacher, whether or not its sitting is over.
+ * Anything else - another course, another student, an attempt not submitted -
+ * is not found.
+ */
+export function courseAttempt(db, courseId, username, attemptId) {
+  const row = db
+    .prepare(
+      `SELECT a.* FROM attempt a JOIN test t ON t.id = a.test_id
+       WHERE a.id = ? AND t.course_id = ? AND a.username = ? AND a.submitted_at IS NOT NULL`
+    )
+    .get(attemptId, courseId, String(username ?? "").trim().toLowerCase());
+  if (!row) throw new NotFoundError("exam.errors.attempts.noAttempt");
+  return row;
 }
 
 /**

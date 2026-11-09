@@ -1325,6 +1325,110 @@ a.sl-exam-button.sl-exam-open:hover,
   font-weight: 600;
 }
 
+/* The review of a submitted attempt (`exam-attempt-review`, design D6). Coded
+   like the board solution (`.reveal .sl-board-correct`/`-wrong`): a correct
+   answer highlighted green with ✓, a wrong one dimmed with ✗. On the page's
+   own tone tokens, so both themes read; the marks also carry their meaning
+   as text for assistive technology. */
+.sl-exam-review-back {
+  margin: 0.4em 0;
+}
+
+.sl-exam-review-summary {
+  font-weight: 600;
+}
+
+.sl-exam-review-question {
+  margin: 1em 0;
+  padding: 6px 14px;
+  border: 1px solid rgba(27, 31, 35, 0.15);
+  border-left: 4px solid var(--sl-exam-tone-bad);
+  border-radius: 6px;
+}
+
+.sl-exam-review-question.sl-exam-review-scored {
+  border-left-color: var(--sl-exam-tone-good);
+}
+
+#markdown-content.dark-mode .sl-exam-review-question {
+  border-top-color: rgba(255, 255, 255, 0.2);
+  border-right-color: rgba(255, 255, 255, 0.2);
+  border-bottom-color: rgba(255, 255, 255, 0.2);
+}
+
+.sl-exam-review-question h3 {
+  margin: 0.3em 0;
+  font-size: 1em;
+}
+
+.sl-exam-review-verdict {
+  display: inline-block;
+  width: 1.2em;
+  text-align: center;
+  color: var(--sl-exam-tone-bad);
+}
+
+.sl-exam-review-scored .sl-exam-review-verdict {
+  color: var(--sl-exam-tone-good);
+}
+
+.sl-exam-review-answers {
+  margin: 0.4em 0;
+  padding-left: 0;
+  list-style: none;
+}
+
+.sl-exam-review-answers li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 2px 0;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.sl-exam-review-answers li.sl-exam-review-correct {
+  background-color: var(--sl-exam-tone-good-bg);
+  font-weight: 600;
+}
+
+.sl-exam-review-answers li.sl-exam-review-wrong {
+  opacity: 0.7;
+}
+
+/* A chosen wrong answer is what the student wants to find: not dimmed as far. */
+.sl-exam-review-answers li.sl-exam-review-wrong.sl-exam-review-chosen {
+  opacity: 0.85;
+}
+
+.sl-exam-review-choice,
+.sl-exam-review-mark {
+  flex: 0 0 auto;
+  width: 1.2em;
+  text-align: center;
+}
+
+.sl-exam-review-correct .sl-exam-review-mark {
+  color: var(--sl-exam-tone-good);
+}
+
+.sl-exam-review-answers .sl-exam-pool-answer {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sl-exam-review-answers .sl-exam-pool-answer > :first-child {
+  margin-top: 0;
+}
+
+.sl-exam-review-answers .sl-exam-pool-answer > :last-child {
+  margin-bottom: 0;
+}
+
+.sl-exam-review-link {
+  white-space: nowrap;
+}
+
 .sl-exam-pool-text img {
   max-width: 100%;
   height: auto;

@@ -29,6 +29,7 @@ import { getCourse, InvalidInputError, NotFoundError } from "./classes.js";
 import { semesters } from "./grading.js";
 import { identityOf, requireTeacher, teacherPage } from "./gate.js";
 import { contextFromQuery, teacherShell } from "./bar.js";
+import { courseAttempt, reviewView } from "./attempts.js";
 import { flagParticipant, participantHolders, participantSetup, setParticipant } from "./participants.js";
 
 /** A record id from the path or query; anything but a positive integer names nothing. */
@@ -99,6 +100,11 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
       next: flagParticipant(record.next, holders),
     };
   });
+  // The review of a student's submitted online-test attempt, for grading: open
+  // to the teacher as soon as it is submitted (exam-attempt-review design D3).
+  api("get", "/courses/:id/students/:username/attempts/:attempt", (req) =>
+    reviewView(db, courseAttempt(db, idParam(req.params.id), req.params.username, idParam(req.params.attempt)))
+  );
   // Grants or withdraws the course's exam-participant role; the role's name
   // comes from the course, never from the request (exam-participant-role D3).
   api("put", "/courses/:id/participants/:username", (req) =>
@@ -169,6 +175,14 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
       kind: "gradebook-student",
       params: { course: String(courseId), student: String(req.params.username).toLowerCase(), ...(semester ? { semester } : {}) },
       context: semester ? { courseId, semester } : { courseId },
+    };
+  });
+  page("/courses/:id/students/:username/attempts/:attempt", (t) => t("exam.pages.attemptReview"), (req) => {
+    const courseId = idParam(req.params.id);
+    return {
+      kind: "attempt-review",
+      params: { course: String(courseId), student: String(req.params.username).toLowerCase(), attempt: String(idParam(req.params.attempt)) },
+      context: { courseId },
     };
   });
   // One of the bar's buttons: the scale belongs to no course, but keeps what the bar has chosen.
