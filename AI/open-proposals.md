@@ -17,3 +17,34 @@ Die Pipeline schreibt `SESSION_SECRET` und den `KEYCLOAK_FILE`-Inhalt (inkl. Cli
 
 ## Hot-Reload-Kanal nennt geänderte gesperrte Files
 Der unauthentifizierte `/hot-reload`-Kanal schickt bei einer Änderung (`type: "page"`) die Liste der geänderten Files an **alle** verbundenen Clients, egal ob sie die Files sehen dürfen. Der Inhalt bleibt geheim, der Pfad nicht: Wird am Vorabend eine unter `@@@ teacher` liegende Testangabe editiert und gesynct, steht z. B. `md/POS/LT1-A.md` im Stream. Aufgefallen beim Explore zu `exam-offline-sittings` (2026-10-25). Zu klären: pro Client nach Sichtbarkeit filtern (der Kanal kennt keine Session) oder nur ein „deine Seite hat sich geändert“ ohne Pfade schicken.
+
+# Exam
+
+## Schüler sehen nach einem Online-Test nach, was falsch war
+Schüler wollen nach einem Online-Test nachschauen können, was sie falsch gemacht haben. Heute zeigt `resultPage` (`exam/client/attempt.js`) nach dem Abgeben nur Punkte, Fragenanzahl und Note. Die Fragen und Antworten des Versuchs stehen in der DB, für den Schüler gibt es aber keine Ansicht dafür.
+
+Entschieden (Gerald, 2026-11-09):
+- Einsehbar aus der eigenen Notenübersicht des Schülers („Meine Ergebnisse“, `sl-exam-results` in `exam/client/gradebook.js`) über die Zeile des Online-Tests, **sobald der Durchgang (die Sitzung), in dem er geschrieben hat, vorbei ist**. Danach jederzeit. Keine Freigabe durch den Lehrer nötig.
+- **Alle Fragen mit allen Antworten**, jede Antwort markiert mit „hab ich so ausgewählt“ und „wäre so richtig gewesen“, farblich kodiert wie die **Lösung an der Tafel** (`/exam/tests/<id>/solution`, `solutionSlides` in `exam/routes-tests.js`: `sl-board-correct`/`sl-board-wrong`, ✓/✗).
+- **Der Lehrer sieht dieselbe Ansicht** auf der Seite des Schülers im Kurs (`/exam/courses/<id>/students/<username>`) als Detail zum Ergebnis des Online-Tests. Das hilft bei der Notengebung.
+- Die Ansicht gilt so lange, wie der Versuch selbst aufbewahrt wird (`exam/retention.js`).
+
+Ein Nachtermin ist damit heikler: Wer im ersten Durchgang geschrieben hat, sieht die Lösungen schon, während der Nachtermin noch aussteht. Das wird bewusst in Kauf genommen; beim Nachtermin muss der Lehrer darauf achten, dass nicht über den Platz hinweg geschummelt wird.
+
+## Mitarbeitskontrollen als Noten 1–5
+Mitarbeitskontrollen werden künftig als **Note von 1 bis 5** eingetragen, mit derselben Bedeutung wie überall sonst (entschieden 2026-11-09; die ursprüngliche Idee war `++` / `+` / `o` / `−`). Heute nimmt eine Mitarbeitsspalte (`plusminus`) nur `+` oder `-` an (`normalizeResult` in `exam/gradebook.js`), gespeichert als 1 bzw. 0. Die Kategorie würde damit wie Präsentationen über `gradeKinds` laufen, der Wert ist die Bandmitte der Note.
+
+Zu klären im Design: Was wird aus bestehenden `+`/`-`-Einträgen (z. B. `+` → 1, `-` → 5, oder bleiben sie als alte Marken)? Die Projektmarken (`projectmark`) teilen heute die `+`/`−`-Eingabe und sind davon nicht betroffen; sie bleiben, wie sie sind.
+
+## Violetter Rahmen während einer Online-Prüfung im Vollbild
+Ein Schüler-Bildschirm mit laufendem Test soll im Klassenzimmer auf einen Blick erkennbar sein: ein violetter Rahmen um die ganze Seite. Entschieden (2026-11-09):
+- **Nur bei Online-Tests**, nicht auf der Handout-Seite eines Offline-Tests.
+- **Nur im Vollbild.** Verlässt die Seite den Vollbildmodus, verschwindet der Rahmen. So sieht der Lehrer im Vorbeigehen, ob der Vollbildmodus aktiv ist.
+- **Auch in der Vorschau des Lehrers.**
+
+Seit `exam-fullscreen-chrome` sind Navigation und Menüs der Seite während des Schreibens ohnehin ausgeblendet; der Rahmen hängt am selben Zustand wie die Vollbild-Erkennung in `exam/client/attempt.js`.
+
+# Präsentationen
+
+## Jede Präsentation passt auf den Schirm
+Jede Präsentation (reveal.js-Deck) soll **immer** ganz auf einen Beamer oder Monitor im Klassenzimmer passen. Ist eine Folie zu groß, wird ihr Inhalt so weit verkleinert, bis er auf den Schirm geht. Anlass: In der **Lösung an der Tafel** (`/exam/tests/<id>/solution`, eine Folie pro Frage, gebaut von `solutionSlides` in `exam/routes-tests.js` und ausgeliefert über `wrapInReveal`) des letzten CDI-Tests liefen Fragen mit Bildern über den Rand. Die Lösung an der Tafel ist der erste Fall. Lässt sich das sauber per CSS lösen, gilt die Regel für **alle** Decks: auch die aus dem `md/`-Korpus und die Lösungsdecks der Handouts. Alle drei laufen über `wrapInReveal` in `obsidian.js`. Wird eine Folie dadurch zu klein, muss der Lehrer sie selbst umformatieren; die App teilt nicht auf. Zu klären: Verhalten von reveal.js (`width`/`height`, `minScale`/`maxScale`) und unserer Styles (`css/reveal*.css`), und warum die Bilder heute nicht mitskaliert werden.
