@@ -15,6 +15,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import os from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
+import zlib from "node:zlib";
 
 import {
   applicationOutput,
@@ -34,6 +35,26 @@ import { purgeUploads } from "../exam/pool-edit.js";
 import { viennaInstant, viennaLocal } from "../exam/client/periods.js";
 
 const run = useExamModule();
+
+/** A grey PNG of `width` × `height` pixels, for an image of a size a check needs. */
+function tallPng(width, height) {
+  const chunk = (type, data) => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(zlib.crc32(body));
+    return Buffer.concat([length, body, crc]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header.set([8, 0, 0, 0, 0], 8); // 8-bit greyscale, no interlace
+  // Each row: filter byte 0, then one grey byte per pixel.
+  const rows = Buffer.alloc((width + 1) * height, 0x80);
+  for (let row = 0; row < height; row++) rows[row * (width + 1)] = 0;
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", header), chunk("IDAT", zlib.deflateSync(rows)), chunk("IEND", Buffer.alloc(0))]);
+}
 
 const fixture = "/md/test-exam-embedding.md";
 const plainPage = "/md/test-md-file.md";
@@ -624,12 +645,13 @@ describe("the gradebook", () => {
 
     const row = await overviewRow(username);
     assert.deepEqual(row.results[test1.id], { value: 0.75, points: 18 }, "17/24-style points are kept");
+    assert.equal(row.results[round.id].grade, 1, "a participation + is the grade 1");
     assert.equal(row.categories.manualTests.fraction, 0.75);
-    assert.equal(row.categories.participation.fraction, 1);
+    assert.ok(Math.abs(row.categories.participation.fraction - 0.94) < 1e-9, "at the middle of grade 1's band");
     assert.equal(row.categories.homework.fraction, 0.9);
     assert.equal(row.categories.onlineTests, undefined, "no online test yet, so the category is left out");
-    // (30 × 0.75 + 15 × 1 + 15 × 0.9) / 60
-    assert.ok(Math.abs(row.proposal.fraction - 0.85) < 1e-9, `the proposal is ${row.proposal.fraction}`);
+    // (30 × 0.75 + 15 × 0.94 + 15 × 0.9) / 60
+    assert.ok(Math.abs(row.proposal.fraction - 0.835) < 1e-9, `the proposal is ${row.proposal.fraction}`);
     assert.equal(row.proposal.grade, 2);
     assert.equal(row.effective, 2);
     assert.equal((await overviewRow(other)).effective, 5);
@@ -653,7 +675,7 @@ describe("the gradebook", () => {
     let { gb } = await ownResults();
     assert.ok(gb, "the student's results list the course");
     assert.deepEqual([gb.semesters.ws.grade, gb.semesters.ws.overridden], [2, false]);
-    assert.ok(Math.abs(gb.semesters.ws.fraction - 0.85) < 1e-9);
+    assert.ok(Math.abs(gb.semesters.ws.fraction - 0.835) < 1e-9);
     assert.ok(gb.entries.some((e) => e.name === "1st test" && e.date === year.startsOn), "a result carries its column's name and date");
 
     const grade = (body) =>
@@ -971,7 +993,7 @@ describe("the gradebook", () => {
     assert.equal(await teacher.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, "the page itself does not scroll sideways");
   });
 
-  test("the sheet: the arrow keys move between results, save the field left and never change a + or −", async () => {
+  test("the sheet: the arrow keys move between results, save the field left and never change a grade; participation takes + o - as 1, 3, 5", async () => {
     await openSheet();
     const username = student.username.toLowerCase();
     const { columns, students } = (await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=ws`)).json;
@@ -1007,24 +1029,32 @@ describe("the gradebook", () => {
     await settled(field(test2, second));
     assert.equal((await overviewRow(second)).results[test2.id].points, 17.5);
     await page.keyboard.press("ArrowLeft");
-    assert.equal((await focused()).column, test2.id, "left from a + or − field goes back");
+    assert.equal((await focused()).column, test2.id, "left from a participation field arrived at goes back");
     await page.keyboard.press("ArrowRight");
     await page.keyboard.press("ArrowRight");
     assert.equal((await focused()).column, round.id, "and right again from a value arrived at, through its empty note");
 
-    // Participation down the list: typed, never changed by an arrow.
-    await page.keyboard.press("ArrowUp");
-    await page.keyboard.type("+");
-    await page.keyboard.press("ArrowDown");
-    await page.keyboard.type("-");
-    await page.keyboard.press("ArrowUp");
-    await page.keyboard.press("ArrowDown");
-    assert.deepEqual(await focused(), { student: second, column: round.id, value: "−" }, "the arrows left the mark as typed");
-    await settled(field(round, first));
-    await settled(field(round, second));
-    assert.equal((await overviewRow(first)).results[round.id].value, 1);
-    assert.equal((await overviewRow(second)).results[round.id].value, 0);
-    assert.equal(await page.evaluate((s) => document.querySelector(s).value, field(round, first)), "+");
+    // Participation down the list: a shortcut shows as its grade once saved,
+    // and an arrow never changes it.
+    const shown = (who) => page.evaluate((s) => document.querySelector(s).value, field(round, who));
+    const grades = async () => [(await overviewRow(first)).results[round.id].grade, (await overviewRow(second)).results[round.id].grade];
+    for (const [typed, expected] of [
+      [["+", "o"], [1, 3]],
+      [["-", "2"], [5, 2]],
+    ]) {
+      await page.keyboard.press("ArrowUp");
+      await page.keyboard.type(typed[0]);
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.type(typed[1]);
+      await page.keyboard.press("ArrowUp");
+      await page.keyboard.press("ArrowDown");
+      await settled(field(round, first));
+      await settled(field(round, second));
+      await page.waitForFunction((s, text) => document.querySelector(s).value === text, { timeout: 5000 }, field(round, first), String(expected[0]));
+      assert.deepEqual(await grades(), expected, `${typed.join(" and ")} are saved as the grades ${expected.join(" and ")}`);
+      assert.deepEqual([await shown(first), await shown(second)], expected.map(String), "and shown as them");
+      assert.deepEqual(await focused(), { student: second, column: round.id, value: String(expected[1]) }, "the arrows left the grade as saved");
+    }
     assert.ok([first, second].includes(username));
   });
 
@@ -1169,7 +1199,7 @@ describe("the gradebook", () => {
       await setWeight("Manual tests", "40");
       assert.deepEqual(await stored(), original, "nothing is saved at 110 %");
       assert.match(await teacher.page.evaluate(() => document.querySelector(".sl-exam").textContent), /Together 110 %/, "the sum is shown");
-      await setWeight("Participation (+/−)", "5");
+      await setWeight("Participation", "5");
       assert.deepEqual(await stored(), { ...original, manualTests: 40, participation: 5 }, "saved once they are back at 100 %");
     } finally {
       await fetchAs(teacher, `/exam/api/courses/${course.id}`, { method: "PUT", body: { weights: original } });
@@ -1213,7 +1243,7 @@ describe("the gradebook", () => {
       assert.ok(Math.abs(boxes.cell[3] - boxes.cell[1] - boxes.testHeight) <= 1, "the round's cell is as tall as a test's");
       await teacher.page.mouse.click(boxes.cell[2] - 3, boxes.cell[3] - 3);
       await teacher.page.waitForSelector("dialog[open] input[name=name]", { timeout: 5000 });
-      assert.equal(await teacher.page.$eval("dialog[open] h3", (h3) => h3.textContent), "Edit column: Participation (+/−)");
+      assert.equal(await teacher.page.$eval("dialog[open] h3", (h3) => h3.textContent), "Edit column: Participation");
       await teacher.page.click("dialog[open] .sl-exam-column-close");
       assert.equal(
         await teacher.page.$eval(`th[data-column="${quiz.id}"]`, (th) => th.querySelectorAll("input, sl-date-input").length),
@@ -4330,6 +4360,20 @@ describe("offline tests and their handouts", () => {
     assert.match(slides, /HANDOUT-ANSWER/);
     assert.match(slides, /HANDOUT-EXAM-VARIANT/);
     assert.doesNotMatch(slides, /HANDOUT-PRACTICE-VARIANT|HANDOUT-TEACHER-HINT/);
+    // Every slide shown in turn: only one larger than the deck is shrunk.
+    await teacher.page.waitForFunction(() => window.Reveal?.isReady(), { timeout: 20000 });
+    const fitted = await teacher.page.evaluate(async () => {
+      const size = Reveal.getComputedSlideSize();
+      const rows = [];
+      for (const slide of Reveal.getSlides()) {
+        const { h, v } = Reveal.getIndices(slide);
+        Reveal.slide(h, v);
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        rows.push({ larger: slide.scrollHeight > size.height + 2 || slide.scrollWidth > size.width + 2, fit: slide.hasAttribute("data-sl-fit") });
+      }
+      return rows;
+    });
+    assert.ok(fitted.length > 0 && fitted.every((row) => row.larger === row.fit), `a fit exactly on the slides larger than the deck: ${JSON.stringify(fitted)}`);
     // Not the shared account's name: it is `student`, a word the fixture's prose uses.
     assert.ok(!slides.includes(other), "no participant's name");
     assert.deepEqual(await fetchAs(student, deck), await fetchAs(student, absent), "a student finds no deck");
@@ -4758,6 +4802,88 @@ describe("the question editor", () => {
     await teacher.page.waitForSelector(".sl-exam-test-questions img", { timeout: 20000 });
     await teacher.page.waitForFunction(() => [...document.querySelectorAll(".sl-exam-test-questions img")].every((img) => img.complete && img.naturalWidth === 1), { timeout: 10000 });
     await fetchAs(teacher, `/exam/api/tests/${test.id}`, { method: "DELETE" });
+  });
+
+  test("the board solution fits the screen: a question whose image is taller than the window shrinks until all of it shows, a short slide is left alone, and a smaller window keeps the fit", async () => {
+    const { src } = (await uploadAs(teacher, { base64: tallPng(200, 2000).toString("base64") })).json;
+    const question = await newQuestion({ nameDe: "Hohes Bild", nameEn: "Tall picture", textDe: `<p>Siehe <img src="${src}" alt=""></p>`, textEn: `<p>See <img src="${src}" alt=""></p>` });
+    const test = await testOf("Editor: tall picture", [question.id]);
+    const page = await teacher.page.browserContext().newPage();
+    /** The current slide: its fit, and how far anything on it lies outside the window. */
+    const current = () =>
+      page.evaluate(() => {
+        const slide = Reveal.getCurrentSlide();
+        // A code block scrolls inside its own box; what it hides is not off the screen.
+        const clipped = (element) => {
+          for (let parent = element.parentElement; parent && parent !== slide; parent = parent.parentElement) {
+            if (getComputedStyle(parent).overflow !== "visible") return true;
+          }
+          return false;
+        };
+        let outside = 0;
+        for (const element of slide.querySelectorAll("*")) {
+          const box = element.getBoundingClientRect();
+          if ((box.width === 0 && box.height === 0) || clipped(element)) continue;
+          outside = Math.max(outside, box.bottom - innerHeight, -box.top, box.right - innerWidth, -box.left);
+        }
+        const image = slide.querySelector("img")?.getBoundingClientRect() ?? null;
+        return {
+          fit: slide.hasAttribute("data-sl-fit"),
+          scale: slide.style.scale === "" ? null : Number(slide.style.scale),
+          outside: Math.round(outside),
+          image: image && { top: image.top, bottom: image.bottom, height: image.height },
+        };
+      });
+    /** Until the current slide stands still: a slide transition moves it for most of a second. */
+    const settle = () =>
+      page.waitForFunction(
+        () =>
+          new Promise((resolve) => {
+            const where = () => JSON.stringify(Reveal.getCurrentSlide().getBoundingClientRect());
+            const first = where();
+            setTimeout(() => resolve(where() === first), 300);
+          }),
+        { timeout: 10000, polling: 100 }
+      );
+    try {
+      await page.setViewport({ width: 1280, height: 800 });
+      await page.goto(`${applicationUrl}/exam/tests/${test.id}/solution`, { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => window.Reveal?.isReady() && document.body.style.display !== "none", { timeout: 20000 });
+      await page.waitForFunction(() => [...document.images].every((img) => img.complete && img.naturalHeight > 0), { timeout: 10000 });
+
+      await page.evaluate(() => Reveal.slide(0));
+      await settle();
+      assert.deepEqual(
+        await page.evaluate(() => [Reveal.getCurrentSlide().hasAttribute("data-sl-fit"), Reveal.getCurrentSlide().style.scale]),
+        [false, ""],
+        "the title slide fits as it is and carries no fit"
+      );
+
+      await page.evaluate(() => Reveal.slide(1));
+      await page.waitForFunction(() => Reveal.getCurrentSlide().hasAttribute("data-sl-fit"), { timeout: 5000 });
+      await settle();
+      const large = await current();
+      assert.ok(large.scale > 0 && large.scale < 1, `the question's slide is shrunk: ${large.scale}`);
+      assert.ok(large.outside <= 2, `nothing of the slide runs off the 1280×800 window: ${large.outside}px`);
+      assert.ok(large.image.top >= 0 && large.image.bottom <= 800 + 2, `the whole image is on the screen: ${JSON.stringify(large.image)}`);
+      assert.equal(
+        await page.evaluate(() => {
+          const slide = Reveal.getCurrentSlide();
+          return [slide.querySelector("h3"), ...slide.querySelectorAll(".sl-board-answers li")].every((element) => element.getBoundingClientRect().bottom <= innerHeight);
+        }),
+        true,
+        "the heading and every answer as well"
+      );
+
+      await page.setViewport({ width: 1024, height: 768 });
+      await settle();
+      const smaller = await current();
+      assert.ok(smaller.scale < large.scale, `a smaller window shrinks it further: ${smaller.scale} after ${large.scale}`);
+      assert.ok(smaller.outside <= 2, `and it still fits: ${smaller.outside}px`);
+    } finally {
+      await page.close();
+      await fetchAs(teacher, `/exam/api/tests/${test.id}`, { method: "DELETE" });
+    }
   });
 
   test("retire, revive and delete: a retired question stays in its tests, a deletion confirms its planned tests, a fresh one goes with its images", async () => {

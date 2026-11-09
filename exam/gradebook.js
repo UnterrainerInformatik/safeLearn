@@ -34,8 +34,21 @@ import { viennaDate } from "./tests.js";
  */
 export const entryKinds = Object.freeze([...Object.keys(entryCategory), "projectmark"]);
 
-/** The kinds whose result is a grade from 1 to 5 the teacher types (design D3). */
-const gradeKinds = Object.freeze(["presentation", "project"]);
+/**
+ * The kinds whose result is a grade from 1 to 5 the teacher types (design D3).
+ * Participation (`plusminus`) is one too, and also takes the shortcuts of
+ * `participationShortcuts`.
+ */
+const gradeKinds = Object.freeze(["presentation", "project", "plusminus"]);
+
+/** A participation field's shortcuts and the grade each one stands for. */
+const participationShortcuts = Object.freeze({ "+": 1, o: 3, O: 3, "-": 5, "−": 5 });
+
+/** A participation result's grade: the typed grade, or the one of a shortcut. */
+function participationGrade(input) {
+  if (typeof input?.mark === "string") return participationShortcuts[input.mark.trim()] ?? null;
+  return input?.grade;
+}
 
 /**
  * The category a column of `kind` is shown in: the one it counts towards, and
@@ -400,20 +413,25 @@ export function deleteColumn(db, id) {
 
 /**
  * A result as typed into a column's field, turned into what is stored: `mark`
- * (`+` or `-`) for participation and a project's mark, `grade` (1 to 5) for a
+ * (`+` or `-`) for a project's mark, `grade` (1 to 5) for participation, a
  * presentation or a project, `points` (0 to the maximum) for a column with a
- * maximum, `percent` (0 to 100) for one without. A grade's `value` is its band
- * midpoint now; it is recomputed on every read (design D3).
+ * maximum, `percent` (0 to 100) for one without. Participation also takes the
+ * shortcuts `+`, `o` and `-` as `mark`, which become the grades 1, 3 and 5. A
+ * grade's `value` is its band midpoint now; it is recomputed on every read
+ * (design D3).
  */
 function normalizeResult(input, column, scale) {
-  if (column.kind === "plusminus" || column.kind === "projectmark") {
+  if (column.kind === "projectmark") {
     const mark = typeof input?.mark === "string" ? input.mark.trim().replace("−", "-") : null;
-    if (mark !== "+" && mark !== "-") throw new InvalidInputError("exam.errors.gradebook.participationMark");
+    if (mark !== "+" && mark !== "-") throw new InvalidInputError("exam.errors.gradebook.projectMark");
     return { value: mark === "+" ? 1 : 0, points: null, grade: null };
   }
   if (gradeKinds.includes(column.kind)) {
-    const grade = input?.grade;
-    if (!Number.isInteger(grade) || grade < 1 || grade > 5) throw new InvalidInputError("exam.errors.gradebook.gradeRange");
+    const participation = column.kind === "plusminus";
+    const grade = participation ? participationGrade(input) : input?.grade;
+    if (!Number.isInteger(grade) || grade < 1 || grade > 5) {
+      throw new InvalidInputError(participation ? "exam.errors.gradebook.participationGrade" : "exam.errors.gradebook.gradeRange");
+    }
     return { value: bandMidpoint(grade, scale), points: null, grade };
   }
   if (column.max_points !== null) {
@@ -610,7 +628,7 @@ function withNotes(entries, notes) {
  */
 function entryFromRow(row, scale) {
   const typed = row.grade ?? null;
-  const mark = row.kind === "plusminus" || row.kind === "projectmark";
+  const mark = row.kind === "projectmark";
   return {
     id: row.id,
     columnId: row.assessment_id,
@@ -620,7 +638,7 @@ function entryFromRow(row, scale) {
     value: typed === null ? row.value : bandMidpoint(typed, scale),
     points: row.points,
     maxPoints: row.max_points,
-    // A participation or project mark is + or -, not a grade.
+    // A project's mark is + or -, not a grade.
     grade: mark ? null : (typed ?? gradeFor(row.value, scale)),
     date: row.held_on,
     semesterDate: row.project_held_on ?? row.held_on,

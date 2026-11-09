@@ -3722,6 +3722,110 @@ export async function wrapAsDocument(html, req) {
 }
 
 /**
+ * Every slide of a deck fits the screen (presentation-view, "Every slide fits
+ * the screen"). Reveal sizes a deck to the window and never scales a slide by
+ * its content, so a slide taller or wider than the deck runs off the screen.
+ * This script measures the current slide - its natural size, every fragment
+ * counted, since a fragment only changes its opacity and takes up its room
+ * from the start - and only when that is larger than the deck's slide size by
+ * more than a rounding error does it shrink the slide, its proportions kept,
+ * until it fits. A slide that fits gets nothing: no style and no class, so it
+ * looks exactly as it did before this rule.
+ *
+ * It shrinks with the CSS `scale` property and not `transform` or `zoom`:
+ * `scale` composes with the transforms Reveal's transitions set on a slide, and
+ * unlike `zoom` it scales a percentage size (an image at `max-width: 50%`)
+ * along with everything else. Reveal centers a slide by its layout height and
+ * puts one taller than the deck at the top, so the slide is scaled from its top
+ * centre. A slide wider than the deck is scaled until its right edge is back
+ * inside, which keeps it centred.
+ *
+ * It reruns when Reveal is ready, on every slide change and every resize, when
+ * an image or a font of the deck loads, and when the current slide changes its
+ * size for any other reason (a diagram drawn late). The print view lays every
+ * slide on a page of its own, so there it fits all of them once the pages are
+ * laid out.
+ */
+const deckFitScript = `
+    <script>
+      (function () {
+        // A slide is shrunk only when it is larger than the deck by more than
+        // this, so a rounding difference never touches a slide that fits.
+        var tolerance = 2;
+
+        function clearFit(slide) {
+          if (!slide.hasAttribute("data-sl-fit")) return;
+          slide.style.removeProperty("scale");
+          slide.style.removeProperty("transform-origin");
+          slide.removeAttribute("data-sl-fit");
+        }
+
+        function fit(slide, width, height) {
+          if (!slide || !width || !height) return;
+          // Its natural size, which a scale leaves alone: scrollWidth and
+          // scrollHeight are layout sizes, before any transform.
+          var naturalWidth = slide.scrollWidth;
+          var naturalHeight = slide.scrollHeight;
+          if (naturalWidth === 0 && naturalHeight === 0) return;
+          var factor = 1;
+          if (naturalHeight > height + tolerance) factor = Math.min(factor, height / naturalHeight);
+          // Scaled from its horizontal centre, a slide whose content reaches
+          // naturalWidth ends at width / 2 + factor * (naturalWidth - width / 2).
+          if (naturalWidth > width + tolerance) factor = Math.min(factor, width / 2 / (naturalWidth - width / 2));
+          if (factor >= 1) {
+            clearFit(slide);
+            return;
+          }
+          slide.setAttribute("data-sl-fit", "");
+          slide.style.setProperty("transform-origin", "50% 0");
+          slide.style.setProperty("scale", String(factor));
+        }
+
+        function fitCurrent() {
+          var slide = Reveal.getCurrentSlide();
+          var size = Reveal.getComputedSlideSize();
+          fit(slide, size.width, size.height);
+          watch(slide);
+        }
+
+        // In the print view every slide is on a page of its own, as wide as
+        // the slide and a margin taller, and the page is what it has to fit.
+        // Until the pages are laid out there is nothing to measure against.
+        function fitPrinted() {
+          document.querySelectorAll(".reveal .pdf-page > section:not(.stack)").forEach(function (slide) {
+            fit(slide, slide.offsetWidth, slide.parentElement.clientHeight);
+          });
+        }
+
+        // The current slide's own size, which changes when an image or a
+        // diagram arrives after the slide was first measured.
+        var observed = null;
+        var observer = window.ResizeObserver ? new ResizeObserver(function () { fitCurrent(); }) : null;
+        function watch(slide) {
+          if (!observer || observed === slide) return;
+          if (observed) observer.unobserve(observed);
+          observed = slide;
+          if (slide) observer.observe(slide);
+        }
+
+        function refit() {
+          if (Reveal.isPrintView && Reveal.isPrintView()) fitPrinted();
+          else fitCurrent();
+        }
+
+        Reveal.on("ready", refit);
+        Reveal.on("slidechanged", refit);
+        Reveal.on("resize", refit);
+        Reveal.on("pdf-ready", fitPrinted);
+        window.addEventListener("resize", function () { if (Reveal.isReady()) refit(); });
+        document.addEventListener("load", function (event) {
+          if (event.target && event.target.tagName === "IMG" && Reveal.isReady()) refit();
+        }, true);
+        if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { if (Reveal.isReady()) refit(); });
+      })();
+    </script>`;
+
+/**
  * `options.title` names a deck that is no corpus file - the exam module's board
  * solution (`board-solution`) - in place of `req.file.name`.
  */
@@ -3938,6 +4042,7 @@ export async function wrapInReveal(reveal, req, options = {}) {
         pdfMaxPagesPerSlide: 1
       });
     </script>
+    ${deckFitScript}
   </body>
   
   </html>

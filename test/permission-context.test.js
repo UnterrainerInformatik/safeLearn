@@ -24,6 +24,7 @@ import assert from "node:assert/strict";
 import { afterEach, describe, mock, test } from "node:test";
 
 import { getPermissionContext } from "../permission-context.js";
+import { setUserAttribute } from "../middlewares/keycloak-middleware.js";
 import { hasSomeRoles, identityOf } from "../utils.js";
 import { resolveFileVisibility } from "../obsidian.js";
 
@@ -316,5 +317,86 @@ describe("the identity a request is recorded under", () => {
     assert.equal(identityOf({ user: { accessTokenDecoded: {} } }), null);
     assert.equal(identityOf({ user: { accessTokenDecoded: { preferred_username: "   " } } }), null);
     assert.equal(identityOf({ user: { accessTokenDecoded: { preferred_username: 42 } } }), null);
+  });
+});
+
+describe("two writes of one account do not undo each other", () => {
+  /**
+   * An account endpoint that keeps one account the way Keycloak does: a POST
+   * replaces the whole attribute set. A POST whose `lastVisitedUrl` is
+   * `held` waits for `release` before it is stored, as a slow write would.
+   */
+  function accountStore(attributes, { held = null, release = null } = {}) {
+    const store = { attributes: { ...attributes }, posts: 0 };
+    global.fetch = async (url, options = {}) => {
+      if (options.method === "POST") {
+        const body = JSON.parse(options.body);
+        if (held !== null && body.attributes.lastVisitedUrl === held) await release;
+        store.posts += 1;
+        store.attributes = { ...body.attributes };
+        return { ok: true };
+      }
+      return { ok: true, json: async () => ({ id: "0000-1111", username: "x", attributes: Object.fromEntries(Object.entries(store.attributes).map(([k, v]) => [k, [v]])) }) };
+    };
+    return store;
+  }
+
+  /** A session of its own per check, so the writes of one check never queue behind another's. */
+  const sessionOf = (name) => {
+    const req = teacherSession();
+    req.user.preferred_username = name;
+    return req;
+  };
+
+  test("a page read with the old preferences, writing lastVisitedUrl after a newer config was stored, keeps the newer config", async () => {
+    const store = accountStore({ config: JSON.stringify({ vt: 0 }), lastVisitedUrl: "/before" });
+    const page = sessionOf("writer-late");
+    // The page reads the account while the teacher is still in student view.
+    assert.equal((await getPermissionContext(page)).preferences.vt, 0);
+    // The teacher switches back; that write is stored first.
+    assert.equal(await setUserAttribute(sessionOf("writer-late"), "config", JSON.stringify({ vt: 1 })), true);
+    assert.equal(JSON.parse(store.attributes.config).vt, 1);
+    // Only now does the page store where it was.
+    assert.equal(await setUserAttribute(page, "lastVisitedUrl", "/page"), true);
+    assert.deepEqual(
+      { config: JSON.parse(store.attributes.config), lastVisitedUrl: store.attributes.lastVisitedUrl },
+      { config: { vt: 1 }, lastVisitedUrl: "/page" },
+      "the page's write carries the newer config, not the one it read"
+    );
+  });
+
+  test("a slow lastVisitedUrl write and a config write started after it end with the new config, in the order asked", async () => {
+    let open;
+    const release = new Promise((resolve) => (open = resolve));
+    const store = accountStore({ config: JSON.stringify({ vt: 0 }), lastVisitedUrl: "/before" }, { held: "/page", release });
+    const page = sessionOf("writer-slow");
+    await getPermissionContext(page);
+    const visited = setUserAttribute(page, "lastVisitedUrl", "/page");
+    const reset = setUserAttribute(sessionOf("writer-slow"), "config", JSON.stringify({ vt: 1 }));
+    // Give the reset every chance to overtake the held write.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(store.posts, 0, "the config write waits for the one asked for before it");
+    open();
+    assert.deepEqual([await visited, await reset], [true, true]);
+    assert.equal(store.posts, 2);
+    assert.deepEqual(
+      { config: JSON.parse(store.attributes.config), lastVisitedUrl: store.attributes.lastVisitedUrl },
+      { config: { vt: 1 }, lastVisitedUrl: "/page" },
+      "the new config stands, and the page's lastVisitedUrl is kept"
+    );
+  });
+
+  test("a failed write does not hold up the next one, and is not laid over it", async () => {
+    const store = accountStore({ config: JSON.stringify({ vt: 0 }) });
+    const req = sessionOf("writer-failing");
+    const working = global.fetch;
+    global.fetch = async (url, options = {}) => (options.method === "POST" ? { ok: false, status: 500 } : working(url, options));
+    const logged = await whileLogging(async () => {
+      assert.equal(await setUserAttribute(req, "config", JSON.stringify({ vt: 1 })), false);
+    });
+    assert.ok(logged.length > 0, "the failure is logged");
+    global.fetch = working;
+    assert.equal(await setUserAttribute(sessionOf("writer-failing"), "lastVisitedUrl", "/page"), true);
+    assert.equal(JSON.parse(store.attributes.config).vt, 0, "the refused config is not written along");
   });
 });

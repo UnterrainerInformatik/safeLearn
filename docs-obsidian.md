@@ -182,6 +182,11 @@ An embedded PDF is shown in the browser's own PDF viewer, on the page and on a s
 Other kinds of files, such as Office documents or ZIP archives, are not shown inline: an embed of one renders as a link to it, like a wiki link does.
 
 Linking or embedding a file is also what lets students download it: a file in the vault is served to someone only if a page they may see links or embeds it - see [permissions](docs-permissions.md). A link or embed written as code, between backticks or in a fenced block, is shown as written and counts for nothing.
+## Every Slide Fits the Screen
+A presentation (`?reveal`) is shown on a projector or a classroom monitor, so every slide fits wholly on the screen it is shown on. A slide whose content is larger than the screen - a tall image, long code, a long list - is scaled down as a whole, its proportions kept, until all of it is visible; nothing runs off the screen. A slide that fits is left exactly as it is: it is never enlarged, and never shrunk because another slide is too large. The size is taken with all of a slide's [fragments](#fragments-in-reveal-js) shown, so a slide revealed step by step keeps its size from step to step. Making the window smaller shrinks a slide that no longer fits, making it larger again gives it back its own size, and the PDF export (`?reveal=1&print-pdf`) fits each slide to its page the same way.
+
+This holds for every deck: the presentations of your vault, a handout's solution deck and a test's solution on the board. The application never splits a slide into several; if a slide becomes too small to read, split or shorten it yourself. A code block keeps its own height limit and scrolls inside its box, as before.
+
 ## Fragments in Reveal.js
 You may use fragments when starting a presentation.
 Fragments are parts of you page that pop up one after another, step by step, when you're pressing the forward-button you normally press to advance to the next vertical page.

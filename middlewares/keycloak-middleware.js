@@ -433,48 +433,95 @@ export async function getUserAttributes(req, getAll = false) {
   return account;
 }
 
+/**
+ * The attribute writes of each account, by account: the chain they run in one
+ * after another, and what this process last wrote of each attribute and when
+ * that write was done.
+ *
+ * Every write sends the account's whole attribute set, merged from the account
+ * as the request read it - for a rendered page, at its start. Two writes of
+ * one account could otherwise overtake each other: the `lastVisitedUrl` of a
+ * page read with an old preference block would put that old block back after a
+ * newer one had been stored (participation-grades-and-fitting-decks, design
+ * D3). So the writes of an account run in the order they were asked for, and a
+ * write lays over the account it read every attribute this process has written
+ * since that read began. A fresh lookup would do the same at the price of a
+ * second one per rendered page, and a page costs one (role-resolution).
+ */
+const accountWrites = new Map();
+
+/** The account a session belongs to, as the key of `accountWrites`. */
+function accountKey(req) {
+  return req.user.sub ?? req.user.preferred_username ?? req.user.email ?? req.user.accessToken;
+}
+
+/**
+ * The attribute set to write: the account as this request read it at
+ * `readAt`, with what this process has written of it since, and with
+ * `attributeName` set to `attributeValue`.
+ */
+function mergeAttributes(account, written, readAt, attributeName, attributeValue) {
+  const attributes = { ...account?.attributes };
+  for (const [name, write] of Object.entries(written)) {
+    if (write.at >= readAt) attributes[name] = write.value;
+  }
+  attributes[attributeName] = attributeValue;
+  return { ...account, attributes };
+}
+
 export async function setUserAttribute(req, attributeName, attributeValue) {
   if (!req || !req.user || !req.user.accessToken || !req.user.keycloakConfig) {
     return null;
   }
 
   // Reads from the permission context when this request has one, so storing
-  // `lastVisitedUrl` after a rendered page costs no lookup of its own.
+  // `lastVisitedUrl` after a rendered page costs no lookup of its own. When the
+  // account was read is what decides which of this process's own writes it
+  // may be missing: the context's clock reading is taken before its lookup.
+  const fetchedAt = Date.now();
   const currentAttributes = await getUserAttributes(req, true);
-  // console.log("current attributes", currentAttributes);
+  const context = req.permissionContext ? await req.permissionContext : null;
+  const readAt = context?.referenceDate instanceof Date ? context.referenceDate.getTime() : fetchedAt;
 
-  // Merge current and new attributes
-  const mas = { ...currentAttributes.attributes, [attributeName]: attributeValue };
-  const mergedAttributes = { ...currentAttributes, attributes: mas };
-  // console.log("merged attributes before saving", mergedAttributes);
+  const key = accountKey(req);
+  if (!accountWrites.has(key)) accountWrites.set(key, { chain: Promise.resolve(), written: {} });
+  const writes = accountWrites.get(key);
 
-  const result = await fetch(accountUrl(req), {
-    method: "POST",
-    headers: {
-      Authorization: "Bearer " + req.user.accessToken,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(mergedAttributes),
-  })
-    .then((response) => {
-      if (!response.ok) {
-        // console.log('url', url);
-        // console.log('response', JSON.stringify(response, null, 2));
-        throw new Error("Failed to update attribute " + JSON.stringify({ mergedAttributes: mergedAttributes }, null, 2));
-      }
-      return true;
+  const write = writes.chain.then(async () => {
+    const mergedAttributes = mergeAttributes(currentAttributes, writes.written, readAt, attributeName, attributeValue);
+    const stored = await fetch(accountUrl(req), {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer " + req.user.accessToken,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(mergedAttributes),
     })
-    .catch((error) => {
-      console.error("Error updating attribute:", error);
-      return false;
-    });
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error("Failed to update attribute " + JSON.stringify({ mergedAttributes: mergedAttributes }, null, 2));
+        }
+        return true;
+      })
+      .catch((error) => {
+        console.error("Error updating attribute:", error);
+        return false;
+      });
+    // Taken once the write is done: a request that began reading before this
+    // point may or may not have seen it, so it gets it laid over.
+    if (stored) writes.written[attributeName] = { value: attributeValue, at: Date.now() };
+    return stored;
+  });
+  // A failed write does not hold up the next one.
+  writes.chain = write.catch(() => {});
+  const result = await write;
 
   // What was just written is what the rest of this request has to read. The
   // context is handed the value rather than asked to fetch it again, and it
   // knows how to fold a written preference block into the preferences a check
   // reads - this file does not.
-  if (result && req.permissionContext) {
-    (await req.permissionContext).applyWrittenAttribute(attributeName, attributeValue);
+  if (result && context) {
+    context.applyWrittenAttribute(attributeName, attributeValue);
   }
   return result;
 }

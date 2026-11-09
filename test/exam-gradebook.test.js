@@ -214,6 +214,11 @@ function column(db, course, spec, results = []) {
   return created;
 }
 
+/** The migrations up to 018, before participation marks became grades (019). */
+function beforeParticipationGrades() {
+  return readMigrations().slice(0, 18);
+}
+
 describe("existing entries become columns", () => {
   /** A database at schema version 3, as the module left it before columns. */
   function schemaThreeDatabase() {
@@ -280,8 +285,9 @@ describe("existing entries become columns", () => {
 
   test("migrating from schema 3 groups entries into columns and changes no result, proposal or override", () => {
     const { db, dbPath, before, results } = schemaThreeDatabase();
-    const migrated = migrate(db, dbPath);
-    assert.deepEqual(migrated, { from: 3, to: readMigrations().length });
+    // Up to 018: 019 turns participation marks into grades on purpose, and has its own test.
+    const migrated = migrate(db, dbPath, beforeParticipationGrades());
+    assert.deepEqual(migrated, { from: 3, to: 18 });
 
     const columns = db.prepare("SELECT * FROM assessment ORDER BY id").all();
     assert.deepEqual(
@@ -368,7 +374,7 @@ describe("short tests join the categories", () => {
     const columnsBefore = rows("SELECT * FROM assessment ORDER BY id");
     const resultsBefore = rows("SELECT * FROM manual_entry ORDER BY id");
 
-    assert.deepEqual(migrate(db, dbPath), { from: 9, to: readMigrations().length });
+    assert.deepEqual(migrate(db, dbPath, beforeParticipationGrades()), { from: 9, to: 18 });
 
     // 014 adds a mark column's project and a result's typed grade, both empty here.
     assert.deepEqual(rows("SELECT * FROM assessment ORDER BY id"), columnsBefore.map((row) => ({ ...row, project_id: null })), "every column keeps its id and values");
@@ -431,15 +437,15 @@ describe("columns and their results", () => {
     close(anna.semesters.ws.categories.shortTests.fraction, (5 / 6 + 0.5) / 2);
   });
 
-  test("a column without a name is named by its date; participation takes + or −, a column without a maximum percent", () => {
+  test("a column without a name is named by its date; participation takes a grade, a column without a maximum percent", () => {
     const { db, course } = gradebookFixture();
-    const round = column(db, course, { kind: "plusminus", date: "2026-11-04" }, [["anna", { mark: "+" }], ["ben", { mark: "−" }]]);
+    const round = column(db, course, { kind: "plusminus", date: "2026-11-04" }, [["anna", { grade: 1 }], ["ben", { grade: 5 }]]);
     assert.equal(round.name, "2026-11-04");
     assert.equal(round.category, "participation");
     const homework = column(db, course, { kind: "homework", name: "Essay", date: "2026-11-05" }, [["anna", { percent: 90 }]]);
     const anna = studentRecord(db, course.id, "anna").entries;
-    assert.deepEqual(anna.map((e) => [e.category, e.value, e.grade]), [["participation", 1, null], ["homework", 0.9, 1]]);
-    assert.equal(studentRecord(db, course.id, "ben").entries[0].value, 0);
+    assert.deepEqual(anna.map((e) => [e.category, e.value, e.grade]), [["participation", 0.94, 1], ["homework", 0.9, 1]]);
+    assert.equal(studentRecord(db, course.id, "ben").entries[0].value, 0.25);
     assert.throws(() => setResult(db, homework.id, "anna", { points: 9 }), InvalidInputError, "a column in percent takes percent");
   });
 
@@ -464,7 +470,7 @@ describe("columns and their results", () => {
       [points, { points: -1 }],
       [points, { points: "18" }],
       [percent, { percent: 120 }],
-      [marks, { mark: "o" }],
+      [marks, { mark: "x" }],
     ]) {
       assert.throws(() => setResult(db, target.id, "anna", input), InvalidInputError, JSON.stringify(input));
     }
@@ -540,8 +546,8 @@ describe("proposals, overrides and the course overview", () => {
     column(db, course, { kind: "test", date: "2026-11-03" }, [["anna", { percent: 70 }]]);
     column(db, course, { kind: "plusminus", date: "2026-11-04" }, [["anna", { mark: "+" }]]);
     const before = studentRecord(db, course.id, "anna").semesters.ws;
-    // 30 % at 0.7 and 15 % at 1.0, scaled to 45 %.
-    close(before.proposal.fraction, (30 * 0.7 + 15 * 1) / 45);
+    // 30 % at 0.7 and 15 % at 0.94 (a + is the grade 1), scaled to 45 %.
+    close(before.proposal.fraction, (30 * 0.7 + 15 * 0.94) / 45);
     assert.equal(before.proposal.grade, 2);
 
     column(db, course, { kind: "test", date: "2026-12-01" }, [["anna", { percent: 40 }]]);
@@ -812,7 +818,7 @@ describe("presentations and projects", () => {
     const records = () => [1, 2].flatMap((courseId) => ["anna", "ben"].map((username) => studentRecord(db, courseId, username)));
     const before = { columns: rows("SELECT * FROM assessment ORDER BY id"), results: rows("SELECT * FROM manual_entry ORDER BY id"), records: records() };
 
-    assert.deepEqual(migrate(db, dbPath), { from: 13, to: readMigrations().length });
+    assert.deepEqual(migrate(db, dbPath, beforeParticipationGrades()), { from: 13, to: 18 });
 
     assert.deepEqual(rows("SELECT * FROM assessment ORDER BY id"), before.columns.map((row) => ({ ...row, project_id: null })), "every column keeps its id and values");
     assert.deepEqual(rows("SELECT * FROM manual_entry ORDER BY id"), before.results.map((row) => ({ ...row, grade: null })), "every result keeps its id and values");
@@ -876,7 +882,7 @@ describe("presentations and projects", () => {
     close(graded.categories.projects.fraction, 0.815, "three − marks change nothing");
     assert.equal(graded.categories.projects.count, 1);
     close(graded.proposal.fraction, 0.815);
-    assert.equal(keyOf(() => setResult(db, marks[0].id, "anna", { grade: 1 })), "exam.errors.gradebook.participationMark", "a mark is + or −");
+    assert.equal(keyOf(() => setResult(db, marks[0].id, "anna", { grade: 1 })), "exam.errors.gradebook.projectMark", "a mark is + or −");
   });
 
   test("a project's marks stand right before it and go by its semester, whatever their own dates", () => {
@@ -1188,5 +1194,108 @@ describe("notes", () => {
     assert.equal(refused(() => setNote(db, course.id, homework.id, "anna", "changed")), "exam.errors.years.closed");
     assert.equal(refused(() => deleteNote(db, course.id, homework.id, "anna")), "exam.errors.years.closed");
     assert.deepEqual(db.prepare("SELECT username, text FROM result_note").all().map((row) => ({ ...row })), [{ username: "anna", text: "kept" }]);
+  });
+});
+
+describe("participation as grades", () => {
+  const onlyParticipation = { onlineTests: 0, manualTests: 0, shortTests: 0, presentations: 0, projects: 0, participation: 100, homework: 0 };
+  const keyOf = (fn) => {
+    try {
+      fn();
+    } catch (error) {
+      return error.key;
+    }
+    return null;
+  };
+
+  test("a participation column takes a grade, and + o - as the grades 1, 3 and 5, each worth its band's midpoint", () => {
+    const { db, course } = gradebookFixture();
+    updateCourse(db, course.id, { weights: onlyParticipation });
+    const round = createColumn(db, course.id, { kind: "plusminus", date: "2026-11-04" });
+    const cases = [
+      [{ grade: 2 }, 2, 0.815],
+      [{ mark: "+" }, 1, 0.94],
+      [{ mark: "o" }, 3, 0.69],
+      [{ mark: "O" }, 3, 0.69],
+      [{ mark: "-" }, 5, 0.25],
+      [{ mark: "−" }, 5, 0.25],
+    ];
+    for (const [input, grade, value] of cases) {
+      const row = setResult(db, round.id, "anna", input);
+      assert.equal(row.results[round.id].grade, grade, `${JSON.stringify(input)}: the sheet shows the grade`);
+      const [entry] = studentRecord(db, course.id, "anna").entries;
+      assert.deepEqual([entry.category, entry.grade], ["participation", grade], JSON.stringify(input));
+      close(entry.value, value, `${JSON.stringify(input)}: the band midpoint on 88/75/63/50`);
+    }
+    close(studentRecord(db, course.id, "anna").semesters.ws.categories.participation.fraction, 0.25);
+  });
+
+  test("anything but a grade from 1 to 5 or a shortcut is refused, and the result stays", () => {
+    const { db, course } = gradebookFixture();
+    const round = column(db, course, { kind: "plusminus", date: "2026-11-04" }, [["anna", { grade: 2 }]]);
+    for (const bad of [{ mark: "++" }, { mark: "x" }, { grade: 0 }, { grade: 6 }, { grade: 2.5 }, { grade: "2" }, { percent: 80 }, {}]) {
+      assert.equal(keyOf(() => setResult(db, round.id, "anna", bad)), "exam.errors.gradebook.participationGrade", JSON.stringify(bad));
+    }
+    assert.equal(studentRecord(db, course.id, "anna").entries[0].grade, 2, "the result stays as it was");
+    assert.equal(keyOf(() => createColumn(db, course.id, { kind: "plusminus", date: "2026-11-04", maxPoints: 10 })), "exam.errors.gradebook.participationMax");
+  });
+
+  test("migrating to 019 turns + into 1 and − into 5, closed years included, and leaves a project's marks and every note and date", () => {
+    const dbPath = temporaryPath();
+    const db = new DatabaseSync(dbPath);
+    openDatabases.push(db);
+    db.exec("PRAGMA foreign_keys = ON");
+    migrate(db, dbPath, beforeParticipationGrades());
+    const allWeights = '{"onlineTests":0,"manualTests":0,"shortTests":0,"presentations":0,"projects":10,"participation":90,"homework":0}';
+    db.exec(`
+      INSERT INTO school_year (id, name, starts_on, summer_starts_on, ends_on, is_current) VALUES
+        (1, '2025/26', '2025-09-08', '2026-02-16', '2026-07-03', 0),
+        (2, '2026/27', '2026-09-07', '2027-02-15', '2027-07-02', 1);
+      INSERT INTO class (id, school_year_id, name) VALUES (1, 1, '3bhif'), (2, 2, '4bhif');
+      INSERT INTO student (username) VALUES ('anna'), ('ben');
+      INSERT INTO roster_entry (class_id, username, joined_at) VALUES (1, 'anna', 'x'), (1, 'ben', 'x'), (2, 'anna', 'x'), (2, 'ben', 'x');
+      INSERT INTO course (id, class_id, subject, weights) VALUES (1, 1, 'WMC', '${allWeights}'), (2, 2, 'WMC', '${allWeights}');
+      INSERT INTO assessment (id, course_id, kind, name, held_on, max_points, created_at, project_id) VALUES
+        (4, 1, 'plusminus', 'old round', '2026-03-04', NULL, 'x', NULL),
+        (5, 2, 'plusminus', 'round', '2026-10-02', NULL, 'x', NULL),
+        (6, 2, 'project', 'Webshop', '2026-11-20', NULL, 'x', NULL),
+        (7, 2, 'projectmark', 'check', '2026-11-10', NULL, 'x', 6);
+      INSERT INTO manual_entry (id, assessment_id, username, value, points, grade, created_at, updated_at) VALUES
+        (10, 4, 'anna', 1, NULL, NULL, 'x', 'x'), (11, 4, 'ben', 0, NULL, NULL, 'x', 'x'),
+        (20, 5, 'anna', 1, NULL, NULL, 'x', 'x'), (21, 5, 'ben', 0, NULL, NULL, 'x', 'x'),
+        (30, 7, 'anna', 1, NULL, NULL, 'x', 'x'), (31, 7, 'ben', 0, NULL, NULL, 'x', 'x');
+      INSERT INTO result_note (assessment_id, username, text, created_at, updated_at) VALUES (5, 'ben', 'was ill', 'x', 'x'), (4, 'anna', 'kept', 'x', 'x');
+      UPDATE school_year SET closed_at = '2026-07-10T00:00:00Z' WHERE id = 1;
+    `);
+    const rows = (sql) => db.prepare(sql).all().map((row) => ({ ...row }));
+    const before = { columns: rows("SELECT * FROM assessment ORDER BY id"), notes: rows("SELECT * FROM result_note ORDER BY id") };
+
+    assert.deepEqual(migrate(db, dbPath), { from: 18, to: readMigrations().length });
+
+    assert.deepEqual(
+      rows("SELECT id, assessment_id, username, value, points, grade FROM manual_entry ORDER BY id"),
+      [
+        { id: 10, assessment_id: 4, username: "anna", value: 0.94, points: null, grade: 1 },
+        { id: 11, assessment_id: 4, username: "ben", value: 0.25, points: null, grade: 5 },
+        { id: 20, assessment_id: 5, username: "anna", value: 0.94, points: null, grade: 1 },
+        { id: 21, assessment_id: 5, username: "ben", value: 0.25, points: null, grade: 5 },
+        { id: 30, assessment_id: 7, username: "anna", value: 1, points: null, grade: null },
+        { id: 31, assessment_id: 7, username: "ben", value: 0, points: null, grade: null },
+      ],
+      "+ is 1 at 0.94, − is 5 at 0.25, in the closed year too; a project's marks stay + and −"
+    );
+    assert.deepEqual(rows("SELECT * FROM assessment ORDER BY id"), before.columns, "every column keeps its name and date");
+    assert.deepEqual(rows("SELECT * FROM result_note ORDER BY id"), before.notes, "every note stays");
+
+    const anna = studentRecord(db, 2, "anna");
+    const round = anna.entries.find((entry) => entry.columnId === 5);
+    assert.deepEqual([round.grade, round.date], [1, "2026-10-02"]);
+    close(anna.semesters.ws.categories.participation.fraction, 0.94);
+    const mark = anna.entries.find((entry) => entry.columnId === 7);
+    assert.deepEqual([mark.grade, mark.value, mark.category], [null, 1, null], "a project's mark counts nowhere, as before");
+    assert.equal(studentRecord(db, 1, "ben").entries[0].grade, 5, "the closed year's − is a 5");
+
+    assert.throws(() => db.prepare("UPDATE manual_entry SET value = 0.5 WHERE id = 10").run(), /school year closed/, "the closed year's trigger is back");
+    db.prepare("UPDATE manual_entry SET value = 0.5 WHERE id = 20").run();
   });
 });

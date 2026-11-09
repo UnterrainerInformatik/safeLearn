@@ -38,15 +38,23 @@ const categoryLabels = {
  */
 const addableKinds = { manualTests: "test", shortTests: "shorttest", presentations: "presentation", projects: "project", participation: "plusminus", homework: "homework" };
 
-/** True for a column whose fields take `+` or `−`: participation and a project's marks. */
+/** True for a column whose fields take `+` or `−`: a project's marks. */
 function isMark(column) {
-  return column.kind === "plusminus" || column.kind === "projectmark";
+  return column.kind === "projectmark";
 }
 
-/** True for a column whose fields take a grade from 1 to 5: a presentation or a project's end grade. */
+/** True for a column whose fields take a grade from 1 to 5: participation, a presentation or a project's end grade. */
 function isGraded(column) {
-  return column.kind === "presentation" || column.kind === "project";
+  return column.kind === "plusminus" || column.kind === "presentation" || column.kind === "project";
 }
+
+/** True for a participation column, whose grade fields also take the shortcuts `+`, `o` and `-`. */
+function isParticipation(column) {
+  return column.kind === "plusminus";
+}
+
+/** The keys a participation field takes as a shortcut, and what the field shows until the grade is saved. */
+const participationShortcuts = { "+": "+", o: "o", O: "o", "-": "−", "−": "−" };
 
 const semesterLabels = { ws: t("exam.gradebook.semester.ws"), ss: t("exam.gradebook.semester.ss") };
 
@@ -192,6 +200,11 @@ function readCell(column, text) {
   if (isMark(column)) {
     const mark = trimmed.replace("−", "-");
     return mark === "+" || mark === "-" ? { body: { mark } } : { reason: t("exam.gradebook.markRefused") };
+  }
+  if (isParticipation(column)) {
+    if (/^[1-5]$/.test(trimmed)) return { body: { grade: Number(trimmed) } };
+    // A shortcut goes out as typed; the server turns it into its grade (design D1).
+    return trimmed in participationShortcuts ? { body: { mark: trimmed } } : { reason: t("exam.gradebook.participationRefused") };
   }
   if (isGraded(column)) return /^[1-5]$/.test(trimmed) ? { body: { grade: Number(trimmed) } } : { reason: t("exam.gradebook.gradeRefused") };
   const value = parseNumber(trimmed);
@@ -645,11 +658,12 @@ class GradebookView extends ExamElement {
     }
     const mark = isMark(column);
     const graded = isGraded(column);
+    const participation = isParticipation(column);
     let stored = result;
     const field = h("input", {
       type: "text",
       class: mark ? "sl-exam-cell sl-exam-mark" : "sl-exam-cell",
-      inputmode: mark ? "text" : graded ? "numeric" : "decimal",
+      inputmode: mark || participation ? "text" : graded ? "numeric" : "decimal",
       maxlength: mark || graded ? "1" : null,
       autocomplete: "off",
       value: cellText(column, result),
@@ -667,9 +681,15 @@ class GradebookView extends ExamElement {
         if (typed.empty) return stored === null ? null : examApi(path, { method: "DELETE" });
         return examApi(path, { method: "PUT", body: typed.body });
       },
-      onSaved: (answer) => {
+      onSaved: (answer, sentText) => {
         if (!answer) return;
         stored = answer.results[column.id] ?? null;
+        // A participation shortcut shows as the grade it was saved as, unless
+        // something else has been typed meanwhile.
+        if (participation && stored && field.value === sentText) {
+          field.value = cellText(column, stored);
+          field.markSaved(field.value);
+        }
         show(answer);
       },
     });
@@ -680,6 +700,16 @@ class GradebookView extends ExamElement {
         if (!["+", "-", "−"].includes(event.key)) return;
         event.preventDefault();
         field.value = event.key === "+" ? "+" : "−";
+        field.saveNow();
+      });
+    }
+    if (participation) {
+      // A shortcut is a complete value in one keystroke, like a + or −: it
+      // replaces what is there and is saved at once.
+      field.addEventListener("keydown", (event) => {
+        if (event.altKey || event.ctrlKey || event.metaKey || !(event.key in participationShortcuts)) return;
+        event.preventDefault();
+        field.value = participationShortcuts[event.key];
         field.saveNow();
       });
     }

@@ -1,7 +1,11 @@
+/* An image on a slide. Its width stays capped at half the slide, which the
+   decks are laid out for. Its height has no cap of its own: a percentage
+   height inside a block of no fixed height caps nothing, and a slide that a
+   tall image makes too large is shrunk as a whole by the deck's fit script
+   (wrapInReveal in obsidian.js), image and all. */
 #revealContent img {
   object-fit: contain;
   max-width: 50%;
-  max-height: 50%;
   background-color: #c3c3c3;
 }
 
