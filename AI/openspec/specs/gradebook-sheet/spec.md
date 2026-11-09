@@ -7,7 +7,7 @@ Defines the gradebook as a sheet - one column per assessment, one row per studen
 
 ### Requirement: Results are recorded in assessment columns
 
-A course's manual results SHALL be organized in columns. A column SHALL belong to one category - manual tests, short tests, presentations, projects, participation or homework - and SHALL carry a name, a date and, for manual tests, short tests and homework, optionally a maximum number of points. The date SHALL lie in the course's school year and SHALL decide the semester of every result in the column; a project's `+`/`−` column is the exception, see "A project has an end grade and `+`/`−` columns for the record". A student SHALL have at most one result per column. Every rule of the gradebook about results stays as it is: a test, short-test or homework result is points out of the column's maximum or, without a maximum, a percentage, a participation result is `+` (1) or `−` (0), and a presentation or project result is a grade from 1 to 5.
+A course's manual results SHALL be organized in columns. A column SHALL belong to one category - manual tests, short tests, presentations, projects, participation or homework - and SHALL carry a name, a date and, for manual tests, short tests and homework, optionally a maximum number of points. The date SHALL lie in the course's school year and SHALL decide the semester of every result in the column; a project's `+`/`−` column is the exception, see "A project has an end grade and `+`/`−` columns for the record". A student SHALL have at most one result per column. Every rule of the gradebook about results stays as it is: a test, short-test or homework result is points out of the column's maximum or, without a maximum, a percentage, and a participation, presentation or project result is a grade from 1 to 5.
 
 #### Scenario: A paper test as a column
 
@@ -31,7 +31,7 @@ The sheet SHALL show a `+` at the top of each of the categories manual tests, sh
 #### Scenario: A participation column
 
 - **WHEN** a teacher uses the `+` of participation and enters the date 2026-11-04
-- **THEN** a participation column dated 2026-11-04 appears, and each student has a field for `+` or `−` in it
+- **THEN** a participation column dated 2026-11-04 appears, without a maximum, and each student has a field for a grade from 1 to 5 in it
 
 #### Scenario: Changing the maximum
 
@@ -99,7 +99,7 @@ Every field of the sheet SHALL be saved as soon as its value changes, without a 
 
 ### Requirement: Arrow keys move between the sheet's result fields
 
-While a result field of the sheet has the focus, the arrow keys SHALL move the focus between result fields, for points, percent and `+`/`−` fields alike. The down arrow SHALL move to the same column's field of the next student, the up arrow to that of the previous student. The right arrow SHALL move to the same student's field in the next column to the right, and the left arrow to the one to the left, but only while the text cursor stands at the end (right) or the start (left) of the field's text, so that the arrows still move the cursor inside a value being typed. An empty field counts as both. Moving SHALL save the field being left, as leaving it by any other means does. At the edge of the sheet the focus SHALL stay where it is. Left and right SHALL pass over category boundaries as if the columns were one row. The arrows SHALL NOT change a field's value: a `+`/`−` field is set by typing `+` or `-`. The override field SHALL NOT take part in arrow movement. Tab and Shift+Tab SHALL move along the row as the browser does. Enter in a result field SHALL do what the down arrow does: save the field and move the focus to the same column's field of the next student.
+While a result field of the sheet has the focus, the arrow keys SHALL move the focus between result fields, for points, percent, grade and `+`/`−` fields alike. The down arrow SHALL move to the same column's field of the next student, the up arrow to that of the previous student. The right arrow SHALL move to the same student's field in the next column to the right, and the left arrow to the one to the left, but only while the text cursor stands at the end (right) or the start (left) of the field's text, so that the arrows still move the cursor inside a value being typed. An empty field counts as both. Moving SHALL save the field being left, as leaving it by any other means does. At the edge of the sheet the focus SHALL stay where it is. Left and right SHALL pass over category boundaries as if the columns were one row. The arrows SHALL NOT change a field's value: a `+`/`−` field (a project's mark) is set by typing `+` or `-`, a grade field by typing the grade, and a participation field also by typing `+`, `o` or `-`, which it shows as the grade 1, 3 or 5 once saved. The override field SHALL NOT take part in arrow movement. Tab and Shift+Tab SHALL move along the row as the browser does. Enter in a result field SHALL do what the down arrow does: save the field and move the focus to the same column's field of the next student.
 
 #### Scenario: Entering a test for the class
 
@@ -119,8 +119,8 @@ While a result field of the sheet has the focus, the arrow keys SHALL move the f
 
 #### Scenario: Participation marks down the list
 
-- **WHEN** a teacher in a participation column types `+`, presses the down arrow, types `-` and presses the down arrow again
-- **THEN** the first student has `+`, the second has `−`, and the focus is in the third student's field
+- **WHEN** a teacher in a participation column types `+`, presses the down arrow, types `o`, presses the down arrow, types `-`, presses the down arrow, types `2` and presses the down arrow again
+- **THEN** the first four students show the grades 1, 3, 5 and 2, and the focus is in the fifth student's field
 
 #### Scenario: Enter down the list
 
@@ -465,3 +465,22 @@ An online-test column's result fields cannot be edited and the arrow keys pass o
 
 - **WHEN** a teacher types "You forgot GreetingService.java (-1)", presses Enter and types "Otherwise great."
 - **THEN** the note is stored on two lines, and pressing the up arrow on the second line moves the cursor to the first line instead of to the previous student
+
+### Requirement: Participation marks recorded before grades become grades
+
+A participation result recorded as `+` or `−` before participation took grades SHALL become a grade once, when the module's database is upgraded: `+` SHALL become the grade 1 and `−` the grade 5. From then on it SHALL count and show like every other participation grade, at the middle of its grade's band. This SHALL hold for results of closed school years as well, so that a closed year's participation shows as grades too. The upgrade SHALL keep every result's column, student, date and note, and SHALL NOT touch a project's `+`/`−` marks.
+
+#### Scenario: A + from October
+
+- **WHEN** a student had `+` in a participation column dated 2026-10-02 before the upgrade, and the scale is 88/75/63/50
+- **THEN** after the upgrade the field shows the grade 1 and the result counts as 0.94
+
+#### Scenario: A − from October
+
+- **WHEN** a student had `−` in a participation column before the upgrade, and the scale is 88/75/63/50
+- **THEN** after the upgrade the field shows the grade 5 and the result counts as 0.25
+
+#### Scenario: A project's marks stay marks
+
+- **WHEN** a project's mark column holds `+` and `−` before the upgrade
+- **THEN** after the upgrade it still holds `+` and `−` and counts in no category
