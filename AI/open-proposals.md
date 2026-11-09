@@ -25,14 +25,6 @@ Mitarbeitskontrollen werden künftig als **Note von 1 bis 5** eingetragen, mit d
 
 Zu klären im Design: Was wird aus bestehenden `+`/`-`-Einträgen (z. B. `+` → 1, `-` → 5, oder bleiben sie als alte Marken)? Die Projektmarken (`projectmark`) teilen heute die `+`/`−`-Eingabe und sind davon nicht betroffen; sie bleiben, wie sie sind.
 
-## Violetter Rahmen während einer Online-Prüfung im Vollbild
-Ein Schüler-Bildschirm mit laufendem Test soll im Klassenzimmer auf einen Blick erkennbar sein: ein violetter Rahmen um die ganze Seite. Entschieden (2026-11-09):
-- **Nur bei Online-Tests**, nicht auf der Handout-Seite eines Offline-Tests.
-- **Nur im Vollbild.** Verlässt die Seite den Vollbildmodus, verschwindet der Rahmen. So sieht der Lehrer im Vorbeigehen, ob der Vollbildmodus aktiv ist.
-- **Auch in der Vorschau des Lehrers.**
-
-Seit `exam-fullscreen-chrome` sind Navigation und Menüs der Seite während des Schreibens ohnehin ausgeblendet; der Rahmen hängt am selben Zustand wie die Vollbild-Erkennung in `exam/client/attempt.js`.
-
 ## Lehrer-Session bleibt nach `vt: 0` in der Schüleransicht hängen
 In `test/exam.test.js` schalten zwei Checks die Lehrer-Session mit `setPreferences(teacher, { vt: 0 })` in die Schüleransicht und im `finally` mit `setPreferences(teacher, {})` zurück: „no student reaches another student's attempt, and a teacher cannot write a test“ (online tests: writing) und „no student, no teacher in student view and no username off the roster gets the role“ (Matura candidates). Das Zurückstellen scheitert jedes Mal mit *Preference "vt" of the teacher session was set to 1, but the application renders with 0*: Der Schreibweg in `setPreferences` (`test/harness.js`) meldet Erfolg, nach dem Reload rendert die App aber weiter mit `vt = 0`.
 
