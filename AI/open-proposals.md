@@ -31,4 +31,11 @@ themen:
 ---
 ```
 
-Diese Properties sind Metadaten (z. B. für die PDF-Erzeugung), kein Inhalt. Im App-Code (`app.js`, `obsidian.js`, `obsidian-page.js`, `utils.js`) gibt es derzeit keinerlei Frontmatter-Behandlung — markdown-it macht aus dem öffnenden `---` vermutlich ein `<hr>` und aus den Zeilen bis zum schließenden `---` eine Setext-Überschrift (`<h2>`). Gewünscht: ein Frontmatter-Block ganz am Dateianfang wird vor dem Rendern entfernt, sowohl im HTML- als auch im reveal-Pfad (bei reveal wäre `---` sonst zusätzlich ein Folientrenner). Zu klären: ob Suchindex und WYSIWYG-/Exam-Pfade denselben Strip brauchen, und ob einzelne Properties später doch genutzt werden sollen (z. B. `lang`, `footer`).
+Diese Properties sind Metadaten (z. B. für die PDF-Erzeugung), kein Fließtext. Im App-Code gibt es derzeit keinerlei Frontmatter-Behandlung — markdown-it macht aus dem öffnenden `---` vermutlich ein `<hr>` und aus den Zeilen bis zum schließenden `---` eine Setext-Überschrift; in reveal wäre `---` zusätzlich ein Folientrenner.
+
+**Strippen, bevor irgendetwas anderes mit dem File passiert.** Das ist nicht nur Kosmetik: die Datei-Permission wird aus der *ersten Zeile* gelesen (`app.js:128`, `obsidian.js:471` → `parseFirstLineForPermissions`). Steht das Frontmatter oben, ist die erste Zeile `---` und die `@@@`-Directive greift nicht mehr — das File wäre ungewollt anders berechtigt. Frontmatter steht per Definition **immer ganz am Dateianfang** (öffnendes `---` in Zeile 1). Die Datei-`@@@`-Directive steht daher in der Zeile direkt *nach* dem schließenden `---`. Deshalb wird der Frontmatter-Block ganz am Anfang der Pipeline entfernt (beim Einlesen, vor Permission-Parsing, Rendern, Exam-Pfaden usw.) — danach ist die `@@@`-Zeile wieder die erste Zeile und alles Bestehende funktioniert unverändert. Ein `---` an späterer Stelle ist kein Frontmatter und bleibt, was es ist.
+
+Die Properties werden aber nicht weggeworfen, sondern separat aufgehoben:
+- **Suche:** die Werte (z. B. `klasse`, `fach`, `themen`) sind für den Suchindex interessant und sollen mit indiziert werden.
+- **Fließtext-GUI (nicht reveal):** die Properties lassen sich per Button als Message einblenden. In reveal werden sie nicht angezeigt.
+- **Header/Footer:** die Properties `header` und `footer` (wie `footer: "4AHIF - WMC4 - Hausübung 1"` im Beispiel) werden als Kopf- bzw. Fußzeile der Seite eingeblendet. Zu klären: ob das auch in reveal gilt (dort z. B. als Folien-Footer).
