@@ -38,4 +38,4 @@ Diese Properties sind Metadaten (z. B. für die PDF-Erzeugung), kein Fließtext.
 Die Properties werden aber nicht weggeworfen, sondern separat aufgehoben:
 - **Suche:** die Werte (z. B. `klasse`, `fach`, `themen`) sind für den Suchindex interessant und sollen mit indiziert werden.
 - **Fließtext-GUI (nicht reveal):** die Properties lassen sich per Button als Message einblenden. In reveal werden sie nicht angezeigt.
-- **Header/Footer:** die Properties `header` und `footer` (wie `footer: "4AHIF - WMC4 - Hausübung 1"` im Beispiel) werden als Kopf- bzw. Fußzeile der Seite eingeblendet. Zu klären: ob das auch in reveal gilt (dort z. B. als Folien-Footer).
+- **Header/Footer:** die Properties `header` und `footer` (wie `footer: "4AHIF - WMC4 - Hausübung 1"` im Beispiel) werden als Kopf- bzw. Fußzeile der Seite eingeblendet. Das gilt auch in reveal: dort erscheinen sie als Header/Footer jeder Folie.
