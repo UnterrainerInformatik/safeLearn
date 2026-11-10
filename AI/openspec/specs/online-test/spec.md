@@ -95,7 +95,7 @@ The tests SHALL be listed newest first. Tests without a sitting SHALL come first
 Each test's row SHALL be coloured by where the test stands:
 - **open right now** while any of its sittings is open (an offline sitting once started), whatever its other sittings are;
 - otherwise **done** once it has sittings and every one is over;
-- otherwise **within the next 7 days** while a sitting that is not over opens less than seven days from now, including a planned offline sitting past its time that has not been started;
+- otherwise **within the next 6 days** while a sitting that is not over opens on a calendar day at most six days after today, both days taken in the school's time zone (Europe/Vienna) and the time of day not counting - a sitting later today included, and so is a planned offline sitting past its time that has not been started;
 - otherwise **later, or no sitting yet**.
 
 The colour SHALL NOT be the only carrier: each row SHALL name its state in words (as its tooltip), and a legend above the list SHALL show the four states with their colours. The marked row SHALL keep its own highlight over the colour, and the row's colour SHALL still be visible at its edge.
@@ -119,13 +119,24 @@ The colour SHALL NOT be the only carrier: each row SHALL name its state in words
 #### Scenario: A test being written right now
 
 - **WHEN** one of a test's sittings is open and a make-up is scheduled for next week
-- **THEN** its row is marked as open right now, not as within the next 7 days
+- **THEN** its row is marked as open right now, not as within the next 6 days
 
 #### Scenario: The next test
 
 - **WHEN** a test's only sitting opens in three days
-- **THEN** its row is marked as within the next 7 days
+- **THEN** its row is marked as within the next 6 days
 - **AND** a test whose only sitting opens in ten days is marked as later
+
+#### Scenario: Next week's test on the same weekday
+
+- **WHEN** a teacher looks at the list on Monday at 10:00 Vienna time, and one test's only sitting opens next Monday at 08:00 and another's on Sunday at 23:00
+- **THEN** the test of next Monday is marked as later
+- **AND** the test of Sunday is marked as within the next 6 days
+
+#### Scenario: A test later today
+
+- **WHEN** a test's only sitting opens today at 23:00 Vienna time and it is 08:00 now
+- **THEN** its row is marked as within the next 6 days
 
 ### Requirement: A sitting sets the window and the duration
 
@@ -654,7 +665,7 @@ The view for the class SHALL show how many participants are writing, have submit
 
 In the live view of an online sitting, the row of a participant who has submitted SHALL be coloured green (good), following the module's row colours (`exam-ui-conventions`). It SHALL no longer be shown faded. The rows of participants who have not started or are writing SHALL stay neutral. A participant's row that carries the suspicious signal (manipulated browser, hidden by timing, out of full screen, full screen not available, or without heartbeat) or a tick rate down SHALL show an amber stripe at its left edge, without a tint, on top of the colour of its status. The stripe SHALL only flag the row. It SHALL NOT change the order, the status or the grade, and SHALL NOT appear on the view for the class. A legend above the table SHALL name the green row and the amber stripe.
 
-The colours of the list of tests (open right now red, within the next 7 days amber, later slate, done green) SHALL be the module's shared row colours.
+The colours of the list of tests (open right now red, within the next 6 days amber, later slate, done green) SHALL be the module's shared row colours.
 
 #### Scenario: A submitted participant
 
