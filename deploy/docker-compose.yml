@@ -46,3 +46,15 @@ services:
       # module's database (exam.sqlite) and its backups (exam-backups/) live
       # here too, when the module is on.
       - ${DATA_DIR}:/app/data
+      # The Keycloak adapter configuration, OIDC client secret included. The
+      # pipeline writes it next to this file ("Fill keycloak.json file for
+      # deployment") rather than into the image's site/: the image is pushed to
+      # a public registry, and a secret in a layer outlives every rotation of it.
+      # create_host_path: false makes compose refuse to start when the file is
+      # missing, instead of mounting an empty directory in its place.
+      - type: bind
+        source: ./keycloak.json
+        target: /app/keycloak.json
+        read_only: true
+        bind:
+          create_host_path: false

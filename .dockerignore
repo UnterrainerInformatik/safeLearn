@@ -13,3 +13,9 @@ npm-debug.log
 README-secret.md
 # github related files
 .github/
+# Secrets never go into the image, which is pushed to a public registry.
+# keycloak.json (OIDC client secret) is mounted at runtime, at any depth - a
+# stale pipeline writing site/keycloak.json cannot bake it in again. The root
+# .env is a developer's local one; site/.env (no secrets) still goes in.
+**/keycloak*.json
+.env

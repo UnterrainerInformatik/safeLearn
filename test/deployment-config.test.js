@@ -14,13 +14,19 @@
  *
  *   - the image's own `.env` — the workflow's "Fill .env file" step writes
  *     `site/.env`, the `Dockerfile` copies it to `/app/.env`, and `app.js` loads
- *     it through dotenv. Baked into a layer that is pushed to a registry, so it
- *     is the wrong channel for a secret and the right one for everything else.
+ *     it through dotenv. Baked into a layer that is pushed to a public registry,
+ *     so it carries no secret at all — only ports, URLs and the start page.
  *   - the container's environment — the workflow's "Fill .env file for
  *     deployment" step writes `deploy/.env`, and `deploy/docker-compose.yml`
  *     interpolates it into its `environment:` block. Both halves are needed: a
  *     value written to `deploy/.env` that the compose file never names reaches
- *     nothing, which is its own test below.
+ *     nothing, which is its own test below. Every secret takes this channel.
+ *
+ * One file is not a variable: `keycloak.json`, which carries the OIDC client
+ * secret. It takes the runtime route as well — the deploy job writes it to
+ * `deploy/keycloak.json`, the SSH deploy copies it next to `deploy/.env`, and
+ * the compose file mounts it read-only to `/app/keycloak.json`. It never goes
+ * into `site/`, which the `Dockerfile` copies into the image.
  */
 
 import assert from "node:assert/strict";
@@ -198,20 +204,98 @@ test("every value the compose file interpolates is one the pipeline fills in", (
   }
 });
 
-test("the directory-service credentials travel by container environment, not in the image", () => {
-  for (const name of ["DIRECTORY_SERVICE_CLIENT_ID", "DIRECTORY_SERVICE_CLIENT_SECRET"]) {
+/**
+ * The secrets a deployment hands the application as variables, with where an
+ * operator reads about each. Every one has to reach the container through its
+ * environment and none may sit in the image's own .env.
+ */
+const secrets = new Map([
+  ["SESSION_SECRET", "docs-building.md, the SESSION_SECRET row"],
+  ["DIRECTORY_SERVICE_CLIENT_ID", 'docs-keycloak.md, "Directory search client"'],
+  ["DIRECTORY_SERVICE_CLIENT_SECRET", 'docs-keycloak.md, "Directory search client"'],
+]);
+
+test("every secret travels by container environment, not in the image", () => {
+  for (const [name, docs] of secrets) {
     assert.ok(
-      containerEnv.has(name),
-      `${name} is expected in ${composePath}'s environment: block — see docs-keycloak.md, ` +
-        `"Directory search client".`
+      containerEnv.has(name) && deployEnv.has(name),
+      `${name} is expected in ${composePath}'s environment: block and in deploy/.env — see ${docs}.`
     );
     assert.ok(
       !imageEnv.has(name),
       `${name} is written into the image's own .env by ${workflowPath}. That image is pushed to a ` +
-        `registry, so the client secret would sit in a published layer and outlive every rotation ` +
-        `of it. It belongs in the container's environment, which it already reaches.`
+        `public registry, so the secret would sit in a published layer and outlive every rotation ` +
+        `of it. It belongs in the container's environment ("Fill .env file for deployment" -> ` +
+        `${composePath} environment:), which it already reaches.`
     );
   }
+});
+
+test("the pipeline writes no keycloak.json into the image", () => {
+  for (const line of workflow.split("\n")) {
+    if (line.trim().startsWith("#")) continue;
+    assert.ok(
+      !/\bsite\/keycloak[^\s]*\.json/.test(line),
+      `${workflowPath} touches site/keycloak.json: "${line.trim()}". The Dockerfile copies site/ into ` +
+        `the image, which is pushed to a public registry, and keycloak.json carries the OIDC client ` +
+        `secret. It reaches the container as a mount instead: written to deploy/keycloak.json before ` +
+        `the SSH deploy, mounted read-only by ${composePath}.`
+    );
+  }
+});
+
+/** The long-syntax bind mount of the compose service whose target is `target`, as text. */
+function composeMount(target) {
+  const lines = compose.split("\n");
+  const at = lines.findIndex((line) => line.trim() === `target: ${target}`);
+  if (at === -1) return undefined;
+  // The entry begins at the nearest "- type:" above and ends before the next "- ".
+  let start = at;
+  while (start > 0 && !/^\s+-\s+type:/.test(lines[start])) start--;
+  const indent = lines[start].match(/^(\s*)/)[1].length;
+  let end = start + 1;
+  while (end < lines.length) {
+    const line = lines[end];
+    if (line.trim().length > 0 && !line.trim().startsWith("#")) {
+      const lineIndent = line.match(/^(\s*)/)[1].length;
+      if (lineIndent <= indent) break;
+    }
+    end++;
+  }
+  return lines.slice(start, end).join("\n");
+}
+
+test("keycloak.json reaches the container through a read-only mount the pipeline fills", () => {
+  const mount = composeMount("/app/keycloak.json");
+  assert.ok(
+    mount,
+    `${composePath} mounts nothing at /app/keycloak.json. The image carries no keycloak.json, so ` +
+      `without the mount the instance refuses to start.`
+  );
+  assert.match(mount, /type:\s*bind/, `the /app/keycloak.json mount in ${composePath} has to be a bind mount.`);
+  assert.match(mount, /read_only:\s*true/, `the /app/keycloak.json mount in ${composePath} has to be read-only.`);
+  assert.match(
+    mount,
+    /create_host_path:\s*false/,
+    `the /app/keycloak.json mount in ${composePath} has to set bind.create_host_path: false. ` +
+      `Otherwise a missing file becomes an empty directory and the container starts broken.`
+  );
+  const source = mount.match(/source:\s*\.\/(\S+)/);
+  assert.ok(source, `the /app/keycloak.json mount in ${composePath} has to read a file next to it (source: ./...).`);
+
+  // The pipeline has to write that file into deploy/ before the SSH deploy copies the directory.
+  const lines = workflow.split("\n");
+  const deployAt = lines.findIndex((line) => line.trim() === "- name: Deploy using SSH 🚛");
+  assert.notEqual(deployAt, -1, `${workflowPath} has no "Deploy using SSH 🚛" step.`);
+  const written = new RegExp(`>>?\\s*\\.?/?deploy/${source[1].replace(/[.]/g, "\\.")}\\b`);
+  const writer = lines.slice(0, deployAt).findIndex((line) => !line.trim().startsWith("#") && written.test(line));
+  assert.notEqual(
+    writer,
+    -1,
+    `${composePath} mounts ./${source[1]} to /app/keycloak.json, and no step of ${workflowPath} before ` +
+      `"Deploy using SSH" writes deploy/${source[1]}. The server would get no file, and compose ` +
+      `refuses to start.`
+  );
 });
 
 test("a variable that exists for the harness reaches no deployed instance", () => {

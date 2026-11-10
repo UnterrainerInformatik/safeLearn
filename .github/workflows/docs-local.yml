@@ -41,14 +41,9 @@ jobs:
             echo NEXT_PUBLIC_SERVER_URL=${{ secrets.SERVER_URL }} >> site/.env
             echo NEXT_PUBLIC_IS_APP_FOLDER=true >> site/.env
             echo NEXT_AUTOSCAN=${{ secrets.AUTOSCAN || 'false' }} >> site/.env
-            echo SESSION_SECRET=${{ secrets.SESSION_SECRET }} >> site/.env
-      - name: Touch keycloak.json file
-        run: touch site/keycloak.json
-      - name: Fill keycloak.json file
-        run: |
-            cat <<EOF >> site/keycloak.json
-            ${{ secrets.KEYCLOAK_FILE }}
-            EOF
+            # No secret goes in here: the Dockerfile copies site/ into the image,
+            # and the image is pushed to a public registry. SESSION_SECRET and
+            # keycloak.json reach the container at runtime, in the deploy job.
       - name: Setup QEMU
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
@@ -176,6 +171,16 @@ jobs:
             # (docs-exam-module.md), a repository variable as well. Unset,
             # two years.
             echo EXAM_RETENTION_YEARS=${{ vars.EXAM_RETENTION_YEARS }} >> ./deploy/.env
+      - name: Fill keycloak.json file for deployment
+        run: |
+            # The Keycloak adapter configuration, OIDC client secret included.
+            # Written next to deploy/.env and bind-mounted read-only to
+            # /app/keycloak.json by docker-compose.yml, rather than copied into
+            # the image: the image is pushed to a public registry, and a secret
+            # baked into a layer outlives every rotation of it.
+            cat <<'KEYCLOAK_EOF' > ./deploy/keycloak.json
+            ${{ secrets.KEYCLOAK_FILE }}
+            KEYCLOAK_EOF
       - name: Normalize line endings for deploy scripts
         run: |
             sudo apt-get update -y

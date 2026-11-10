@@ -95,7 +95,7 @@ Because the server checks the login *before* it renders anything, no page, image
 1. **Set up Keycloak.** Create the client and the user attributes as described in [Keycloak](docs-keycloak.md#keycloak-setup), and add `<your server URL>/*` as a valid redirect URI. Assign the role `teacher` to the teachers and whatever class roles your directives use.
 2. **Fork and configure.** Follow [Building](docs-building.md): create the fork, merge this repository as the `public` remote, enter the GitHub secrets (`KEYCLOAK_FILE`, `SESSION_SECRET`, `SERVER_URL`, the Docker Hub and SSH ones, …).
 3. **Prepare the server.** Create the deploy directory and the data directory (`DEPLOY_DIR`, `DATA_DIR`) and give the SSH user write access to them.
-4. **Push to `master`.** The action builds the image, pushes it and starts the container on your server with `AUTH=keycloak`. The deployment always states `AUTH=keycloak` explicitly, so a mistake in its configuration can never turn your site public.
+4. **Push to `master`.** The action builds the image, pushes it and starts the container on your server with `AUTH=keycloak`. The deployment always states `AUTH=keycloak` explicitly, so a mistake in its configuration can never turn your site public. The image carries no secret: `KEYCLOAK_FILE` lands as `keycloak.json` in `DEPLOY_DIR` next to the compose file, which mounts it read-only into the container, and `SESSION_SECRET` reaches the container through its environment.
 5. From now on, every push to `master` publishes your changes. Merging `public/master` brings in SafeLearn's updates.
 
 For a small team, or to edit during a lesson, consider keeping the Markdown on a Nextcloud instead, mounted into the container: see [Where Your Markdown Lives](#where-your-markdown-lives).
@@ -219,6 +219,6 @@ The instance ends at start-up with a message naming the problem, rather than run
 | Configuration | Why |
 | --- | --- |
 | `AUTH` is anything but `keycloak`, `none` or unset | A typo must not decide whether the site is public. |
-| `AUTH=keycloak` (or unset) without a readable `keycloak.json` | Same reason. The message names `AUTH=none` as the deliberate alternative. |
+| `AUTH=keycloak` (or unset) without a readable `keycloak.json` | Same reason. The message names `AUTH=none` as the deliberate alternative. In a deployment the file is mounted from the deploy directory, never baked into the image; if it is missing there, compose already refuses to start the container. |
 | `AUTH=keycloak` (or unset) without `SESSION_SECRET` | There is no built-in secret, because it would be the same in every instance built from this public repository. |
 | `AUTH=none` with `EXAM_MODULE=on` | The exam module has to know who a reader is. |

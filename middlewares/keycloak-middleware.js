@@ -47,7 +47,10 @@ export async function initKeycloak(app) {
     console.error(
       `SafeLearn runs with Keycloak (AUTH is "keycloak" or unset) and cannot read keycloak.json ` +
         `from ${process.cwd()}: ${error.message}\n` +
-        "Provide keycloak.json for the realm this instance signs in against, or set AUTH=none " +
+        "Provide keycloak.json for the realm this instance signs in against: in a deployment, " +
+        "the read-only mount deploy/docker-compose.yml places at /app/keycloak.json (the pipeline " +
+        "writes it from KEYCLOAK_FILE next to the compose file; the image never carries it), or " +
+        "the keycloak.json next to app.js when running from a working tree. Or set AUTH=none " +
         "to publish without any sign-in (see docs-wysiwyg.md and READER_ROLES)."
     );
     process.exit(1);
@@ -76,9 +79,10 @@ export async function initKeycloak(app) {
   if (!sessionSecret || sessionSecret.trim() === "") {
     console.error(
       "SESSION_SECRET is not set, and SafeLearn signs its session cookies with it.\n" +
-        "Set SESSION_SECRET to a long random value in the .env file this deployment reads " +
-        "(/app/.env in the container image, or the .env next to app.js when running from a " +
-        "working tree), or pass it to the container as an environment variable.\n" +
+        "Set SESSION_SECRET to a long random value. In a deployment it reaches the container " +
+        "through its environment (deploy/.env -> deploy/docker-compose.yml environment:), never " +
+        "through the image, which is public; when running from a working tree, put it in the " +
+        ".env next to app.js.\n" +
         "It is only ever compared against itself, so any long random string will do — but it " +
         "must be different in every deployment, and changing it logs every user out once."
     );
