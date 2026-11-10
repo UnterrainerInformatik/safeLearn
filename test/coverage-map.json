@@ -572,9 +572,10 @@
       "corpus": []
     },
     "test/exam-test-timing.test.js": {
-      "what": "Where a test stands in the teacher's list of tests, unit by unit, without a browser, on the very file the browser loads: no sitting is later, every sitting over is done, an open sitting is open beside any other, one opening within seven days is soon and one at seven days or more is later, a coming make-up makes a written test soon again and a far one keeps it later, and a planned offline sitting past its time, never started, is soon.",
+      "what": "Where a test stands in the teacher's list of tests, unit by unit, without a browser, on the very file the browser loads: no sitting is later, every sitting over is done, an open sitting is open beside any other, one opening on a Vienna calendar day at most six days after today is soon whatever the time of day (later today included, Sunday 23:00 seen on Monday 10:00) and next Monday 08:00 is later, the day counts in Vienna rather than UTC and in days rather than hours across both DST changeovers, a coming make-up makes a written test soon again and a far one keeps it later, and a planned offline sitting past its time, never started, is soon.",
       "guards": [
-        "exam/client/test-timing.js"
+        "exam/client/test-timing.js",
+        "exam/client/periods.js"
       ],
       "corpus": []
     },
