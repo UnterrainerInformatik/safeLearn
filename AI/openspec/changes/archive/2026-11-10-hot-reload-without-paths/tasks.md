@@ -15,5 +15,5 @@
 ## 4. Docs and full run
 
 - [x] 4.1 Describe the new check in the `deployment-surface.js` row of `docs-testing.md`, and add it to `test/coverage-map.json` if the map lists checks per requirement. Verify: the coverage map references the new requirement "The reload endpoint names no file".
-- [ ] 4.2 Run `npm test`. Verify: green, apart from the known flaky checks (AI/memory/flaky-content-checks.md), which are re-run.
-- [ ] 4.3 Remove the "Hot-Reload-Kanal nennt geänderte gesperrte Files" entry from `AI/open-proposals.md` when archiving. If Gerald wants the remaining guess oracle tracked, add it there as a new entry. Verify: the entry is gone.
+- [x] 4.2 Run `npm test`. Verify: green, apart from the known flaky checks (AI/memory/flaky-content-checks.md), which are re-run.
+- [x] 4.3 Remove the "Hot-Reload-Kanal nennt geänderte gesperrte Files" entry from `AI/open-proposals.md` when archiving. If Gerald wants the remaining guess oracle tracked, add it there as a new entry. Verify: the entry is gone.
