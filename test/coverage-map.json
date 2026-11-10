@@ -110,7 +110,7 @@
       ]
     },
     "test/checks/navigation.js": {
-      "what": "Wiki-link resolution including the duplicated basename — with a digit in the name and without one — and the name with spaces, the folder-name edge cases, the table of contents and the navigation tree. That the Content list holds the headings of the page it is drawn on and no other: none on a module page after a corpus page, each page's own when two are rendered at once, a heading naming a tag as text, and no heading of a section the reader may not see. That at 1600px the burger is visible, folds the column away so the content takes its width, brings it back, and that the next page opens unfolded.",
+      "what": "Wiki-link resolution including the duplicated basename — with a digit in the name and without one — and the name with spaces, the folder-name edge cases, the table of contents and the navigation tree. That the Content list holds the headings of the page it is drawn on and no other: none on a module page after a corpus page, each page's own when two are rendered at once, a heading naming a tag as text, and no heading of a section the reader may not see. That at 1600px the burger is visible, folds the column away so the content takes its width, brings it back, and that the next page opens unfolded. That of two folders carrying the same name at the same depth - md/folder-tests/namesake-a/shared and namesake-b/shared - a click opens and closes only the one clicked, the other staying closed, and that a page inside the second opens its own folders on load, highlighted, and not its namesake's.",
       "guards": [
         "obsidian.js",
         "app.js",

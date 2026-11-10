@@ -36,6 +36,9 @@ const contentListPage = "/md/test-content-list.md";
 const teacherHeadingPage = "/md/test-search-jump.md";
 const teacherHeading = "Nur fuer Lehrende";
 const modulePage = "/admin/attachments";
+const namesakeA = ["folder-tests", "namesake-a", "shared"];
+const namesakeB = ["folder-tests", "namesake-b", "shared"];
+const namesakePage = "/md/folder-tests/namesake-b/shared/Namesake B.md";
 
 /** The Content list of the page the session is looking at, or `null` when it has none. */
 const contentList = (session) =>
@@ -48,6 +51,72 @@ const contentList = (session) =>
       markup: entry.innerHTML,
     }));
   });
+
+/**
+ * The state of the navigation-tree folders along each of the given paths, read
+ * off the rendered sidebar: for every folder on the path, whether its content is
+ * open, plus the files directly inside the last one — each with whether it can
+ * be seen (every folder around it open) and whether it is the highlighted page.
+ * A folder is found by walking the tree segment by segment, so two folders with
+ * the same name are told apart by where they sit, not by their markup.
+ */
+const treeState = (session, paths) =>
+  session.page.evaluate((paths) => {
+    const isOpen = (contents) => getComputedStyle(contents).maxHeight !== "0px";
+    const walk = (segments) => {
+      const folders = [];
+      for (const segment of segments) {
+        const scope = folders.length
+          ? folders[folders.length - 1].contents
+          : document.querySelector(".sidebar-dirlist");
+        const folder = [...scope.children].find(
+          (child) =>
+            child.classList.contains("folder") &&
+            child.querySelector(":scope > .folder-name").textContent.trim() === segment
+        );
+        if (!folder) return { found: false, folders };
+        folders.push({
+          name: segment,
+          header: folder.querySelector(":scope > .folder-name"),
+          contents: folder.querySelector(":scope > .folder-files"),
+        });
+      }
+      return { found: true, folders };
+    };
+    return paths.map((segments) => {
+      const { found, folders } = walk(segments);
+      if (!found) return { path: segments.join("/"), found: false };
+      const last = folders[folders.length - 1].contents;
+      return {
+        path: segments.join("/"),
+        found: true,
+        open: folders.map((folder) => isOpen(folder.contents)),
+        files: [...last.querySelectorAll(":scope > a")].map((link) => ({
+          name: link.textContent.trim(),
+          visible: folders.every((folder) => isOpen(folder.contents)),
+          highlighted: link.classList.contains("highlight"),
+        })),
+      };
+    });
+  }, paths);
+
+/** Clicks the name of the folder at the given path in the navigation tree. */
+const clickFolder = (session, segments) =>
+  session.page.evaluate((segments) => {
+    let scope = document.querySelector(".sidebar-dirlist");
+    let header = null;
+    for (const segment of segments) {
+      const folder = [...scope.children].find(
+        (child) =>
+          child.classList.contains("folder") &&
+          child.querySelector(":scope > .folder-name").textContent.trim() === segment
+      );
+      if (!folder) throw new Error(`no folder "${segments.join("/")}" in the navigation tree`);
+      header = folder.querySelector(":scope > .folder-name");
+      scope = folder.querySelector(":scope > .folder-files");
+    }
+    header.click();
+  }, segments);
 
 /** Every Markdown file of the corpus, as the path the application serves it on. */
 function corpusFiles(directory = corpusRoot, collected = []) {
@@ -472,5 +541,51 @@ describe("navigation", () => {
         `the folder "${folder}" should be listed in the navigation tree`
       );
     }
+  });
+
+  // ---- 6.6 Folders carrying the same name ----
+
+  test("of two folders carrying the same name, a click opens and closes only the one clicked, and a page inside the second opens that one", async () => {
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 500));
+    await render(session, corpusPage);
+    let [a, b] = await treeState(session, [namesakeA, namesakeB]);
+    assert.ok(a.found && b.found, `the tree should list ${namesakeA.join("/")} and ${namesakeB.join("/")}`);
+    assert.ok(!b.open.some(Boolean), `on ${corpusPage} no folder on ${b.path} should be open`);
+
+    await clickFolder(session, namesakeB.slice(0, 1));
+    await clickFolder(session, namesakeB.slice(0, 2));
+    await clickFolder(session, namesakeB);
+    await settle();
+    [a, b] = await treeState(session, [namesakeA, namesakeB]);
+    assert.deepEqual(b.open, [true, true, true], `clicking down to ${b.path} should open each folder on the way`);
+    assert.ok(
+      b.files.some((file) => file.name === "Namesake B" && file.visible),
+      `opening ${b.path} should reveal "Namesake B", but it holds ${JSON.stringify(b.files)}`
+    );
+    assert.deepEqual(
+      a.open.slice(1),
+      [false, false],
+      `opening ${b.path} should leave ${a.path} as it was, closed`
+    );
+
+    await clickFolder(session, namesakeB);
+    await settle();
+    [a, b] = await treeState(session, [namesakeA, namesakeB]);
+    assert.equal(b.open[2], false, `a second click on ${b.path} should close it again`);
+    assert.deepEqual(a.open.slice(1), [false, false], `closing ${b.path} should leave ${a.path} closed`);
+
+    await render(session, namesakePage);
+    await settle();
+    [a, b] = await treeState(session, [namesakeA, namesakeB]);
+    assert.deepEqual(b.open, [true, true, true], `${namesakePage} should open every folder on its own path`);
+    assert.ok(
+      b.files.some((file) => file.name === "Namesake B" && file.visible && file.highlighted),
+      `${namesakePage} should be shown and highlighted in its folder, but it holds ${JSON.stringify(b.files)}`
+    );
+    assert.deepEqual(
+      a.open.slice(1),
+      [false, false],
+      `${namesakePage} should not open ${a.path}, the folder carrying the same names`
+    );
   });
 });

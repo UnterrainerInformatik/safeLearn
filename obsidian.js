@@ -2797,31 +2797,23 @@ async function markPathForSelectedPage(req, files) {
   };
   const splitPath = path.split("/");
   r.file = splitPath.pop();
+  // The full path of every folder leading to the page, from the corpus root:
+  // `a`, `a/b`, `a/b/c`. A folder of the tree is opened when its own full path
+  // is one of these, so a namesake elsewhere in the tree never matches.
   for (let i = 0; i < splitPath.length; i++) {
-    const f = {
-      dir: splitPath[i],
-      level: i,
-    };
-    r.path.push(f);
+    r.path.push(splitPath.slice(0, i + 1).join("/"));
   }
-  console.log("markPathForSelectedPage", r);
   return r;
 }
 
-function lookupAndMarkPath(folder, level, path) {
-  for (const p of path) {
-    if (p.level === level && p.dir === folder) {
-      return true;
-    }
-  }
-  return false;
+function lookupAndMarkPath(folderPath, path) {
+  return path.includes(folderPath);
 }
 
 async function getDirectoryListingInternal(path, req, files, folders) {
   let html = "";
   let lastProcessedFileIndex = -1;
   let lastFile = null;
-  let currentLevel = 0;
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
@@ -2838,10 +2830,10 @@ async function getDirectoryListingInternal(path, req, files, folders) {
       // Insert as many folders as needed to reach the new folder
       for (let j = diffIndex; j < file.folderArray.length; j++) {
         const folder = file.folderArray[j];
-        html += insertDirFolder(folder, j);
-        if (lookupAndMarkPath(folder, currentLevel, path.path)) {
-          openNavTreeScript += `toggleDirList('${getCssHashKey(folder, j)}');\n`;
-          currentLevel++;
+        const folderPath = file.folderArray.slice(0, j + 1).join("/");
+        html += insertDirFolder(folder, folderPath, j);
+        if (lookupAndMarkPath(folderPath, path.path)) {
+          openNavTreeScript += `toggleDirList('${getCssHashKey(folderPath)}');\n`;
         }
       }
       folders = file.folderArray;
@@ -2880,13 +2872,16 @@ function hash32(str) {
   return (h >>> 0).toString(36);
 }
 
-function getCssHashKey(folder, j) {
-  return `ff-${hash32(folder)}-${j}`;
+// A folder is keyed by its full path from the corpus root, not by its name:
+// `exercises/WMC` and `homework/WMC` are different folders, and toggleDirList()
+// addresses the first element carrying the key.
+function getCssHashKey(folderPath) {
+  return `ff-${hash32(folderPath)}`;
 }
 
-function insertDirFolder(folder, j) {
+function insertDirFolder(folder, folderPath, j) {
   let r = "";
-  const key = getCssHashKey(folder, j);
+  const key = getCssHashKey(folderPath);
   r += `<div class="folder" style="margin: 0px; padding: 0px;">`;
   r += `<div class="folder-name row" onclick="toggleDirList('${key}')" style="cursor: pointer;">${indentStringFor(
     j

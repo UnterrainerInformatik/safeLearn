@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines the sidebar of the page view: that its Content list reflects only the page it is drawn on and the reader it is drawn for, and that the ☰ button shows and hides it at every viewport width.
+Defines the sidebar of the page view: that its Content list reflects only the page it is drawn on and the reader it is drawn for, that each folder of the navigation tree opens and closes on its own and the folders leading to the open page are shown open, and that the ☰ button shows and hides it at every viewport width.
 
 ## Requirements
 
