@@ -3463,17 +3463,14 @@ function getAutoReloadScript() {
           sessionStorage.setItem("scrollY", window.scrollY);
         }
 
+        // A page event names no file: the server sends it only to the client
+        // whose declared file was modified, so receiving it is the decision.
         if (payload.type === 'nav' && !window.Reveal) {
           location.reload();
         } else if (payload.type === 'page') {
-          const current = decodeURIComponent(location.pathname.replace(/^\\/+/, ""));
-          if (payload.files && payload.files.some(f => current.endsWith(f))) {
-            location.reload();
-          } else {
-            console.log('[SSE] Skipping reload: not affected', { current, files: payload.files });
-          }
+          location.reload();
         } else {
-          console.log('[SSE] Skipping reload: not affected', { current, files: payload.files });
+          console.log('[SSE] Skipping reload: not affected', { type: payload.type });
         }
       } catch (err) {
         console.error('[SSE] Error parsing reload payload:', err);

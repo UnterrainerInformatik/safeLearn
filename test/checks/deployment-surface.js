@@ -21,13 +21,20 @@
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import path from "node:path";
 import { before, describe, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 
-import { applicationUrl, render, sameOriginReferences, setPreferences, sharedSession } from "../harness.js";
+import {
+  applicationUrl,
+  render,
+  sameOriginReferences,
+  setPreferences,
+  sharedSession,
+  startAnonymous,
+} from "../harness.js";
 
 const projectRoot = path.resolve(import.meta.dirname, "..", "..");
 
@@ -162,6 +169,70 @@ async function subscribeToReload(query) {
     contentType: response.headers.get("content-type"),
     opened,
     afterwards,
+  };
+}
+
+/**
+ * The two files the reload check modifies in one sync: one every session may
+ * see and one only teachers may, as the `currentFile` a page declares them by.
+ */
+const hotReloadOpen = "md/test-hot-reload-open.md";
+const hotReloadRestricted = "md/test-hot-reload-restricted.md";
+
+/**
+ * Subscribes to the reload stream of the instance at `url`, declaring
+ * `currentFile` the way a rendered page does, and collects every `reload` event
+ * it is sent, parsed. No cookie is sent: this is the anonymous client the
+ * endpoint has to be safe against.
+ *
+ * Answers `{ events, raw, stop() }`; `raw` keeps each event's data as written,
+ * so an assertion can look for a path in what crossed the wire rather than in
+ * what parsed out of it.
+ */
+async function listenToReload(url, currentFile) {
+  const controller = new AbortController();
+  const context = encodeURIComponent(JSON.stringify({ type: "page", currentFile }));
+  const response = await fetch(`${url}/hot-reload?context=${context}`, { signal: controller.signal });
+  const events = [];
+  const raw = [];
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = "";
+  const reading = (async () => {
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        buffered += decoder.decode(value, { stream: true });
+        let end;
+        while ((end = buffered.indexOf("\n\n")) !== -1) {
+          const block = buffered.slice(0, end);
+          buffered = buffered.slice(end + 2);
+          const lines = block.split("\n");
+          if (!lines.includes("event: reload")) continue;
+          const data = lines
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => line.slice("data:".length).trim())
+            .join("\n");
+          raw.push(data);
+          try {
+            events.push(JSON.parse(data));
+          } catch {
+            events.push({ unparsable: data });
+          }
+        }
+      }
+    } catch {
+      // Aborted by stop(), which is the only way this stream ends here.
+    }
+  })();
+  return {
+    events,
+    raw,
+    async stop() {
+      controller.abort();
+      await reading;
+    },
   };
 }
 
@@ -418,6 +489,79 @@ describe("deployment surface", () => {
       "a subscription carrying an uninterpretable context should be established exactly as one without it"
     );
     assert.equal(malformed.contentType, plain.contentType, "and should be served as the same thing");
+  });
+
+  test("the reload stream names no file, and a page is told only when exactly its file changed", async () => {
+    // The suite's own instance runs without a watcher, so this one is spawned
+    // with it: it watches the working tree's `md/`, the same files the edit
+    // below touches.
+    const instance = await startAnonymous({ env: { NEXT_AUTOSCAN: "true" } });
+    const files = [hotReloadOpen, hotReloadRestricted].map((name) => {
+      const onDisk = path.join(projectRoot, name);
+      return { onDisk, original: readFileSync(onDisk, "utf8") };
+    });
+    let declaringOpen;
+    let declaringBoth;
+    try {
+      declaringOpen = await listenToReload(instance.url, hotReloadOpen);
+      // Both paths strung together: a declaration that contains several files
+      // must match none of them, or one connection tests many guesses at once.
+      declaringBoth = await listenToReload(instance.url, `${hotReloadOpen} ${hotReloadRestricted}`);
+      // The watcher has to have finished crawling the corpus before an edit is
+      // reported as one; it says nothing when it has.
+      await delay(2000);
+
+      const stamp = `\n<!-- modified by the reload check at ${Date.now()} -->\n`;
+      for (const file of files) writeFileSync(file.onDisk, file.original + stamp);
+
+      // One sync may arrive as one scan or as one per file. Wait for the first
+      // event, then until the stream has been quiet for a while.
+      const deadline = Date.now() + 20000;
+      while (declaringOpen.events.length === 0 && Date.now() < deadline) await delay(200);
+      let seen = -1;
+      while (Date.now() < deadline) {
+        const now = declaringOpen.events.length + declaringBoth.events.length;
+        if (now === seen) break;
+        seen = now;
+        await delay(3000);
+      }
+    } finally {
+      for (const file of files) writeFileSync(file.onDisk, file.original);
+      await declaringOpen?.stop();
+      await declaringBoth?.stop();
+      await instance.stop();
+    }
+
+    for (const [who, stream] of [
+      ["the client declaring the open file", declaringOpen],
+      ["the client declaring both paths at once", declaringBoth],
+    ]) {
+      for (const [index, data] of stream.raw.entries()) {
+        assert.ok(
+          !data.includes("md/") && !Object.hasOwn(stream.events[index], "files"),
+          `${who} was sent a reload event that names files: ${data}. The endpoint answers ` +
+            `anyone, so a path it sends is a path every anonymous client learns, restricted or not.`
+        );
+      }
+    }
+    assert.ok(
+      declaringOpen.events.some((event) => JSON.stringify(event) === JSON.stringify({ type: "page" })),
+      `the client declaring ${hotReloadOpen} was not told to reload its page after that file changed. ` +
+        `It received: ${JSON.stringify(declaringOpen.raw)}`
+    );
+    assert.deepEqual(
+      declaringBoth.raw,
+      [],
+      "a client declaring several paths strung together was told about a change; a declared file " +
+        "has to be exactly the modified one"
+    );
+    for (const file of files) {
+      assert.equal(
+        readFileSync(file.onDisk, "utf8"),
+        file.original,
+        `${path.relative(projectRoot, file.onDisk)} was not put back the way the check found it`
+      );
+    }
   });
 
   test("a page whose reload stream is refused retries with a growing delay", async () => {

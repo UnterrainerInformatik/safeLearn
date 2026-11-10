@@ -196,6 +196,13 @@ const restrictedFiles = [
     directive: ["teacher"],
     content: "STALEGESCHLOSSEN",
   },
+  // The restricted half of the sync `test/checks/deployment-surface.js` makes
+  // on a watching instance; its path must never reach the reload stream.
+  {
+    path: "/md/test-hot-reload-restricted.md",
+    directive: ["teacher"],
+    content: "the restricted file of a sync",
+  },
   // One of the places `test/checks/attachments.js` embeds its shared image.
   {
     path: "/md/test-attachments-teachers.md",

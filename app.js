@@ -269,18 +269,21 @@ function broadcastReloadSSE(filesChanged = null) {
       // Full reload for everyone
       shouldReload = true;
     } else {
-      // Reveal presentation: only reload if the open file was changed
-      shouldReload = filesChanged.some(changed =>
-        currentFile.endsWith(changed) || currentFile.includes(changed)
-      );
+      // Only the client whose declared file is exactly one of the modified
+      // ones. Not a substring match: a declared string that contains several
+      // paths would otherwise match them all and test many guesses at once.
+      shouldReload = filesChanged.includes(currentFile);
     }
 
     // console.log(`Client ${id} (currentFile: ${currentFile}) - shouldReload: ${shouldReload}`);
     if (!shouldReload) continue;
 
-    const payload = isNavChange
-      ? { type: "nav" }
-      : { type: "page", files: filesChanged };
+    // The payload names no file. This endpoint answers anyone, and one sync can
+    // modify an open file together with a restricted one; sending the list would
+    // tell every client on the open file the path of the restricted one. The
+    // server has already decided that this client's page is affected, so the
+    // kind of reload is all it needs.
+    const payload = isNavChange ? { type: "nav" } : { type: "page" };
 
     try {
       res.write(`event: reload\ndata: ${JSON.stringify(payload)}\n\n`);
