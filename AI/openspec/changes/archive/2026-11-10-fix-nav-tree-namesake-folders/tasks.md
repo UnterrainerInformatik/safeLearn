@@ -14,4 +14,4 @@
 
 - [x] 3.1 Run `npm test`; verify the new check and the existing navigation and folder-tests checks pass (re-run known flaky checks once before treating them as failures)
 - [x] 3.2 Note in `AI/architecture.md` (component map for `obsidian.js`) that nav-tree folders are keyed by full path; extend the Purpose of `AI/openspec/specs/page-navigation/spec.md` to mention the navigation tree
-- [ ] 3.3 After the safeLearn push, merge into secureLectures and verify on the deployed instance that `homework/WMC` opens for a teacher
+- [x] 3.3 After the safeLearn push, merge into secureLectures and verify on the deployed instance that `homework/WMC` opens for a teacher
