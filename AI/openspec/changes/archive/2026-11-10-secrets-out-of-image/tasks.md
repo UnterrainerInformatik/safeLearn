@@ -22,10 +22,10 @@
 
 ## 5. secureLectures (downstream deployment config)
 
-- [ ] 5.1 After safeLearn is pushed, merge `public/master` into secureLectures and apply 2.1–2.4 to its own `.github/workflows/docs-local.yml`, `deploy/docker-compose.yml` and `.dockerignore`, keeping its local differences (self-hosted runner, path filter, corpus mount, `AUTOSCAN`). Verify: `git grep -n "site/keycloak"` in secureLectures is empty, and a deploy run starts for HEAD.
+- [x] 5.1 After safeLearn is pushed, merge `public/master` into secureLectures and apply 2.1–2.4 to its own `.github/workflows/docs-local.yml`, `deploy/docker-compose.yml` and `.dockerignore`, keeping its local differences (self-hosted runner, path filter, corpus mount, `AUTOSCAN`). Verify: `git grep -n "site/keycloak"` in secureLectures is empty, and a deploy run starts for HEAD.
 
 ## 6. After the fixed images are live (Gerald, manual)
 
-- [ ] 6.1 Confirm the pushed image no longer contains the secrets: `docker pull` the image, then `docker run --rm --entrypoint sh <image> -c 'ls /app/keycloak.json; grep -c SESSION_SECRET /app/.env'` shows no file and `0`. Confirm both instances still sign in.
-- [ ] 6.2 Rotate the Keycloak client secret of the client in `KEYCLOAK_FILE` and set a new `SESSION_SECRET` (`openssl rand -hex 32`); update the GitHub secrets in every repository that uses these values and re-run the workflows. Expect one forced re-login for all users. Verify: sign-in works with the new values.
-- [ ] 6.3 Remove the entry "Öffentliches Image enthält site/.env und keycloak.json" from `AI/open-proposals.md` when archiving.
+- [x] 6.1 Confirm the pushed image no longer contains the secrets: `docker pull` the image, then `docker run --rm --entrypoint sh <image> -c 'ls /app/keycloak.json; grep -c SESSION_SECRET /app/.env'` shows no file and `0`. Confirm both instances still sign in.
+- [x] 6.2 Rotate the Keycloak client secret of the client in `KEYCLOAK_FILE` and set a new `SESSION_SECRET` (`openssl rand -hex 32`); update the GitHub secrets in every repository that uses these values and re-run the workflows. Expect one forced re-login for all users. Verify: sign-in works with the new values.
+- [x] 6.3 Remove the entry "Öffentliches Image enthält site/.env und keycloak.json" from `AI/open-proposals.md` when archiving.
