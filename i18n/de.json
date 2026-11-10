@@ -498,6 +498,7 @@
         "questionOnce": "Eine Frage kann nur einmal in einem Test vorkommen.",
         "questionRetired": "Die Frage „{name}“ ist außer Dienst gestellt.",
         "sittingNotOpen": "Nur ein Termin, der gerade offen ist, kann beendet oder verlängert werden.",
+        "sittingEndBeforeOpen": "Ein Termin kann erst beendet werden, nachdem er geöffnet hat.",
         "sittingNotOver": "Nur ein vorbeigegangener Termin kann neu angesetzt werden.",
         "sittingOpened": "Dieser Termin hat bereits begonnen und kann sich nicht mehr ändern.",
         "sittingRunning": "Der Termin läuft. Bitte zuerst beenden.",

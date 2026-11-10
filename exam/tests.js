@@ -716,6 +716,10 @@ function requireOpen(db, row, at) {
 export function endSitting(db, id, at = now()) {
   const row = sittingRow(db, id);
   requireOpen(db, row, at);
+  // A window has to end after it opened. An end at the very moment of the
+  // opening is refused here rather than left to the schema's check, which would
+  // raise from inside the transaction instead of telling the teacher anything.
+  if (at <= row.opens_at) throw new ConflictError("exam.errors.tests.sittingEndBeforeOpen");
   inTransaction(db, () => {
     db.prepare("UPDATE sitting SET closes_at = ? WHERE id = ?").run(at, id);
     // An attempt's deadline is stored, the earlier of its start plus the duration and the window's end.

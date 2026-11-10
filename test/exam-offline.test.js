@@ -335,7 +335,9 @@ describe("an offline sitting", () => {
     const { sitting } = running(db, course);
     assert.equal(keyOf(() => extendSitting(db, sitting.id, { minutes: 10 })), "exam.errors.tests.sittingNotOpen");
     assert.equal(keyOf(() => endSitting(db, sitting.id)), "exam.errors.tests.sittingNotOpen");
-    const started = startSitting(db, sitting.id);
+    // Started a minute back, so the end below cannot fall into the millisecond
+    // the window opened in (`endSitting` refuses that, by design).
+    const started = startSitting(db, sitting.id, inMinutes(-1));
     const extended = extendSitting(db, sitting.id, { minutes: 10 });
     assert.equal(Date.parse(extended.closesAt) - Date.parse(started.closesAt), 10 * 60000);
     const ended = endSitting(db, sitting.id);
@@ -343,6 +345,16 @@ describe("an offline sitting", () => {
     assert.deepEqual(openTestsOf(db, "anna"), [], "the window closed for everyone");
     deleteSitting(db, sitting.id);
     assert.equal(getTest(db, sitting.testId).sittings.length, 0, "once over it can go, in an emergency");
+  });
+
+  test("is not ended at the moment it opened, and stays open as it was", () => {
+    const { db, course } = seeded();
+    const { sitting } = running(db, course);
+    const started = startSitting(db, sitting.id, inMinutes(-1));
+    assert.equal(keyOf(() => endSitting(db, sitting.id, started.opensAt)), "exam.errors.tests.sittingEndBeforeOpen");
+    const after = getSitting(db, sitting.id);
+    assert.equal(after.state, "open", "a refused end leaves the sitting open");
+    assert.equal(after.closesAt, started.closesAt, "and its window as it was");
   });
 
   test("is not started while a handout does not resolve, and the refusal names it", async () => {
@@ -428,7 +440,9 @@ describe("a make-up of an offline test", () => {
     const { db, course } = seeded();
     const { test: offline, sitting } = running(db, course);
     for (const username of ["ben", "cara"]) setAttendance(db, sitting.id, username, { present: false });
-    startSitting(db, sitting.id);
+    // Started a minute back, so the end below cannot fall into the millisecond
+    // the window opened in (`endSitting` refuses that, by design).
+    startSitting(db, sitting.id, inMinutes(-1));
     endSitting(db, sitting.id);
     assert.deepEqual(getSitting(db, sitting.id).absent, ["ben", "cara"]);
     assert.equal(keyOf(() => createSitting(db, offline.id, { opensAt: inMinutes(60) })), "exam.errors.tests.makeupParticipants");
@@ -512,7 +526,9 @@ describe("a handout's attachments", () => {
     const { sitting } = running(db, course);
     const check = (username, attachment) => handoutAttachmentCheck(db, studentReq(username), attachment, { username, teacher: false });
     assert.equal(await check("anna", "POS/diagram.png"), false, "before the start");
-    startSitting(db, sitting.id);
+    // Started a minute back, so the end below cannot fall into the millisecond
+    // the window opened in (`endSitting` refuses that, by design).
+    startSitting(db, sitting.id, inMinutes(-1));
     assert.equal(await check("anna", "POS/diagram.png"), true, "the image it embeds");
     assert.equal(await check("anna", "POS/starter.zip"), true, "the archive it links");
     assert.equal(await check("anna", "POS/exam-only.png"), true, "inside the exam variant");

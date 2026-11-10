@@ -8,6 +8,7 @@
  */
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
@@ -100,4 +101,27 @@ test("every entry says what it guards and what it reads", () => {
       }
     }
   }
+});
+
+// A file under `md/` that an ignore rule excludes exists only in the working
+// tree it was written in: every other checkout verifies a corpus without it,
+// and a check that reads it fails there for no visible reason. The author who
+// has the file is the only one who can see the mistake, so it is caught here,
+// before a commit, rather than by the check that reads the file elsewhere.
+test("no file under md/ is excluded from version control", (t) => {
+  const listed = spawnSync("git", ["ls-files", "--others", "--ignored", "--exclude-standard", "--", "md/"], {
+    cwd: projectRoot,
+    encoding: "utf8",
+  });
+  if (listed.error || listed.status !== 0) {
+    t.skip(`git could not list the ignored files of md/ here: ${listed.error?.message ?? listed.stderr.trim()}`);
+    return;
+  }
+  const ignored = listed.stdout.split("\n").filter(Boolean);
+  assert.deepEqual(
+    ignored,
+    [],
+    `these files under md/ are ignored by git, so no other checkout has them: ${ignored.join(", ")}. ` +
+      "Add a negated rule for each to .gitignore, or move it out of md/."
+  );
 });

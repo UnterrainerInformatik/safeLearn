@@ -498,6 +498,7 @@
         "questionOnce": "A question can be in a test only once.",
         "questionRetired": "The question \"{name}\" is retired.",
         "sittingNotOpen": "Only a sitting that is open now can be ended or extended.",
+        "sittingEndBeforeOpen": "A sitting can only be ended after it has opened.",
         "sittingNotOver": "Only a sitting that is over can be rescheduled.",
         "sittingOpened": "This sitting has opened already and cannot change any more.",
         "sittingRunning": "The sitting is running. End it first.",
