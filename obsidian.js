@@ -4460,7 +4460,22 @@ function getAutoReloadScript() {
     try {
       const asked = new URLSearchParams(window.location.search);
       const wanted = (asked.get("heading") || "").replace(/\\s+/g, " ").trim();
-      if (!wanted) return;
+      if (!wanted) {
+        // A link to a heading or block of another note ([[Note#Heading]],
+        // [[Note#^id]], \`note-anchors\`) opens this page with a #fragment. The
+        // browser resolved it while the body was still hidden and so stayed at
+        // the top; it is resolved again here, now that there is a layout.
+        // The id is decoded because an anchor keeps umlauts and the address
+        // carries them percent-encoded.
+        const fragment = window.location.hash.slice(1);
+        if (!fragment) return;
+        let id = fragment;
+        try { id = decodeURIComponent(fragment); } catch { /* keep it as written */ }
+        const target = document.getElementById(id);
+        if (!target) return;
+        window.scrollTo(0, target.getBoundingClientRect().top + window.scrollY - 50);
+        return;
+      }
       const occurrence = parseInt(asked.get("occurrence") || "1", 10);
       if (!Number.isFinite(occurrence) || occurrence < 1) return;
 

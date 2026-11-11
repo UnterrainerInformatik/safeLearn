@@ -62,6 +62,15 @@
    "main " plus the file's basename - and the chain behind it ends in a generic,
    so a font that fails to load degrades to a monospace rather than to whatever
    the browser defaults to. See docs-development.md. */
+/* A blank line between two items makes the whole list "loose" (CommonMark), so
+   every item's text becomes a paragraph with the browser's 1em margins - a link
+   list grouped by blank lines then reads double-spaced. Inside an item the
+   paragraphs keep only a small gap, close to what Obsidian shows. */
+#markdown-content li > p {
+  margin-top: 0.2em;
+  margin-bottom: 0.2em;
+}
+
 .shiki {
   /* A <pre> does not wrap at all by default, which is what kept the two wrapping
      declarations below from ever doing anything: a block wider than the column

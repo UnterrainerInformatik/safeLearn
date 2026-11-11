@@ -192,6 +192,25 @@ describe("obsidian syntax", () => {
     assert.ok(shown.hash === "#summary" && shown.top >= 40 && shown.top < shown.height && shown.scrolled > 0, JSON.stringify(shown));
   });
 
+  test("a link to a heading of another note opens that note at the heading", async () => {
+    // What following [[Note#Heading]] from another page does: a full load of
+    // the note with a #fragment. The page view is served with its body hidden,
+    // so the browser's own resolution of the fragment lands at the top; the
+    // page has to scroll there itself once it is shown.
+    const { page } = await render(student(), "/md/test-content-list.md");
+    await page.goto(`${new URL(demo, applicationUrl).href}#summary`, { waitUntil: "domcontentloaded" });
+    const shown = await eventually(
+      () =>
+        page.$eval("#summary", (heading) => ({
+          top: heading.getBoundingClientRect().top,
+          height: window.innerHeight,
+          scrolled: window.scrollY,
+        })),
+      (value) => value.top >= 40 && value.top < value.height && value.scrolled > 0
+    );
+    assert.ok(shown.top >= 40 && shown.top < shown.height && shown.scrolled > 0, JSON.stringify(shown));
+  });
+
   test("a link within a deck shows the slide holding its heading", async () => {
     const { page } = await render(student(), demo, { view: "presentation" });
     await page.waitForFunction(() => window.Reveal?.isReady?.(), { timeout: 15000 });
