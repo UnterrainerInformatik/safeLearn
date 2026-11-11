@@ -41,3 +41,4 @@ Echter Ablageort: `/mnt/data/source/HTL/safeLearn/AI/memory/`
 - [Obsidian-Pfad für test:obsidian](obsidian-app-path.md) — `SAFELEARN_OBSIDIAN_APP=/usr/bin/obsidian` setzen und `AI/plugin` vorher auf origin/master ziehen, sonst Dutzende Fehlalarme
 - [Directory-Service darf schreiben](directory-service-write-rights.md) — seit 2026-10-24 manage-users + manage-clients an unterrainer und Demo-Realm, für den examparticipant-Umschalter
 - [safeLearn ist die Demo-Instanz](safelearn-is-demo-instance.md) — „Demo-Instanz“ = safeLearn selbst mit eigenem Deploy und eigenen Secrets; secureLectures ist eine zweite Instanz
+- [Tests gezielt, Suite einmal](test-runs-targeted-first.md) — volle `npm test` nur einmal am Ende; nach Fehlern nur betroffene Checks nachlaufen lassen
