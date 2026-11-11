@@ -12,34 +12,6 @@ Dazu am 2026-09-13 beobachtet: **manuell ausgelöste Syncs setzen `lastSync` nic
 
 # Rendering
 
-## Frontmatter (Obsidian-Properties) nicht anzeigen
-Markdown-Files mit YAML-Frontmatter (Obsidian „Properties“) zeigen diesen Block beim Rendern als HTML-Seite und als reveal-Präsentation sichtbar an. Beispiel aus secureLectures: `homework/WMC/GRULE/Hausübung 1 - 4AHIF - Ausgabe 2026-11-10 - Abgabe 2026-12-08.md` beginnt mit
-
-```yaml
----
-lang: de-AT
-klasse: 4AHIF
-nummer: 1
-ausgabe: 2026-11-10
-abgabe: 2026-12-08
-fach: "WMC4 - Web and Mobile Computing"
-footer: "4AHIF - WMC4 - Hausübung 1"
-punkte: 40
-themen:
-  - Quarkus - Fundamentals
-  - ...
----
-```
-
-Diese Properties sind Metadaten (z. B. für die PDF-Erzeugung), kein Fließtext. Im App-Code gibt es derzeit keinerlei Frontmatter-Behandlung — markdown-it macht aus dem öffnenden `---` vermutlich ein `<hr>` und aus den Zeilen bis zum schließenden `---` eine Setext-Überschrift; in reveal wäre `---` zusätzlich ein Folientrenner.
-
-**Strippen, bevor irgendetwas anderes mit dem File passiert.** Das ist nicht nur Kosmetik: die Datei-Permission wird aus der *ersten Zeile* gelesen (`app.js:128`, `obsidian.js:471` → `parseFirstLineForPermissions`). Steht das Frontmatter oben, ist die erste Zeile `---` und die `@@@`-Directive greift nicht mehr — das File wäre ungewollt anders berechtigt. Frontmatter steht per Definition **immer ganz am Dateianfang** (öffnendes `---` in Zeile 1). Die Datei-`@@@`-Directive steht daher in der Zeile direkt *nach* dem schließenden `---`. Deshalb wird der Frontmatter-Block ganz am Anfang der Pipeline entfernt (beim Einlesen, vor Permission-Parsing, Rendern, Exam-Pfaden usw.) — danach ist die `@@@`-Zeile wieder die erste Zeile und alles Bestehende funktioniert unverändert. Ein `---` an späterer Stelle ist kein Frontmatter und bleibt, was es ist.
-
-Die Properties werden aber nicht weggeworfen, sondern separat aufgehoben:
-- **Suche:** die Werte (z. B. `klasse`, `fach`, `themen`) sind für den Suchindex interessant und sollen mit indiziert werden.
-- **Fließtext-GUI (nicht reveal):** die Properties lassen sich per Button als Message einblenden. In reveal werden sie nicht angezeigt.
-- **Header/Footer:** die Properties `header` und `footer` (wie `footer: "4AHIF - WMC4 - Hausübung 1"` im Beispiel) werden als Kopf- bzw. Fußzeile der Seite eingeblendet. Das gilt auch in reveal: dort erscheinen sie als Header/Footer jeder Folie.
-
 ## Weitere Obsidian-Syntax, die der Renderer nicht kennt
 Bestandsaufnahme vom 2026-11-11. Gerendert wird mit `marked` (`gfm`, `breaks`); vorher kümmert sich `preParse` nur um Permissions, Embeds (`![[…]]` auf Attachments), PlantUML, Mermaid, Wiki-Links, Callouts, Fragmente und Side-by-Side. Alles andere aus Obsidian geht roh an `marked`. Geprüft wurde mit `marked` allein, und gezählt wurde in `safeLearn/md`, `secureLectures/md` und im Nextcloud-Vault. Die meisten Treffer dort stehen in Code-Blöcken (Java-Format-Strings, `$$Lambda`, XML), echte Nutzung ist also selten. Sortiert nach Schwere:
 
@@ -66,3 +38,17 @@ Bestandsaufnahme vom 2026-11-11. Gerendert wird mit `marked` (`gfm`, `breaks`); 
    *Problem:* Wer zwischen zwei Folien die Leerzeile vergisst, bekommt eine `<h2>`, die niemand wollte, und vermutlich keinen Folienwechsel. Zu prüfen, wie `splitForReveal` das sieht.
 
 Schon in Ordnung und deshalb nicht Teil des Punkts: HTML-Kommentare `<!-- … -->` (der Sanitizer entfernt sie), einklappbare Callouts `> [!info]-`, `\|` in Wiki-Links innerhalb von Tabellen, BOM und unsichtbare Zeichen am Dateianfang, und Frontmatter (eigener Change `frontmatter-properties`).
+
+# Testing
+
+## Testlauf schneller: gezielt laufen lassen und Suite aufteilen
+Ein voller `npm test` dauert inzwischen 13–15 Minuten (2026-11-11: 1.047 Tests, 799 s bzw. 869 s). Am 2026-10-24 waren es noch 732 Tests in 369 s (archivierte Change `gradebook-short-tests`). Der Sprung kam in der Woche vom 15. bis 22. Oktober mit dem Exam-Modul (419 → 975 Testfälle im Quellcode, heute 571 von 1.136 im Exam-Modul). Die Laufzeit ist stärker gewachsen als die Anzahl (+135 % gegenüber +43 %), weil vor allem Browser-Tests dazukamen, also Puppeteer mit echtem Login gegen die Keycloak-Demo. Größte Brocken 2026-11-11: Online-Tests „writing“ 105 s, permissions 70 s, Live-View 66 s, Question-Editor 42 s. Reine Unit-Tests (z. B. `test/frontmatter.test.js`, `test/directive-grammar.test.js`) kosten Millisekunden.
+
+Tests streichen ist nicht das Ziel: sie decken echte Anforderungen ab und fanden 2026-11-11 drei echte Regressionen. Ziel ist, dass eine Änderung nicht jedes Mal die ganze Suite bezahlt. Zwei Teile, gemeinsam umzusetzen:
+
+1. **Gezielt laufen lassen über `test/coverage-map.json`.** Die Map hält schon fest, welcher Check welche Datei schützt, und der Hook `AI/claude/hooks/name-covering-checks.mjs` nennt die Checks nach einem Edit (er startet bewusst nichts). Ein Skript, z. B. `npm run test:changed`, liest die geänderten Dateien (`git diff --name-only` gegen HEAD bzw. den letzten Commit) und startet nur die Checks, die sie schützen. Zu klären:
+   - Die Content-Checks unter `test/checks/` sind Module, keine Testdateien. Sie laufen nur über `test/content.test.js`, damit ein Lauf einmal pro Rolle einloggt. Ein gezielter Lauf braucht also `content.test.js` mit `--test-name-pattern` auf die `describe`-Namen der betroffenen Module (oder einen Mechanismus, der nur diese Module importiert), und der Check „logged in once per role“ darf dabei nicht falsch anschlagen.
+   - `obsidian.js`, `app.js` und `test/harness.js` werden von fast jedem Check geschützt. Eine Änderung dort läuft gezielt fast so lange wie voll. Wenn die Map feiner werden soll (pro Funktion statt pro Datei), ist das eine eigene Entscheidung.
+2. **Suite aufteilen.** `npm run test:unit` für alles ohne Browser und Server (Sekunden), die Browser-/Exam-Suite getrennt davon (`test:browser` o. ä.). `npm test` bleibt der volle Lauf. Konvention: während der Arbeit Unit-Tests und gezielte Checks; die volle Suite einmal am Ende bzw. vor dem Push (siehe Memory `test-runs-targeted-first`). Dazu `docs-testing.md` und den Hook, der heute `npm test` als nächsten Schritt anbietet, anpassen.
+
+Nicht Teil des Punkts: Parallelisierung (`--test-concurrency` > 1). Die Suite teilt sich die öffentlichen Demo-Accounts und deren Preferences, das ist ohne Umbau der Isolation nicht sicher.

@@ -193,3 +193,42 @@ pre.mermaid svg {
   font-size: 0.7em;
   opacity: 0.85;
 }
+
+/* A deck's `header` and `footer` properties (`frontmatter-properties`): one
+   overlay each inside .reveal and outside .slides, so at the viewport's edges
+   on every slide. Small, and clear of the controls and the slide number in
+   the bottom right. In the print view they are cloned onto every page. */
+.reveal > .sl-deck-header,
+.reveal > .sl-deck-footer,
+.reveal .pdf-page > .sl-deck-header,
+.reveal .pdf-page > .sl-deck-footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  padding: 0 120px;
+  text-align: center;
+  font-size: 16px;
+  line-height: 1.4;
+  opacity: 0.7;
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.reveal > .sl-deck-header,
+.reveal .pdf-page > .sl-deck-header {
+  top: 8px;
+}
+
+.reveal > .sl-deck-footer,
+.reveal .pdf-page > .sl-deck-footer {
+  bottom: 8px;
+}
+
+/* In the print view the originals would sit on the first page only. */
+html.reveal-print .reveal > .sl-deck-header,
+html.reveal-print .reveal > .sl-deck-footer {
+  display: none;
+}

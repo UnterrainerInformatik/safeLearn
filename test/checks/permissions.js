@@ -28,6 +28,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { before, describe, test } from "node:test";
 
+import { splitFrontmatter } from "../../obsidian.js";
 import { accountLookups, render, roles, setPreferences, sharedSession } from "../harness.js";
 
 const corpusRoot = path.join(path.resolve(import.meta.dirname, "..", ".."), "md");
@@ -44,10 +45,13 @@ function corpusPaths(directory = corpusRoot, collected = []) {
   return collected;
 }
 
-/** The first line of a corpus file, as it stands on disk. */
+/**
+ * The line a corpus file's whole-file directive is read from: its first line
+ * once any frontmatter is split off, as every read of the application does.
+ */
 const directiveLine = (servedPath) =>
-  readFileSync(path.join(corpusRoot, servedPath.slice("/md/".length)), "utf8")
-    .split("\n")[0]
+  splitFrontmatter(readFileSync(path.join(corpusRoot, servedPath.slice("/md/".length)), "utf8"))
+    .body.split("\n")[0]
     .trim();
 
 /** Whether a corpus file's first line is a whole-file `@@@` directive. */
@@ -220,6 +224,12 @@ const restrictedFiles = [
     path: "/md/test-exam-handout-b.md",
     directive: ["teacher"],
     content: "HANDOUT-B-TASK",
+  },
+  // The directive on the line after its frontmatter (`frontmatter-properties`).
+  {
+    path: "/md/test-frontmatter.md",
+    directive: ["teacher"],
+    content: "Frontmatter fixture",
   },
 ];
 

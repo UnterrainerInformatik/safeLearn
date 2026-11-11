@@ -114,15 +114,24 @@ const { mode: authMode } = establishAuthMode();
 const app = express();
 app.set("trust proxy", true);
 
-import { registerEmbedHandler, registerEmbedClientScript, registerOpenTestsCheck, highlightExtension, scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions, wrapAsDocument, resolveFileVisibility, registerVisibilityChangeCallback, searchCorpus, minimumQueryLength, recordAttachmentGrants, hasAttachmentGrant, dropAttachmentGrants, mayServeAttachment, normalizeCorpusPath, registerHandoutAttachmentCheck, mayServeHandoutAttachment } from "./obsidian.js";
+import { registerEmbedHandler, registerEmbedClientScript, registerOpenTestsCheck, highlightExtension, scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions, splitFrontmatter, wrapAsDocument, resolveFileVisibility, registerVisibilityChangeCallback, searchCorpus, minimumQueryLength, recordAttachmentGrants, hasAttachmentGrant, dropAttachmentGrants, mayServeAttachment, normalizeCorpusPath, registerHandoutAttachmentCheck, mayServeHandoutAttachment } from "./obsidian.js";
 
 import chokidar from "chokidar";
 import { openEventStream } from "./event-stream.js";
 
+/**
+ * A corpus file's text rendered for this session, as `{ html, properties }`.
+ * The frontmatter is split off before anything else reads the file, so the
+ * whole-file directive is read from the line right after it; `properties` are
+ * the block's, for the view to show (`frontmatter-properties`), and travel
+ * with the render rather than on `req`, since an embed may render another file
+ * within the same request.
+ */
 async function sanitizeAndParseMarkdown(data, req, options = {}) {
   try {
     await refreshAccessToken(req);
-    let d = data.replace(/^[\u200B\u200C\u200D\u200E\u200F\uFEFF]/, "");
+    const split = splitFrontmatter(data, req.path);
+    let d = split.body;
     // Look if the first line contains a permission directive
     // First, get the first line of d
     const firstLine = d.split("\n")[0];
@@ -145,7 +154,9 @@ async function sanitizeAndParseMarkdown(data, req, options = {}) {
     const marked = await markedFor(req);
     let html = await marked.parse(d);
     html = manipulateHtml(html, req);
-    return sanitizeHtml(html);
+    // Reached only for a file this session may see, so only such a file hands
+    // its properties to the view.
+    return { html: sanitizeHtml(html), properties: split.properties };
   } catch (error) {
     // Not something to show on the page: the session it would be shown to has
     // just ended, and the request is answered as one without a session.
@@ -153,7 +164,7 @@ async function sanitizeAndParseMarkdown(data, req, options = {}) {
       throw error;
     }
     console.error(`Error parsing markdown: ${error}`);
-    return `Error parsing markdown: ${error}`;
+    return { html: `Error parsing markdown: ${error}`, properties: null };
   }
 }
 
@@ -185,7 +196,7 @@ async function markedFor(req) {
 async function renderHandout(corpusPath, req, { answer = false } = {}) {
   await refreshAccessToken(req);
   const data = await fs.promises.readFile(path.join(__dirname, "md", corpusPath), "utf8");
-  let d = data.replace(/^[\u200B\u200C\u200D\u200E\u200F\uFEFF]/, "");
+  let d = splitFrontmatter(data, corpusPath).body;
   if (parseFirstLineForPermissions(d.split("\n")[0]) !== null) {
     d = d.split("\n").slice(1).join("\n");
   }
@@ -493,9 +504,9 @@ async function registerRoutes(app, identity) {
       // embedded module elements as they would with the module off.
       const render = filePath.startsWith(corpusRoot)
         ? (data, options) =>
-            sanitizeAndParseMarkdown(data, req, options).then((html) => {
+            sanitizeAndParseMarkdown(data, req, options).then(({ html, properties }) => {
               recordAttachmentGrants(req, html);
-              return html;
+              return { html, properties };
             })
         : (data, options) => sanitizeAndParseMarkdown(data, req, options);
       fs.readFile(filePath, "utf8", (err, data) => {
@@ -507,7 +518,7 @@ async function registerRoutes(app, identity) {
         const reveal = req.query.reveal;
         if (reveal) {
           render(data, { embedDefaults: true })
-            .then((html) => wrapInReveal(splitForReveal(html), req))
+            .then(({ html, properties }) => wrapInReveal(splitForReveal(html), req, { properties }))
             .then((r) => {
               res.send(r);
             })
@@ -516,7 +527,7 @@ async function registerRoutes(app, identity) {
           const doc = req.query.document;
           if  (doc) {
             render(data, { embedDefaults: true })
-              .then((html) => wrapAsDocument(html, req))
+              .then(({ html, properties }) => wrapAsDocument(html, req, { properties }))
               .then((r) => {
                 preferences.rememberLastVisited(req, res);
                 res.send(r);
@@ -524,7 +535,7 @@ async function registerRoutes(app, identity) {
               .catch(next);
           } else {
             render(data)
-              .then((html) => wrapInPage(html, getStartPage(), req))
+              .then(({ html, properties }) => wrapInPage(html, getStartPage(), req, { properties }))
               .then((r) => {
                 preferences.rememberLastVisited(req, res);
                 res.send(r);

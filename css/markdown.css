@@ -85,3 +85,65 @@
      narrow column is narrower than plenty of them. */
   overflow-wrap: anywhere;
 }
+
+/* A file's `header` and `footer` properties (`frontmatter-properties`): a quiet
+   line above and below the content, in the reading column's own font. */
+.sl-file-header,
+.sl-file-footer {
+  font-size: 0.85em;
+  opacity: 0.7;
+}
+
+.sl-file-header {
+  padding-bottom: 0.4em;
+  margin-bottom: 1em;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.35);
+}
+
+.sl-file-footer {
+  padding-top: 0.4em;
+  margin-top: 2em;
+  border-top: 1px solid rgba(127, 127, 127, 0.35);
+}
+
+/* The properties message of the page view: names over values, a list as its
+   items. Inside #markdown-content, so it follows the dark mode. */
+.sl-properties {
+  max-width: min(36em, calc(100vw - 32px));
+  box-sizing: border-box;
+}
+
+.sl-properties h2 {
+  margin-top: 0;
+}
+
+.sl-properties-list dt {
+  font-weight: bold;
+  margin-top: 0.5em;
+}
+
+.sl-properties-list dd {
+  margin-left: 1em;
+  overflow-wrap: anywhere;
+}
+
+.sl-properties-list ul {
+  margin: 0;
+  padding-left: 1.2em;
+}
+
+.sl-properties form {
+  margin-top: 1em;
+  text-align: right;
+}
+
+#markdown-content.dark-mode .sl-properties {
+  color-scheme: dark;
+  background-color: #1e1e1e;
+  color: #e2e2e2;
+  border-color: #545d68;
+}
+
+#markdown-content.dark-mode .sl-properties::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+}

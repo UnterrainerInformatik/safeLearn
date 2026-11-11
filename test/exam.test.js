@@ -4201,6 +4201,7 @@ describe("offline tests and their handouts", () => {
     const files = (await fetchAs(teacher, `/exam/api/courses/${course.id}/handout-files`)).json.files;
     const byPath = Object.fromEntries(files.map((file) => [file.path, file]));
     assert.equal(byPath[handoutA].classReadable, false);
+    assert.equal(byPath[handoutB].classReadable, false, "a directive right after the frontmatter is read");
     assert.equal(byPath["test-md-file.md"].classReadable, true, "a file without a directive is readable by the class");
     assert.equal((await fetchAs(student, `/exam/api/courses/${course.id}/handout-files`)).status, 403);
 
@@ -4340,6 +4341,7 @@ describe("offline tests and their handouts", () => {
     const b = await handoutText();
     assert.match(b, /HANDOUT-B-TASK/);
     assert.doesNotMatch(b, /HANDOUT-A-TASK/);
+    assert.doesNotMatch(b, /HANDOUT-B-PROPERTY|fach:/, "the handout shows nothing of its frontmatter");
     assert.equal(await served(student, image), false, "handout A's image goes with the group");
     assert.ok(await served(student, imageB));
     await attendance({ group: "A" });

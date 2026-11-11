@@ -47,6 +47,13 @@
       "logout": "abmelden",
       "rememberLastPage": "zuletzt besuchte Seite merken"
     },
+    "page": {
+      "properties": {
+        "button": "Eigenschaften",
+        "close": "Schließen",
+        "title": "Eigenschaften dieser Seite"
+      }
+    },
     "sidebar": {
       "content": "Inhalt",
       "home": "Start",

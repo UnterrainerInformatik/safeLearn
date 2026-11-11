@@ -77,6 +77,8 @@ Both are security parameters rather than comfort ones: together they bound how f
 ## Pass One: The Index Proposes
 `candidatePaths()` walks `lastIndexEntries`, the map a scan built, and keeps every file whose path or whose recorded text contains the query case-insensitively. That map holds each file's full text because the scan reads it anyway — the whole-file directive, the inline blocks and the text all come out of one read, and an entry whose `mtime` has not moved is carried forward instead of being read again. `corpus-index` governs what a scan records.
 
+A file's frontmatter is stripped before the scan records anything (`splitFrontmatter`, see the [render pipeline](docs-render-pipeline.md)); its property values, names left out, are recorded beside the text as `propertyText` and matched as well.
+
 This pass touches no disk and asks no permission question. It is deliberately generous: a file it proposes may turn out to be one this session may not see, or one whose text has changed since the scan. Both are settled by reading the file.
 ## Pass Two: The File Decides
 Each candidate is then handed to `answerFromFile()`, which repeats — in the same order — exactly what the page handler does before it renders anything.
@@ -167,6 +169,8 @@ Because the second pass reads the file, an index that has gone stale can cost a 
 Every one of those outcomes is indistinguishable from a file that simply does not match — which is also what a file the session may not see looks like.
 ## Matching And Ranking
 Matching is **case-insensitive substring**, over the filtered text. No stemming, no fuzziness, no typo tolerance: a query is a prefix or an interior of the words it finds, so a reader searching a German compound's first element finds the compound. `occurrencesIn()` uses a regular expression over the original text rather than `indexOf` over a lowercased copy, because lowercasing changes the length of a few characters and an offset taken against a copy of a different length would quote the wrong part of the passage.
+
+A file's property values are matched after its body, each value - a list item by item - as a passage of its own, once the whole-file directive has let the session see the file. No heading stands over them, so a hit there is ranked like a hit in body text, its snippet is the value that matched, and it adds no heading to the result. Property names are not matched.
 
 Ranking has exactly one rule and a tie-breaker: a hit in the document's name or in one of its headings is what the reader was probably looking for and comes first; a hit that falls only in body text is what they get when it was not. Within each of the two groups the results are ordered by name, case-insensitively.
 ## The Shape Of A Result

@@ -11,6 +11,7 @@ import { i18nOf } from "./i18n/server.js";
 import { createFormat } from "./i18n/format.js";
 import { languageNames, languages, locales } from "./i18n/t.js";
 import * as lucideIcons from "lucide-static";
+import { isMap, isNode, isScalar, parseDocument } from "yaml";
 
 const internalTags = {
   callout: {
@@ -250,6 +251,104 @@ function parsePermissionEntries(raw) {
     .filter((entry) => entry !== null);
 }
 
+/**
+ * The invisible marks an editor may leave in front of a file's first character:
+ * a byte-order mark, or a zero-width or direction mark. Dropped before the file's
+ * first line is read, so they never hide a frontmatter block or a directive.
+ */
+const leadingInvisibleMark = /^[\u200B\u200C\u200D\u200E\u200F\uFEFF]/;
+
+/**
+ * A corpus file's text split into its frontmatter properties and its body
+ * (`frontmatter-properties`). This is the first thing every read of a corpus
+ * file does, and the only place that decides what frontmatter is: the page
+ * views, the handout, the index, search and the attachment check all call it
+ * and then read the whole-file directive from line 1 of `body`, so the line
+ * right after the block is the file's first line for all of them alike.
+ *
+ * Frontmatter opens on the very first line (after a leading invisible mark)
+ * with `---` and closes at the first later line that is `---`; trailing blanks
+ * and a `\r` line ending do not matter on either. Without both lines the file
+ * has no frontmatter, and `body` is the text with only the mark dropped - so a
+ * file without frontmatter reads exactly as it always did.
+ *
+ * `properties` is the block's mapping as an ordered list of `[name, value]`,
+ * values as YAML's core schema reads them (a date stays the string written), or
+ * null when there is no block or it holds nothing. A block that is not a
+ * readable mapping is stripped all the same and yields null; that is logged on
+ * the server with `source`, the file's path, and never shown to a reader.
+ */
+export function splitFrontmatter(text, source = null) {
+  const marked = String(text).replace(leadingInvisibleMark, "");
+  const opening = marked.match(/^---[ \t]*\r?\n/);
+  if (!opening) {
+    return { body: marked, properties: null };
+  }
+  const rest = marked.slice(opening[0].length);
+  const closing = rest.match(/^---[ \t]*\r?$/m);
+  if (!closing) {
+    return { body: marked, properties: null };
+  }
+  let body = rest.slice(closing.index + closing[0].length);
+  if (body.startsWith("\n")) {
+    body = body.slice(1);
+  }
+  return { body, properties: readFrontmatter(rest.slice(0, closing.index), source) };
+}
+
+function readFrontmatter(yamlText, source) {
+  const unreadable = (why) => {
+    console.warn(
+      `[frontmatter] Stripped an unreadable frontmatter block from ${source ?? "a corpus file"}: ${String(why).split("\n")[0]}`
+    );
+    return null;
+  };
+  let document;
+  try {
+    document = parseDocument(yamlText, { schema: "core" });
+  } catch (error) {
+    return unreadable(error.message);
+  }
+  if (document.errors.length > 0) {
+    return unreadable(document.errors[0].message);
+  }
+  if (document.contents === null) {
+    return null;
+  }
+  if (!isMap(document.contents)) {
+    return unreadable("it is not a mapping of property names to values");
+  }
+  const properties = [];
+  for (const pair of document.contents.items) {
+    if (!isScalar(pair.key) || pair.key.value === null || typeof pair.key.value === "object") {
+      return unreadable("a property name is not a plain name");
+    }
+    const value = isNode(pair.value) ? pair.value.toJS(document) : pair.value ?? null;
+    properties.push([String(pair.key.value), value]);
+  }
+  return properties.length > 0 ? properties : null;
+}
+
+/**
+ * The values of `properties` as search text: names left out, one value per
+ * line, a list item by item, nested values flattened in order. Empty when there
+ * are none.
+ */
+export function propertyValuesText(properties) {
+  const lines = [];
+  const add = (value) => {
+    if (value === null || value === undefined) return;
+    if (Array.isArray(value)) value.forEach(add);
+    else if (typeof value === "object") Object.values(value).forEach(add);
+    else {
+      const text = String(value).trim();
+      if (text !== "") lines.push(text);
+    }
+  };
+  for (const [, value] of properties ?? []) add(value);
+  return lines.join("\n");
+}
+
 export function parseFirstLineForPermissions(line) {
   if (typeof line !== "string") {
     return null;
@@ -464,7 +563,12 @@ export function registerVisibilityChangeCallback(callback) {
  * actually changed.
  */
 async function readCorpusFile(filePath) {
-  const text = await fs.promises.readFile(filePath, "utf8");
+  // Frontmatter first, as at every read of a corpus file: what the index holds
+  // is the body, and its directive is the body's first line.
+  const { body: text, properties } = splitFrontmatter(
+    await fs.promises.readFile(filePath, "utf8"),
+    filePath
+  );
   // `readline` handed the first line over without its line ending, whichever of
   // the two it was, and `parseFirstLineForPermissions` is held to the same input
   // as before.
@@ -472,6 +576,8 @@ async function readCorpusFile(filePath) {
   return {
     permissions: parseFirstLineForPermissions(firstLine),
     text,
+    // The property values, for `candidatePaths` to propose the file by.
+    propertyText: propertyValuesText(properties),
     blocks: extractInlinePermissionBlocks(text),
     references: extractAttachmentReferences(text),
   };
@@ -864,8 +970,8 @@ export async function scanFiles(prefix, dir, resetFonts = false, root = dir) {
       const carried = carriedEntries.get(relFullPath);
       const derived =
         carried && carried.mtime === mtime ? carried : await readCorpusFile(absPath);
-      const { permissions, text, blocks, references } = derived;
-      currentEntries.set(relFullPath, { mtime, permissions, text, blocks, references });
+      const { permissions, text, propertyText, blocks, references } = derived;
+      currentEntries.set(relFullPath, { mtime, permissions, text, propertyText, blocks, references });
       return {
         [file]: {
           path: file,
@@ -1391,7 +1497,8 @@ function candidatePaths(query) {
   for (const [fullPath, entry] of lastIndexEntries) {
     if (
       fullPath.toLowerCase().includes(needle) ||
-      entry.text.toLowerCase().includes(needle)
+      entry.text.toLowerCase().includes(needle) ||
+      entry.propertyText.toLowerCase().includes(needle)
     ) {
       paths.push(fullPath);
     }
@@ -1514,8 +1621,9 @@ async function answerFromFile(req, file, query) {
   }
 
   // The same two steps the page handler performs before anything else, in the
-  // same order: the leading marks it drops, then the whole-file directive.
-  let content = raw.replace(/^[​‌‍‎‏﻿]/, "");
+  // same order: the frontmatter it splits off, then the whole-file directive.
+  const split = splitFrontmatter(raw, file.absolutePath);
+  let content = split.body;
   const permissions = parseFirstLineForPermissions(content.split("\n")[0]);
   if (permissions !== null) {
     const { visible } = await resolveFileVisibility(req, permissions);
@@ -1527,6 +1635,15 @@ async function answerFromFile(req, file, query) {
 
   const segments = await filterForbiddenSegments(content, req);
   const headings = headingsOf(segments);
+  // The property values come after the body, decided by the same directive,
+  // each a passage of its own so a list is matched item by item and a snippet
+  // quotes the one value that matched. No heading stands over them, so a match
+  // there is ranked like a match in body text; names are not part of them.
+  for (const value of propertyValuesText(split.properties).split("\n")) {
+    if (value !== "") {
+      segments.push({ text: value, offset: null, properties: true });
+    }
+  }
 
   // Matched inside each passage separately. Nothing here ever holds the joined
   // document, so a match across the place a hidden block was removed cannot be
@@ -1534,7 +1651,12 @@ async function answerFromFile(req, file, query) {
   const found = [];
   segments.forEach((segment, index) => {
     for (const offset of occurrencesIn(segment.text, query)) {
-      found.push({ segment, index, offset, heading: headingAt(headings, index, offset) });
+      found.push({
+        segment,
+        index,
+        offset,
+        heading: segment.properties ? null : headingAt(headings, index, offset),
+      });
     }
   });
 
@@ -2427,8 +2549,8 @@ async function referencesVisibly(req, fullPath, attachment, { asHandout = false 
     return false;
   }
   // The same steps the page handler takes, in the same order, as `answerFromFile`
-  // does for search: the leading marks, the whole-file directive, the blocks.
-  let content = raw.replace(/^[​‌‍‎‏﻿]/, "");
+  // does for search: the frontmatter, the whole-file directive, the blocks.
+  let content = splitFrontmatter(raw, file.absolutePath).body;
   const permissions = parseFirstLineForPermissions(content.split("\n")[0]);
   if (permissions !== null) {
     if (!asHandout) {
@@ -3152,7 +3274,75 @@ async function getTopdownMenu(req) {
   `;
 }
 
-async function getTopBar(startPage, req, title = null) {
+/**
+ * A property's value as header or footer text: a string or a number that is
+ * not empty, or null. A list, a mapping, a boolean or a missing property shows
+ * nothing in its place (`frontmatter-properties`).
+ */
+function scalarProperty(properties, name) {
+  const found = (properties ?? []).find(([key]) => key === name);
+  if (!found) return null;
+  const [, value] = found;
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const text = String(value).trim();
+  return text === "" ? null : text;
+}
+
+/**
+ * The file's `header` and `footer` properties as the markup the page and
+ * document views put around the content, escaped; each empty when absent.
+ */
+function fileHeaderAndFooter(properties) {
+  const header = scalarProperty(properties, "header");
+  const footer = scalarProperty(properties, "footer");
+  return {
+    header: header === null ? "" : `<header class="sl-file-header">${escapeHtmlAttribute(header)}</header>`,
+    footer: footer === null ? "" : `<footer class="sl-file-footer">${escapeHtmlAttribute(footer)}</footer>`,
+  };
+}
+
+/** One property value as text markup: a list as its items, everything escaped. */
+function propertyValueMarkup(value) {
+  if (value === null || value === undefined) return "";
+  if (Array.isArray(value)) {
+    return `<ul>${value.map((item) => `<li>${propertyValueMarkup(item)}</li>`).join("")}</ul>`;
+  }
+  if (typeof value === "object") {
+    return `<dl>${Object.entries(value)
+      .map(([name, inner]) => `<dt>${escapeHtmlAttribute(name)}</dt><dd>${propertyValueMarkup(inner)}</dd>`)
+      .join("")}</dl>`;
+  }
+  return escapeHtmlAttribute(String(value));
+}
+
+/**
+ * The page view's properties message (`frontmatter-properties`, design D5): a
+ * closed `<dialog>` listing every property of the file in its order, built
+ * from escaped text only. Empty for a file without properties, and then the top
+ * bar offers no button for it either.
+ */
+function propertiesDialog(properties, t) {
+  if (!properties || properties.length === 0) return "";
+  const rows = properties
+    .map(([name, value]) => `<dt>${escapeHtmlAttribute(name)}</dt><dd>${propertyValueMarkup(value)}</dd>`)
+    .join("");
+  return `
+        <dialog id="slProperties" class="sl-properties" aria-labelledby="slPropertiesTitle">
+          <h2 id="slPropertiesTitle">${escapeHtmlAttribute(t("app.page.properties.title"))}</h2>
+          <dl class="sl-properties-list">${rows}</dl>
+          <form method="dialog">
+            <button class="sl-button sl-properties-close">${escapeHtmlAttribute(t("app.page.properties.close"))}</button>
+          </form>
+        </dialog>
+        <script>
+          // A click on the backdrop closes the message like its button does.
+          document.getElementById("slProperties").addEventListener("click", function (event) {
+            if (event.target === this) this.close();
+          });
+        </script>`;
+}
+
+async function getTopBar(startPage, req, title = null, properties = null) {
   const { t } = await i18nOf(req);
   return `
     <button class="sl-button topbar-burger" style="height: 32px; margin: 6px; margin-left: 0px;" onclick="toggleSidebar()">${lucideIcon(
@@ -3203,6 +3393,14 @@ async function getTopBar(startPage, req, title = null) {
             <div class="flipswitch-switch"></div>
         </label>
       </div>`
+          : ""
+      }
+      ${
+        // The file's properties, shown on request; only a file that has any.
+        properties && properties.length > 0
+          ? `<button id="slPropertiesButton" class="sl-button sl-properties-button" style="height: 32px; margin: 6px;" title="${escapeHtmlAttribute(t("app.page.properties.button"))}" aria-label="${escapeHtmlAttribute(t("app.page.properties.button"))}" aria-haspopup="dialog" onclick="document.getElementById('slProperties').showModal()">${lucideIcon(
+              "Info"
+            )}</button>`
           : ""
       }
       <button class="sl-button" style="height: 32px; margin: 6px;" onclick="openAsPresentation(false)">${lucideIcon(
@@ -3608,7 +3806,12 @@ function getAutoReloadScript() {
  */
 export async function wrapInPage(html, startPage, req, options = {}) {
   const title = options.title ?? null;
-  const { lang, loc } = await i18nOf(req);
+  const properties = options.properties ?? null;
+  const { lang, loc, t } = await i18nOf(req);
+  const { header, footer } = fileHeaderAndFooter(properties);
+  // The properties message sits inside #markdown-content, as the module's
+  // dialogs do, so it follows the dark mode as that is switched. It is on the
+  // footer's line, so the page view's text has the document view's lines.
   // The document language is the interface's (design.md, D7); the format
   // rides along for the exam module's client, which reads both before it
   // draws anything.
@@ -3639,15 +3842,17 @@ export async function wrapInPage(html, startPage, req, options = {}) {
            is the only thing that does; wrapAsDocument below serves the body the
            same way for the same reason. -->
       <body style="display: none;">
-        <div id="topbar" class="nav-font">${await getTopBar(startPage, req, title)}</div>
+        <div id="topbar" class="nav-font">${await getTopBar(startPage, req, title, properties)}</div>
         <div id="wrapper">
           <div id="sidebar" class="nav-font">&nbsp;<br>${await getSideBar(
             startPage,
             req
           )}</div>
           <div id="markdown-content"${options.wide ? ' class="sl-wide"' : ""}>
+          ${header}
     `;
   const post = `
+          ${footer}${propertiesDialog(properties, t)}
           </div>
           <div id="topdown-menu" class="nav-font">
             ${await getTopdownMenu(req)}
@@ -3675,8 +3880,13 @@ export async function wrapInPage(html, startPage, req, options = {}) {
   return pre + html + post;
 }
 
-export async function wrapAsDocument(html, req) {
+/**
+ * `options.properties` are the file's frontmatter properties; only `header`
+ * and `footer` are shown, around the content, and no properties message.
+ */
+export async function wrapAsDocument(html, req, options = {}) {
   const { lang, loc } = await i18nOf(req);
+  const { header, footer } = fileHeaderAndFooter(options.properties ?? null);
   const pre = `
       <!DOCTYPE html>
       <html lang="${lang}" data-sl-locale="${loc}">
@@ -3694,8 +3904,10 @@ export async function wrapAsDocument(html, req) {
       <body style="display: none;">
         <div id="wrapper">
           <div id="markdown-content">
+          ${header}
     `;
   const post = `
+          ${footer}
           </div>
         </div>
         <script src="/obsidian-page.js"></script>
@@ -3818,10 +4030,40 @@ const deckFitScript = `
     </script>`;
 
 /**
+ * The deck's `header` and `footer` properties (`frontmatter-properties`, design
+ * D6). Reveal has no header or footer of its own, so each is one overlay inside
+ * `.reveal` and outside `.slides`, which Reveal's scaling leaves at the edges
+ * of the viewport - and so on every slide. The print view lays each slide on a
+ * page of its own, where one overlay would be on one page only, so there they
+ * are cloned onto every page once the pages are laid out.
+ */
+function deckHeaderAndFooter(properties) {
+  const header = scalarProperty(properties, "header");
+  const footer = scalarProperty(properties, "footer");
+  if (header === null && footer === null) return { overlays: "", script: "" };
+  const overlays =
+    (header === null ? "" : `<div class="sl-deck-header">${escapeHtmlAttribute(header)}</div>`) +
+    (footer === null ? "" : `<div class="sl-deck-footer">${escapeHtmlAttribute(footer)}</div>`);
+  const script = `
+    <script>
+      Reveal.on("pdf-ready", function () {
+        var overlays = document.querySelectorAll(".reveal > .sl-deck-header, .reveal > .sl-deck-footer");
+        document.querySelectorAll(".reveal .pdf-page").forEach(function (page) {
+          overlays.forEach(function (overlay) { page.appendChild(overlay.cloneNode(true)); });
+        });
+      });
+    </script>`;
+  return { overlays, script };
+}
+
+/**
  * `options.title` names a deck that is no corpus file - the exam module's board
  * solution (`board-solution`) - in place of `req.file.name`.
+ * `options.properties` are the file's frontmatter properties; only `header`
+ * and `footer` are shown, on every slide, and no properties message.
  */
 export async function wrapInReveal(reveal, req, options = {}) {
+  const deck = deckHeaderAndFooter(options.properties ?? null);
   const pre = `
   <!DOCTYPE html>
   <html>
@@ -3864,6 +4106,7 @@ export async function wrapInReveal(reveal, req, options = {}) {
   `;
   const post = `
       </div>
+      ${deck.overlays}
     </div>
     <!-- The engine and the one plugin this deck uses, both from the installed
          package. A plugin is a script loaded here and named in \`plugins\` below;
@@ -4035,6 +4278,7 @@ export async function wrapInReveal(reveal, req, options = {}) {
       });
     </script>
     ${deckFitScript}
+    ${deck.script}
   </body>
   
   </html>

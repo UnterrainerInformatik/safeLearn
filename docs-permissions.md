@@ -21,6 +21,7 @@ Anyone who has even one of these roles assigned will be able to view the documen
 * Roles are case-insensitive. So putting `@@@ Stu Dent, 4BHIF` is the same as putting `@@@ stu dent, 4bhif`.
 * If the directive is in the first line of the document (the very first line), then it applies to the whole document.
 	* In that case, there is no end-directive.
+	* A file whose first line opens Obsidian frontmatter (a properties block from `---` to `---`) has that block stripped before the directive is looked for, so its first line is the line right after the block. Put the directive there; see "File Restrictions" below.
 * Documents that are hidden for a viewer will not be displayed to that viewer, even if the viewer has a direct-link.
 * Documents that are hidden for a viewer will not be visible in the directory-tree on the left as well.
 * If a directory on the left has only files invisible to the viewer, then the entry of that directory will be invisible as well.
@@ -64,6 +65,19 @@ Some text in a document only visible to users with the `4bhif` group or `teacher
 # Some Document
 Some text in a document only visible to teachers.
 ```
+
+A file with Obsidian properties keeps them at the very top, as Obsidian writes them; the directive goes on the line right after the closing `---`. The block is stripped before anything reads the file - the page, the navigation tree, search, the attachment check and exam handouts all see the directive there - and is never shown as content.
+```markdown
+---
+klasse: 4AHIF
+footer: "4AHIF - WMC4 - Hausübung 1"
+---
+@@@ teacher
+
+# Some Document
+Some text in a document only visible to teachers, whose properties are not shown as text.
+```
+The property values are searched like body text, by anyone the directive lets see the file and by nobody else. The page view offers a button showing all properties as a message, and a `header` or `footer` property holding text is shown above and below the content in all three views (on every slide in a presentation).
 
 You can specify multiple roles, so anyone with ANY of those roles assigned will be able to view the document.
 ```markdown

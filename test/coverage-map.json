@@ -29,7 +29,8 @@
         "test/checks/session-lifecycle.js",
         "test/checks/deployment-surface.js",
         "test/checks/attachments.js",
-        "test/checks/exam-embedding.js"
+        "test/checks/exam-embedding.js",
+        "test/checks/frontmatter.js"
       ],
       "corpus": []
     },
@@ -146,6 +147,25 @@
       "corpus": [
         "md/presentations/test-presentation.md",
         "md/test-md-file.md"
+      ]
+    },
+    "test/checks/frontmatter.js": {
+      "what": "A corpus file with Obsidian properties in front of its @@@ teacher directive, against a running instance: a student is refused it, it is absent from the student's navigation tree and present in the teacher's, and the attachment only it references is served to the teacher and not to the student - so every read site strips the block before reading the directive. No line of the block, no leading rule and no slide made of it appears to a teacher in the page, document or presentation view. A teacher finds it by a value of its themen list with that value as snippet and no heading, a property name finds nothing, and a student finds nothing in its properties. The page view's properties button opens a message listing every property in order, a list as its items and <b>x</b> as its characters, which closes again; there is no button for a file without properties or with an unreadable block, nor in the document or presentation view. The footer property is shown below the content in the page and document view, a text header is shown and a list footer is not, and an unreadable block is stripped with no header, footer or button. In the presentation view the footer is on the first and the last slide, neither of which needs a fit, a header-only file shows its header and no footer, and the print view carries the footer on every page.",
+      "guards": [
+        "obsidian.js",
+        "app.js",
+        "css/markdown.css",
+        "css/reveal.css",
+        "i18n/en.json",
+        "i18n/de.json",
+        "test/harness.js"
+      ],
+      "corpus": [
+        "md/test-frontmatter.md",
+        "md/test-frontmatter-header-only.md",
+        "md/test-frontmatter-broken.md",
+        "md/test-md-file.md",
+        "md/assets/test-attachment-frontmatter.png"
       ]
     },
     "test/checks/session-lifecycle.js": {
@@ -286,6 +306,13 @@
       "guards": [
         "obsidian.js",
         "utils.js"
+      ],
+      "corpus": []
+    },
+    "test/frontmatter.test.js": {
+      "what": "What frontmatter is, decided by splitFrontmatter, the first step of every read of a corpus file: a block opens on line 1 (after a leading invisible mark) and closes at the first later ---, trailing blanks and CRLF on either fence line do not matter, a rule further down or an unclosed block is not frontmatter and leaves the text unchanged, the line after the block is the body's first line and so carries the whole-file directive, values are read with YAML's core schema so dates stay strings, order is the file's, an empty block yields nothing silently, a broken or non-mapping block is stripped and logged with the file's path, and the values become search text with names left out and list items one per line. Needs no browser, no login and no server.",
+      "guards": [
+        "obsidian.js"
       ],
       "corpus": []
     },

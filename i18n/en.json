@@ -47,6 +47,13 @@
       "logout": "logout",
       "rememberLastPage": "remember last visited page"
     },
+    "page": {
+      "properties": {
+        "button": "Properties",
+        "close": "Close",
+        "title": "Properties of this page"
+      }
+    },
     "sidebar": {
       "content": "Content",
       "home": "Home",
