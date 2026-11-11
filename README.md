@@ -56,6 +56,10 @@ The tier a feature needs is noted in brackets; everything without a note works i
 * One platform for all teaching materials, and everything is Markdown
 * One editor ([Obsidian](https://obsidian.md)) that's cool, really good and completely free
 	* Full Obsidian-flavor Markdown: callouts, wiki links, embeds, image sizing, the highlight colors
+	* Footnotes and math formulas (KaTeX, rendered on the server), on the page and on the slide
+	* Links to headings and blocks (`[[Note#Heading]]`, `[[Note#^id]]`), and embedded notes (`![[Note]]`, `![[Note#Heading]]`) that keep the embedded note's permissions
+	* Comments (`%%…%%`) that no reader ever sees, not even through search
+	* Properties (frontmatter) that are searchable, shown behind an info button, and used as page and slide header and footer
 	* Diagrams with Mermaid and PlantUML, syntax highlighting with diff and focus notations
 	* PDFs shown inline with `![[handout.pdf]]`, on the page and on a slide, with a link beneath for phones
 	* The [SafeLearn plugin](docs-obsidian.md#the-obsidian-plugin) for Obsidian shows SafeLearn's own tags while you write
@@ -110,7 +114,7 @@ So there are some intricacies you should be aware of when working with it and se
 ## Documentation
 ### Using It
 * [Installation](docs-installation.md) — the three tiers, what each needs, and how to install it.
-* [Obsidian Language Extensions](docs-obsidian.md) — the Obsidian-specific syntax SafeLearn understands: callouts, fragments, columns, diagrams, embeds.
+* [Obsidian Language Extensions](docs-obsidian.md) — the Obsidian-specific syntax SafeLearn understands: callouts, properties, comments, footnotes, math, heading and block links, note embeds, fragments, columns, diagrams.
 * [Permissions](docs-permissions.md) — who may read whole files or parts of them, roles, time windows and the exam/practice/answer views.
 * [Local WYSIWYG Container](docs-wysiwyg.md) — a container on your own machine that shows every change the moment you save it.
 * [Exam Module](docs-exam-module.md) — tier 3: the switch, where the data lives, backups, classes, the gradebook, the question pool, online tests, and how a page places one of its elements.

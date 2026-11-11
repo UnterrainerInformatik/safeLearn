@@ -142,6 +142,29 @@ Since Obsidian 1.14 a highlight can carry one of six colors: put the color's emo
 
 Obsidian's own `==` suggestions and the formatting menu write exactly this, so whatever you color in the editor is colored on the page, in light and dark mode and in the presentation view.
 A highlight stays on one line, may contain other formatting (`==🔵**bold** and a [link](...)==`), and is left alone inside code.
+## Properties (Frontmatter)
+Obsidian keeps a note's [properties](https://obsidian.md/help/properties) in a YAML block at the very top of the file, between two `---` lines. safeLearn strips that block before anything else reads the file, so its lines never show as content in any view:
+
+```markdown
+---
+klasse: 4AHIF
+abgabe: 2026-12-08
+footer: "4AHIF - WMC4 - Hausübung 1"
+themen:
+  - Quarkus CDI
+  - REST
+---
+@@@ teacher
+# Hausübung 1
+```
+
+What the properties are used for:
+
+- **Search.** Property values are searched like body text (a list item by item), by every reader the file's directive lets see it and by nobody else. Property names are not searched.
+- **Info button.** The page view shows a button in the top bar that opens all of the file's properties as a message, every value as text. A file without properties gets no button.
+- **Header and footer.** A `header` or `footer` property holding text or a number is shown above and below the content on the page and in the document view, and in the presentation on every slide (and so on every printed page). A list, a mapping or an empty value shows nothing.
+
+The permission directive goes on the line right after the closing `---`, as above; that line counts as the file's first line (see [Permissions](docs-permissions.md)). Dates stay exactly as you wrote them. A block that is not valid YAML is stripped all the same, the file then simply has no properties, and the server log names the file. A `---` anywhere else, or an opening `---` that is never closed, is not frontmatter. The frontmatter of an [embedded note](#embedding-notes) is not inserted.
 ## Comments
 Text between two `%%` is an Obsidian [comment](https://obsidian.md/help/syntax#Comments): a note to yourself that Obsidian hides in its reading view. safeLearn hides it everywhere. No reader sees it on the page, in the document or in the presentation, search does not find it, and an attachment that only a comment names is not served.
 
