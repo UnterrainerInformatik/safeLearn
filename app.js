@@ -114,7 +114,7 @@ const { mode: authMode } = establishAuthMode();
 const app = express();
 app.set("trust proxy", true);
 
-import { registerEmbedHandler, registerEmbedClientScript, registerOpenTestsCheck, highlightExtension, scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions, splitFrontmatter, wrapAsDocument, resolveFileVisibility, registerVisibilityChangeCallback, searchCorpus, minimumQueryLength, recordAttachmentGrants, hasAttachmentGrant, dropAttachmentGrants, mayServeAttachment, normalizeCorpusPath, registerHandoutAttachmentCheck, mayServeHandoutAttachment } from "./obsidian.js";
+import { registerEmbedHandler, registerEmbedClientScript, registerOpenTestsCheck, highlightExtension, scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions, splitFrontmatter, stripComments, wrapAsDocument, resolveFileVisibility, registerVisibilityChangeCallback, searchCorpus, minimumQueryLength, recordAttachmentGrants, hasAttachmentGrant, dropAttachmentGrants, mayServeAttachment, normalizeCorpusPath, registerHandoutAttachmentCheck, mayServeHandoutAttachment } from "./obsidian.js";
 
 import chokidar from "chokidar";
 import { openEventStream } from "./event-stream.js";
@@ -150,6 +150,9 @@ async function sanitizeAndParseMarkdown(data, req, options = {}) {
       // Strip the first line since it held the permissions
       d = d.split("\n").slice(1).join("\n");
     }
+    // Comments go once the directive is decided and before anything else reads
+    // the text (`obsidian-comments`), so no view renders one.
+    d = stripComments(d);
     d = await preParse(d, req, options);
     const marked = await markedFor(req);
     let html = await marked.parse(d);
@@ -200,6 +203,7 @@ async function renderHandout(corpusPath, req, { answer = false } = {}) {
   if (parseFirstLineForPermissions(d.split("\n")[0]) !== null) {
     d = d.split("\n").slice(1).join("\n");
   }
+  d = stripComments(d);
   req[handoutViews] = { answer: answer === true };
   try {
     d = await preParse(d, req, { embedDefaults: true });

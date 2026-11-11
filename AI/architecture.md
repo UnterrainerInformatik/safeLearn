@@ -233,7 +233,9 @@ Every Markdown response follows the same chain, driven by `sanitizeAndParseMarkd
 ```
 read file (app.js)
   └─ refreshAccessToken            fresh roles and attributes for this render
+  └─ splitFrontmatter              properties block off the top
   └─ parseFirstLineForPermissions  whole-file gate; the directive line is stripped
+  └─ stripComments                 Obsidian %% comments removed (obsidian-comments)
   └─ preParse (obsidian.js)
        1. removeForbiddenContent      drop @@@ blocks the user may not see
        2. preReplaceEmbeds            ```safelearn-<kind> blocks → module placeholder,
@@ -256,6 +258,8 @@ read file (app.js)
        5. makeContentMap                UUID anchors on every heading; TOC map onto req
   └─ DOMPurify.sanitize            final output filter
 ```
+
+Obsidian comments are removed at every read of a corpus file, not only here: the page views, the exam handout (`renderHandout`), the scan's index (`readCorpusFile`, which keeps the directive line and strips what follows), search (`answerFromFile`) and the attachment check (`referencesVisibly`). All five do it at the same point, after the whole-file directive is decided and before `filterForbiddenSegments`. So a comment can neither hide nor move the directive, a `@@@` block or heading inside one has no effect, and no comment is rendered, matched, quoted or counted as an attachment reference. `stripComments` follows Obsidian's two kinds: a `%%` at the start of a line opens a block up to the next `%%` or the end of the file, any other `%%` closes on its own line or is text. It finds the marks in `maskCode`'s masking, so `%%` in code stays.
 
 Code blocks are parked before the link, callout and fragment passes and restored afterwards (steps 5 and 10), so those rewrites cannot corrupt code samples. Callouts may nest; the code markers may not.
 

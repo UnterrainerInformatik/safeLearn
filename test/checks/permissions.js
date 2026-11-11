@@ -207,6 +207,13 @@ const restrictedFiles = [
     directive: ["teacher"],
     content: "the restricted file of a sync",
   },
+  // `test/checks/comments.js`: line 1 is the directive, line 2 opens a
+  // comment, and the directive has to gate it exactly as it gates any file.
+  {
+    path: "/md/test-comments-gated.md",
+    directive: ["teacher"],
+    content: "GESPERRTINHALT",
+  },
   // One of the places `test/checks/attachments.js` embeds its shared image.
   {
     path: "/md/test-attachments-teachers.md",

@@ -79,6 +79,8 @@ Both are security parameters rather than comfort ones: together they bound how f
 
 A file's frontmatter is stripped before the scan records anything (`splitFrontmatter`, see the [render pipeline](docs-render-pipeline.md)); its property values, names left out, are recorded beside the text as `propertyText` and matched as well.
 
+Obsidian comments are removed from the recorded text as well (`stripComments`, see the [render pipeline](docs-render-pipeline.md)): from everything after the directive line, which is kept as written, or from the whole body when there is none. So a file is never proposed for a word that only a comment holds.
+
 This pass touches no disk and asks no permission question. It is deliberately generous: a file it proposes may turn out to be one this session may not see, or one whose text has changed since the scan. Both are settled by reading the file.
 ## Pass Two: The File Decides
 Each candidate is then handed to `answerFromFile()`, which repeats — in the same order — exactly what the page handler does before it renders anything.
@@ -116,6 +118,11 @@ partition #MistyRose "the whole-file directive, as the page resolves it" {
   else (no)
   endif
 }
+:remove Obsidian comments (stripComments);
+note right
+  After the directive, before the blocks: a comment
+  is never matched and never quoted in a snippet.
+end note
 
 partition #AliceBlue "filterForbiddenSegments - the passages this session may read" {
   :every inline permission block decided by hasSomeRoles(),\nall of them against one reference date;

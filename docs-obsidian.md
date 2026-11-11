@@ -142,6 +142,24 @@ Since Obsidian 1.14 a highlight can carry one of six colors: put the color's emo
 
 Obsidian's own `==` suggestions and the formatting menu write exactly this, so whatever you color in the editor is colored on the page, in light and dark mode and in the presentation view.
 A highlight stays on one line, may contain other formatting (`==🔵**bold** and a [link](...)==`), and is left alone inside code.
+## Comments
+Text between two `%%` is an Obsidian [comment](https://obsidian.md/help/syntax#Comments): a note to yourself that Obsidian hides in its reading view. safeLearn hides it everywhere. No reader sees it on the page, in the document or in the presentation, search does not find it, and an attachment that only a comment names is not served.
+
+```markdown
+Die Lösung ist %%Lösung: 42%% im Skript.
+
+%%
+A block comment: add an example here.
+It may span several paragraphs, headings and code blocks.
+%%
+```
+
+There are two kinds, exactly as in Obsidian:
+
+- A `%%` at the start of a line (after spaces, a `>` or a list marker at most) opens a block comment. It runs to the next `%%`, wherever that stands. If there is none, everything after it is hidden, as in Obsidian, so a forgotten closing mark shows as missing text on the page.
+- Any other `%%` opens an inline comment, which must close on the same line. If it does not, the `%%` is shown as written.
+
+A `%%` inside code is not a comment. Inline code, a fenced block and a `mermaid` block (which has `%%` comments of its own) keep their marks, so a Java format string such as `String.format("%.1f%%", rate)` stays intact. A comment at the top of a file does not disturb the permission directive: that is still read from the first line as written.
 ## Image Sizing
 The renderer will never touch the image's size, until it won't fit the display. If that occurs, it will just resize it proportionally to fit it.
 

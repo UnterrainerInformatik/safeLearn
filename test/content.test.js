@@ -51,6 +51,7 @@ const modules = [
   "pdf-embeds",
   "exam-embedding",
   "frontmatter",
+  "comments",
   "deployment-surface",
 ];
 

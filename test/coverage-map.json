@@ -30,7 +30,8 @@
         "test/checks/deployment-surface.js",
         "test/checks/attachments.js",
         "test/checks/exam-embedding.js",
-        "test/checks/frontmatter.js"
+        "test/checks/frontmatter.js",
+        "test/checks/comments.js"
       ],
       "corpus": []
     },
@@ -166,6 +167,20 @@
         "md/test-frontmatter-broken.md",
         "md/test-md-file.md",
         "md/assets/test-attachment-frontmatter.png"
+      ]
+    },
+    "test/checks/comments.js": {
+      "what": "Obsidian comments against a running instance. In md/test-comments.md, visible to everyone, a student sees no word that stands inside a comment in the page, document or presentation view - inline, two per line, a block across paragraphs, a block holding an @@@ teacher block, a setext heading and an ## heading, and an unclosed block at the end - and sees all text around them, an unpaired %% within a line included; a teacher does not see the teacher block inside a comment either. Inline code and a Java block keep their %%, Mermaid receives its own %% comment and draws the diagram, and the presentation has one slide per heading outside a comment. No word inside a comment is found by search for either role, and a snippet next to a comment quotes the paragraph without it. An attachment named only inside a comment is served to no one. md/test-comments-gated.md, @@@ teacher on line 1 and a comment opening on line 2, is refused to a student, absent from the student's navigation tree and search and present in the teacher's, and shown to the teacher without its comment - so the directive is read before comments are removed.",
+      "guards": [
+        "obsidian.js",
+        "app.js",
+        "test/harness.js"
+      ],
+      "corpus": [
+        "md/test-comments.md",
+        "md/test-comments-gated.md",
+        "md/test-md-file.md",
+        "md/assets/test-attachment-comments.png"
       ]
     },
     "test/checks/session-lifecycle.js": {
@@ -311,6 +326,13 @@
     },
     "test/frontmatter.test.js": {
       "what": "What frontmatter is, decided by splitFrontmatter, the first step of every read of a corpus file: a block opens on line 1 (after a leading invisible mark) and closes at the first later ---, trailing blanks and CRLF on either fence line do not matter, a rule further down or an unclosed block is not frontmatter and leaves the text unchanged, the line after the block is the body's first line and so carries the whole-file directive, values are read with YAML's core schema so dates stay strings, order is the file's, an empty block yields nothing silently, a broken or non-mapping block is stripped and logged with the file's path, and the values become search text with names left out and list items one per line. Needs no browser, no login and no server.",
+      "guards": [
+        "obsidian.js"
+      ],
+      "corpus": []
+    },
+    "test/comments.test.js": {
+      "what": "What an Obsidian comment is, decided by stripComments, which every read of a corpus file calls right after the whole-file directive: a %% that begins a line (after whitespace, > or a list marker) opens a block comment up to the next %% anywhere - across blank lines, rules and fenced blocks - or to the end of the file; any other %% closes on its own line and is text when it does not; after a comment the next mark is judged anew; %% in inline code and in backtick, tilde and Mermaid fences is no mark, a code span in front of a mark does not make it a block opener, code inside a comment goes with it, and a stray backtick in a comment cannot mask a mark past a blank line. A text without marks outside code comes back identical. Needs no browser, no login and no server.",
       "guards": [
         "obsidian.js"
       ],

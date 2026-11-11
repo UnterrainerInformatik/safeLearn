@@ -565,16 +565,27 @@ export function registerVisibilityChangeCallback(callback) {
 async function readCorpusFile(filePath) {
   // Frontmatter first, as at every read of a corpus file: what the index holds
   // is the body, and its directive is the body's first line.
-  const { body: text, properties } = splitFrontmatter(
+  const { body, properties } = splitFrontmatter(
     await fs.promises.readFile(filePath, "utf8"),
     filePath
   );
   // `readline` handed the first line over without its line ending, whichever of
   // the two it was, and `parseFirstLineForPermissions` is held to the same input
   // as before.
-  const firstLine = text.split("\n", 1)[0].replace(/\r$/, "");
+  const firstLine = body.split("\n", 1)[0].replace(/\r$/, "");
+  const permissions = parseFirstLineForPermissions(firstLine);
+  // Then the comments (`obsidian-comments`, design D5): the index keeps its
+  // directive line as written and strips what follows it, so no file is proposed
+  // for a word only a comment holds and no block inside one is registered.
+  const newline = body.indexOf("\n");
+  const text =
+    permissions === null
+      ? stripComments(body)
+      : newline === -1
+        ? body
+        : body.slice(0, newline + 1) + stripComments(body.slice(newline + 1));
   return {
-    permissions: parseFirstLineForPermissions(firstLine),
+    permissions,
     text,
     // The property values, for `candidatePaths` to propose the file by.
     propertyText: propertyValuesText(properties),
@@ -1620,8 +1631,8 @@ async function answerFromFile(req, file, query) {
     return null;
   }
 
-  // The same two steps the page handler performs before anything else, in the
-  // same order: the frontmatter it splits off, then the whole-file directive.
+  // The same steps the page handler performs before anything else, in the same
+  // order: the frontmatter it splits off, the whole-file directive, the comments.
   const split = splitFrontmatter(raw, file.absolutePath);
   let content = split.body;
   const permissions = parseFirstLineForPermissions(content.split("\n")[0]);
@@ -1632,6 +1643,9 @@ async function answerFromFile(req, file, query) {
     }
     content = content.split("\n").slice(1).join("\n");
   }
+  // Comments next, before anything is decided or matched (`obsidian-comments`),
+  // so a comment is never matched and never quoted.
+  content = stripComments(content);
 
   const segments = await filterForbiddenSegments(content, req);
   const headings = headingsOf(segments);
@@ -2331,6 +2345,64 @@ function maskCode(markdown) {
   return chars.join("");
 }
 
+/**
+ * What may stand in front of a `%%` on its line for it to open a block comment:
+ * whitespace, blockquote markers and list markers followed by whitespace.
+ */
+const commentBlockPrefix = /^(?:[ \t]*(?:>|(?:[-*+]|\d{1,9}[.)])(?=[ \t])))*[ \t]*$/;
+
+/**
+ * The text with its Obsidian comments removed (`obsidian-comments`).
+ *
+ * There are two kinds, as in Obsidian. A `%%` that begins a line opens a block
+ * comment, which closes at the next `%%` wherever it stands and otherwise runs
+ * to the end of the text. Any other `%%` opens an inline comment, which closes
+ * at the next `%%` on the same line; without one it is no comment and stays as
+ * written. A `%%` inside fenced or inline code is neither, so the marks are
+ * looked for in `maskCode`'s masking and the ranges are cut from the original -
+ * code that lies inside a comment goes with it. Whether a mark begins its line
+ * is read from the original, because a code span in front of it is text there.
+ *
+ * Every read of a corpus file calls this right after the whole-file directive
+ * has been decided, so the directive is always read as written.
+ */
+export function stripComments(markdown) {
+  if (typeof markdown !== "string" || !markdown.includes("%%")) {
+    return markdown;
+  }
+  const masked = maskCode(markdown);
+  const ranges = [];
+  let mark = masked.indexOf("%%");
+  while (mark !== -1) {
+    const lineStart = masked.lastIndexOf("\n", mark - 1) + 1;
+    const block = commentBlockPrefix.test(markdown.slice(lineStart, mark));
+    let close = masked.indexOf("%%", mark + 2);
+    if (!block && close !== -1 && masked.slice(mark, close).includes("\n")) {
+      close = -1;
+    }
+    if (close === -1) {
+      if (block) {
+        ranges.push([mark, markdown.length]);
+        break;
+      }
+      mark = masked.indexOf("%%", mark + 2);
+      continue;
+    }
+    ranges.push([mark, close + 2]);
+    mark = masked.indexOf("%%", close + 2);
+  }
+  if (ranges.length === 0) {
+    return markdown;
+  }
+  let result = "";
+  let from = 0;
+  for (const [start, end] of ranges) {
+    result += markdown.slice(from, start);
+    from = end;
+  }
+  return result + markdown.slice(from);
+}
+
 const htmlEntities = { "&amp;": "&", "&quot;": '"', "&#39;": "'", "&lt;": "<", "&gt;": ">" };
 
 function decodeHtmlEntities(value) {
@@ -2549,7 +2621,8 @@ async function referencesVisibly(req, fullPath, attachment, { asHandout = false 
     return false;
   }
   // The same steps the page handler takes, in the same order, as `answerFromFile`
-  // does for search: the frontmatter, the whole-file directive, the blocks.
+  // does for search: the frontmatter, the whole-file directive, the comments,
+  // the blocks.
   let content = splitFrontmatter(raw, file.absolutePath).body;
   const permissions = parseFirstLineForPermissions(content.split("\n")[0]);
   if (permissions !== null) {
@@ -2561,6 +2634,8 @@ async function referencesVisibly(req, fullPath, attachment, { asHandout = false 
     }
     content = content.split("\n").slice(1).join("\n");
   }
+  // A reference inside a comment is no reference (`obsidian-comments`).
+  content = stripComments(content);
   const folder = corpusFolderOf(fullPath);
   const segments = await filterForbiddenSegments(content, req);
   return segments.some((segment) =>
