@@ -891,6 +891,15 @@ export async function sharedSession(role) {
 }
 
 /**
+ * The roles a shared session has been opened for in this run, in the order they
+ * were first asked for. A run of selected content modules uses only some roles,
+ * so its login count is asserted against these rather than against every role.
+ */
+export function sharedRoles() {
+  return [...sharedSessions.keys()];
+}
+
+/**
  * Asks the application who it thinks the session belongs to, right now. Useful
  * for proving that two sessions in one run really are two sessions.
  */

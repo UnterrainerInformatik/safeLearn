@@ -682,6 +682,14 @@
         "md/test-exam-practice-question.md",
         "md/test-attachments.md"
       ]
+    },
+    "test/test-run.test.js": {
+      "what": "The partial runs: the unit and browser groups of tools/test-run.mjs together are exactly the files npm test runs and never overlap, no unit file imports puppeteer, and the planning rules of npm run test:changed - a content module selects itself only, test/harness.js selects the whole content suite and every harness user, a corpus file selects its readers, an unmapped file is reported as unguarded, a changed test file runs itself.",
+      "guards": [
+        "tools/test-run.mjs",
+        "test/coverage-map.json"
+      ],
+      "corpus": []
     }
   }
 }

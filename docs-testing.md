@@ -36,6 +36,7 @@ One run does the following:
 | `test/exam.test.js` | The instance **with** the exam module, in a process and on a port of its own, against a database created for the run and removed afterwards — see [The exam-module run](#the-exam-module-run). |
 | `test/anonymous.test.js` | Instances **without** an identity provider (`AUTH=none`), each started by `startAnonymous` on a port of its own, without any login and without Keycloak: what a reader without roles and a reader holding `teacher` are shown, the cookies their preferences live in, the routes that are absent, and the starts that are refused (`expectRefusedStart`). Runs offline. |
 | `test/exam-foundation.test.js` | The exam module unit by unit: database, migrations, backups, the teacher/student gate, the embedding hooks, and failure isolation. No browser, no login, no server. |
+| `test/test-run.test.js` | The partial runs: that `npm run test:unit` and `npm run test:browser` together are exactly the files `npm test` runs and never overlap, that no unit file imports `puppeteer`, and the planning rules of `npm run test:changed` against fixed inputs. No browser, no login, no server. |
 | `test/deployment-config.test.js` | That every environment variable the application reads reaches a deployed instance — through the image's own `.env` or through the container's environment — and that neither path is wired up only halfway. No browser, no login, no server: it reads the workflow, the compose file and the application's own sources. |
 
 `test/directive-grammar.test.js` is the one check in this run that reaches outside the repository. The plugin has to reach the same conclusion about a directive as the server does — that is the whole of what it is for — and its mirror of `parsePermissionEntry`, `parsePermissionWindow` and `parseLocalDateTime` is checked against those functions rather than against a reading of them. It transpiles the plugin's `main.ts` and runs its grammar over the same table. So `npm test` needs the plugin checkout the same way `npm run test:obsidian` does: the symlink `AI/plugin`, or `SAFELEARN_TEST_PLUGIN_DIR`. It does not need Obsidian, and it builds nothing.
@@ -48,6 +49,22 @@ npm test
 `npm install` also downloads a Chromium build (~150 MB) into your npm cache. Puppeteer is a `devDependency`, so `npm install --omit=dev` in the `Dockerfile` keeps it out of the production image.
 
 Each check reports on its own, and the process exits non-zero if any of them failed.
+
+### Running part of it
+A full run takes a quarter of an hour, most of it in the checks that log in. Three commands run part of it; `npm test` stays the full run.
+
+```bash
+npm run test:unit        # every test file that needs no server and no browser — no login
+npm run test:browser     # every test file that uses the server harness
+npm run test:changed     # only the checks that guard the files you changed
+```
+
+* **The two groups.** A file under `test/*.test.js` is in the browser group if it imports the server harness (`from "./harness.js"`), otherwise in the unit group. Nobody assigns a file by hand: `tools/test-run.mjs` reads the files every time, and `test/test-run.test.js` fails if the two groups together are not exactly what `npm test` runs, or if a unit file imports `puppeteer`. The unit group still needs the plugin checkout for `test/directive-grammar.test.js`, but no identity provider.
+* **The targeted run.** `npm run test:changed` takes the changed files from the working tree against `HEAD`, untracked files included; when the tree is clean, from the last commit (`HEAD~1..HEAD`). Paths can be given explicitly: `npm run test:changed -- test/checks/rendering.js`. It looks each file up in [the coverage record](#the-coverage-record) and starts exactly the checks named there, each once. A changed check file runs itself. Files no check guards are listed as unguarded; if nothing is guarded at all, nothing starts and the command exits 0.
+* **See the plan first.** `npm run test:changed -- --dry-run` prints which checks would run and why, and starts nothing.
+* **Selected content modules.** When only single modules under `test/checks/` are affected, the targeted run starts `test/content.test.js` with `SAFELEARN_TEST_CHECKS` set to their names (`SAFELEARN_TEST_CHECKS=rendering,views`). The suite then imports only those, in the order of the full run, and asserts one login per role they actually used plus the sessions of their own (`session-lifecycle`). An unknown name fails immediately and lists the known modules. You can set the variable by hand, too. A change to `test/harness.js`, `app.js` or `obsidian.js` selects nearly everything; that is expected.
+
+**The convention:** during the work, run `npm run test:unit` and `npm run test:changed`. Run the full `npm test` once at the end, or before the push. The record is per file and can miss a dependency, so the targeted run speeds up the work but does not replace the full run.
 
 ### The exam-module run
 `test/exam.test.js` is part of `npm test` but proves a different instance: one with `EXAM_MODULE=on`. It calls `useExamModule()` from the harness before its first session, which
@@ -207,6 +224,7 @@ Every value has a default; set only what you need to change. No file in the repo
 | `SAFELEARN_TEST_ENTRY_PATH`           | `/test`                            | Protected path a session is opened on, which starts the flow.  |
 | `SAFELEARN_TEST_CONTENT_PATH`         | `/md/test-md-file.md`              | Page a fresh session is put on once the flow has completed.    |
 | `SAFELEARN_TEST_HEADED`               | unset                              | `1` runs with a visible browser window.                        |
+| `SAFELEARN_TEST_CHECKS`               | unset                              | Comma-separated content modules `test/content.test.js` runs instead of all of them — see [Running part of it](#running-part-of-it). |
 | `SAFELEARN_TEST_STARTUP_TIMEOUT_MS`   | `120000`                           | How long to wait for the application to answer.                |
 | `SAFELEARN_TEST_NAVIGATION_TIMEOUT_MS`| `45000`                            | How long any single navigation may take.                       |
 | `SAFELEARN_TEST_EXAM_PORT`            | `8089`                             | Port of the instance `test/exam.test.js` starts with the exam module. |
@@ -272,7 +290,8 @@ Test files live in `test/` and are named `*.test.js`; `node --test` runs them on
 `test/coverage-map.json` is the single source for which check guards which file. It is not restated here, because a second copy would drift.
 
 * `test/coverage.test.js` keeps it honest: every path it names must exist, every check in `test/` must appear in it, and an entry naming a check that is gone is a failure.
-* `AI/claude/hooks/name-covering-checks.mjs` reads it on every `Edit`/`Write` in an assisted session and names the checks covering the edited file. It never runs the suite — a run takes minutes and authenticates against a shared public realm, which is not something to trigger as a side effect of an edit.
+* `AI/claude/hooks/name-covering-checks.mjs` reads it on every `Edit`/`Write` in an assisted session and names the checks covering the edited file. It offers `npm run test:changed` as the next step but never runs it — even a targeted run may take minutes and may authenticate against a shared public realm, which is not something to trigger as a side effect of an edit.
+* `tools/test-run.mjs` reads it for `npm run test:changed`, so the record that names the checks also runs them.
 
 A change that adds or removes a check updates the map in the same change.
 

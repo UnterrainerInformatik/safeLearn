@@ -6,9 +6,11 @@
  * file. This hook looks the edited file up in that record and says which checks
  * cover it, so the connection survives without anyone having to remember it.
  *
- * It never runs the suite. A run takes minutes and authenticates against a
- * shared public Keycloak realm, which is not something to trigger as a side
- * effect of an edit — it is offered as the next step and left to the session.
+ * It never runs anything. The targeted run `npm run test:changed` starts only
+ * the checks the record names for the changed files, but those may take
+ * minutes and may authenticate against a shared public Keycloak realm, which is
+ * not something to trigger as a side effect of an edit — it is offered as the
+ * next step and left to the session.
  *
  * Prints nothing for a file no check guards, and always exits 0: an edit must
  * never be blocked or made noisy by this.
@@ -17,7 +19,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-const runCommand = "npm test";
+const runCommand = "npm run test:changed";
 
 /** Everything on stdin, or an empty string when there is nothing to read. */
 function readStdin() {
@@ -73,8 +75,8 @@ function main() {
   const context =
     `${guarded} is covered by ${covering.length} check${covering.length > 1 ? "s" : ""}:\n` +
     `${lines.join("\n")}\n` +
-    `Offer running them with \`${runCommand}\` as the next step. Do not run it unasked: ` +
-    `a run takes minutes and authenticates against a shared public Keycloak realm.`;
+    `Offer running them with \`${runCommand}\` (only the checks the changed files need) as the next step. ` +
+    `Do not run it unasked: it may take minutes and may authenticate against a shared public Keycloak realm.`;
 
   process.stdout.write(
     JSON.stringify({

@@ -11,6 +11,9 @@
     "prod": "node -r dotenv/config ./app.js",
     "test": "node --test --test-concurrency=1 \"test/*.test.js\"",
     "test:headed": "node --test --test-concurrency=1 --env-file=test/headed.env \"test/*.test.js\"",
+    "test:unit": "node tools/test-run.mjs --group unit",
+    "test:browser": "node tools/test-run.mjs --group browser",
+    "test:changed": "node tools/test-run.mjs",
     "test:obsidian": "node --test --test-concurrency=1 \"test/obsidian/*.test.js\"",
     "docs:screenshots": "node tools/obsidian-screenshots.mjs"
   },
