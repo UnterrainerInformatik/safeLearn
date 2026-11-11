@@ -160,6 +160,85 @@ There are two kinds, exactly as in Obsidian:
 - Any other `%%` opens an inline comment, which must close on the same line. If it does not, the `%%` is shown as written.
 
 A `%%` inside code is not a comment. Inline code, a fenced block and a `mermaid` block (which has `%%` comments of its own) keep their marks, so a Java format string such as `String.format("%.1f%%", rate)` stays intact. A comment at the top of a file does not disturb the permission directive: that is still read from the first line as written.
+## Footnotes
+Obsidian's [footnotes](https://obsidian.md/help/syntax#Footnotes) render as numbered, linked superscripts, both the referenced kind and the inline kind:
+
+```markdown
+Fowler wrote it.[^src] An inline note stands where it is referenced.^[Like this one.]
+
+[^src]: Refactoring, 2002.
+```
+
+The notes are numbered 1, 2, 3 … in the order their first reference appears, whatever their labels are, and two references to one label share its number. On the page and in the document they are listed after the content. In the presentation each note stands at the bottom of the slide that holds its first reference, and on no other slide.
+
+A reference without a definition is shown as written, brackets included, so a forgotten definition is visible. (Obsidian drops the brackets there.) A definition without a reference is not shown, and so is neither part of a `@@@` block the reader may not see. Footnote syntax inside code stays as written.
+
+## Math
+Formulas between `$` (inline) and `$$` (display) are typeset with [KaTeX](https://katex.org/) on the server, so they show in every view without a script, and the fonts are served by safeLearn itself:
+
+```markdown
+Pythagoras: $a^2 + b^2 = c^2$.
+
+$$
+\frac{a}{b} = \sqrt{c}
+$$
+```
+
+The rule for `$` is Obsidian's: the opening `$` is not followed by a space, the closing `$` is not preceded by one and not followed by a digit. So `Kostet $5 und $10.` stays text, and `\$` is a literal dollar sign. A `$` inside code is never math.
+
+KaTeX is not MathJax, which Obsidian uses. Nearly everything a lesson needs is the same, but a command KaTeX does not know is shown in red as its source, and a formula that does not parse at all is shown as its source marked as an error. Either is visible on the first render, and the rest of the page is not affected.
+
+## Links To Headings And Blocks
+Every heading carries an anchor made of its text: lowercased, spaces as `-`, punctuation removed, umlauts kept. `## Übung 3: Größen` is `#übung-3-größen`. A second heading with the same text gets `-2`, a third `-3`. The Content list in the sidebar uses these anchors, so a link to a heading is the same for every reader and every load.
+
+A wiki link can name a heading or a block, of another note or of the same page:
+
+```markdown
+[[Git#Branches]]             the heading "Branches" of note Git
+[[Git#Remote#Branches]]      nested headings: the last one decides
+[[#Installation|see below]]  a heading of this page, with its own text
+[[Trees#^def-tree]]          the block of note Trees marked ^def-tree
+[[#^def-tree]]               a block of this page
+```
+
+Without `|text`, the link reads like Obsidian's: `Git > Branches`, `Git > Remote > Branches`, `Trees > ^def-tree`. A heading that does not exist opens the note at its top. In the presentation, a link to a heading or block of the same deck shows the slide that holds it. (A heading made only of digits reads as a slide number there.)
+
+A block is marked with `^id` at the end of a paragraph or a list item, or on a line of its own directly after a table, a quote, a list or a code block. The marker is not shown. `id` consists of letters, digits and `-`:
+
+```markdown
+A tree is a connected graph without cycles. ^def-tree
+
+| Note | Punkte |
+|------|--------|
+| 1    | 90     |
+
+^table-grades
+```
+
+## Embedding Notes
+`![[Note]]` inserts another note where it stands, `![[Note#Heading]]` one of its sections (the heading and everything up to the next heading of the same or a higher level), and `![[Note#^id]]` one of its blocks:
+
+```markdown
+![[Definition Baum]]
+![[Git#Branches]]
+![[Trees#^def-tree]]
+```
+
+The inserted text renders as if it were written there: its callouts, code, diagrams, images, footnotes and formulas render, and its headings appear in the Content list and start slides. Its frontmatter is not inserted.
+
+An embed keeps the permissions of the note it inserts. The note's first-line directive decides whether anything is inserted for this reader, and its `@@@` blocks are filtered for this reader before the section or block is taken. An embed the reader may not see looks exactly like an embed of a note that does not exist: it stays as written. So does an embed of a missing note, heading or block, and one inside code. Embeds inside embedded notes are resolved up to five levels deep, and a note that would embed itself again further down stays as written there.
+
+Search finds embedded text in the note it is written in, not in the page that embeds it. An image of an embedded note is served to whoever may see the page that shows it.
+
+Limits:
+
+- A footnote definition that stands outside an embedded section is not inserted with it, so its reference stays as written.
+- A relative Markdown image path (`![x](img/a.png)`) inside an embedded note is resolved against the page that embeds it, not against the embedded note. Embed images by name (`![[a.png]]`) and this does not matter.
+- The `|` part of a note embed (Obsidian's embed size) is ignored.
+
+## A Rule Directly Under Text
+A `---` directly under a line of text is no rule: CommonMark and Obsidian both read the line above it as a heading (a "setext" heading of level 2). safeLearn renders it the same way, so it starts a slide in the presentation, as Obsidian shows it as a heading. Leave a blank line above `---` for a rule.
+
 ## Image Sizing
 The renderer will never touch the image's size, until it won't fit the display. If that occurs, it will just resize it proportionally to fit it.
 

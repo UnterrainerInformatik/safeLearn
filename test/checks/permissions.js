@@ -214,6 +214,13 @@ const restrictedFiles = [
     directive: ["teacher"],
     content: "GESPERRTINHALT",
   },
+  // The note `test/checks/obsidian-syntax.js` embeds into an unrestricted page:
+  // opened on its own it is gated like any file.
+  {
+    path: "/md/test-embed-teacher.md",
+    directive: ["teacher"],
+    content: "EINBETTUNGLEHRER",
+  },
   // One of the places `test/checks/attachments.js` embeds its shared image.
   {
     path: "/md/test-attachments-teachers.md",

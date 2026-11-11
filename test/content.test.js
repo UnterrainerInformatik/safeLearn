@@ -52,6 +52,7 @@ const modules = [
   "exam-embedding",
   "frontmatter",
   "comments",
+  "obsidian-syntax",
   "deployment-surface",
 ];
 

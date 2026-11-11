@@ -1,8 +1,9 @@
 import fs from "fs";
 import path from "path";
 import pako from "pako";
-import { v4 as uuidv4 } from "uuid";
 import { JSDOM } from "jsdom";
+import katex from "katex";
+import markedFootnote from "marked-footnote";
 import { hasSomeRoles } from "./utils.js";
 import { getPermissionContext } from "./permission-context.js";
 import { withoutIdentity } from "./auth-mode.js";
@@ -1187,12 +1188,20 @@ export const highlightExtension = {
 export async function preParse(md, req, options = {}) {
   let r = md;
   r = await removeForbiddenContent(r, req);
+  // Note embeds first (`note-embedding`, design D6): the host's hidden blocks
+  // are gone, so an embed inside one is never resolved, and everything after
+  // this treats the inserted text as the host's own.
+  r = await preReplaceNoteEmbeds(r, req, { chain: hostChain(req, options), depth: 0, embedded: { count: 0 } });
   // After the permission filter, so a block inside a hidden section is already
   // gone, and before preMarkCode, so the block is not protected as code.
   r = await preReplaceEmbeds(r, req, { defaultsOnly: options.embedDefaults === true });
   r = await preReplacePlantUml(r, req);
   r = await preReplaceMermaid(r, req);
   r = preMarkCode(r);
+  r = preReplaceInlineFootnotes(r);
+  // Before the wiki links, so a trailing `^id` is gone before anything else
+  // reads the line.
+  r = preReplaceBlockMarkers(r);
   r = preReplaceObsidianFileLinks(r, req);
   r = preMarkCallouts(r);
   r = preprocessFragments(r)
@@ -1927,10 +1936,17 @@ const wikiLinkPattern = /(?<!\!)\[\[([^\]\n]+)\]\]/g;
 /**
  * A wiki link's target and text, from what stands between `[[` and `]]`.
  *
- * The one reading of that text, shared by the renderer and the attachment gate,
- * so the two cannot disagree about which name a link gives. `|text` is split
- * off, together with the `\` a table escapes the `|` with, and the target loses
- * a leading `/md/` or `md/`.
+ * The one reading of that text, shared by the renderer, the note embeds and the
+ * attachment gate, so they cannot disagree about which name a link gives.
+ * `|text` is split off, together with the `\` a table escapes the `|` with, and
+ * the target loses a leading `/md/` or `md/`.
+ *
+ * Whatever follows the first `#` is the place inside the target
+ * (`note-anchors`): `segments` are its `#`-separated parts as written,
+ * `fragment` the last of them, which is the one that decides, and `block` says
+ * whether it names a block (`^id`, `fragment` then without the caret). `name`
+ * is what stands before the `#` and resolves as it always did; it is empty for
+ * a place within the same page.
  */
 function parseWikiLink(inner) {
   let name = inner;
@@ -1946,7 +1962,61 @@ function parseWikiLink(inner) {
       text = null;
     }
   }
-  return { name: stripCorpusPrefix(name), text };
+  let segments = [];
+  const hash = name.indexOf("#");
+  if (hash !== -1) {
+    segments = name
+      .slice(hash + 1)
+      .split("#")
+      .map((segment) => segment.trim())
+      .filter((segment) => segment !== "");
+    name = name.slice(0, hash).trim();
+  }
+  const last = segments.length > 0 ? segments[segments.length - 1] : null;
+  const block = last !== null && last.startsWith("^");
+  return {
+    name: stripCorpusPrefix(name),
+    text,
+    segments,
+    fragment: last === null ? null : block ? last.slice(1) : last,
+    block,
+  };
+}
+
+/**
+ * A heading's anchor, from its text alone (`note-anchors`): lowercased, every
+ * run of whitespace a `-`, and everything but letters of any script, digits,
+ * `-` and `_` removed. The one rule behind the Content list's entries, a wiki
+ * link to a heading and the cut of a section embed, so the three agree.
+ */
+export function slugify(text) {
+  return String(text ?? "")
+    .normalize("NFC")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^\p{L}\p{M}\p{Nd}_-]/gu, "");
+}
+
+/** The anchor a wiki link's place resolves to: a heading's slug, or `block-<id>`. */
+function anchorOf(link) {
+  return link.block ? `block-${link.fragment}` : slugify(link.fragment);
+}
+
+/**
+ * The corpus path (relative to `md/`) of the note a wiki link or an embed
+ * names, or null. A basename that exists in more than one folder is only
+ * addressable by the path that tells the copies apart.
+ */
+function resolveNote(name) {
+  const candidates = mdFilesMap[name.split("/").pop()];
+  if (!candidates) {
+    return null;
+  }
+  if (candidates.length === 1) {
+    return candidates[0];
+  }
+  return candidates.find((candidate) => candidate === name + ".md") ?? null;
 }
 
 /**
@@ -1971,38 +2041,453 @@ function preReplaceObsidianFileLinks(html, req) {
     if (masked.slice(offset, offset + match.length) !== match) {
       return match;
     }
-    const { name: fileName, text: alt } = parseWikiLink(inner);
-    const lastPartOfFileName = fileName.split("/").pop();
-    const filePath = mdFilesMap[lastPartOfFileName];
-    if (filePath) {
-      let f = filePath[0];
-      if (filePath.length > 1) {
-        // A basename that exists in more than one folder is only addressable by
-        // the path that tells the copies apart. That path is emitted whole, the
-        // extension included: the page handler in `app.js` answers a request
-        // because it ends in `.md`, so a link that dropped the extension would
-        // fall through to the catch-all - which is what the single-candidate
-        // line above does too.
-        f = filePath.find((path) => path === fileName + ".md");
-        if (!f) {
-          return match;
-        }
+    const link = parseWikiLink(inner);
+    const { name: fileName, text: alt, segments } = link;
+    // A place within this page (`note-anchors`): only the anchor, no page URL.
+    if (fileName === "") {
+      if (link.fragment === null) {
+        return match;
       }
-      console.log(f);
+      return `[${alt ?? segments.join(" > ")}](#${anchorOf(link)})`;
+    }
+    // A basename that exists in more than one folder is only addressable by the
+    // path that tells the copies apart. That path is emitted whole, the
+    // extension included: the page handler in `app.js` answers a request
+    // because it ends in `.md`, so a link that dropped the extension would fall
+    // through to the catch-all.
+    if (mdFilesMap[fileName.split("/").pop()]) {
+      const f = resolveNote(fileName);
+      if (f === null) {
+        return match;
+      }
       const serverUrl = `${req.protocol}://${req.get("host")}`;
       const encodedPath = encodePathPreservingSlashes(dirPrefix + f);
-      const url = `${serverUrl}/${encodedPath}`;
-      return `[${alt ? alt : fileName}](${url})`;
+      // A heading or block that does not exist needs no lookup: the browser
+      // ignores an unknown fragment, so the link lands on the note's top, as
+      // it does in Obsidian.
+      const anchor = link.fragment === null ? "" : `#${anchorOf(link)}`;
+      const url = `${serverUrl}/${encodedPath}${anchor}`;
+      // Obsidian's own default text names every segment as written.
+      return `[${alt ?? [fileName, ...segments].join(" > ")}](${url})`;
     }
-    // Not a page: a wiki link to an attachment resolves as its embed does.
+    // Not a page: a wiki link to an attachment resolves as its embed does. What
+    // follows its `#` (a PDF's `page=3`) is handed to the browser unchanged.
     const attachment = resolveWikiLinkAttachment(fileName);
     if (attachment === null) {
       return match;
     }
+    const written = segments.length > 0 ? `${fileName}#${segments.join("#")}` : fileName;
+    const suffix = segments.length > 0 ? `#${encodeURI(segments.join("#"))}` : "";
     const serverUrl = `${req.protocol}://${req.get("host")}`;
-    const url = `${serverUrl}/${encodePathPreservingSlashes(dirPrefix + attachment)}`;
-    return `[${alt ? alt : fileName}](${url})`;
+    const url = `${serverUrl}/${encodePathPreservingSlashes(dirPrefix + attachment)}${suffix}`;
+    return `[${alt ?? written}](${url})`;
   });
+}
+
+// ################### Obsidian syntax: footnotes, blocks, math, note embeds ###################
+
+/** The label an inline footnote `^[…]` is given, so `marked-footnote` numbers it among the others. */
+const inlineFootnoteLabel = "sl-inline-";
+
+/**
+ * Rewrites every inline footnote `^[text]` into a reference and appends its
+ * definition at the end (`footnote-rendering`, design D1), where
+ * `marked-footnote` numbers it by first use among the referenced ones. The
+ * brackets are matched by counting, so `^[see [[Note]]]` keeps its wiki link.
+ * Code stays as written, and so does an escaped `\^[`.
+ */
+function preReplaceInlineFootnotes(md) {
+  if (!md.includes("^[")) {
+    return md;
+  }
+  const masked = maskCode(md);
+  const definitions = [];
+  let result = "";
+  let carried = 0;
+  for (let at = masked.indexOf("^["); at !== -1; at = masked.indexOf("^[", at + 1)) {
+    if (at < carried || (at > 0 && masked[at - 1] === "\\")) {
+      continue;
+    }
+    let depth = 0;
+    let end = -1;
+    for (let i = at + 1; i < masked.length; i++) {
+      const c = masked[i];
+      if (c === "\n" && masked[i + 1] === "\n") break;
+      if (c === "[") depth++;
+      else if (c === "]" && --depth === 0) {
+        end = i;
+        break;
+      }
+    }
+    if (end === -1) {
+      continue;
+    }
+    const text = md.slice(at + 2, end).replace(/\s*\n\s*/g, " ").trim();
+    if (text === "") {
+      continue;
+    }
+    const label = `${inlineFootnoteLabel}${definitions.length + 1}`;
+    definitions.push(`[^${label}]: ${text}`);
+    result += md.slice(carried, at) + `[^${label}]`;
+    carried = end + 1;
+  }
+  if (definitions.length === 0) {
+    return md;
+  }
+  return `${result}${md.slice(carried)}\n\n${definitions.join("\n")}\n`;
+}
+
+/** A block marker `^id` (`note-anchors`): letters, digits and `-`. */
+const blockIdPattern = "[A-Za-z0-9-]+";
+const trailingBlockMarker = new RegExp(`(\\s)\\^(${blockIdPattern})[ \\t]*$`);
+const standaloneBlockMarker = new RegExp(`^[ \\t]*\\^(${blockIdPattern})[ \\t]*$`);
+
+/**
+ * Replaces each block marker with a placeholder `applyBlockAnchors` turns into
+ * the block's id once the HTML exists (design D5). A marker ending a line stays
+ * inside its paragraph or list item; one on a line of its own becomes a
+ * paragraph of its own, set apart by blank lines so a table above it cannot
+ * take it for a row. Code stays as written, and so does any other `^`.
+ */
+function preReplaceBlockMarkers(md) {
+  if (!md.includes("^")) {
+    return md;
+  }
+  const masked = maskCode(md).split("\n");
+  return md
+    .split("\n")
+    .map((line, index) => {
+      const shown = masked[index];
+      const alone = standaloneBlockMarker.exec(shown);
+      if (alone) {
+        return `\n<span data-block-anchor="${alone[1]}" data-block-standalone="1"></span>\n`;
+      }
+      const trailing = trailingBlockMarker.exec(shown);
+      if (trailing) {
+        return `${line.slice(0, trailing.index)}${trailing[1]}<span data-block-anchor="${trailing[2]}"></span>`;
+      }
+      return line;
+    })
+    .join("\n");
+}
+
+/** How deep embeds nest inside embedded content (`note-embedding`). */
+export const maximumEmbedDepth = 5;
+
+/**
+ * The corpus path of the page being rendered, as the first link of the embed
+ * chain, so a note that embeds the page back stops right there. Null where the
+ * request does not name a corpus page.
+ */
+function hostChain(req, options) {
+  if (typeof options.corpusPath === "string") {
+    return [options.corpusPath];
+  }
+  let requested;
+  try {
+    requested = decodeURIComponent(req?.path ?? "");
+  } catch {
+    return [];
+  }
+  const prefix = `/${dirPrefix}`;
+  return requested.startsWith(prefix) && requested.endsWith(".md") ? [requested.slice(prefix.length)] : [];
+}
+
+/**
+ * A note's text as this session may read it on its own, or null: the
+ * frontmatter split off, its whole-file directive decided and removed, its
+ * comments and the inline blocks this session may not see gone - the steps a
+ * page takes, in the order it takes them.
+ */
+async function readNoteForSession(req, corpusPath) {
+  const file = mdFilesDirStructure[corpusPath];
+  if (!file) {
+    return null;
+  }
+  let raw;
+  try {
+    raw = await fs.promises.readFile(file.absolutePath, "utf8");
+  } catch {
+    return null;
+  }
+  let content = splitFrontmatter(raw, file.absolutePath).body;
+  const permissions = parseFirstLineForPermissions(content.split("\n")[0].replace(/\r$/, ""));
+  if (permissions !== null) {
+    const { visible } = await resolveFileVisibility(req, permissions);
+    if (!visible) {
+      return null;
+    }
+    content = content.split("\n").slice(1).join("\n");
+  }
+  content = stripComments(content);
+  return removeForbiddenContent(content, req);
+}
+
+const atxHeading = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/;
+
+/**
+ * The section of `text` under the first heading whose anchor is the anchor of
+ * `heading`, the heading included, up to the next heading of the same or a
+ * higher level; null when there is none. Headings inside code are no headings.
+ */
+function sectionOf(text, heading) {
+  const wanted = slugify(heading);
+  const lines = text.split("\n");
+  const masked = maskCode(text).split("\n");
+  let start = -1;
+  let level = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const match = atxHeading.exec(masked[i]);
+    if (!match) continue;
+    if (start === -1) {
+      if (slugify(headingText(match[2] ?? "")) === wanted) {
+        start = i;
+        level = match[1].length;
+      }
+    } else if (match[1].length <= level) {
+      return lines.slice(start, i).join("\n");
+    }
+  }
+  return start === -1 ? null : lines.slice(start).join("\n");
+}
+
+const listItemStart = /^([ \t]*)(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/;
+
+/**
+ * The block of `text` marked `^id`, without its marker; null when there is
+ * none. A marker ending a list item names that item (with what is indented
+ * below it), one ending any other line names its paragraph, and one on a line
+ * of its own names the block directly above it.
+ */
+function blockOf(text, id) {
+  const lines = text.split("\n");
+  const masked = maskCode(text).split("\n");
+  // Blank as written: a masked fence is blank in `masked`, and is a block.
+  const blank = (i) => lines[i] === undefined || lines[i].trim() === "";
+  for (let i = 0; i < lines.length; i++) {
+    const alone = standaloneBlockMarker.exec(masked[i]);
+    if (alone && alone[1] === id) {
+      let from = i - 1;
+      while (from >= 0 && blank(from)) from--;
+      if (from < 0) return null;
+      const to = from;
+      // A fenced block is one block however many blank lines it holds.
+      if (/^[ \t]{0,3}(`{3,}|~{3,})/.test(lines[to])) {
+        const fence = lines[to].trim().charAt(0);
+        let open = to - 1;
+        while (open >= 0 && !new RegExp(`^[ \\t]{0,3}\\${fence}{3,}`).test(lines[open])) open--;
+        if (open >= 0) return lines.slice(open, to + 1).join("\n");
+      }
+      while (from > 0 && !blank(from - 1)) from--;
+      return lines.slice(from, to + 1).join("\n");
+    }
+    const trailing = trailingBlockMarker.exec(masked[i]);
+    if (!trailing || trailing[2] !== id) continue;
+    const cut = (index) => (index === i ? lines[i].slice(0, trailing.index) : lines[index]);
+    const item = listItemStart.exec(masked[i]);
+    if (item) {
+      const indent = item[1].length;
+      let to = i;
+      while (to + 1 < lines.length && !blank(to + 1) && !listItemStart.test(masked[to + 1]) &&
+        /^[ \t]*/.exec(masked[to + 1])[0].length > indent) to++;
+      const block = [];
+      for (let k = i; k <= to; k++) block.push(cut(k).slice(indent));
+      return block.join("\n");
+    }
+    let from = i;
+    while (from > 0 && !blank(from - 1) && !listItemStart.test(masked[from])) from--;
+    let to = i;
+    while (to + 1 < lines.length && !blank(to + 1) && !listItemStart.test(masked[to + 1])) to++;
+    const block = [];
+    for (let k = from; k <= to; k++) block.push(cut(k));
+    return block.join("\n");
+  }
+  return null;
+}
+
+/**
+ * Gives the footnote labels of inserted content a prefix of their own, so the
+ * host's `[^1]` and the embedded note's `[^1]` stay two notes (design D1).
+ */
+function prefixFootnoteLabels(text, prefix) {
+  const masked = maskCode(text);
+  return text.replace(/\[\^([^\]\n]+)\]/g, (match, label, offset) =>
+    masked.slice(offset, offset + match.length) === match ? `[^${prefix}${label}]` : match
+  );
+}
+
+/**
+ * Replaces each note embed `![[Note]]`, `![[Note#Heading]]` and `![[Note#^id]]`
+ * with what it names, as this session may see it on its own
+ * (`note-embedding`, design D5). An embed of an attachment, one in code, and
+ * one that cannot be resolved - no such note, no such heading or block, not
+ * visible to this session, too deep, or already on the chain of notes being
+ * inserted - stays as written, so a refused embed reads exactly like a missing
+ * one.
+ */
+async function preReplaceNoteEmbeds(md, req, context) {
+  if (!md.includes("![[")) {
+    return md;
+  }
+  const masked = maskCode(md);
+  const embed = /!\[\[([^\]\n]+)\]\]/g;
+  let result = "";
+  let carried = 0;
+  let match;
+  while ((match = embed.exec(masked)) !== null) {
+    if (md.slice(match.index, match.index + match[0].length) !== match[0]) {
+      continue;
+    }
+    const inserted = await insertedNote(match[1], req, context);
+    if (inserted === null) {
+      continue;
+    }
+    result += `${md.slice(carried, match.index)}\n\n${inserted}\n\n`;
+    carried = match.index + match[0].length;
+  }
+  return carried === 0 ? md : result + md.slice(carried);
+}
+
+async function insertedNote(inner, req, context) {
+  // An attachment embed, with or without its size, renders as it always did.
+  // The `|` part of a note embed is ignored (design, non-goals).
+  if (resolveAttachment(inner.split("|")[0].trim()) !== null) {
+    return null;
+  }
+  const link = parseWikiLink(inner);
+  if (link.name === "") {
+    return null;
+  }
+  const note = resolveNote(link.name);
+  if (note === null || context.depth >= maximumEmbedDepth || context.chain.includes(note)) {
+    return null;
+  }
+  let text = await readNoteForSession(req, note);
+  if (text === null) {
+    return null;
+  }
+  if (link.fragment !== null) {
+    text = link.block ? blockOf(text, link.fragment) : sectionOf(text, link.fragment);
+    if (text === null) {
+      return null;
+    }
+  }
+  context.embedded.count += 1;
+  text = prefixFootnoteLabels(text, `e${context.embedded.count}-`);
+  return preReplaceNoteEmbeds(text, req, {
+    chain: [...context.chain, note],
+    depth: context.depth + 1,
+    embedded: context.embedded,
+  });
+}
+
+/**
+ * Typesets `$…$` and `$$…$$` with KaTeX on the server (`math-rendering`, design
+ * D2). Inline math follows Obsidian's rule: the opening `$` is not followed by
+ * whitespace, the closing `$` is not preceded by whitespace and not followed by
+ * a digit, on one line. `$$…$$` is display math, inline or as a block of its
+ * own, across lines. A `$` behind a backslash is not a candidate, so `\$`
+ * reaches `marked`'s own escape. A formula that does not parse shows its
+ * source, marked as an error, and costs nothing else.
+ */
+const displayMath = /^\$\$(?!\$)([\s\S]+?)\$\$/;
+const inlineMath = /^\$(?=[^\s$])((?:\\.|[^\\\n$])*?[^\s\\$])\$(?!\d)/;
+const blockMath = /^ {0,3}\$\$[ \t]*(?:\n|(?=[^\n]))([\s\S]+?)\$\$[ \t]*(?:\n+|$)/;
+
+/**
+ * KaTeX's markup without what DOMPurify's MathML profile refuses: the
+ * `<semantics>` wrapper and its `<annotation>` holding the TeX source (refused
+ * against namespace confusion; left to DOMPurify, the annotation's text would
+ * stay behind as loose text for a screen reader), and the two layout
+ * attributes of `<mtable>`. Removed here, so the sanitizer passes the formula
+ * through unchanged and keeps its own profile.
+ */
+function typeset(tex, displayMode) {
+  return katex
+    .renderToString(tex, { displayMode, throwOnError: false, strict: "ignore", output: "htmlAndMathml" })
+    .replace(/<annotation\b[^>]*>[\s\S]*?<\/annotation>/g, "")
+    .replace(/<\/?semantics>/g, "")
+    .replace(/<mtable\b[^>]*>/g, (tag) => tag.replace(/\s+column(?:align|spacing)="[^"]*"/g, ""));
+}
+
+/**
+ * The formula `src` starts with, or null. A candidate that would reach into
+ * inline code is none: the code span wins, so a `$` in code stays as written
+ * however the dollars around it pair up.
+ */
+function mathAt(src) {
+  const display = displayMath.exec(src);
+  if (display && display[1].trim() !== "" && !display[1].includes("`")) {
+    return { raw: display[0], text: display[1].trim(), displayMode: true };
+  }
+  const inline = inlineMath.exec(src);
+  if (inline && !inline[1].includes("`")) {
+    return { raw: inline[0], text: inline[1], displayMode: false };
+  }
+  return null;
+}
+
+export const mathExtension = {
+  extensions: [
+    {
+      name: "blockMath",
+      level: "block",
+      start(src) {
+        const index = src.search(/^ {0,3}\$\$/m);
+        return index < 0 ? undefined : index;
+      },
+      tokenizer(src) {
+        const match = blockMath.exec(src);
+        if (!match || match[1].trim() === "") return undefined;
+        return { type: "blockMath", raw: match[0], text: match[1].trim() };
+      },
+      renderer(token) {
+        return `${typeset(token.text, true)}\n`;
+      },
+    },
+    {
+      name: "inlineMath",
+      level: "inline",
+      start(src) {
+        for (let index = src.indexOf("$"); index !== -1; index = src.indexOf("$", index + 1)) {
+          let backslashes = 0;
+          for (let i = index - 1; i >= 0 && src[i] === "\\"; i--) backslashes++;
+          if (backslashes % 2 === 0 && mathAt(src.slice(index))) {
+            return index;
+          }
+          // `$$` that is no display formula is no pair of inline openers either.
+          if (src[index + 1] === "$") index++;
+        }
+        return undefined;
+      },
+      tokenizer(src) {
+        const formula = mathAt(src);
+        return formula === null ? undefined : { type: "inlineMath", ...formula };
+      },
+      renderer(token) {
+        return typeset(token.text, token.displayMode);
+      },
+    },
+  ],
+};
+
+/**
+ * Everything the renderer adds to `marked` for Obsidian's syntax, for one
+ * render: highlights, footnotes and math. Called per render, because
+ * `marked-footnote` keeps its counter in the instance it returns and two
+ * renders sharing one would number each other's notes (design D1).
+ * `labels` are the footnote list's heading for screen readers and the
+ * back-link's label, in the reader's language.
+ */
+export function obsidianMarkedExtensions(labels = {}) {
+  return [
+    highlightExtension,
+    markedFootnote({
+      description: labels.footnotes ?? "Footnotes",
+      backRefLabel: labels.backToReference ?? "Back to reference {0}",
+    }),
+    mathExtension,
+  ];
 }
 
 export async function preReplaceMermaid(md, req) {
@@ -2071,8 +2556,64 @@ export function manipulateHtml(html, req) {
   r = replaceObsidianImageLinks(r, req);
   r = replaceObsidianImageAltResizeValues(r);
   r = postprocessFragments(r)
-  r = makeContentMap(r, req);
+  r = applyBlockAnchors(r);
   return r;
+}
+
+/**
+ * Gives every heading its stable anchor and leaves the Content list on `req`
+ * (`note-anchors`, `page-navigation`). The last step, after `sanitizeHtml`:
+ * DOMPurify drops an id that names a property of `document` - its guard
+ * against DOM clobbering - so a heading called "Images" or "Links" would lose
+ * its anchor if it were given one before. An anchor holds letters, digits, `-`
+ * and `_` only, and a heading's id never becomes a property of `document`.
+ */
+export function anchorHeadings(html, req) {
+  return makeContentMap(html, req);
+}
+
+/**
+ * Turns the placeholders `preReplaceBlockMarkers` left into ids (`note-anchors`).
+ * A marker that ended a paragraph or a list item names that paragraph or list
+ * item; one that stood on its own line names the block before it. Every
+ * placeholder is removed, whether it found a block or not, so none reaches the
+ * browser.
+ */
+function applyBlockAnchors(html) {
+  if (!html.includes("data-block-anchor")) {
+    return html;
+  }
+  const dom = new JSDOM(html);
+  const document = dom.window.document;
+  for (const placeholder of Array.from(document.querySelectorAll("span[data-block-anchor]"))) {
+    const id = `block-${placeholder.getAttribute("data-block-anchor")}`;
+    let target = null;
+    if (placeholder.hasAttribute("data-block-standalone")) {
+      // Rendered as a paragraph of its own or as bare HTML; either way the block
+      // it names is the element before that.
+      const wrapper =
+        placeholder.parentElement?.tagName === "P" && placeholder.parentElement.textContent.trim() === ""
+          ? placeholder.parentElement
+          : placeholder;
+      target = wrapper.previousElementSibling;
+      placeholder.remove();
+      if (wrapper !== placeholder && wrapper.childNodes.length === 0) {
+        wrapper.remove();
+      } else if (wrapper !== placeholder && wrapper.textContent.trim() === "" && wrapper.children.length === 0) {
+        wrapper.remove();
+      }
+    } else {
+      target = placeholder.closest("p, li");
+      if (target?.tagName === "P" && target.parentElement?.tagName === "LI") {
+        target = target.parentElement;
+      }
+      placeholder.remove();
+    }
+    if (target && !target.hasAttribute("id") && !document.getElementById(id)) {
+      target.setAttribute("id", id);
+    }
+  }
+  return dom.serialize();
 }
 
 export function splitForReveal(html) {
@@ -2095,7 +2636,64 @@ export function splitForReveal(html) {
     sections.push(splitSubSections(currentSection.join("")));
   }
 
-  return sections.join("");
+  return finishForReveal(sections.join(""));
+}
+
+/**
+ * What the presentation view needs beyond the slides themselves.
+ *
+ * A link to a place in the same deck becomes `#/<id>`: Reveal resolves that to
+ * the slide holding the element (`note-anchors`), where a plain `#<id>` would
+ * only scroll a deck that does not scroll. And each footnote moves to the slide
+ * of its first reference, numbered as on the page, so the list at the end of
+ * the file - which would be one more slide - is gone (`footnote-rendering`).
+ */
+function finishForReveal(html) {
+  if (!html.includes('href="#') && !html.includes("footnotes")) {
+    return html;
+  }
+  const dom = new JSDOM(html);
+  const document = dom.window.document;
+
+  for (const list of Array.from(document.querySelectorAll("section.footnotes"))) {
+    for (const note of Array.from(list.querySelectorAll(":scope > ol > li"))) {
+      const reference = document.querySelector(`a[data-footnote-ref][href="#${note.id}"]`);
+      const slide = reference?.closest("section:not(.footnotes)");
+      if (!reference || !slide) {
+        continue;
+      }
+      note.setAttribute("value", reference.textContent.trim());
+      let notes = slide.querySelector(":scope > div.footnotes > ol");
+      if (!notes) {
+        const box = document.createElement("div");
+        box.className = "footnotes";
+        notes = document.createElement("ol");
+        box.appendChild(notes);
+        slide.appendChild(box);
+      }
+      notes.appendChild(note);
+    }
+    // The list stood after the last slide's content. A slide that held nothing
+    // else is gone with it, and so is its column if that was its only row.
+    const slide = list.closest("section:not(.footnotes)");
+    list.remove();
+    for (let empty = slide; empty && empty.tagName === "SECTION"; ) {
+      if (empty.textContent.trim() !== "" || empty.querySelector("img, svg, iframe, video, table, pre")) {
+        break;
+      }
+      const parent = empty.parentElement;
+      empty.remove();
+      empty = parent;
+    }
+  }
+
+  for (const link of Array.from(document.querySelectorAll('a[href^="#"]'))) {
+    const href = link.getAttribute("href");
+    if (href.length > 1 && !href.startsWith("#/")) {
+      link.setAttribute("href", `#/${href.slice(1)}`);
+    }
+  }
+  return document.body.innerHTML;
 }
 
 function splitSubSections(html) {
@@ -2135,19 +2733,37 @@ function makeContentMap(html, req) {
   const document = dom.window.document;
   const headers = document.querySelectorAll("h1, h2, h3, h4, h5, h6");
   const contentMap = {};
+  // Ids already taken in this rendering: the slugs given so far, and whatever
+  // the page carries of its own (block anchors, footnotes).
+  const taken = new Set(Array.from(document.querySelectorAll("[id]"), (element) => element.id));
+  taken.add("ROOT");
 
   contentMap["ROOT"] = { text: "TOP", indent: 1 };
   headers.forEach((header) => {
-    const guid = uuidv4();
+    // The footnotes' own heading is for screen readers and is no part of the
+    // page's outline.
+    if (header.closest("section.footnotes")) {
+      return;
+    }
+    // A stable anchor (`note-anchors`, design D3): the first heading of a text
+    // keeps the bare slug, every further one counts up from -2.
+    const base = slugify(header.textContent) || "heading";
+    let anchor = base;
+    for (let n = 2; taken.has(anchor); n++) {
+      anchor = `${base}-${n}`;
+    }
+    taken.add(anchor);
     const indent = parseInt(header.tagName.slice(1));
-    contentMap[guid] = { text: header.textContent, indent: indent };
-    header.setAttribute("id", guid);
+    contentMap[anchor] = { text: header.textContent, indent: indent };
+    header.setAttribute("id", anchor);
     header.setAttribute("class", "docanchor");
   });
   if (req) {
     req.contentListing = contentMap;
   }
-  return `<span id="ROOT" class="docanchor"></span>` + dom.serialize();
+  // The body alone: this runs after the sanitizer, which used to strip the
+  // document around it.
+  return `<span id="ROOT" class="docanchor"></span>` + document.body.innerHTML;
 }
 
 function replaceObsidianImageAltResizeValues(html) {
@@ -3823,10 +4439,11 @@ function getAutoReloadScript() {
    * restore - see revealPage() in obsidian-page.js.
    *
    * A native #fragment cannot do this: the browser resolves a fragment during
-   * load, while the body is still hidden, and would land at the top. Nor could
-   * it address the right place - makeContentMap gives every heading a fresh
-   * uuid on every render, so a heading's id means nothing outside the render
-   * that produced it. What a result carries instead is the heading's text and
+   * load, while the body is still hidden, and would land at the top. Nor is a
+   * heading's anchor the address a result needs: the anchor of a repeated
+   * heading counts the equal headings before it that this session sees, and
+   * the search counts the same way only by doing it itself. What a result
+   * carries instead is the heading's text and
    * which occurrence of that text it is, counted over the content this session
    * is served. This counts the same way over the page in front of it.
    *
@@ -3910,6 +4527,7 @@ export async function wrapInPage(html, startPage, req, options = {}) {
           ${await getFontImports()}
         </style>
         <link rel="stylesheet" href="/css/main.css">
+        <link rel="stylesheet" href="/node_modules/katex/dist/katex.min.css">
         <link rel="shortcut icon" href="/assets/favicon.ico" type="image/x-icon" />
         <title>${title !== null ? escapeHtmlAttribute(title) : req.file.name}</title>
       </head>
@@ -3978,6 +4596,7 @@ export async function wrapAsDocument(html, req, options = {}) {
           ${await getFontImports()}
         </style>
         <link rel="stylesheet" href="/css/main.css">
+        <link rel="stylesheet" href="/node_modules/katex/dist/katex.min.css">
         <link rel="shortcut icon" href="/assets/favicon.ico" type="image/x-icon" />
         <title>${req.file.name}</title>
       </head>
@@ -4162,6 +4781,7 @@ export async function wrapInReveal(reveal, req, options = {}) {
     <link rel="stylesheet" href="/node_modules/reveal.js/dist/reveal.css">
     <link rel="stylesheet" href="/css/reveal-theme-moon.css">
     <link rel="stylesheet" href="/css/highlights.css">
+    <link rel="stylesheet" href="/node_modules/katex/dist/katex.min.css">
 
     <style>
       ${getFontImports()}

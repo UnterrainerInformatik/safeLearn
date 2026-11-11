@@ -8,7 +8,7 @@ Defines the sidebar of the page view: that its Content list reflects only the pa
 
 ### Requirement: The Content list shows the headings of the page it is drawn on
 
-The sidebar's **Content** section SHALL list the headings of the page it is drawn on and of no other page. It SHALL be built from the same rendering of that page the reader receives, so it SHALL NOT list a heading the reader's rendering omitted. Pages rendered for other readers, before or at the same time, SHALL NOT affect it. A page of the page view that carries no rendered corpus content (the administration pages and the exam module's pages) SHALL show no Content section at all.
+The sidebar's **Content** section SHALL list the headings of the page it is drawn on and of no other page. It SHALL be built from the same rendering of that page the reader receives, so it SHALL NOT list a heading the reader's rendering omitted. Pages rendered for other readers, before or at the same time, SHALL NOT affect it. A page of the page view that carries no rendered corpus content (the administration pages and the exam module's pages) SHALL show no Content section at all. Each entry SHALL lead to its heading by the heading's stable anchor (`note-anchors`), so an entry's address is the same address a wiki link to that heading uses.
 
 #### Scenario: A module page after a corpus page
 
@@ -30,6 +30,11 @@ The sidebar's **Content** section SHALL list the headings of the page it is draw
 
 - **WHEN** a corpus page holds a section restricted to teachers and a student opens it
 - **THEN** the student's Content list does not list that section's heading
+
+#### Scenario: An entry and a wiki link agree
+
+- **WHEN** a page has a heading `## Branches` and another page links `[[Note#Branches]]` to it
+- **THEN** the Content list entry and the link both address the anchor `branches`
 
 ### Requirement: The ☰ button shows and hides the sidebar at every width
 

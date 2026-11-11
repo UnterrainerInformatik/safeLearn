@@ -232,3 +232,19 @@ html.reveal-print .reveal > .sl-deck-header,
 html.reveal-print .reveal > .sl-deck-footer {
   display: none;
 }
+
+/* Footnotes on the slide of their first reference (`footnote-rendering`). */
+.reveal .slides section .footnotes {
+  margin-top: 0.6em;
+  font-size: 0.5em;
+  text-align: left;
+}
+
+.reveal .slides section .footnotes ol {
+  margin: 0;
+}
+
+.reveal a[data-footnote-ref] {
+  font-size: 0.6em;
+  vertical-align: super;
+}

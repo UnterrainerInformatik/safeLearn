@@ -40,6 +40,10 @@
       "loading": "Loading…",
       "unavailable": "Exam module element {kind}: only available on an instance with the exam database."
     },
+    "footnotes": {
+      "backToReference": "Back to reference {label}",
+      "heading": "Footnotes"
+    },
     "menu": {
       "format": "Format",
       "language": "Language",

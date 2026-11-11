@@ -147,3 +147,34 @@
 #markdown-content.dark-mode .sl-properties::backdrop {
   background: rgba(0, 0, 0, 0.6);
 }
+
+/* Footnotes (`footnote-rendering`): the list after the content, its heading
+   for screen readers only, as marked-footnote writes it. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+section.footnotes {
+  margin-top: 2em;
+  padding-top: 0.5em;
+  border-top: 1px solid rgba(128, 128, 128, 0.4);
+  font-size: 0.9em;
+}
+
+a[data-footnote-ref] {
+  text-decoration: none;
+}
+
+/* Display formulas scroll on their own rather than widening the page. */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}

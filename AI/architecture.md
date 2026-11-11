@@ -43,17 +43,18 @@ Keycloak itself is external. The client configuration is read from `keycloak.jso
 
 | Component | Declared | Resolved | Where it is used |
 | --- | --- | --- | --- |
-| `marked` | `^12.0.1` | 12.0.2 | `app.js` — two configured instances, `markedLight` and `markedDark`, chosen per request from the user's dark-mode preference |
+| `marked` | `^12.0.1` | 12.0.2 | `app.js` — `markedFor` builds one instance per render (`buildMarked`), with `obsidianMarkedExtensions` and Shiki in the theme of the user's dark-mode preference; per render because `marked-footnote` keeps its numbering in the extension |
+| `marked-footnote` | `^1.4.0` | 1.4.0 | `obsidian.js` `obsidianMarkedExtensions` — Obsidian footnotes `[^label]`; inline `^[…]` is rewritten into it by `preReplaceInlineFootnotes` |
+| `katex` | `^0.19.1` | 0.19.1 | `obsidian.js` `mathExtension` — server-side typesetting of `$…$`/`$$…$$` with a tokenizer of our own (Obsidian's delimiter rule); `katex/dist` is mounted in `app.js` like `mermaid/dist` and `katex.min.css` linked by all three wrappers |
 | `marked-shiki` | `^1.0.1` | 1.2.1 | `app.js` — bridges `marked` to Shiki for fenced code blocks |
 | `shiki` | `^1.1.7` | 1.29.2 | `app.js` — all bundled languages loaded; themes `material-theme-lighter` (light) and `one-dark-pro` (dark) |
 | `@shikijs/transformers` | `^1.1.7` | 1.29.2 | `app.js` — notation transformers for diff, highlight, word-highlight, focus, error-level, plus the two meta transformers |
 | `dompurify` | `^3.0.9` | 3.3.1 | `sanitize.js` — the one instance: `app.js`'s final sanitize before every response, and the exam module's question import and question editor (through `exam/stored-html.js`) |
-| `jsdom` | `^24.0.0` | 24.1.3 | `sanitize.js` (DOMPurify window), `exam/pool-import.js` (Moodle XML) and `obsidian.js` (fragment post-processing, Reveal section splitting, table-of-contents building) |
+| `jsdom` | `^24.0.0` | 24.1.3 | `sanitize.js` (DOMPurify window), `exam/pool-import.js` (Moodle XML) and `obsidian.js` (fragment post-processing, block anchors, Reveal section splitting and footnote placement, table-of-contents building) |
 | `mermaid` | `^11.12.0` | 11.12.2 | Rendered **in the browser**: `obsidian.js` emits a module script importing `/node_modules/mermaid/dist/mermaid.esm.min.mjs` and `/node_modules/@mermaid-js/layout-elk/dist/mermaid-layout-elk.esm.min.mjs`. Each package's `dist` directory has a mount of its own in `app.js` — the directory, not the entry file, because mermaid fetches further chunks from `dist/chunks/mermaid.esm.min/` at runtime. The rest of the dependency tree is not served |
 | `reveal.js` | `^5.0.5` | 5.2.1 | Rendered **in the browser**: `obsidian.js` `wrapInReveal` links `/node_modules/reveal.js/dist/reset.css` and `dist/reveal.css` and loads `dist/reveal.js` plus `plugin/notes/notes.js`. Two mounts in `app.js` serve `dist` and `plugin/notes` — directories, not entry files, because the theme's fonts sit under `dist/theme/fonts/` and the speaker view opens `plugin/notes/speaker-view.html`. The theme is `css/reveal-theme-moon.css`, this project's derivation of the package's `moon.css`, whose Google Fonts `@import` was replaced by `@font-face` rules over `assets/main-fonts/Lato*.ttf` — six of them, 300/400/700 upright and the italic of each, because `.reveal` sets weight 300 and a deck's emphasis, blockquote and `q` therefore resolve to 300 italic. No version is named in any source file |
 | `lucide-static` | `^0.357.0` | 0.357.0 | `obsidian.js` — `lucideIcon()` inlines SVG icons into callouts, the nav tree and every toolbar button |
 | `pako` | `^2.1.0` | 2.1.0 | `obsidian.js` — deflates PlantUML source for the PlantUML server URL encoding |
-| `uuid` | `^9.0.1` | 9.0.1 | `obsidian.js` — anchor ids for the generated table of contents |
 
 PlantUML is an external HTTP service (`NEXT_PUBLIC_PLANTUML_URL`, default `https://plantuml.unterrainer.info/plantuml`); diagrams are substituted server-side as image links before Markdown conversion.
 
@@ -111,7 +112,7 @@ Each entry is marked with its implementation status:
 | Always-current material, readable anywhere | **[verified]** | Content is rendered per request from disk; no build or publish step |
 | Responsive layout for phone/tablet | **[verified]** | `css/media.css` plus the collapsible sidebar in `obsidian-page.js`: `toggleSidebar()` opens and closes an overlay at 1024 px and below, and above that folds the column away with `sl-sidebar-folded` on `#wrapper` (`css/sidebar.css`), not remembered across page loads |
 | Remember last opened page | **[verified]** | `app.js` writes the `lastVisitedUrl` attribute; the `/` handler redirects to it when preference `sl == 1` |
-| Automatic table of contents | **[verified]** | `obsidian.js` `makeContentMap` assigns UUID anchors and leaves the heading list on the request (`req.contentListing`), `getContentListing` renders it into the sidebar of the same page; a page without a rendering of its own (admin and module pages) shows no Content section |
+| Automatic table of contents | **[verified]** | `obsidian.js` `anchorHeadings` (after the sanitizer) assigns stable slug anchors (`slugify`, `-2`, `-3` for repeats) and leaves the heading list on the request (`req.contentListing`), `getContentListing` renders it into the sidebar of the same page; a page without a rendering of its own (admin and module pages) shows no Content section |
 | Active-heading highlight while scrolling | **[undocumented]** | `obsidian-page.js` `markTopAnchor` |
 | Font selection (main and navigation, separately) | **[verified]** | `obsidian.js` `scanFonts` + `getFontImports` + the `typefaces` table; `obsidian-page.js` `mainFontChange`/`navFontChange`, stored by name and migrated off the old index through `LEGACY_FONT_ORDER` |
 | Font size and line spacing controls | **[verified]** | `obsidian-page.js` `fontBigger`/`fontSmaller`/`spacingBigger`/`spacingSmaller` |
@@ -238,32 +239,41 @@ read file (app.js)
   └─ stripComments                 Obsidian %% comments removed (obsidian-comments)
   └─ preParse (obsidian.js)
        1. removeForbiddenContent      drop @@@ blocks the user may not see
-       2. preReplaceEmbeds            ```safelearn-<kind> blocks → module placeholder,
+       2. preReplaceNoteEmbeds        ![[Note]], ![[Note#Heading]], ![[Note#^id]] → the note,
+                                      section or block as this user may read it (note-embedding)
+       3. preReplaceEmbeds            ```safelearn-<kind> blocks → module placeholder,
                                       teacher notice, or nothing (exam-embedding)
-       3. preReplacePlantUml          deflate + encode, substitute a diagram image link
-       4. preReplaceMermaid           rewrite the fence to <pre class="mermaid">
-       5. preMarkCode                 park fenced code in an array behind a placeholder
-       6. preReplaceObsidianFileLinks resolve [[wiki-links]] to absolute URLs
-       7. preMarkCallouts             convert > [!type] blocks to internal markers
-       8. preprocessFragments         ##fragment  → HTML comment marker
-       9. preprocessSideBySide        ##side-by-side-* → column divs
-      10. unmarkCode                  restore the parked code blocks
-  └─ marked.parse                  markedDark or markedLight, chosen by preference `dm`;
-                                   both carry highlightExtension (==text==, ==🔴text==)
+       4. preReplacePlantUml          deflate + encode, substitute a diagram image link
+       5. preReplaceMermaid           rewrite the fence to <pre class="mermaid">
+       6. preMarkCode                 park fenced code in an array behind a placeholder
+       7. preReplaceInlineFootnotes   ^[text] → [^sl-inline-n] + definition at the end
+       8. preReplaceBlockMarkers      trailing / standalone ^id → placeholder span
+       9. preReplaceObsidianFileLinks resolve [[wiki-links]] to absolute URLs, #heading → #slug,
+                                      #^id → #block-id, [[#…]] within the page
+      10. preMarkCallouts             convert > [!type] blocks to internal markers
+      11. preprocessFragments         ##fragment  → HTML comment marker
+      12. preprocessSideBySide        ##side-by-side-* → column divs
+      13. unmarkCode                  restore the parked code blocks
+  └─ marked.parse                  a marked built per render by markedFor: Shiki theme by `dm`,
+                                   highlightExtension (==text==), marked-footnote, mathExtension (KaTeX)
   └─ manipulateHtml (obsidian.js)
        1. replacePreMarkCallouts        markers → styled callout markup with a Lucide icon
        2. replaceObsidianImageLinks     ![[embeds]] → img / video / audio / link by extension
        3. replaceObsidianImageAltResize  alt="name|WxH" → inline width/height
        4. postprocessFragments          markers → .fragment spans, index reset at h2/h3
-       5. makeContentMap                UUID anchors on every heading; TOC map onto req
+       5. applyBlockAnchors             block placeholders → id="block-<id>" on p / li / previous block
   └─ DOMPurify.sanitize            final output filter
+  └─ anchorHeadings                slug anchors on every heading; TOC map onto req (after the
+                                   sanitizer, which drops ids like "images" against DOM clobbering)
 ```
 
 Obsidian comments are removed at every read of a corpus file, not only here: the page views, the exam handout (`renderHandout`), the scan's index (`readCorpusFile`, which keeps the directive line and strips what follows), search (`answerFromFile`) and the attachment check (`referencesVisibly`). All five do it at the same point, after the whole-file directive is decided and before `filterForbiddenSegments`. So a comment can neither hide nor move the directive, a `@@@` block or heading inside one has no effect, and no comment is rendered, matched, quoted or counted as an attachment reference. `stripComments` follows Obsidian's two kinds: a `%%` at the start of a line opens a block up to the next `%%` or the end of the file, any other `%%` closes on its own line or is text. It finds the marks in `maskCode`'s masking, so `%%` in code stays.
 
-Code blocks are parked before the link, callout and fragment passes and restored afterwards (steps 5 and 10), so those rewrites cannot corrupt code samples. Callouts may nest; the code markers may not.
+Anchors, the target resolver and transclusion (obsidian-syntax-coverage): `slugify` is the one rule for a heading's anchor, shared by `anchorHeadings`, the wiki-link resolver and the section cut of an embed, so the three agree without a lookup in the target file. `parseWikiLink` splits off the part after `#` (`segments`, the deciding last one as `fragment`, `block` for `^id`), and `resolveNote` is the one by-name lookup of a note, shared by links and embeds. `preReplaceNoteEmbeds` reads an embedded note through `readNoteForSession` (frontmatter, `resolveFileVisibility`, `stripComments`, `removeForbiddenContent` - the page's own steps), cuts a section (`sectionOf`) or block (`blockOf`), prefixes its footnote labels, and recurses with a depth limit of five and the chain of notes so far, which starts with the page itself. Whatever it cannot resolve stays as written, so a refused embed and a missing one look the same. Search and the attachment index are unchanged: embedded text is found in its own note, and an attachment it names is granted from the rendered HTML like any other. In the presentation, `splitForReveal` ends with `finishForReveal`, which moves each footnote to the slide of its first reference and rewrites `#x` links to `#/x` (Reveal resolves that to the slide holding `x`).
 
-`preReplaceEmbeds` (step 2) runs after the permission filter, so an element block inside a hidden section is already gone, and before the code parking, so the block is not treated as code. A block inside a longer fence stays text. A kind with a handler registered by the exam module renders that handler's placeholder; otherwise a known kind renders a notice for a session acting as a teacher and nothing for anyone else. The presentation and document views pass `embedDefaults`, which forces the second behaviour. `wrapInPage` adds the module's client script only when a handler set it and the body carries a placeholder.
+Code blocks are parked before the link, callout and fragment passes and restored afterwards (steps 6 and 13), so those rewrites cannot corrupt code samples. Callouts may nest; the code markers may not.
+
+`preReplaceEmbeds` (step 3) runs after the permission filter, so an element block inside a hidden section is already gone, and before the code parking, so the block is not treated as code. A block inside a longer fence stays text. A kind with a handler registered by the exam module renders that handler's placeholder; otherwise a known kind renders a notice for a session acting as a teacher and nothing for anyone else. The presentation and document views pass `embedDefaults`, which forces the second behaviour. `wrapInPage` adds the module's client script only when a handler set it and the body carries a placeholder.
 
 After sanitizing, one of three wrappers builds the response: `wrapInPage` (top bar, sidebar, settings menu), `wrapAsDocument` (content only, for printing), or `wrapInReveal` — which first calls `splitForReveal` to cut the HTML into `<section>` elements at `h2` (horizontal) and `h3` (vertical) boundaries. `wrapInPage`'s `writing` option writes `class="sl-writing"` on `<html>`: a generic marker that a test is being written on the page, without the core knowing why. `css/exam.css` hides the sidebar, the burger, the top bar's buttons and the settings menu under it, and the hot-reload client from `getAutoReloadScript` skips (and does not queue) a reload while it is set. The exam module's client keeps the class in step with the test element's `sl-exam-writing` events, so a content page that places a test gets it once the attempt is shown, and every page loses it after the submission without a reload. The `previewing` option writes `class="sl-previewing"` instead, for a teacher's preview of a test: `css/exam.css` hides the same chrome under it, but the hot-reload client ignores it, so the preview still follows corpus changes; the client toggles it from the same events (`detail.preview`) and leaves the results sections alone for it. While `<html>` carries either class and is the `:fullscreen` element, `css/exam.css` also draws a violet 8px frame as a fixed `body::after` with `pointer-events: none` (exam-fullscreen-frame); pure CSS, so the browser drops it on every way out of full screen without a listener.
 

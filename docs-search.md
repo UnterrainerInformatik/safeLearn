@@ -211,12 +211,11 @@ title Following a hit to its heading - why it is not an anchor
 start
 :the heading link carries\n?heading=<text>&occurrence=<n>;
 note right
-  Not a #fragment. makeContentMap gives every
-  heading a fresh uuid on every render, so an
-  id means nothing outside the render that
-  produced it - and the browser resolves a
-  fragment during load, while the body is
-  still hidden, landing at the top.
+  Not a #fragment. A repeated heading's anchor
+  counts the equal headings this session sees,
+  and the browser resolves a fragment during
+  load, while the body is still hidden,
+  landing at the top.
 end note
 :the page view is requested;
 :rendered and filtered for this session - again,\nfrom the file, by the same implementation;

@@ -56,7 +56,8 @@
         "md/test-md-file.md",
         "md/test-search-teacher-file.md",
         "md/test-search-staleness-restricted.md",
-        "md/test-hot-reload-restricted.md"
+        "md/test-hot-reload-restricted.md",
+        "md/test-embed-teacher.md"
       ]
     },
     "test/checks/views.js": {
@@ -719,6 +720,35 @@
         "test/coverage-map.json"
       ],
       "corpus": []
+    },
+    "test/obsidian-syntax.test.js": {
+      "what": "Obsidian syntax the renderer resolves itself, decided by the code that decides it, on a fixture corpus scanned with scanFiles and rendered as app.js renders it (preParse, a marked built with obsidianMarkedExtensions, manipulateHtml, sanitizeHtml, splitForReveal for a deck). Stable heading anchors: slugify keeps letters of any script, umlauts included, turns whitespace into -, drops punctuation, and equal headings count up from -2, the same on every render and as the Content list's keys. Wiki links to a heading of another note (nested segments: the last decides, the text names every segment), to a block, to a heading that does not exist (the note's top), within the page, in a deck as #/<id>; an unresolved note and a link in code stay as written, and an attachment link reads as before with its fragment handed on. Block markers on a paragraph, a list item and on their own line after a table become ids and leave no placeholder; a caret in code and 2^10 stay. Footnotes numbered by first use, shared references, an inline footnote between two referenced ones, a wiki link inside one, a reference without a definition and syntax in code as written, a definition inside a hidden teacher block, the footnotes' heading outside the Content list, and in a deck each note on the slide of its first reference with no slide of its own for the list. Math: inline and display, brackets and emphasis around a formula, prices, an escaped dollar, a digit after the closing dollar and code as text, a parse error shown as source with the page going on, and the sanitizer leaving the typeset output as it is. Note embeds: a whole note, a section to the next heading of its level with its headings in the Content list, a block (paragraph, list item, table, fenced code), missing note, heading or block and an embed in code as written, attachment embeds as before, an image of an embedded note in the host, host and embedded footnotes kept apart, a teacher-only note and a section inside a hidden block reading as missing for a student, a teacher block inside the embedded note filtered, an embed inside a hidden host block not resolved, a cycle ending with the embed as written, and nesting stopping after five levels. Needs no browser, no login and no server.",
+      "guards": [
+        "obsidian.js",
+        "sanitize.js"
+      ],
+      "corpus": []
+    },
+    "test/checks/obsidian-syntax.js": {
+      "what": "Obsidian syntax the renderer resolves itself, against a running instance. md/test-obsidian-syntax.md, visible to everyone: footnotes numbered by first use and listed after the content in the page and document views, a reference without a definition as written, and in the presentation each note on the slide of its first reference with no slide for the list; inline and display formulas typeset in all three views with a KaTeX font face loaded and no request to a host but the application and the identity provider, prices, an escaped dollar and code as text, and a broken formula shown as its source marked as an error; block markers as ids of a paragraph, a list item and a table, never shown; wiki links to another note's heading (every segment as the text, the last as the target), to a heading that does not exist, within the page and to a block; a link within the page scrolls to its heading, a link within the deck shows the slide holding it, and a Content list entry of md/test-content-list.md and a wiki link to that heading address the same anchor. md/test-embed-host.md, visible to everyone, as a student and as a teacher in the page and presentation views: a whole note, a section with its subsection, a block, a note with a @@@ teacher block filtered per role, a teacher-only note and a section inside a hidden block reading exactly like an embed of a missing note for the student and shown to the teacher, a cycle ending with the host's embed as written; the embedded section's headings in the Content list and as slides; an embedded note's image served to the student; search finding embedded text in the note it is written in and not in the host.",
+      "guards": [
+        "obsidian.js",
+        "app.js",
+        "css/markdown.css",
+        "css/reveal.css",
+        "test/harness.js"
+      ],
+      "corpus": [
+        "md/test-obsidian-syntax.md",
+        "md/test-embed-host.md",
+        "md/test-embed-whole.md",
+        "md/test-embed-sections.md",
+        "md/test-embed-teacher.md",
+        "md/test-embed-mixed.md",
+        "md/test-embed-cycle.md",
+        "md/test-content-list.md",
+        "md/assets/test-attachment-embed.png"
+      ]
     }
   }
 }

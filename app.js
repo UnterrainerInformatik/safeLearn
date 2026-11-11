@@ -11,6 +11,7 @@ import { getPermissionContext, handoutViews } from "./permission-context.js";
 import { establishAuthMode, withoutIdentity } from "./auth-mode.js";
 import { readerPreferences } from "./reader-preferences.js";
 import { languages } from "./i18n/t.js";
+import { i18nOf } from "./i18n/server.js";
 import { registerAdminRoutes } from "./admin/index.js";
 import {
   verifyCallerIdentity,
@@ -41,64 +42,45 @@ const highlighter = await getHighlighter({
   langs: Object.keys(bundledLanguages),
   themes: [darkTheme, lightTheme]
 });
-// Set options
-const markedLight = new Marked();
-markedLight.use({
-  async: true,
-  breaks: true,
-  gfm: true,
-  pedantic: false,
-});
-markedLight.use(highlightExtension);
-markedLight.use(
-  markedShiki({
-    highlight(code, lang, props) {
-      return highlighter.codeToHtml(code, {
-        lang,
-        theme: lightTheme,
-        meta: { __raw: props.join(" ") }, // required by `transformerMeta*`
-        transformers: [
-          transformerNotationDiff(),
-          transformerNotationHighlight(),
-          transformerNotationWordHighlight(),
-          transformerNotationFocus(),
-          transformerNotationErrorLevel(),
-          transformerMetaHighlight(),
-          transformerMetaWordHighlight(),
-        ],
-      });
-    },
-  })
-);
-const markedDark = new Marked();
-markedDark.use({
-  async: true,
-  breaks: true,
-  gfm: true,
-  pedantic: false,
-});
-markedDark.use(highlightExtension);
-markedDark.use(
-  markedShiki({
-    highlight(code, lang, props) {
-      return highlighter.codeToHtml(code, {
-        lang,
-        theme: darkTheme,
-        meta: { __raw: props.join(" ") }, // required by `transformerMeta*`
-        transformers: [
-          transformerNotationDiff(),
-          transformerNotationHighlight(),
-          transformerNotationWordHighlight(),
-          transformerNotationFocus(),
-          transformerNotationErrorLevel(),
-          transformerMetaHighlight(),
-          transformerMetaWordHighlight(),
-        ],
-      });
-    },
-  })
-);
-
+/**
+ * A `marked` for one render, in the session's light or dark code theme.
+ *
+ * Built per render rather than once per theme: `marked-footnote` keeps its
+ * numbering in the extension instance, and a render that lexes while another
+ * awaits Shiki would continue the other one's count (obsidian-syntax-coverage,
+ * design D1). Building one is an object merge; the highlighter is shared.
+ */
+function buildMarked(theme, labels) {
+  const marked = new Marked();
+  marked.use({
+    async: true,
+    breaks: true,
+    gfm: true,
+    pedantic: false,
+  });
+  marked.use(...obsidianMarkedExtensions(labels));
+  marked.use(
+    markedShiki({
+      highlight(code, lang, props) {
+        return highlighter.codeToHtml(code, {
+          lang,
+          theme,
+          meta: { __raw: props.join(" ") }, // required by `transformerMeta*`
+          transformers: [
+            transformerNotationDiff(),
+            transformerNotationHighlight(),
+            transformerNotationWordHighlight(),
+            transformerNotationFocus(),
+            transformerNotationErrorLevel(),
+            transformerMetaHighlight(),
+            transformerMetaWordHighlight(),
+          ],
+        });
+      },
+    })
+  );
+  return marked;
+}
 
 import { config } from "dotenv";
 import path from "node:path";
@@ -114,7 +96,7 @@ const { mode: authMode } = establishAuthMode();
 const app = express();
 app.set("trust proxy", true);
 
-import { registerEmbedHandler, registerEmbedClientScript, registerOpenTestsCheck, highlightExtension, scanFiles, scanFonts, preParse, manipulateHtml, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions, splitFrontmatter, stripComments, wrapAsDocument, resolveFileVisibility, registerVisibilityChangeCallback, searchCorpus, minimumQueryLength, recordAttachmentGrants, hasAttachmentGrant, dropAttachmentGrants, mayServeAttachment, normalizeCorpusPath, registerHandoutAttachmentCheck, mayServeHandoutAttachment } from "./obsidian.js";
+import { registerEmbedHandler, registerEmbedClientScript, registerOpenTestsCheck, obsidianMarkedExtensions, scanFiles, scanFonts, preParse, manipulateHtml, anchorHeadings, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions, splitFrontmatter, stripComments, wrapAsDocument, resolveFileVisibility, registerVisibilityChangeCallback, searchCorpus, minimumQueryLength, recordAttachmentGrants, hasAttachmentGrant, dropAttachmentGrants, mayServeAttachment, normalizeCorpusPath, registerHandoutAttachmentCheck, mayServeHandoutAttachment } from "./obsidian.js";
 
 import chokidar from "chokidar";
 import { openEventStream } from "./event-stream.js";
@@ -159,7 +141,7 @@ async function sanitizeAndParseMarkdown(data, req, options = {}) {
     html = manipulateHtml(html, req);
     // Reached only for a file this session may see, so only such a file hands
     // its properties to the view.
-    return { html: sanitizeHtml(html), properties: split.properties };
+    return { html: anchorHeadings(sanitizeHtml(html), req), properties: split.properties };
   } catch (error) {
     // Not something to show on the page: the session it would be shown to has
     // just ended, and the request is answered as one without a session.
@@ -171,7 +153,7 @@ async function sanitizeAndParseMarkdown(data, req, options = {}) {
   }
 }
 
-/** The configured `marked` instance for the session's dark-mode preference. */
+/** A `marked` for this render, in the code theme of the session's dark-mode preference. */
 async function markedFor(req) {
   let dm = 0;
   if (withoutIdentity()) {
@@ -180,7 +162,11 @@ async function markedFor(req) {
     const a = JSON.parse(req.user.accessTokenDecoded.config);
     dm = a.dm;
   }
-  return dm == 1 ? markedDark : markedLight;
+  const { t } = await i18nOf(req);
+  return buildMarked(dm == 1 ? darkTheme : lightTheme, {
+    footnotes: t("app.footnotes.heading"),
+    backToReference: t("app.footnotes.backToReference", { label: "{0}" }),
+  });
 }
 
 /**
@@ -208,7 +194,7 @@ async function renderHandout(corpusPath, req, { answer = false } = {}) {
   try {
     d = await preParse(d, req, { embedDefaults: true });
     const marked = await markedFor(req);
-    return sanitizeHtml(manipulateHtml(await marked.parse(d), req));
+    return anchorHeadings(sanitizeHtml(manipulateHtml(await marked.parse(d), req)), req);
   } finally {
     // The page around it - top bar, menu, navigation - is the session's own.
     delete req[handoutViews];
@@ -647,6 +633,14 @@ async function registerRoutes(app, identity) {
     "/node_modules/mermaid/dist",
     checkAuthenticated,
     express.static(path.join(__dirname, "node_modules", "mermaid", "dist"))
+  );
+  // KaTeX's stylesheet and the fonts it addresses relative to itself, for the
+  // formulas the server typesets (`math-rendering`): no view loads them from
+  // another host.
+  app.use(
+    "/node_modules/katex/dist",
+    checkAuthenticated,
+    express.static(path.join(__dirname, "node_modules", "katex", "dist"))
   );
   app.use(
     "/node_modules/@mermaid-js/layout-elk/dist",

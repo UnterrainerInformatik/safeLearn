@@ -21,7 +21,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { before, describe, test } from "node:test";
 
-import { click, render, roles, setPreferences, sharedSession } from "../harness.js";
+import { click, eventually, render, roles, setPreferences, sharedSession } from "../harness.js";
 
 const projectRoot = path.resolve(import.meta.dirname, "..", "..");
 const corpusRoot = path.join(projectRoot, "md");
@@ -396,6 +396,30 @@ describe("navigation", () => {
         answer.anchors,
         `the Content list of ${answer.pagePath} should hold exactly that page's headings`
       );
+    }
+  });
+
+  test("each Content list entry jumps to its heading by the heading's own anchor", async () => {
+    await render(session, contentListPage);
+    const entries = await session.page.$$eval(".sidebar-anchors a", (anchors) =>
+      anchors.map((a) => a.getAttribute("href")).filter((href) => href !== "#ROOT")
+    );
+    assert.deepEqual(entries, ["#content-list-a-page-of-its-own", "#a-heading-naming-b-as-text", "#second-section"]);
+    for (const href of entries) {
+      await click(session.page, `.sidebar-anchors a[href="${href}"]`);
+      // In view and not under the fixed top bar; a short page cannot scroll
+      // its last heading all the way up.
+      const shown = await eventually(
+        () =>
+          session.page.$eval(`[id="${href.slice(1)}"]`, (heading) => ({
+            hash: window.location.hash,
+            top: heading.getBoundingClientRect().top,
+            height: window.innerHeight,
+          })),
+        (value) => decodeURIComponent(value.hash) === href && value.top >= 40 && value.top < value.height
+      );
+      assert.equal(decodeURIComponent(shown.hash), href);
+      assert.ok(shown.top >= 40 && shown.top < shown.height, `${href}: the heading stands at ${shown.top}px after the jump`);
     }
   });
 

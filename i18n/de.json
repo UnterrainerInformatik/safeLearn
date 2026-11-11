@@ -40,6 +40,10 @@
       "loading": "Lädt…",
       "unavailable": "Element des Prüfungsmoduls {kind}: nur auf einer Instanz mit der Prüfungsdatenbank verfügbar."
     },
+    "footnotes": {
+      "backToReference": "Zurück zum Verweis {label}",
+      "heading": "Fußnoten"
+    },
     "menu": {
       "format": "Format",
       "language": "Sprache",
