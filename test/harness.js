@@ -20,6 +20,7 @@ import { mkdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { isDeepStrictEqual } from "node:util";
 
 import puppeteer from "puppeteer";
 
@@ -683,7 +684,7 @@ async function logIn(page, role, account) {
   const submit = await form.$('[type="submit"]');
   await Promise.all([
     page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-    submit ? submit.click() : form.evaluate((element) => element.submit()),
+    submit ? click(page, 'form:has(input[type="password"]) [type="submit"]') : form.evaluate((element) => element.submit()),
   ]);
 
   if (new URL(page.url()).origin !== new URL(applicationUrl).origin) {
@@ -1260,6 +1261,91 @@ export async function render(session, pagePath, { view = "page" } = {}) {
 
   const text = await session.page.$eval(requested.root, (element) => element.textContent);
   return { page: session.page, text, url: session.page.url(), view, path: pagePath };
+}
+
+/** How long `click` waits for its element to become actionable, unless told otherwise. */
+export const clickTimeoutMs = 10_000;
+
+/**
+ * Clicks the element `selector` names in `target` — a page or a frame — once it
+ * can be clicked: attached, visible, enabled and no longer moving.
+ *
+ * This is the one way a browser check clicks. `page.click(selector)` resolves
+ * the selector once and clicks that node; when the client script redraws the
+ * bar or table right after loading, that node has just been replaced or has no
+ * box yet, and the check fails with "Node is detached" or "not clickable" —
+ * or passes, depending on who was faster. The Locator below re-resolves the
+ * selector until an element is ready and holds still over two frames, so the
+ * click lands on the element as it is after the redraw.
+ *
+ * `options` are Puppeteer's click options (`count`, `button`, `offset`, …)
+ * plus `timeout`, bounded by `clickTimeoutMs` by default; `stable: false` skips
+ * the stability wait for an element that animates continuously (say why at the
+ * call site). Fails naming the selector and the URL, not with a bare timeout.
+ *
+ * A click that starts a navigation is written as before:
+ * `Promise.all([page.waitForNavigation(…), click(page, selector)])`.
+ */
+export async function click(target, selector, { timeout = clickTimeoutMs, stable = true, ...options } = {}) {
+  let locator = target.locator(selector).setTimeout(timeout);
+  if (!stable) locator = locator.setWaitForStableBoundingBox(false);
+  try {
+    await locator.click(options);
+  } catch (error) {
+    throw new Error(
+      `could not click ${selector} within ${timeout} ms on ${target.url()}: ${error.message}`,
+      { cause: error }
+    );
+  }
+}
+
+/**
+ * Reads `read()` until `accept` holds for it, at most `timeout` ms, and returns
+ * the last value read — whether it was accepted or not.
+ *
+ * For an assertion on a state the page reaches asynchronously (after a request,
+ * a toggle, a redraw): wait, then assert. The caller asserts on the returned
+ * value as before, so a state that never arrives still fails with the check's
+ * own message naming what it saw, not with a bare timeout. `accept` is a
+ * predicate, or a value the read must deep-equal.
+ */
+export async function eventually(read, accept, { timeout = 10_000, interval = 50 } = {}) {
+  const accepted = typeof accept === "function" ? accept : (value) => isDeepStrictEqual(value, accept);
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const value = await read();
+    if (accepted(value) || Date.now() >= deadline) return value;
+    await delay(interval);
+  }
+}
+
+/**
+ * Waits until `measure` — a function run in the page, returning a JSON value —
+ * returns the same over `frames` consecutive animation frames, at most
+ * `timeout` ms. Returns silently either way; the caller measures and asserts.
+ *
+ * For a measurement right after a change of layout (a scroll, a resize, a
+ * redraw), which otherwise reads whichever frame it happens to land in.
+ * `args` are passed to `measure`, as to `evaluate`.
+ */
+export async function whenStill(target, measure, { frames = 2, timeout = 5000, args = [] } = {}) {
+  const deadline = Date.now() + timeout;
+  const afterFrames = (count) =>
+    target.evaluate(
+      (count) =>
+        new Promise((resolve) => {
+          const step = () => (--count <= 0 ? resolve() : requestAnimationFrame(step));
+          requestAnimationFrame(step);
+        }),
+      count
+    );
+  let last = JSON.stringify(await target.evaluate(measure, ...args));
+  while (Date.now() < deadline) {
+    await afterFrames(frames);
+    const now = JSON.stringify(await target.evaluate(measure, ...args));
+    if (now === last) return;
+    last = now;
+  }
 }
 
 /**

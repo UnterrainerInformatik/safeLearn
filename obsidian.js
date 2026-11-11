@@ -3681,9 +3681,14 @@ function getAutoReloadScript() {
   // Leaving this page — for another one, or into the back/forward cache — gives
   // the stream up; coming back out of that cache opens a new one. Without the
   // second half a restored page would be listening to nothing.
+  //
+  // Only a restore reconnects. pageshow also fires on the first load, and a
+  // stream refused before that moment has no es but a retry pending: a
+  // reconnect there threw the backoff's first step away and tried again at
+  // once, which is the extra attempt the backoff check saw on some runs.
   window.addEventListener("pagehide", disconnect);
-  window.addEventListener("pageshow", function() {
-    if (!es) connect();
+  window.addEventListener("pageshow", function(event) {
+    if (event.persisted) connect();
   });
 
   // Puts back what the page was looking at before a hot reload. Whether a page

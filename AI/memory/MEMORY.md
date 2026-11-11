@@ -36,7 +36,7 @@ Echter Ablageort: `/mnt/data/source/HTL/safeLearn/AI/memory/`
 - [Keycloak importiert beim Blättern](keycloak-import-on-demand.md) — `users/count` zählt nur die lokale DB, `GET /users` paginiert in die LDAP-Föderation und importiert dabei; manual sync schützt nicht
 - [Toter federationLink löscht beim Lesen](keycloak-dead-federation-link-deletes-on-read.md) — nach einer `usersDn`-Verengung entfernt schon ein `GET` die lokale Kopie; erst sichern, dann umstellen
 - [Keycloak-Bot-Account](keycloak-bot-account.md) — `bot@unterrainer.info`, nur lesend; Passwort in `.env.sh` auf babylon5, Schreibrechte gibt Gerald temporär
-- [Wackelige Checks](flaky-content-checks.md) — Reload-Backoff, 390px-Viewport und pro `exam.test.js`-Lauf ein zufälliger Exam-Check (Modul-Leiste, Offline-Anwesenheit, Writing, Sheet-Spalten), auch auf HEAD; erst nochmal laufen lassen, HEAD-Vergleich per `git stash push -u`
+- [Wackelige Checks](flaky-content-checks.md) — seit 2026-11-11 behoben (Click-Helper, warten-dann-prüfen, pageshow-Bug); ein roter Browser-Check ist wieder ein Befund, nicht Rauschen
 - [i18n im BabelEdit-Format](i18n-babeledit-json.md) — Übersetzungen als ein JSON-File pro Sprache mit gleichen Keys, damit BabelEdit sie pflegen und erweitern kann
 - [Obsidian-Pfad für test:obsidian](obsidian-app-path.md) — `SAFELEARN_OBSIDIAN_APP=/usr/bin/obsidian` setzen und `AI/plugin` vorher auf origin/master ziehen, sonst Dutzende Fehlalarme
 - [Directory-Service darf schreiben](directory-service-write-rights.md) — seit 2026-10-24 manage-users + manage-clients an unterrainer und Demo-Realm, für den examparticipant-Umschalter

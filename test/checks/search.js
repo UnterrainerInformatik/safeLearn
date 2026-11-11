@@ -31,6 +31,7 @@ import { after, before, describe, test } from "node:test";
 import {
   accountLookups,
   applicationUrl,
+  click,
   render,
   roles,
   setPreferences,
@@ -747,7 +748,7 @@ describe("search", () => {
 
     // Typed rather than assigned, so the debounce the field waits is exercised
     // the way a reader exercises it.
-    await page.click("#searchField");
+    await click(page, "#searchField");
     await page.type("#searchField", "SPRUNGZWEI", { delay: 20 });
     await page.waitForSelector(".sl-search-result a.sl-search-name");
 
@@ -761,7 +762,7 @@ describe("search", () => {
       `the result links to ${named.href} rather than to the page view of ${jumpPage}`
     );
 
-    await page.click(".sl-search-expand");
+    await click(page, ".sl-search-expand");
     const heading = await page.$eval(".sl-search-heading", (link) => link.getAttribute("href"));
     assert.match(
       heading,
@@ -771,7 +772,7 @@ describe("search", () => {
 
     await Promise.all([
       page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-      page.click(".sl-search-heading"),
+      click(page, ".sl-search-heading"),
     ]);
     await page.waitForSelector("#markdown-content");
     await page.waitForFunction(() => document.body.style.display === "");

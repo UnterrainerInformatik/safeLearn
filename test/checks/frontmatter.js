@@ -22,7 +22,7 @@
 import assert from "node:assert/strict";
 import { before, describe, test } from "node:test";
 
-import { applicationUrl, render, setPreferences, sharedSession } from "../harness.js";
+import { applicationUrl, click, render, setPreferences, sharedSession } from "../harness.js";
 
 const fixture = "/md/test-frontmatter.md";
 const headerOnly = "/md/test-frontmatter-header-only.md";
@@ -154,7 +154,7 @@ describe("frontmatter", () => {
   test("the page view's properties button shows every property, markup as text", async () => {
     const { page } = await render(sessions.get("teacher"), fixture);
     assert.equal(await page.$eval("#slProperties", (dialog) => dialog.open), false, "hidden until asked for");
-    await page.click("#slPropertiesButton");
+    await click(page, "#slPropertiesButton");
     await page.waitForFunction(() => document.getElementById("slProperties").open, { timeout: 5000 });
     const shown = await page.$eval("#slProperties .sl-properties-list", (list) => ({
       names: [...list.children].filter((el) => el.tagName === "DT").map((dt) => dt.textContent),
@@ -168,7 +168,7 @@ describe("frontmatter", () => {
     assert.equal(shown.values[5], "<b>x</b>", "the value is shown as its characters");
     assert.equal(shown.bold, 0, "and not as bold text");
     assert.deepEqual(shown.topics, ["Quarkus CDI", topicValue]);
-    await page.click("#slProperties .sl-properties-close");
+    await click(page, "#slProperties .sl-properties-close");
     await page.waitForFunction(() => !document.getElementById("slProperties").open, { timeout: 5000 });
   });
 

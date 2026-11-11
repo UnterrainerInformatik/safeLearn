@@ -21,7 +21,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { before, describe, test } from "node:test";
 
-import { render, roles, setPreferences, sharedSession } from "../harness.js";
+import { click, render, roles, setPreferences, sharedSession } from "../harness.js";
 
 const projectRoot = path.resolve(import.meta.dirname, "..", "..");
 const corpusRoot = path.join(projectRoot, "md");
@@ -445,8 +445,8 @@ describe("navigation", () => {
           firstLeft: content.firstElementChild?.getBoundingClientRect().left ?? null,
         };
       });
-    const click = async () => {
-      await session.page.click(".topbar-burger");
+    const clickBurger = async () => {
+      await click(session.page, ".topbar-burger");
       await settle();
     };
 
@@ -458,18 +458,18 @@ describe("navigation", () => {
       assert.ok(shown.sidebar > 200, `the column should be shown when ${modulePage} opens, but is ${shown.sidebar}px wide`);
       assert.equal(shown.burger, "1", "the burger should be visible at 1600px");
 
-      await click();
+      await clickBurger();
       const folded = await measure();
       assert.equal(folded.sidebar, 0, `one click should fold the column, but it is ${folded.sidebar}px wide`);
       assert.ok(folded.firstLeft <= 30, `${modulePage} should run to the left margin, but starts at ${folded.firstLeft}px`);
 
-      await click();
+      await clickBurger();
       const back = await measure();
       assert.equal(back.sidebar, shown.sidebar, "a second click should bring the column back at its width");
       assert.equal(back.contentLeft, shown.contentLeft, "and the content back to its place beside it");
 
       await render(session, corpusPage);
-      await click();
+      await clickBurger();
       const reading = await measure();
       assert.equal(reading.sidebar, 0, `one click should fold the column on ${corpusPage} too`);
       assert.ok(

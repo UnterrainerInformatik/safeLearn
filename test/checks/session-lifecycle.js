@@ -33,6 +33,7 @@ import { after, before, describe, test } from "node:test";
 import {
   applicationStillRunning,
   applicationUrl,
+  click,
   contentPath,
   currentUser,
   openSession,
@@ -69,9 +70,8 @@ describe("a session that ends at the identity provider", () => {
     // way a user does it - the page in the first tab stays open on content.
     const keycloak = await ending.context.newPage();
     await keycloak.goto(endSessionUrl(), { waitUntil: "domcontentloaded" });
-    const confirm = await keycloak.$('form [type="submit"]');
-    assert.ok(confirm, `the end-session page at ${keycloak.url()} offers no button to confirm the logout`);
-    await Promise.all([keycloak.waitForNavigation({ waitUntil: "domcontentloaded" }), confirm.click()]);
+    assert.ok(await keycloak.$('form [type="submit"]'), `the end-session page at ${keycloak.url()} offers no button to confirm the logout`);
+    await Promise.all([keycloak.waitForNavigation({ waitUntil: "domcontentloaded" }), click(keycloak, 'form [type="submit"]')]);
     await keycloak.close();
 
     // A link on the open page to another page of the corpus.

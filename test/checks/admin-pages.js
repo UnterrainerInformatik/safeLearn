@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 
-import { accessToken, applicationOutput, applicationUrl, render, setPreferences, sharedSession } from "../harness.js";
+import { accessToken, applicationOutput, applicationUrl, click, render, setPreferences, sharedSession } from "../harness.js";
 import { createFormat } from "../../i18n/format.js";
 
 const pages = { attachments: "/admin/attachments", directory: "/admin/directory" };
@@ -178,7 +178,7 @@ describe("the administration pages", () => {
       assert.equal(section.label, catalogs.en.section);
       assert.deepEqual(section.buttons, Object.values(pages));
       const navigated = teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" });
-      await teacher.page.click(`.sl-menu-admin button[data-admin-page="${pagePath}"]`);
+      await click(teacher.page, `.sl-menu-admin button[data-admin-page="${pagePath}"]`);
       await navigated;
       assert.equal(new URL(teacher.page.url()).pathname, pagePath, `the ${name} button should open ${pagePath}`);
       await openAdminPage(teacher, pagePath);
@@ -228,7 +228,7 @@ describe("the administration pages", () => {
     await teacher.context.overridePermissions(applicationUrl, ["clipboard-read", "clipboard-write", "clipboard-sanitized-write"]);
     const data = await json(teacher, "/admin/api/attachments");
     await openAdminPage(teacher, pages.attachments);
-    await teacher.page.click(".sl-admin-copy");
+    await click(teacher.page, ".sl-admin-copy");
     await teacher.page.waitForFunction(() => document.querySelector(".sl-admin-copy-status").textContent !== "");
     const status = await teacher.page.$eval(".sl-admin-copy-status", (element) => element.textContent);
     assert.equal(status, catalogs.en.attachments.copied, "the page confirms the copy beside the button");

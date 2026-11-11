@@ -2,7 +2,7 @@
   "description": "Which check guards which file. The single source for the coverage record: docs-testing.md points at this file instead of restating it, test/coverage.test.js keeps it honest, and AI/claude/hooks/name-covering-checks.mjs reads it to name the checks when a guarded file is edited. Paths are relative to the repository root.",
   "checks": {
     "test/smoke.test.js": {
-      "what": "The harness itself: both roles reach authenticated content, two sessions stay independent in either order, and the two sessions really are different users.",
+      "what": "The harness itself: both roles reach authenticated content, two sessions stay independent in either order, and the two sessions really are different users. Also the harness's click: it lands on a button the page replaces right after loading, and a selector that never appears fails within its timeout, naming the selector and the URL.",
       "guards": [
         "test/harness.js",
         "app.js",
@@ -342,6 +342,13 @@
       "guards": [
         "test/coverage-map.json",
         ".gitignore"
+      ],
+      "corpus": []
+    },
+    "test/check-conventions.test.js": {
+      "what": "Conventions of the browser checks, read from their source: no check, check module or harness function clicks a page or frame directly (page.click / frame.click); every click goes through the harness's click, which waits for an attached, visible, still element and re-resolves it after a redraw.",
+      "guards": [
+        "test/harness.js"
       ],
       "corpus": []
     },

@@ -20,6 +20,8 @@ import zlib from "node:zlib";
 import {
   applicationOutput,
   applicationUrl,
+  click,
+  eventually,
   reauthenticate,
   render,
   restartApplication,
@@ -27,6 +29,7 @@ import {
   sharedSession,
   shutdown,
   useExamModule,
+  whenStill,
   whileUnanswered,
 } from "./harness.js";
 import { openDatabase } from "../exam/db.js";
@@ -484,17 +487,13 @@ describe("classes and courses", () => {
     try {
       const username = candidates[0].username;
       await page.goto(`${applicationUrl}/exam/classes/${klass.id}`, { waitUntil: "domcontentloaded" });
-      const row = await page.waitForFunction(
-        (name) => [...document.querySelectorAll(".sl-exam-roster tr")].find((tr) => tr.children[1]?.textContent === name && tr.querySelector(".sl-exam-roster-remove")),
-        { timeout: 20000 },
-        username
-      );
-      const button = await row.asElement().$(".sl-exam-roster-remove");
-      await button.click();
-      assert.match(await button.evaluate((b) => b.textContent), /^Click again to take .* off the roster/, "the label says what the second click does");
+      // The row by its username cell, by selector, so a redraw of the roster between the two clicks is followed.
+      const button = `::-p-xpath(//table[contains(@class,"sl-exam-roster")]//tr[td[2]=${JSON.stringify(username)}]//button[contains(@class,"sl-exam-roster-remove")])`;
+      await click(page, button, { timeout: 20000 });
+      assert.match(await page.$eval(button, (b) => b.textContent), /^Click again to take .* off the roster/, "the label says what the second click does");
       const attending = async () => (await fetchAs(teacher, `/exam/api/classes/${klass.id}`)).json.roster.find((e) => e.username === username && !e.leftAt);
       assert.ok(await attending(), "one click takes nobody off");
-      await button.click();
+      await click(page, button);
       await page.waitForFunction(
         (name) => [...document.querySelectorAll(".sl-exam-roster tr")].some((tr) => tr.children[1]?.textContent === name && tr.classList.contains("sl-exam-left")),
         { timeout: 10000 },
@@ -559,7 +558,7 @@ describe("the gradebook", () => {
   async function openColumnDialog(column) {
     const head = `th[data-column="${column.id}"] button.sl-exam-column-edit`;
     await teacher.page.waitForSelector(head, { timeout: 20000 });
-    await teacher.page.click(head);
+    await click(teacher.page, head);
     await teacher.page.waitForSelector("dialog[open] input[name=name]", { timeout: 5000 });
   }
 
@@ -813,11 +812,11 @@ describe("the gradebook", () => {
       "online tests keep their heading with the weight before any test is written, in a narrow placeholder"
     );
 
-    await teacher.page.click('button.sl-exam-add[aria-label="Add a column to Manual tests"]');
+    await click(teacher.page, 'button.sl-exam-add[aria-label="Add a column to Manual tests"]');
     await teacher.page.waitForSelector("dialog[open] input[name=name]");
     await teacher.page.type("dialog[open] input[name=name]", "2nd test");
     await teacher.page.type("dialog[open] input[name=maxPoints]", "20");
-    await teacher.page.click("dialog[open] button[type=submit]");
+    await click(teacher.page, "dialog[open] button[type=submit]");
     await teacher.page.waitForFunction(
       () => [...document.querySelectorAll("th.sl-exam-column-head")].some((th) => th.title.split("\n")[0] === "2nd test"),
       { timeout: 10000 }
@@ -845,11 +844,11 @@ describe("the gradebook", () => {
       await openColumnDialog(column);
       const button = "dialog[open] .sl-exam-delete-column";
       assert.equal(await teacher.page.$eval(button, (b) => b.textContent), "Delete this column");
-      await teacher.page.click(button);
+      await click(teacher.page, button);
       assert.equal(await teacher.page.$eval(button, (b) => b.textContent), "Click again to delete it and its 1 result");
       const exists = async () => (await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=ws`)).json.columns.some((c) => c.id === column.id);
       assert.equal(await exists(), true, "one click deletes nothing");
-      await teacher.page.click(button);
+      await click(teacher.page, button);
       await teacher.page.waitForFunction((selector) => !document.querySelector(selector), { timeout: 10000 }, `th[data-column="${column.id}"]`);
       assert.equal(await exists(), false, "the second click deletes");
       assert.deepEqual(dialogs, [], "no browser dialog");
@@ -899,8 +898,8 @@ describe("the gradebook", () => {
     assert.equal((await overviewRow(other)).override, null);
 
     const username = student.username.toLowerCase();
-    await teacher.page.click(`tr[data-student="${username}"] .sl-exam-proposal`);
-    await teacher.page.click(`tr[data-student="${other}"] .sl-exam-proposal`);
+    await click(teacher.page, `tr[data-student="${username}"] .sl-exam-proposal`);
+    await click(teacher.page, `tr[data-student="${other}"] .sl-exam-proposal`);
     const marked = await teacher.page.evaluate(() => [...document.querySelectorAll(".sl-exam-sheet tr.is-marked")].map((tr) => tr.dataset.student));
     assert.deepEqual(marked, [other], "only the second row is marked");
   });
@@ -930,7 +929,7 @@ describe("the gradebook", () => {
       assert.notEqual(colours.sticky, "rgb(255, 255, 255)", "not the sticky cells' white");
       assert.notEqual(colours.sticky, colours.green, "red and green differ");
       assert.match(colours.stripe, /inset/, "with a stripe on its left edge");
-      await teacher.page.click(`tr[data-student="${other}"] .sl-exam-proposal`);
+      await click(teacher.page, `tr[data-student="${other}"] .sl-exam-proposal`);
       const marked = await teacher.page.evaluate((red) => {
         const cell = document.querySelector(`tr[data-student="${red}"]`).cells[0];
         return { background: getComputedStyle(cell).backgroundColor, stripe: getComputedStyle(cell).boxShadow };
@@ -965,11 +964,11 @@ describe("the gradebook", () => {
 
   test("the sheet: the leading columns keep their place while the sheet scrolls sideways", async () => {
     await openSheet();
-    const lefts = () =>
-      teacher.page.evaluate(() => ({
-        sticky: [...document.querySelectorAll(".sl-exam-sheet tbody tr:first-child [data-sticky]")].map((cell) => Math.round(cell.getBoundingClientRect().left)),
-        field: Math.round(document.querySelector(".sl-exam-sheet tbody tr:first-child input.sl-exam-cell").getBoundingClientRect().left),
-      }));
+    const measureLefts = () => ({
+      sticky: [...document.querySelectorAll(".sl-exam-sheet tbody tr:first-child [data-sticky]")].map((cell) => Math.round(cell.getBoundingClientRect().left)),
+      field: Math.round(document.querySelector(".sl-exam-sheet tbody tr:first-child input.sl-exam-cell").getBoundingClientRect().left),
+    });
+    const lefts = () => teacher.page.evaluate(measureLefts);
     // A narrow wrapper, so the sheet is wider than the room it has.
     await teacher.page.evaluate(() => {
       document.querySelector(".sl-exam-scroll").style.maxWidth = "420px";
@@ -978,6 +977,7 @@ describe("the gradebook", () => {
       const wrapper = document.querySelector(".sl-exam-scroll");
       return wrapper.scrollWidth > wrapper.clientWidth;
     });
+    await whenStill(teacher.page, measureLefts);
     const before = await lefts();
     // The demo class is below the fifth year, so the sheet has no Matura toggle (the Matura candidates suite covers it).
     assert.equal(before.sticky.length, 4, "name, proposal, override and grade");
@@ -987,6 +987,8 @@ describe("the gradebook", () => {
       return wrapper.scrollLeft;
     });
     assert.ok(scrolled > 0, "the scrollbar belongs to the sheet");
+    // A sticky cell's offset is laid out after the scroll, not in the same instant.
+    await whenStill(teacher.page, measureLefts);
     const after = await lefts();
     after.sticky.forEach((left, index) => assert.ok(Math.abs(left - before.sticky[index]) <= 2, `column ${index} moved from ${before.sticky[index]} to ${left}`));
     assert.ok(before.field - after.field >= scrolled - 2, "the result columns scrolled");
@@ -1117,7 +1119,7 @@ describe("the gradebook", () => {
 
       // A click on a mark opens the note field.
       await page.focus(field(late, first));
-      await page.click(mark(homework, first));
+      await click(page, mark(homework, first));
       assert.deepEqual(await active(), { part: "note", student: first, value: "You forgot GreetingService.java (-1)" });
 
       // The student sees their note, and a column holding only a note for them.
@@ -1244,7 +1246,7 @@ describe("the gradebook", () => {
       await teacher.page.mouse.click(boxes.cell[2] - 3, boxes.cell[3] - 3);
       await teacher.page.waitForSelector("dialog[open] input[name=name]", { timeout: 5000 });
       assert.equal(await teacher.page.$eval("dialog[open] h3", (h3) => h3.textContent), "Edit column: Participation");
-      await teacher.page.click("dialog[open] .sl-exam-column-close");
+      await click(teacher.page, "dialog[open] .sl-exam-column-close");
       assert.equal(
         await teacher.page.$eval(`th[data-column="${quiz.id}"]`, (th) => th.querySelectorAll("input, sl-date-input").length),
         0,
@@ -1278,7 +1280,7 @@ describe("the gradebook", () => {
       });
     const openers = {
       "+": async () => {
-        await page.click('button.sl-exam-add[aria-label="Add a column to Homework"]');
+        await click(page, 'button.sl-exam-add[aria-label="Add a column to Homework"]');
         await page.waitForSelector("dialog[open] input[name=name]", { timeout: 5000 });
         return "dialog[open] .sl-exam-column-cancel";
       },
@@ -1295,7 +1297,7 @@ describe("the gradebook", () => {
           await setDark(dark);
           const close = await open();
           seen[dark ? "dark" : "light"] = await colours();
-          await page.click(close);
+          await click(page, close);
           await page.waitForFunction(() => !document.querySelector("dialog[open]"), { timeout: 5000 });
         }
         for (const part of ["dialog", "input"]) {
@@ -1344,7 +1346,7 @@ describe("the gradebook", () => {
       assert.equal((await stored()).maxPoints, 30);
       assert.deepEqual((await overviewRow(other)).results[column.id], { value: 20 / 30, points: 20 }, "the result follows the new maximum");
 
-      await page.click("dialog[open] .sl-exam-column-close");
+      await click(page, "dialog[open] .sl-exam-column-close");
       await page.waitForFunction(
         (id) => document.querySelector(`th[data-column="${id}"]`)?.title.split("\n")[0] === "Rename me (group A)",
         { timeout: 10000 },
@@ -1364,12 +1366,12 @@ describe("the gradebook", () => {
     await fetchAs(teacher, `/exam/api/courses/${course.id}`, { method: "PUT", body: { weights: { ...gbWeights, shortTests: 10, participation: 5 } } });
     try {
       await openSheet();
-      await page.click('button.sl-exam-add[aria-label="Add a column to Short tests"]');
+      await click(page, 'button.sl-exam-add[aria-label="Add a column to Short tests"]');
       await page.waitForSelector("dialog[open] input[name=name]");
       assert.equal(await page.$eval("dialog[open] h3", (h3) => h3.textContent), "New column: Short tests");
       await page.type("dialog[open] input[name=name]", "Quiz 1");
       await page.type("dialog[open] input[name=maxPoints]", "6");
-      await page.click("dialog[open] button[type=submit]");
+      await click(page, "dialog[open] button[type=submit]");
       await page.waitForFunction(
         () => [...document.querySelectorAll("th.sl-exam-column-head")].some((th) => th.title.split("\n")[0] === "Quiz 1"),
         { timeout: 10000 }
@@ -1404,12 +1406,12 @@ describe("the gradebook", () => {
     await fetchAs(teacher, `/exam/api/courses/${course.id}`, { method: "PUT", body: { weights: inUse } });
     try {
       await openSheet();
-      await page.click('button.sl-exam-add[aria-label="Add a column to Presentations"]');
+      await click(page, 'button.sl-exam-add[aria-label="Add a column to Presentations"]');
       await page.waitForSelector("dialog[open] input[name=name]");
       assert.equal(await page.$eval("dialog[open] h3", (h3) => h3.textContent), "New column: Presentations");
       assert.equal(await page.$("dialog[open] input[name=maxPoints]"), null, "a presentation asks for no maximum");
       await page.type("dialog[open] input[name=name]", "Referat Git");
-      await page.click("dialog[open] button[type=submit]");
+      await click(page, "dialog[open] button[type=submit]");
       await page.waitForFunction(() => [...document.querySelectorAll("th.sl-exam-column-head")].some((th) => th.title.split("\n")[0] === "Referat Git"), { timeout: 10000 });
       talk = (await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=ws`)).json.columns.find((c) => c.name === "Referat Git");
       assert.deepEqual([talk.kind, talk.category, talk.maxPoints], ["presentation", "presentations", null]);
@@ -1438,18 +1440,18 @@ describe("the gradebook", () => {
     try {
       await openSheet();
       assert.equal(await page.$$eval(".sl-exam-sheet thead tr", (rows) => rows.length), 2, "no project, no third heading row");
-      await page.click('button.sl-exam-add[aria-label="Add a column to Projects"]');
+      await click(page, 'button.sl-exam-add[aria-label="Add a column to Projects"]');
       await page.waitForSelector("dialog[open] input[name=name]");
       assert.equal(await page.$eval("dialog[open] h3", (h3) => h3.textContent), "New project");
       await page.type("dialog[open] input[name=name]", "Webshop");
-      await page.click("dialog[open] button[type=submit]");
+      await click(page, "dialog[open] button[type=submit]");
       await page.waitForSelector("th.sl-exam-project", { timeout: 10000 });
       for (const name of ["Sprint 1", "Sprint 2"]) {
-        await page.click('th.sl-exam-project button.sl-exam-add[aria-label="Add a +/− column to Webshop"]');
+        await click(page, 'th.sl-exam-project button.sl-exam-add[aria-label="Add a +/− column to Webshop"]');
         await page.waitForSelector("dialog[open] input[name=name]");
         assert.equal(await page.$eval("dialog[open] h3", (h3) => h3.textContent), "New +/− column: Webshop");
         await page.type("dialog[open] input[name=name]", name);
-        await page.click("dialog[open] button[type=submit]");
+        await click(page, "dialog[open] button[type=submit]");
         await page.waitForFunction((n) => [...document.querySelectorAll("th.sl-exam-column-head")].some((th) => th.title.split("\n")[0] === n), { timeout: 10000 }, name);
       }
       const all = await columns();
@@ -1475,14 +1477,14 @@ describe("the gradebook", () => {
 
       // The counts in the dialog are the sheet's as it was loaded, as for any column.
       await openSheet();
-      await page.click("th.sl-exam-project button.sl-exam-project-edit");
+      await click(page, "th.sl-exam-project button.sl-exam-project-edit");
       await page.waitForSelector("dialog[open] .sl-exam-delete-project");
       assert.equal(await page.$eval("dialog[open] h3", (h3) => h3.textContent), "Edit the project Webshop");
       const button = "dialog[open] .sl-exam-delete-project";
-      await page.click(button);
+      await click(page, button);
       assert.equal(await page.$eval(button, (b) => b.textContent), "Click again to delete it with 2 +/− columns and 2 results");
       assert.ok((await columns()).some((c) => c.id === project.id), "one click deletes nothing");
-      await page.click(button);
+      await click(page, button);
       await page.waitForFunction(() => !document.querySelector("th.sl-exam-project"), { timeout: 10000 });
       assert.deepEqual((await columns()).filter((c) => c.category === "projects"), [], "the project and its +/− columns are gone");
       assert.equal(await page.$$eval(".sl-exam-sheet thead tr", (rows) => rows.length), 2);
@@ -1524,7 +1526,7 @@ describe("the gradebook", () => {
     };
     try {
       await open();
-      await page.click(".sl-exam-tests-new-offline");
+      await click(page, ".sl-exam-tests-new-offline");
       await page.waitForSelector("select[name=gradebookKind]");
       assert.deepEqual(await page.$$eval("select[name=gradebookKind] option", (options) => options.map((o) => o.value)), ["test"], "short tests are at 0 %");
       await fetchAs(teacher, `/exam/api/courses/${course.id}`, { method: "PUT", body: { weights: { ...gbWeights, manualTests: 0, participation: 45 } } });
@@ -1654,13 +1656,13 @@ describe("the module bar", () => {
     };
     const expected = [`${year.name} (current)`, "9XGB", "GB"];
 
-    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), teacher.page.click('.sl-exam-bar-page[data-page="pool"]')]);
+    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(teacher.page, '.sl-exam-bar-page[data-page="pool"]')]);
     await teacher.page.waitForSelector(".sl-exam-bar");
     assert.equal(new URL(teacher.page.url()).pathname, "/exam/pool");
     assert.deepEqual(await chosen(), expected, "the pool's bar keeps year, class and course");
     assert.equal((await buttons()).pool.current, "page", "the pool's button is marked");
 
-    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), teacher.page.click('.sl-exam-bar-page[data-page="tests"]')]);
+    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(teacher.page, '.sl-exam-bar-page[data-page="tests"]')]);
     await teacher.page.waitForSelector(".sl-exam-bar");
     assert.equal(new URL(teacher.page.url()).pathname, "/exam/tests");
     assert.deepEqual(await chosen(), expected, "the tests' bar keeps year, class and course");
@@ -1697,20 +1699,20 @@ describe("the module bar", () => {
 
   test("a new course is created from the bar and chosen afterwards", async () => {
     await open(`/exam/classes/${spare.id}`);
-    await teacher.page.click('.sl-exam-bar button[data-create="course"]');
+    await click(teacher.page, '.sl-exam-bar button[data-create="course"]');
     await teacher.page.waitForSelector("dialog[open] input[name=subject]", { timeout: 20000 });
     await teacher.page.type("dialog[open] input[name=subject]", "NVS");
-    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), teacher.page.click("dialog[open] button[type=submit]")]);
+    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(teacher.page, "dialog[open] button[type=submit]")]);
     const created = (await fetchAs(teacher, `/exam/api/classes/${spare.id}`)).json.courses.find((c) => c.subject === "NVS");
     assert.ok(created, "the course exists");
     assert.equal(new URL(teacher.page.url()).pathname, `/exam/courses/${created.id}`, "its config sheet is open");
     await teacher.page.waitForSelector(".sl-exam-bar");
     assert.equal((await bar(teacher.page)).course.chosen, "NVS");
 
-    await teacher.page.click('.sl-exam-bar button[data-create="course"]');
+    await click(teacher.page, '.sl-exam-bar button[data-create="course"]');
     await teacher.page.waitForSelector("dialog[open] input[name=subject]", { timeout: 20000 });
     await teacher.page.type("dialog[open] input[name=subject]", "nvs");
-    await teacher.page.click("dialog[open] button[type=submit]");
+    await click(teacher.page, "dialog[open] button[type=submit]");
     await teacher.page.waitForFunction(() => document.querySelector("dialog[open] .sl-exam-message")?.textContent, { timeout: 10000 });
     assert.match(await teacher.page.evaluate(() => document.querySelector("dialog[open] .sl-exam-message").textContent), /already/, "a duplicate is refused as before");
   });
@@ -1848,7 +1850,7 @@ describe("the question pool", () => {
   test("the browser page draws the tree, the list and a preview with the answers marked", async () => {
     await teacher.page.goto(`${applicationUrl}/exam/pool`, { waitUntil: "domcontentloaded" });
     await teacher.page.waitForSelector(".sl-exam-pool-questions tbody tr", { timeout: 20000 });
-    await teacher.page.click(`.sl-exam-pool-questions tr[data-question="${questionId}"] button`);
+    await click(teacher.page, `.sl-exam-pool-questions tr[data-question="${questionId}"] button`);
     await teacher.page.waitForSelector(".sl-exam-pool-question", { timeout: 10000 });
     await teacher.page.waitForFunction(() => [...document.querySelectorAll(".sl-exam-pool-text img")].every((img) => img.complete), {
       timeout: 10000,
@@ -1869,7 +1871,7 @@ describe("the question pool", () => {
       correct: ["✓yes de"],
       imageLoaded: true,
     });
-    await teacher.page.click(".sl-exam-pool-languages button:last-child");
+    await click(teacher.page, ".sl-exam-pool-languages button:last-child");
     assert.match(await teacher.page.$eval(".sl-exam-pool-text", (el) => el.textContent), /en picture/);
   });
 
@@ -1957,8 +1959,7 @@ describe("online tests: assembly", () => {
   test("without a course in the bar the browser offers no way to create a test", async () => {
     await teacher.page.goto(`${applicationUrl}/exam/pool`, { waitUntil: "domcontentloaded" });
     await teacher.page.waitForSelector(".sl-exam-pool-questions tbody tr", { timeout: 20000 });
-    const [first] = await teacher.page.$$(".sl-exam-pool-questions tbody tr");
-    await first.click();
+    await click(teacher.page, ".sl-exam-pool-questions tbody tr:first-child");
     await teacher.page.waitForSelector(".sl-exam-pool-question", { timeout: 10000 });
     const seen = await teacher.page.evaluate(() => ({
       chosen: document.querySelectorAll(".sl-exam-pool-questions tr.is-chosen, .sl-exam-pool-questions tr[aria-selected]").length,
@@ -1975,16 +1976,16 @@ describe("online tests: assembly", () => {
     const chosen = () => teacher.page.$$eval(".sl-exam-pool-questions tr.is-chosen", (rows) => rows.map((row) => Number(row.dataset.question)));
     // A click anywhere on a row chooses it, a second one unchooses it; the
     // first column is the row's box.
-    await teacher.page.click(`tr[data-question="${questions[0].id}"] td:nth-child(3)`);
+    await click(teacher.page, `tr[data-question="${questions[0].id}"] td:nth-child(3)`);
     assert.deepEqual(await chosen(), [questions[0].id]);
-    await teacher.page.click(`tr[data-question="${questions[0].id}"] td:nth-child(4)`);
+    await click(teacher.page, `tr[data-question="${questions[0].id}"] td:nth-child(4)`);
     assert.deepEqual(await chosen(), [], "unchosen again");
     await teacher.page.waitForSelector(".sl-exam-pool-question", { timeout: 10000 });
-    for (const question of questions) await teacher.page.click(`tr[data-question="${question.id}"] td:nth-child(2) .sl-exam-pool-kind`);
+    for (const question of questions) await click(teacher.page, `tr[data-question="${question.id}"] td:nth-child(2) .sl-exam-pool-kind`);
     assert.deepEqual((await chosen()).sort(), questions.map((q) => q.id).sort());
     assert.match(await teacher.page.$eval(".sl-exam-pool-count", (el) => el.textContent), /2 questions chosen/);
     await teacher.page.type(".sl-exam-pool-create input[name=name]", "HTTP basics");
-    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), teacher.page.click(".sl-exam-pool-create button[type=submit]")]);
+    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(teacher.page, ".sl-exam-pool-create button[type=submit]")]);
     const testId = Number(new URL(teacher.page.url()).pathname.split("/").pop());
     assert.ok(testId > 0, `the test's page opened: ${teacher.page.url()}`);
     await teacher.page.waitForSelector(".sl-exam-test-questions li", { timeout: 20000 });
@@ -2083,18 +2084,18 @@ describe("online tests: assembly", () => {
       await page.goto(`${applicationUrl}/exam/tests/${created.id}`, { waitUntil: "domcontentloaded" });
       await page.waitForSelector(button, { timeout: 20000 });
       assert.equal(await label(), "Delete");
-      await page.click(button);
+      await click(page, button);
       assert.equal(await label(), "Click again to delete this sitting", "the first click only arms it");
       assert.equal(await sittings(), 1, "and deletes nothing");
 
-      await page.click("#markdown-content h1");
+      await click(page, "#markdown-content h1");
       assert.equal(await label(), "Delete", "a click elsewhere disarms it");
-      await page.click(button);
+      await click(page, button);
       await page.keyboard.press("Escape");
       assert.equal(await label(), "Delete", "so does Escape");
 
-      await page.click(button);
-      await page.click(button);
+      await click(page, button);
+      await click(page, button);
       await page.waitForFunction((selector) => !document.querySelector(selector), { timeout: 10000 }, button);
       assert.equal(await sittings(), 0, "the second click deletes");
     } finally {
@@ -2196,7 +2197,7 @@ describe("online tests: writing", () => {
         },
         "the only way in is the full-screen button, with the request above it"
       );
-      await page.click(`.sl-exam-attempt-open[data-test="${test.id}"] button`);
+      await click(page, `.sl-exam-attempt-open[data-test="${test.id}"] button`);
       await page.waitForSelector(".sl-exam-attempt-question", { visible: true, timeout: 20000 });
       assert.equal(await page.evaluate(() => document.fullscreenElement === document.documentElement), true, "the page is in full screen");
       assert.equal(await page.$(".sl-exam-attempt-gate"), null, "no gate after the start itself");
@@ -2226,7 +2227,7 @@ describe("online tests: writing", () => {
         { label: "Continue in full screen", questionsShown: false, countdown: true },
         "a reload shows the gate with the countdown running, not the questions"
       );
-      await page.click(".sl-exam-attempt-continue");
+      await click(page, ".sl-exam-attempt-continue");
       await page.waitForSelector(".sl-exam-attempt-question", { visible: true, timeout: 10000 });
       assert.equal(await page.evaluate(() => document.fullscreenElement === document.documentElement), true, "back in full screen");
       const resumed = await page.evaluate(() => [...document.querySelectorAll(".sl-exam-attempt-answers input:checked")].map((input) => input.closest("label").textContent.trim()));
@@ -2234,9 +2235,9 @@ describe("online tests: writing", () => {
       assert.match(await page.$eval(".sl-exam-countdown", (el) => el.textContent), /^1[45]:\d\d$/, "and the time left");
 
       await choose(page, correct[1][0]);
-      await page.click(".sl-exam-attempt-submit");
+      await click(page, ".sl-exam-attempt-submit");
       assert.match(await page.$eval(".sl-exam-attempt-submit", (el) => el.textContent), /Really submit/, "submitting asks once more, in the student's language");
-      await page.click(".sl-exam-attempt-submit");
+      await click(page, ".sl-exam-attempt-submit");
       await page.waitForSelector(".sl-exam-attempt-result", { timeout: 10000 });
       const result = await page.$eval(".sl-exam-attempt-result", (el) => el.textContent);
       assert.match(result, /2 of 2 questions correct – grade 1/);
@@ -2278,7 +2279,7 @@ describe("online tests: writing", () => {
     const writeUntilBeat = async (page, id) => {
       await page.goto(`${applicationUrl}/exam/my`, { waitUntil: "domcontentloaded" });
       await page.waitForSelector(`.sl-exam-attempt-open[data-test="${id}"] button`, { timeout: 20000 });
-      await page.click(`.sl-exam-attempt-open[data-test="${id}"] button`);
+      await click(page, `.sl-exam-attempt-open[data-test="${id}"] button`);
       await page.waitForSelector(".sl-exam-attempt-question", { timeout: 20000 });
       const until = Date.now() + 20000;
       let row;
@@ -2341,7 +2342,7 @@ describe("online tests: writing", () => {
   const startOn = async (page, id) => {
     await page.goto(`${applicationUrl}/exam/my`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(`.sl-exam-attempt-open[data-test="${id}"] button`, { timeout: 20000 });
-    await page.click(`.sl-exam-attempt-open[data-test="${id}"] button`);
+    await click(page, `.sl-exam-attempt-open[data-test="${id}"] button`);
     await page.waitForSelector(".sl-exam-attempt-question", { visible: true, timeout: 20000 });
   };
 
@@ -2370,7 +2371,7 @@ describe("online tests: writing", () => {
       assert.deepEqual(layout, { above: true, position: "static" }, "the bar stands above the questions, not over them");
       await choose(page, correct[0][0]);
       await new Promise((resolve) => setTimeout(resolve, 2000));
-      await page.click(".sl-exam-attempt-back");
+      await click(page, ".sl-exam-attempt-back");
       await page.waitForFunction(() => document.fullscreenElement !== null, { timeout: 5000 });
       assert.equal(await bar(), false, "the bar goes once full screen is back");
       const row = await attemptWhen(test.id, (candidate) => candidate.out_count > 0, 15000);
@@ -2439,27 +2440,28 @@ describe("online tests: writing", () => {
     const page = student.page;
     await page.goto(`${applicationUrl}/exam/my`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".sl-exam-my-results sl-exam-results .sl-exam-results", { timeout: 20000 });
-    assert.deepEqual(
-      [(await resultsSection(page)).hidden, (await resultsSection(page)).shown],
-      [false, true],
-      "the results are shown while no test is written"
-    );
+    // The page is served hidden until its owner shows it, and nothing has a box until then.
+    const shownSection = async () => {
+      const section = await resultsSection(page);
+      return [section?.hidden, section?.shown];
+    };
+    assert.deepEqual(await eventually(shownSection, [false, true]), [false, true], "the results are shown while no test is written");
     // The open tests are an embed of their own and may draw after the results.
     await page.waitForSelector(`.sl-exam-attempt-open[data-test="${test.id}"] button`, { timeout: 20000 });
-    await page.click(`.sl-exam-attempt-open[data-test="${test.id}"] button`);
+    await click(page, `.sl-exam-attempt-open[data-test="${test.id}"] button`);
     await page.waitForSelector(".sl-exam-attempt-question", { timeout: 20000 });
-    assert.deepEqual([(await resultsSection(page)).hidden, (await resultsSection(page)).shown], [true, false], "hidden once the test is started");
+    assert.deepEqual(await eventually(shownSection, [true, false]), [true, false], "hidden once the test is started");
 
     await page.reload({ waitUntil: "domcontentloaded" });
     assert.equal((await resultsSection(page)).hidden, true, "a reload during the attempt renders them hidden from the start");
     await page.waitForSelector(".sl-exam-attempt-continue", { visible: true, timeout: 20000 });
-    await page.click(".sl-exam-attempt-continue");
+    await click(page, ".sl-exam-attempt-continue");
     await page.waitForSelector(".sl-exam-attempt-question", { visible: true, timeout: 20000 });
     assert.equal((await resultsSection(page)).hidden, true, "and they stay hidden once the attempt is resumed");
 
     await choose(page, correct[0][0]);
-    await page.click(".sl-exam-attempt-submit");
-    await page.click(".sl-exam-attempt-submit");
+    await click(page, ".sl-exam-attempt-submit");
+    await click(page, ".sl-exam-attempt-submit");
     await page.waitForSelector(".sl-exam-attempt-result", { timeout: 10000 });
     await page.waitForFunction(
       (name) => {
@@ -2557,7 +2559,7 @@ describe("online tests: writing", () => {
       await page.waitForSelector(`.sl-exam-attempt-open[data-test="${test.id}"] button`, { timeout: 20000 });
       assert.deepEqual(await chromeOf(page), chromeShown, "before the start the page has its chrome");
       assert.equal(isFramed(await frameOf(page)), false, "no frame before the start");
-      await page.click(`.sl-exam-attempt-open[data-test="${test.id}"] button`);
+      await click(page, `.sl-exam-attempt-open[data-test="${test.id}"] button`);
       await page.waitForSelector(".sl-exam-attempt-question", { visible: true, timeout: 20000 });
       assert.deepEqual(await chromeOf(page), chromeHidden, "once started only the title is left");
       assert.deepEqual(await frameOf(page), framed, "in full screen the violet frame runs around the screen and takes no clicks");
@@ -2568,7 +2570,7 @@ describe("online tests: writing", () => {
       await page.waitForFunction(() => document.querySelector(".sl-exam-attempt-fullscreen-bar").offsetParent !== null, { timeout: 5000 });
       assert.deepEqual(await chromeOf(page), chromeHidden, "out of full screen it stays hidden");
       assert.equal(isFramed(await frameOf(page)), false, "out of full screen the frame is gone, while the bar asks back");
-      await page.click(".sl-exam-attempt-back");
+      await click(page, ".sl-exam-attempt-back");
       await page.waitForFunction(() => document.fullscreenElement !== null, { timeout: 5000 });
       assert.deepEqual(await frameOf(page), framed, "Back to full screen brings the frame back");
       await page.evaluate(() => document.exitFullscreen());
@@ -2594,7 +2596,7 @@ describe("online tests: writing", () => {
       assert.deepEqual(await chromeOf(page), chromeHidden, "390 px: the chrome stays hidden");
       await page.setViewport({ width: 1280, height: 800 });
 
-      await page.click(".sl-exam-attempt-continue");
+      await click(page, ".sl-exam-attempt-continue");
       await page.waitForSelector(".sl-exam-attempt-question", { visible: true, timeout: 10000 });
       assert.equal(await page.evaluate(() => document.fullscreenElement !== null), true, "in full screen again");
       assert.deepEqual(await frameOf(page), framed, "framed again");
@@ -2603,8 +2605,8 @@ describe("online tests: writing", () => {
       // Skipped once more on the resumed page, so a reload caught up after submitting would show.
       assert.equal(await sendNav(), true, "a hot reload on the resumed attempt does not reload the page either");
       const navigated = navigations.count;
-      await page.click(".sl-exam-attempt-submit");
-      await page.click(".sl-exam-attempt-submit");
+      await click(page, ".sl-exam-attempt-submit");
+      await click(page, ".sl-exam-attempt-submit");
       await page.waitForSelector(".sl-exam-attempt-result", { timeout: 10000 });
       await page.waitForFunction(() => document.fullscreenElement === null, { timeout: 5000 });
       assert.deepEqual(await chromeOf(page), chromeShown, "after submitting the chrome is back, without a reload");
@@ -2633,7 +2635,7 @@ describe("online tests: writing", () => {
     try {
       await page.goto(`${applicationUrl}/exam/my`, { waitUntil: "domcontentloaded" });
       await page.waitForSelector(".sl-exam-attempt-continue", { visible: true, timeout: 20000 });
-      await page.click(".sl-exam-attempt-continue");
+      await click(page, ".sl-exam-attempt-continue");
       await page.waitForSelector(".sl-exam-attempt-question", { visible: true, timeout: 10000 });
       assert.equal(await page.evaluate(() => document.fullscreenElement !== null), true, "written in full screen");
       assert.deepEqual(await chromeOf(page), chromeHidden, "without the chrome");
@@ -2653,7 +2655,7 @@ describe("online tests: writing", () => {
     await render(student, "/md/test-exam-writing-beside-results.md");
     await page.waitForSelector(`.sl-exam-attempt-open[data-test="${test.id}"] button`, { timeout: 20000 });
     await page.waitForSelector("sl-exam-results .sl-exam-results", { timeout: 20000 });
-    await page.click(`.sl-exam-attempt-open[data-test="${test.id}"] button`);
+    await click(page, `.sl-exam-attempt-open[data-test="${test.id}"] button`);
     await page.waitForSelector(".sl-exam-attempt-question", { timeout: 20000 });
     assert.ok(await page.$eval("sl-exam-results", (el) => el.offsetParent !== null && !el.closest("[hidden]")), "the results element stays visible");
     const attempt = database((db) => db.prepare("SELECT id FROM attempt WHERE test_id = ?").get(test.id).id);
@@ -2714,18 +2716,18 @@ describe("online tests: writing", () => {
       assert.equal(await teacher.page.$eval(".sl-exam-attempt-continue", (el) => el.textContent), "Start the test in full screen", "the student's button, in front of the questions");
       assert.deepEqual(await chromeOf(teacher.page), chromePreviewHidden, "behind the gate only the title is left");
       assert.equal(isFramed(await frameOf(teacher.page)), false, "and no frame behind the gate");
-      await teacher.page.click(".sl-exam-attempt-continue");
+      await click(teacher.page, ".sl-exam-attempt-continue");
       await teacher.page.waitForSelector(".sl-exam-attempt-question", { visible: true, timeout: 10000 });
       assert.equal(await teacher.page.evaluate(() => document.fullscreenElement !== null), true, "in full screen");
       assert.deepEqual(await chromeOf(teacher.page), chromePreviewHidden, "while trying it only the title is left");
       assert.deepEqual(await frameOf(teacher.page), framed, "the preview in full screen is framed too");
       // The answer and both clicks on Submit go through the frame.
-      await teacher.page.click(".sl-exam-attempt-answers label");
+      await click(teacher.page, ".sl-exam-attempt-answers label");
       assert.equal(await teacher.page.$$eval(".sl-exam-attempt-answers input:checked", (inputs) => inputs.length), 1, "the click on an answer reaches it");
-      await teacher.page.click(".sl-exam-attempt-submit");
+      await click(teacher.page, ".sl-exam-attempt-submit");
       assert.equal(await teacher.page.$eval(".sl-exam-attempt-submit", (el) => el.dataset.armed), "1", "the first Submit asks again");
       assert.equal(await teacher.page.$(".sl-exam-attempt-preview-ended"), null, "and does not end the preview yet");
-      await teacher.page.click(".sl-exam-attempt-submit");
+      await click(teacher.page, ".sl-exam-attempt-submit");
       await teacher.page.waitForSelector(".sl-exam-attempt-preview-ended", { timeout: 10000 });
       await teacher.page.waitForFunction(() => document.fullscreenElement === null, { timeout: 5000 });
       assert.deepEqual(await chromeOf(teacher.page), chromeShown, "the second ends it: the chrome is back, without a reload");
@@ -2737,7 +2739,7 @@ describe("online tests: writing", () => {
 
       // The content slides back beside the returning sidebar (markdown.css's transition); a click meanwhile misses.
       await teacher.page.waitForFunction(() => document.getAnimations().length === 0, { timeout: 5000 });
-      await teacher.page.click(".sl-exam-attempt-restart");
+      await click(teacher.page, ".sl-exam-attempt-restart");
       await teacher.page.waitForSelector(".sl-exam-writing[data-preview='1'] .sl-exam-attempt-continue", { visible: true, timeout: 10000 });
       assert.deepEqual(await chromeOf(teacher.page), chromePreviewHidden, "started again, the chrome is hidden again");
       assert.equal(await teacher.page.$$eval(".sl-exam-attempt-answers input:checked", (inputs) => inputs.length), 0, "with no answer chosen");
@@ -2761,7 +2763,7 @@ describe("online tests: writing", () => {
     try {
       await page.goto(`${applicationUrl}/exam/tests/${test.id}/preview`, { waitUntil: "domcontentloaded" });
       await page.waitForSelector(".sl-exam-attempt-continue", { visible: true, timeout: 20000 });
-      await page.click(".sl-exam-attempt-continue");
+      await click(page, ".sl-exam-attempt-continue");
       await page.waitForSelector(".sl-exam-attempt-question", { visible: true, timeout: 10000 });
       assert.equal(await page.evaluate(() => document.fullscreenElement !== null), true, "tried in full screen");
       assert.deepEqual(await chromeOf(page), chromePreviewHidden, "without the chrome");
@@ -2783,7 +2785,7 @@ describe("online tests: writing", () => {
     try {
       await page.goto(`${applicationUrl}/exam/tests/${test.id}/preview`, { waitUntil: "domcontentloaded" });
       await page.waitForSelector(".sl-exam-attempt-continue", { visible: true, timeout: 20000 });
-      await page.click(".sl-exam-attempt-continue");
+      await click(page, ".sl-exam-attempt-continue");
       await page.waitForSelector(".sl-exam-attempt-question", { visible: true, timeout: 10000 });
       assert.equal(await sendNav(), false, "the preview page is reloaded");
       assert.equal(await page.evaluate(() => document.documentElement.classList.contains("sl-previewing")), true, "from the first byte without the chrome");
@@ -2909,7 +2911,7 @@ describe("online tests: writing", () => {
     await teacher.page.evaluate(() => {
       document.querySelector(".sl-exam-scroll").scrollLeft = 0;
     });
-    await teacher.page.click(otherCell);
+    await click(teacher.page, otherCell);
     assert.deepEqual(
       await teacher.page.evaluate((s) => ({ note: document.activeElement === document.querySelector(`${s} textarea.sl-exam-note`), open: document.querySelector(s).classList.contains("is-note-open") }), otherCell),
       { note: true, open: true }
@@ -2996,7 +2998,7 @@ describe("online tests: writing", () => {
 
       assert.equal((await fetchAs(student, `/exam/api/attempts/${attemptId}/release`, { method: "POST" })).status, 403, "a student cannot unbind");
       assert.equal(await teacher.page.$eval(`${row} .sl-exam-live-release`, (b) => b.textContent), "Unbind browser");
-      await teacher.page.click(`${row} .sl-exam-live-release`);
+      await click(teacher.page, `${row} .sl-exam-live-release`);
       await teacher.page.waitForSelector(`${row} .sl-exam-live-bound[data-bound="waiting"]`, { timeout: 10000 });
       assert.match(await teacher.page.$eval(`${row} .sl-exam-live-bound`, (el) => el.textContent), /waiting for the next browser/);
       assert.deepEqual(dialogs, [], "a single click, no dialog");
@@ -3135,7 +3137,7 @@ describe("online tests: writing", () => {
           })),
         })),
       }));
-    await student.page.click(`a.sl-exam-review-link[href="${after.link}"]`);
+    await click(student.page, `a.sl-exam-review-link[href="${after.link}"]`);
     await student.page.waitForSelector(".sl-exam-review-question", { timeout: 20000 });
     assert.equal(new URL(student.page.url()).pathname, after.link);
     assert.equal(await student.page.$(".sl-exam-bar"), null, "no teacher's bar");
@@ -3159,7 +3161,7 @@ describe("online tests: writing", () => {
     await teacher.page.goto(`${applicationUrl}/exam/courses/${course.id}/students/${username}`, { waitUntil: "domcontentloaded" });
     const teacherLink = `/exam/courses/${course.id}/students/${username}/attempts/${writing.attempt}`;
     await teacher.page.waitForSelector(`a.sl-exam-review-link[href="${teacherLink}"]`, { timeout: 20000 });
-    await teacher.page.click(`a.sl-exam-review-link[href="${teacherLink}"]`);
+    await click(teacher.page, `a.sl-exam-review-link[href="${teacherLink}"]`);
     await teacher.page.waitForSelector(".sl-exam-review-question", { timeout: 20000 });
     assert.ok(await teacher.page.$(".sl-exam-bar"), "the teacher's page has the bar");
     assert.ok(await teacher.page.$(`.sl-exam-review-back a[href="/exam/courses/${course.id}/students/${username}"]`), "and a way back to the student");
@@ -3534,7 +3536,7 @@ describe("online tests: the live view", () => {
     assert.notEqual(row.background, "rgba(0, 0, 0, 0)", "and its row is coloured");
     assert.deepEqual(await links(`/exam/tests/${written.id}`, `li[data-sitting="${sitting.id}"][data-state="over"]`), expected, "the test's page");
 
-    await teacher.page.click(`li[data-sitting="${sitting.id}"] a.sl-exam-live-link`);
+    await click(teacher.page, `li[data-sitting="${sitting.id}"] a.sl-exam-live-link`);
     await teacher.page.waitForFunction((u) => document.querySelector(`sl-exam-live tr[data-username="${u}"]`)?.dataset.status === "submitted", { timeout: 20000 }, student.username.toLowerCase());
     const seen = await teacher.page.evaluate((u) => ({
       badge: document.querySelector(".sl-exam-live-badge").textContent,
@@ -4012,7 +4014,7 @@ describe("Matura candidates", () => {
     );
     const plain = (await sheetName()).background;
     const answered = teacher.page.waitForResponse((response) => response.url().includes(`/participants/${username}`) && response.request().method() === "PUT", { timeout: 30000 });
-    await teacher.page.click(`.sl-exam-sheet tr[data-student="${username}"] button.sl-exam-participant-toggle`);
+    await click(teacher.page, `.sl-exam-sheet tr[data-student="${username}"] button.sl-exam-participant-toggle`);
     const response = await answered;
     assert.equal(response.status(), 200, await response.text());
     await teacher.page.waitForFunction((who) => document.querySelector(`.sl-exam-sheet tr[data-student="${who}"] button.sl-exam-participant-toggle`)?.getAttribute("aria-pressed") === "true", { timeout: 10000 }, username);
@@ -4059,7 +4061,7 @@ describe("Matura candidates", () => {
   test("withdrawing takes the role away and leaves the student's other roles as they were", async () => {
     await openSheet();
     const answered = teacher.page.waitForResponse((response) => response.url().includes(`/participants/${username}`) && response.request().method() === "PUT", { timeout: 30000 });
-    await teacher.page.click(`.sl-exam-sheet tr[data-student="${username}"] button.sl-exam-participant-toggle`);
+    await click(teacher.page, `.sl-exam-sheet tr[data-student="${username}"] button.sl-exam-participant-toggle`);
     assert.equal((await answered).status(), 200);
     await teacher.page.waitForFunction((who) => document.querySelector(`.sl-exam-sheet tr[data-student="${who}"] button.sl-exam-participant-toggle`)?.getAttribute("aria-pressed") === "false", { timeout: 10000 }, username);
     assert.equal((await sheetName()).highlighted, false);
@@ -4208,20 +4210,20 @@ describe("offline tests and their handouts", () => {
     const page = teacher.page;
     await page.goto(`${applicationUrl}/exam/tests/${offline.id}`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".sl-exam-handout-change", { timeout: 20000 });
-    await page.click(`.sl-exam-handouts li[data-group="B"] .sl-exam-handout-change`);
+    await click(page, `.sl-exam-handouts li[data-group="B"] .sl-exam-handout-change`);
     await page.waitForSelector("dialog[open] .sl-exam-picker-choose", { timeout: 10000 });
     await page.type("dialog[open] .sl-exam-picker-search", "EXAM-HANDOUT");
     const narrowed = await page.$$eval("dialog[open] .sl-exam-picker-choose", (buttons) => buttons.map((b) => b.dataset.path).sort());
     assert.deepEqual(narrowed, [handoutB, handoutA].sort(), "the search ignores the letter case");
     // Choosing saves and draws the page anew; the next click waits for the new button.
     await page.$eval(`.sl-exam-handouts li[data-group="B"] .sl-exam-handout-change`, (button) => (button.dataset.stale = "1"));
-    await page.click(`dialog[open] .sl-exam-picker-choose[data-path="${handoutB}"]`);
+    await click(page, `dialog[open] .sl-exam-picker-choose[data-path="${handoutB}"]`);
     await page.waitForFunction(() => !document.querySelector("dialog[open]"), { timeout: 10000 });
     await page.waitForSelector(`.sl-exam-handouts li[data-group="B"] .sl-exam-handout-change:not([data-stale])`, { timeout: 10000 });
-    await page.click(`.sl-exam-handouts li[data-group="B"] .sl-exam-handout-change`);
+    await click(page, `.sl-exam-handouts li[data-group="B"] .sl-exam-handout-change`);
     await page.waitForSelector("dialog[open] .sl-exam-picker-choose", { timeout: 10000 });
     await page.type("dialog[open] .sl-exam-picker-search", "test-md-file");
-    await page.click(`dialog[open] .sl-exam-picker-choose[data-path="test-md-file.md"]`);
+    await click(page, `dialog[open] .sl-exam-picker-choose[data-path="test-md-file.md"]`);
     await page.waitForFunction(() => document.querySelector("dialog[open] .sl-exam-picker-warning")?.textContent.length > 0, { timeout: 5000 });
     assert.ok(await page.$("dialog[open]"), "a file the class can read asks a second time");
     await page.keyboard.press("Escape");
@@ -4243,7 +4245,7 @@ describe("offline tests and their handouts", () => {
     await page.waitForSelector(`.sl-exam-attendance-table tr[data-username="${other}"] .sl-exam-attendance-group[data-group="B"]`, { timeout: 20000 });
     const rows = () => page.$$eval(".sl-exam-attendance-table tbody tr", (trs) => trs.map((tr) => [tr.dataset.username, tr.dataset.present, tr.dataset.group]));
     assert.ok((await rows()).every(([, present, group]) => present === "1" && group === "A"), "everyone starts present in group A");
-    await page.click(`.sl-exam-attendance-table tr[data-username="${other}"] .sl-exam-attendance-group[data-group="B"]`);
+    await click(page, `.sl-exam-attendance-table tr[data-username="${other}"] .sl-exam-attendance-group[data-group="B"]`);
     await page.waitForSelector(`.sl-exam-attendance-table tr[data-username="${other}"][data-group="B"]`, { timeout: 10000 });
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.waitForSelector(`.sl-exam-attendance-table tr[data-username="${other}"][data-group="B"]`, { timeout: 20000 });
@@ -4265,7 +4267,7 @@ describe("offline tests and their handouts", () => {
     const stored = async () => (await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/live`)).json.participants.find((p) => p.username === other).teacherNote;
     assert.equal(await stored(), "Phone on the desk\ntaken away at 10:12");
     for (const present of ["0", "1"]) {
-      await page.click(`${row} .sl-exam-attendance-present`);
+      await click(page, `${row} .sl-exam-attendance-present`);
       await page.waitForSelector(`${row}[data-present="${present}"]`, { timeout: 10000 });
       assert.equal(await page.$eval(field, (el) => el.value), "Phone on the desk\ntaken away at 10:12", `the note stays at present=${present}`);
     }
@@ -4283,7 +4285,7 @@ describe("offline tests and their handouts", () => {
       // The screen opened in front; a tab in the background runs no
       // requestAnimationFrame, and a click there never lands.
       await page.bringToFront();
-      await page.click(".sl-exam-live-start");
+      await click(page, ".sl-exam-live-start");
       await page.waitForFunction(() => document.querySelector(".sl-exam-live-badge")?.dataset.state === "open", { timeout: 10000 });
       await screen.waitForFunction(() => document.querySelector(".sl-exam-screen-label").textContent === "Closes in", { timeout: 15000, polling: 250 });
       const onScreen = await screen.evaluate(() => ({ remaining: document.querySelector(".sl-exam-screen-remaining").textContent, summary: Boolean(document.querySelector(".sl-exam-screen-summary")), text: document.body.innerText }));
@@ -4632,9 +4634,9 @@ describe("the question editor", () => {
     await teacher.page.waitForSelector(`.sl-exam-pool-questions tr[data-question="${question.id}"]`, { timeout: 20000 });
     assert.equal(await teacher.page.$eval(".sl-exam-pool-category.is-chosen", (el) => el.dataset.category), String(categoryId), "the category is chosen");
     assert.equal(await teacher.page.$eval(".sl-exam-pool-new", (el) => el.hidden), false, "New question is offered");
-    await teacher.page.click(`.sl-exam-pool-questions tr[data-question="${question.id}"] button`);
+    await click(teacher.page, `.sl-exam-pool-questions tr[data-question="${question.id}"] button`);
     await teacher.page.waitForSelector(".sl-exam-pool-edit", { timeout: 10000 });
-    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), teacher.page.click(".sl-exam-pool-edit")]);
+    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(teacher.page, ".sl-exam-pool-edit")]);
     await teacher.page.waitForSelector(".sl-exam-editor sl-rich-text .sl-rich-text-area", { timeout: 20000 });
     const shown = await teacher.page.evaluate(() => ({
       heading: document.querySelector("#markdown-content h1")?.textContent,
@@ -4662,10 +4664,10 @@ describe("the question editor", () => {
     });
 
     // The second answer becomes the correct one, and a third is added.
-    await teacher.page.click('.sl-exam-editor-answer[data-answer="2"] input[type=radio]');
-    await teacher.page.click(".sl-exam-editor-add");
+    await click(teacher.page, '.sl-exam-editor-answer[data-answer="2"] input[type=radio]');
+    await click(teacher.page, ".sl-exam-editor-add");
     await teacher.page.type('.sl-exam-editor-answer[data-answer="3"] .sl-exam-editor-de .sl-rich-text-area', "beides");
-    await teacher.page.click(".sl-exam-editor-actions button[type=submit]");
+    await click(teacher.page, ".sl-exam-editor-actions button[type=submit]");
     await teacher.page.waitForSelector(".sl-exam-editor-problems li", { timeout: 10000 });
     const refused = await teacher.page.evaluate(() => ({
       problems: [...document.querySelectorAll(".sl-exam-editor-problems li")].map((li) => li.textContent),
@@ -4673,7 +4675,7 @@ describe("the question editor", () => {
     }));
     assert.deepEqual(refused, { problems: ["Answer 3 has no English text."], marked: ["3/en"] }, "the problem is shown at its field");
     await teacher.page.type('.sl-exam-editor-answer[data-answer="3"] .sl-exam-editor-en .sl-rich-text-area', "both");
-    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), teacher.page.click(".sl-exam-editor-actions button[type=submit]")]);
+    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(teacher.page, ".sl-exam-editor-actions button[type=submit]")]);
     assert.equal(new URL(teacher.page.url()).search, `?category=${categoryId}`, "back in the browser with the category chosen");
     const saved = await editable(question.id);
     assert.deepEqual(saved.answers.map((a) => [a.textDe, a.textEn, a.correct]), [
@@ -4686,7 +4688,7 @@ describe("the question editor", () => {
   test("a new question from the browser: the rich-text field formats, filters a paste and uploads images by paste and button", async () => {
     await teacher.page.goto(`${applicationUrl}/exam/pool?category=${categoryId}`, { waitUntil: "domcontentloaded" });
     await teacher.page.waitForSelector(".sl-exam-pool-new:not([hidden])", { timeout: 20000 });
-    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), teacher.page.click(".sl-exam-pool-new")]);
+    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(teacher.page, ".sl-exam-pool-new")]);
     assert.equal(new URL(teacher.page.url()).pathname, "/exam/pool/questions/new");
     await teacher.page.waitForSelector(".sl-exam-editor sl-rich-text .sl-rich-text-area", { timeout: 20000 });
     assert.equal(await teacher.page.$eval("select[name=categoryId]", (el) => el.value), String(categoryId), "the browser's category is chosen");
@@ -4696,7 +4698,7 @@ describe("the question editor", () => {
     await teacher.page.type("input[name=nameDe]", "Formatiert");
     await teacher.page.type("input[name=nameEn]", "Formatted");
     // Bold and inline code on a selection; a code block on a line of its own.
-    await teacher.page.click(`${de} .sl-rich-text-area`);
+    await click(teacher.page, `${de} .sl-rich-text-area`);
     await teacher.page.keyboard.type("fett");
     await teacher.page.evaluate((selector) => {
       const area = document.querySelector(`${selector} .sl-rich-text-area`);
@@ -4705,22 +4707,22 @@ describe("the question editor", () => {
       getSelection().removeAllRanges();
       getSelection().addRange(range);
     }, de);
-    await teacher.page.click(`${de} button[data-action=bold]`);
+    await click(teacher.page, `${de} button[data-action=bold]`);
     await teacher.page.keyboard.press("End");
-    await teacher.page.click(`${de} button[data-action=bold]`);
+    await click(teacher.page, `${de} button[data-action=bold]`);
     await teacher.page.keyboard.type(" und ");
     await teacher.page.keyboard.type("x = 1");
     await teacher.page.keyboard.down("Shift");
     for (let i = 0; i < 5; i += 1) await teacher.page.keyboard.press("ArrowLeft");
     await teacher.page.keyboard.up("Shift");
-    await teacher.page.click(`${de} button[data-action=code]`);
+    await click(teacher.page, `${de} button[data-action=code]`);
     const german = await teacher.page.$eval(`${de} sl-rich-text`, (el) => el.value);
     // Chrome keeps the space after the bold word as `&nbsp;`.
     assert.match(german, /^<b>fett<\/b>(?:&nbsp;| )und <code>x = 1<\/code>$/);
 
     // A paste from a web page keeps words and basic formatting only; a
     // pasted image file goes through the upload.
-    await teacher.page.click(`${en} .sl-rich-text-area`);
+    await click(teacher.page, `${en} .sl-rich-text-area`);
     await teacher.page.evaluate((selector, pixel) => {
       const area = document.querySelector(`${selector} .sl-rich-text-area`);
       const paste = (fill) => {
@@ -4742,7 +4744,7 @@ describe("the question editor", () => {
       writeFileSync(path.join(dir, "button.png"), Buffer.from(otherPixel, "base64"));
       writeFileSync(path.join(dir, "fake.png"), "%PDF-1.7\n");
       const input = await teacher.page.$(`${de} input[type=file]`);
-      await teacher.page.click(`${de} .sl-rich-text-area`);
+      await click(teacher.page, `${de} .sl-rich-text-area`);
       await input.uploadFile(path.join(dir, "fake.png"));
       await teacher.page.waitForFunction((selector) => /not an image/.test(document.querySelector(`${selector} .sl-rich-text-status`).textContent), { timeout: 10000 }, de);
       await input.uploadFile(path.join(dir, "button.png"));
@@ -4756,8 +4758,8 @@ describe("the question editor", () => {
       await (await row.$(".sl-exam-editor-de .sl-rich-text-area")).type(`Antwort ${index + 1}`);
       await (await row.$(".sl-exam-editor-en .sl-rich-text-area")).type(`Answer ${index + 1}`);
     }
-    await (await answers[0].$("input[type=radio]")).click();
-    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), teacher.page.click(".sl-exam-editor-actions button[type=submit]")]);
+    await click(teacher.page, '.sl-exam-editor-answer[data-answer="1"] input[type=radio]');
+    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(teacher.page, ".sl-exam-editor-actions button[type=submit]")]);
     const created = (await fetchAs(teacher, `/exam/api/pool/questions?category=${categoryId}&q=Formatiert`)).json;
     assert.equal(created.length, 1);
     const stored = await editable(created[0].id);
@@ -4795,7 +4797,7 @@ describe("the question editor", () => {
 
     await teacher.page.goto(`${applicationUrl}/exam/pool?category=${categoryId}`, { waitUntil: "domcontentloaded" });
     await teacher.page.waitForSelector(`.sl-exam-pool-questions tr[data-question="${question.id}"]`, { timeout: 20000 });
-    await teacher.page.click(`.sl-exam-pool-questions tr[data-question="${question.id}"] button`);
+    await click(teacher.page, `.sl-exam-pool-questions tr[data-question="${question.id}"] button`);
     await teacher.page.waitForSelector(".sl-exam-pool-text img", { timeout: 10000 });
     await teacher.page.waitForFunction(() => [...document.querySelectorAll(".sl-exam-pool-text img")].every((img) => img.complete && img.naturalWidth === 1), { timeout: 10000 });
 
@@ -4966,17 +4968,31 @@ describe("the question editor", () => {
   const rowOf = (id) => `.sl-exam-pool-tree li[data-category="${id}"] > .sl-exam-tree-row`;
   const nameOf = (id) => `${rowOf(id)} .sl-exam-pool-category`;
 
-  /** Where on `selector` to point: `share` of its height down, a little in from its left. */
-  const pointAt = (selector, share = 0.5) =>
-    teacher.page.$eval(
+  /**
+   * Where on `selector` to point: `share` of its height down, a little in from its left.
+   * Measured once the row holds still: the pool's list and filters fill in after
+   * the tree, the page's height changes with them, and a row scrolled to the
+   * middle moves with it - a press at the old place then misses the row.
+   */
+  async function pointAt(selector, share = 0.5) {
+    await teacher.page.$eval(selector, (element) => element.scrollIntoView({ block: "center" }));
+    await whenStill(
+      teacher.page,
+      (selector) => {
+        const box = document.querySelector(selector)?.getBoundingClientRect();
+        return box ? [box.left, box.top, box.width, box.height] : null;
+      },
+      { frames: 6, args: [selector] }
+    );
+    return teacher.page.$eval(
       selector,
       (element, share) => {
-        element.scrollIntoView({ block: "center" });
         const box = element.getBoundingClientRect();
         return { x: box.left + Math.min(box.width / 2, 60), y: box.top + box.height * share };
       },
       share
     );
+  }
 
   /** Drags `from` onto `to` (`share` of its height down) with the mouse, or with a finger after a long press. */
   async function drag(from, to, share = 0.5, { touch = false } = {}) {
@@ -5016,16 +5032,7 @@ describe("the question editor", () => {
 
   /** Opens the menu of category `id` by its ⋯ button. */
   async function openMenu(id) {
-    // Right after the page is drawn the row may still be drawn anew; a click that found no box is tried again.
-    for (let tries = 1; ; tries += 1) {
-      try {
-        await teacher.page.click(`${rowOf(id)} .sl-exam-tree-menu-button`);
-        break;
-      } catch (error) {
-        if (tries === 3 || !/not clickable/.test(error.message)) throw error;
-        await new Promise((resolve) => setTimeout(resolve, 200));
-      }
-    }
+    await click(teacher.page, `${rowOf(id)} .sl-exam-tree-menu-button`);
     await teacher.page.waitForSelector(".sl-exam-tree-menu:not([hidden])", { timeout: 5000 });
   }
 
@@ -5169,7 +5176,7 @@ describe("the question editor", () => {
     const page = teacher.page;
     await openPoolTree();
     await openMenu(a.id);
-    await page.click(inMenu(".sl-exam-tree-add"));
+    await click(page, inMenu(".sl-exam-tree-add"));
     assert.equal(await page.$(".sl-exam-tree-menu:not([hidden])"), null, "the menu closes with its action");
     await page.waitForSelector(".sl-exam-tree-popup[role=dialog] input[name=nameDe]", { timeout: 5000 });
     await page.type(".sl-exam-tree-popup input[name=nameDe]", "Popup Neu");
@@ -5179,28 +5186,28 @@ describe("the question editor", () => {
     const created = (await treeOf([a.nameDe]))[0][1];
     assert.deepEqual(created, [["Popup Neu", []]], "the subcategory is A's last");
 
-    await page.click(nameOf(b.id), { count: 2 });
+    await click(page, nameOf(b.id), { count: 2 });
     await page.waitForSelector(".sl-exam-tree-popup input[name=nameDe]", { timeout: 5000 });
     assert.equal(await page.$eval(".sl-exam-tree-popup input[name=nameDe]", (input) => input.value), b.nameDe, "filled with its names");
     await page.$eval(".sl-exam-tree-popup input[name=nameDe]", (input) => {
       input.value = "";
     });
     await page.type(".sl-exam-tree-popup input[name=nameDe]", a.nameDe);
-    await page.click(".sl-exam-tree-popup button[type=submit]");
+    await click(page, ".sl-exam-tree-popup button[type=submit]");
     await page.waitForFunction(() => document.querySelector(".sl-exam-tree-popup .sl-exam-message")?.textContent, { timeout: 10000 });
     assert.match(await page.$eval(".sl-exam-tree-popup .sl-exam-message", (el) => el.textContent), /already/, "a sibling's name is refused in the popup, which stays open");
     await page.$eval(".sl-exam-tree-popup input[name=nameDe]", (input) => {
       input.value = "";
     });
     await page.type(".sl-exam-tree-popup input[name=nameDe]", "Popup B2");
-    await page.click(".sl-exam-tree-popup button[type=submit]");
+    await click(page, ".sl-exam-tree-popup button[type=submit]");
     await page.waitForFunction((selector) => document.querySelector(selector)?.textContent.startsWith("Popup B2"), { timeout: 10000 }, nameOf(b.id));
 
     await openMenu(b.id);
-    await page.click(inMenu(".sl-exam-tree-rename"));
+    await click(page, inMenu(".sl-exam-tree-rename"));
     await page.waitForSelector(".sl-exam-tree-popup", { timeout: 5000 });
     await page.type(".sl-exam-tree-popup input[name=nameDe]", "nicht gespeichert");
-    await page.click(".sl-exam-tree-popup .sl-exam-tree-cancel");
+    await click(page, ".sl-exam-tree-popup .sl-exam-tree-cancel");
     assert.equal(await page.$(".sl-exam-tree-popup"), null, "Cancel closes it");
     assert.equal((await treeOf(["Popup B2"])).length, 1, "and nothing changed");
   });
@@ -5224,9 +5231,9 @@ describe("the question editor", () => {
     await openMenu(b.id);
     assert.deepEqual(await entries(), ["new-question", "add", "rename", "delete"]);
     const bin = inMenu(".sl-exam-tree-delete");
-    await page.click(bin);
+    await click(page, bin);
     assert.match(await page.$eval(bin, (button) => button.textContent), /^Click again/, "armed, and the menu stays open");
-    await page.click(bin);
+    await click(page, bin);
     await page.waitForFunction((selector) => !document.querySelector(selector), { timeout: 10000 }, rowOf(b.id));
     assert.deepEqual(await treeOf([b.nameDe]), [], "B is gone");
   });
@@ -5263,7 +5270,7 @@ describe("the question editor", () => {
     }
 
     await openMenu(categoryId);
-    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), page.click(inMenu(".sl-exam-tree-new-question"))]);
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(page, inMenu(".sl-exam-tree-new-question"))]);
     const opened = new URL(page.url());
     assert.equal(opened.pathname, "/exam/pool/questions/new");
     assert.equal(opened.searchParams.get("category"), String(categoryId));
@@ -5353,7 +5360,7 @@ describe("the question editor", () => {
     assert.doesNotMatch(reach.pending, /last week/, "the written one is not");
     assert.equal(reach.written, "Tests already written keep their version.");
 
-    await teacher.page.click(".sl-exam-editor-en .sl-rich-text-area");
+    await click(teacher.page, ".sl-exam-editor-en .sl-rich-text-area");
     await teacher.page.evaluate(() => {
       const texts = document.querySelectorAll(".sl-exam-editor-row:not(.sl-exam-editor-answer) sl-rich-text");
       texts[0].value = "<p>Was ist korrekt?</p>";
@@ -5361,7 +5368,7 @@ describe("the question editor", () => {
     });
     await Promise.all([
       teacher.page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 }),
-      teacher.page.click(".sl-exam-editor-actions button[type=submit]"),
+      click(teacher.page, ".sl-exam-editor-actions button[type=submit]"),
     ]);
     assert.equal(new URL(teacher.page.url()).pathname, "/exam/pool", "a save returns to the pool");
     const texts = async (id) => (await fetchAs(teacher, `/exam/api/tests/${id}`)).json.questions.map((q) => [q.questionId, q.textEn]);
@@ -5389,9 +5396,9 @@ describe("the question editor", () => {
     await teacher.page.goto(`${applicationUrl}/exam/pool/questions/${question.id}`, { waitUntil: "domcontentloaded" });
     const button = ".sl-exam-editor-lifecycle [data-action=delete]";
     await teacher.page.waitForSelector(button, { timeout: 20000 });
-    await teacher.page.click(button);
+    await click(teacher.page, button);
     assert.equal(await teacher.page.$eval(button, (b) => b.textContent), "Click again to delete the question; no planned test holds it");
-    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 }), teacher.page.click(button)]);
+    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 }), click(teacher.page, button)]);
     assert.equal((await fetchAs(teacher, `/exam/api/pool/questions/${question.id}`)).status, 404, "gone from the pool");
     assert.equal(await shown(), before, "the written test's page is unchanged");
   });
@@ -5588,7 +5595,7 @@ ${answers("en")}
     assert.deepEqual(preview.created, ["Import-Checks at the top", "Statuscodes under Import-Checks (new as well)"]);
     assert.equal((await imports()).length, 0, "the preview stores nothing");
 
-    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), teacher.page.click(".sl-exam-import-go")]);
+    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(teacher.page, ".sl-exam-import-go")]);
     assert.equal(new URL(teacher.page.url()).search, "?unreviewed=1");
     await teacher.page.waitForSelector(".sl-exam-pool-questions tr.is-unreviewed", { timeout: 20000 });
     const browser = await teacher.page.evaluate(() => ({
@@ -5616,7 +5623,7 @@ ${answers("en")}
     const [first, second, third] = listed;
     await teacher.page.goto(`${applicationUrl}/exam/pool?unreviewed=1&course=${course.id}`, { waitUntil: "domcontentloaded" });
     await teacher.page.waitForSelector(`.sl-exam-pool-questions tr[data-question="${first.id}"]`, { timeout: 20000 });
-    await teacher.page.click(`.sl-exam-pool-questions tr[data-question="${first.id}"] button`);
+    await click(teacher.page, `.sl-exam-pool-questions tr[data-question="${first.id}"] button`);
     await teacher.page.waitForSelector(".sl-exam-pool-review button", { timeout: 10000 });
     const state = await teacher.page.evaluate((id) => {
       const row = document.querySelector(`.sl-exam-pool-questions tr[data-question="${id}"]`);
@@ -5631,7 +5638,7 @@ ${answers("en")}
     assert.match(state.banner, /^Imported on \d{2}\.\d{2}\.\d{4} by .+ from statuscodes\.md, not reviewed yet\.$/);
     assert.equal(state.count, "1 question chosen. 1 of 1 chosen question is not reviewed yet.");
 
-    await teacher.page.click(".sl-exam-pool-review button");
+    await click(teacher.page, ".sl-exam-pool-review button");
     await teacher.page.waitForFunction((id) => document.querySelector(".sl-exam-pool-question h2")?.textContent === id, { timeout: 10000 }, "Import zwei");
     assert.equal((await fetchAs(teacher, `/exam/api/pool/questions/${first.id}`)).json.unreviewed, false);
     assert.equal(await teacher.page.$eval(`.sl-exam-pool-questions tr[data-question="${first.id}"]`, (tr) => tr.classList.contains("is-unreviewed")), false);
@@ -5675,9 +5682,9 @@ ${answers("en")}
     await teacher.page.goto(`${applicationUrl}/exam/pool/import`, { waitUntil: "domcontentloaded" });
     const row = `.sl-exam-import-past tr[data-import="${imported.json.id}"]`;
     await teacher.page.waitForSelector(`${row} button`, { timeout: 20000 });
-    await teacher.page.click(`${row} button`);
+    await click(teacher.page, `${row} button`);
     assert.match(await teacher.page.$eval(`${row} .sl-exam-import-take-back button`, (el) => el.textContent), /^Click again to delete its 2 questions/, "asks by a second click");
-    await teacher.page.click(`${row} .sl-exam-import-take-back button`);
+    await click(teacher.page, `${row} .sl-exam-import-take-back button`);
     await teacher.page.waitForFunction((selector) => !document.querySelector(selector) && document.querySelector(".sl-exam-import"), { timeout: 10000 }, row);
     assert.deepEqual((await fetchAs(teacher, "/exam/api/pool/questions?q=Zur%C3%BCck")).json, [], "its questions are gone");
     const tree = (await fetchAs(teacher, "/exam/api/pool/categories")).json;
@@ -5782,7 +5789,7 @@ describe("the school's periods", () => {
     assert.equal(shown.title, null, "no periods");
     assert.match(shown.text, /^\d\d\.\d\d\.\d{4},? 10:00 – 11:45$/, shown.text);
     assert.equal(await teacher.page.$(".sl-exam-sitting-form form"), null, "a make-up waits behind its button");
-    await teacher.page.click(".sl-exam-sitting-form .sl-exam-sitting-makeup");
+    await click(teacher.page, ".sl-exam-sitting-form .sl-exam-sitting-makeup");
     const form = await teacher.page.$eval(".sl-exam-sitting-form form", (form) => ({
       fields: [...form.querySelectorAll("sl-date-input, input[name], select")].map((input) => input.getAttribute("name")),
       toggle: Boolean(form.querySelector(".sl-exam-sitting-mode")),
@@ -5792,7 +5799,7 @@ describe("the school's periods", () => {
     assert.equal(form.fields.includes("fromPeriod"), false);
     assert.equal(form.toggle, false, "no switch");
     assert.equal(form.wrapper, false);
-    await teacher.page.click(".sl-exam-sitting-form form p > button.sl-exam-action");
+    await click(teacher.page, ".sl-exam-sitting-form form p > button.sl-exam-action");
     assert.ok(await teacher.page.$(".sl-exam-sitting-form .sl-exam-sitting-makeup"), "cancel folds the make-up away again");
   });
 
@@ -5819,11 +5826,11 @@ describe("the school's periods", () => {
         closes
       );
     await fill("10:05", "10.5x");
-    await page.click(".sl-exam-sitting-form button[type=submit]");
+    await click(page, ".sl-exam-sitting-form button[type=submit]");
     assert.equal(await page.$eval(".sl-exam-sitting-form input[name=closesTime]", (input) => input.getAttribute("aria-invalid")), "true");
     assert.deepEqual((await fetchAs(teacher, `/exam/api/tests/${fresh.id}`)).json.sittings, [], "nothing is scheduled");
     await fill("10:05", "10:55");
-    await page.click(".sl-exam-sitting-form button[type=submit]");
+    await click(page, ".sl-exam-sitting-form button[type=submit]");
     await page.waitForSelector(".sl-exam-test-sittings li[data-sitting]", { timeout: 10000 });
     const [stored] = (await fetchAs(teacher, `/exam/api/tests/${fresh.id}`)).json.sittings;
     assert.deepEqual([stored.opensAt, stored.closesAt], [at("10:05"), at("10:55")]);
@@ -5884,7 +5891,7 @@ describe("the school's periods", () => {
       three: form.querySelector('select[name=fromPeriod] option[value="3"]').title,
     }));
     assert.deepEqual(chosen, { times: "10:00–11:45", twelve: "18:05–18:50", three: "10:00–10:50" });
-    await page.click(".sl-exam-sitting-form button[type=submit]");
+    await click(page, ".sl-exam-sitting-form button[type=submit]");
     await page.waitForSelector(".sl-exam-test-sittings li[data-sitting]", { timeout: 10000 });
     const [stored] = (await fetchAs(teacher, `/exam/api/tests/${byForm.id}`)).json.sittings;
     assert.equal(stored.opensAt, at("10:00"));
@@ -5919,14 +5926,14 @@ describe("the school's periods", () => {
     const page = teacher.page;
     await page.goto(`${applicationUrl}/exam/tests/${byForm.id}`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(`li[data-sitting="${sitting.id}"] .sl-exam-sitting-edit`, { timeout: 20000 });
-    await page.click(`li[data-sitting="${sitting.id}"] .sl-exam-sitting-edit`);
+    await click(page, `li[data-sitting="${sitting.id}"] .sl-exam-sitting-edit`);
     const editing = await page.$eval(".sl-exam-sitting-form form", (form) => ({
       from: form.querySelector("select[name=fromPeriod]")?.value,
       to: form.querySelector("select[name=toPeriod]")?.value,
       date: form.querySelector("sl-date-input[name=date]")?.value,
     }));
     assert.deepEqual(editing, { from: "3", to: "4", date });
-    await page.click(".sl-exam-sitting-form .sl-exam-sitting-mode");
+    await click(page, ".sl-exam-sitting-form .sl-exam-sitting-mode");
     const exact = await page.$eval(".sl-exam-sitting-form form", (form) => ({
       date: form.querySelector("sl-date-input[name=date]").value,
       opens: form.querySelector("input[name=opensTime]").value,
@@ -5945,7 +5952,7 @@ describe("the school's periods", () => {
     const [shown] = await windows(page, `li[data-sitting="${created.json.id}"]`);
     assert.equal(shown.title, null);
     assert.match(shown.text, /10:05 – 10:55$/, shown.text);
-    await page.click(`li[data-sitting="${created.json.id}"] .sl-exam-sitting-edit`);
+    await click(page, `li[data-sitting="${created.json.id}"] .sl-exam-sitting-edit`);
     const editing = await page.$eval(".sl-exam-sitting-form form", (form) => ({
       date: form.querySelector("sl-date-input[name=date]")?.value,
       opens: form.querySelector("input[name=opensTime]")?.value,
@@ -5954,7 +5961,7 @@ describe("the school's periods", () => {
     }));
     assert.deepEqual(editing, { date, opens: "10:05", closes: "10:55", toggle: "Lessons instead" });
     // Back to periods: the date stays, the periods are the ones a new sitting gets.
-    await page.click(".sl-exam-sitting-form .sl-exam-sitting-mode");
+    await click(page, ".sl-exam-sitting-form .sl-exam-sitting-mode");
     assert.equal(await page.$eval(".sl-exam-sitting-form sl-date-input[name=date]", (input) => input.value), date);
   });
 });
@@ -6022,9 +6029,9 @@ describe("online tests: an admin's corrections", () => {
     await page.waitForSelector(".sl-exam-test-questions .sl-exam-test-remove.sl-exam-admin", { timeout: 20000 });
     const first = await page.$eval(".sl-exam-test-questions > li", (li) => li.dataset.question);
     const button = `.sl-exam-test-questions > li[data-question="${first}"] .sl-exam-test-remove`;
-    await page.click(button);
+    await click(page, button);
     assert.match(await page.$eval(button, (b) => b.textContent), /score every attempt again/, "asks once more");
-    await page.click(button);
+    await click(page, button);
     await page.waitForFunction(() => document.querySelectorAll(".sl-exam-test-questions > li").length === 2, { timeout: 10000 });
     assert.equal((await fetchAs(admin, `/exam/api/tests/${test.id}`)).json.questions.length, 2);
     const { db } = openDatabase(run.databasePath);
@@ -6046,8 +6053,8 @@ describe("online tests: an admin's corrections", () => {
     // The stream's first snapshot draws every row anew; armed before it, the button would be gone.
     await page.waitForFunction(() => document.querySelector("sl-exam-live")?.dataset.mode === "stream", { timeout: 20000 });
     await page.waitForSelector(button, { timeout: 20000 });
-    await page.click(button);
-    await page.click(button);
+    await click(page, button);
+    await click(page, button);
     await page.waitForFunction((u) => document.querySelector(`sl-exam-live tr[data-username="${u}"]`)?.dataset.status === "not started", { timeout: 10000 }, username);
     const snapshot = (await fetchAs(admin, `/exam/api/sittings/${sitting.id}/live`)).json;
     assert.equal(snapshot.participants.find((p) => p.username === username).attemptId, null);
@@ -6061,9 +6068,9 @@ describe("online tests: an admin's corrections", () => {
     const page = admin.page;
     await page.goto(`${applicationUrl}/exam/tests/${test.id}`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".sl-exam-test-delete.sl-exam-admin", { timeout: 20000 });
-    await page.click(".sl-exam-test-delete");
+    await click(page, ".sl-exam-test-delete");
     assert.match(await page.$eval(".sl-exam-test-delete", (b) => b.textContent), /and 1 attempt$/);
-    await Promise.all([page.waitForNavigation({ timeout: 20000 }), page.click(".sl-exam-test-delete")]);
+    await Promise.all([page.waitForNavigation({ timeout: 20000 }), click(page, ".sl-exam-test-delete")]);
     assert.equal((await fetchAs(admin, `/exam/api/tests/${test.id}`)).status, 404);
     const { db } = openDatabase(run.databasePath);
     try {
@@ -6120,7 +6127,7 @@ describe("online tests: an admin's corrections", () => {
     const line = `li[data-sitting="${sitting.id}"]`;
     await page.goto(`${applicationUrl}/exam/tests/${test.id}`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(`${line}[data-state="over"] .sl-exam-sitting-reschedule`, { timeout: 20000 });
-    await page.click(`${line} .sl-exam-sitting-reschedule`);
+    await click(page, `${line} .sl-exam-sitting-reschedule`);
     await page.waitForSelector(".sl-exam-reschedule .sl-exam-reschedule-kept", { timeout: 5000 });
     assert.equal(await page.$eval(".sl-exam-reschedule-kept dd", (dd) => dd.textContent), "15", "the minutes per attempt are shown, not edited");
     // At the legibility viewport, loaded there as a phone would, nothing in
@@ -6131,7 +6138,7 @@ describe("online tests: an admin's corrections", () => {
     try {
       await page.goto(`${applicationUrl}/exam/tests/${test.id}`, { waitUntil: "domcontentloaded" });
       await page.waitForSelector(`${line} .sl-exam-sitting-reschedule`, { timeout: 20000 });
-      await page.click(`${line} .sl-exam-sitting-reschedule`);
+      await click(page, `${line} .sl-exam-sitting-reschedule`);
       await page.waitForSelector(".sl-exam-reschedule", { timeout: 5000 });
       const overflow = await page.evaluate(() =>
         [...document.querySelectorAll(".sl-exam-reschedule *")].filter((el) => el.scrollWidth > el.clientWidth + 1).map((el) => el.className)
@@ -6142,9 +6149,9 @@ describe("online tests: an admin's corrections", () => {
     }
     await page.goto(`${applicationUrl}/exam/tests/${test.id}`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(`${line} .sl-exam-sitting-reschedule`, { timeout: 20000 });
-    await page.click(`${line} .sl-exam-sitting-reschedule`);
+    await click(page, `${line} .sl-exam-sitting-reschedule`);
     await page.waitForSelector(".sl-exam-reschedule-save", { timeout: 5000 });
-    await page.click(".sl-exam-reschedule-save");
+    await click(page, ".sl-exam-reschedule-save");
     await page.waitForSelector(`${line}[data-state="scheduled"]`, { timeout: 10000 });
     const moved = (await fetchAs(teacher, `/exam/api/tests/${test.id}`)).json.sittings[0];
     const day = new Date(moved.opensAt).getUTCDay();
@@ -6164,12 +6171,12 @@ describe("online tests: an admin's corrections", () => {
     const page = admin.page;
     await page.goto(`${applicationUrl}/exam/tests/${test.id}`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(`${line} .sl-exam-sitting-reschedule.sl-exam-admin`, { timeout: 20000 });
-    await page.click(`${line} .sl-exam-sitting-reschedule`);
+    await click(page, `${line} .sl-exam-sitting-reschedule`);
     await page.waitForSelector(".sl-exam-reschedule-save", { timeout: 5000 });
-    await page.click(".sl-exam-reschedule-save");
+    await click(page, ".sl-exam-reschedule-save");
     assert.equal(await page.$eval(".sl-exam-reschedule-save", (b) => b.textContent), "Click again: delete 1 attempt and reschedule");
     assert.equal((await fetchAs(admin, `/exam/api/tests/${test.id}`)).json.sittings[0].attempts, 1, "one click changes nothing");
-    await page.click(".sl-exam-reschedule-save");
+    await click(page, ".sl-exam-reschedule-save");
     await page.waitForSelector(`${line}[data-state="scheduled"]`, { timeout: 10000 });
     assert.equal(await gradebookResult(test.id), undefined, "the result is gone");
   });
@@ -6260,7 +6267,7 @@ describe("the module's actions", () => {
           await teacher.page.goto(`${applicationUrl}${reference}`, { waitUntil: "domcontentloaded" });
           await teacher.page.waitForSelector(drawn, { timeout: 20000 });
           if (reference.startsWith("/exam/pool?")) {
-            await teacher.page.click(".sl-exam-pool-questions tbody tr");
+            await click(teacher.page, ".sl-exam-pool-questions tbody tr");
             await teacher.page.waitForSelector(".sl-exam-pool-edit", { timeout: 10000 });
           }
           assert.deepEqual(await actionLinks(lang), [], `${reference} (${lang}) draws its actions as buttons`);
@@ -6303,7 +6310,7 @@ describe("the module's actions", () => {
         await teacher.page.goto(`${applicationUrl}${reference}`, { waitUntil: "domcontentloaded" });
         await teacher.page.waitForSelector(drawn, { timeout: 20000 });
         if (reference.startsWith("/exam/pool?")) {
-          await teacher.page.click(".sl-exam-pool-questions tbody tr");
+          await click(teacher.page, ".sl-exam-pool-questions tbody tr");
           await teacher.page.waitForSelector(".sl-exam-pool-edit", { timeout: 10000 });
         }
         // The tree's ⋯ buttons are compact on purpose; the Delete in their menu is a menu entry, not a button.
@@ -6356,12 +6363,12 @@ describe("the module's actions", () => {
 
       // A window shorter than the attempt is refused; the reason stands at the sitting.
       const li = `li[data-sitting="${sitting.id}"]`;
-      await page.click(`${li} .sl-exam-sitting-edit`);
+      await click(page, `${li} .sl-exam-sitting-edit`);
       await page.waitForSelector(".sl-exam-sitting-form input[name=durationMinutes]", { timeout: 10000 });
       await page.$eval(".sl-exam-sitting-form input[name=durationMinutes]", (input) => {
         input.value = "500";
       });
-      await page.click(".sl-exam-sitting-form button[type=submit]");
+      await click(page, ".sl-exam-sitting-form button[type=submit]");
       await page.waitForFunction((selector) => document.querySelector(`${selector} .sl-exam-sitting-message`)?.textContent, { timeout: 10000 }, li);
       assert.equal(await page.$eval(".sl-exam-test > .sl-exam-message", (el) => el.textContent), "", "not under the rename form");
     } finally {
@@ -6372,7 +6379,7 @@ describe("the module's actions", () => {
   test("the bar's Grading scale opens the scale, marked as the current page", async () => {
     await teacher.page.goto(`${applicationUrl}/exam/courses/${course.id}`, { waitUntil: "domcontentloaded" });
     await teacher.page.waitForSelector('.sl-exam-bar-page[data-page="scale"]', { timeout: 20000 });
-    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), teacher.page.click('.sl-exam-bar-page[data-page="scale"]')]);
+    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(teacher.page, '.sl-exam-bar-page[data-page="scale"]')]);
     assert.equal(new URL(teacher.page.url()).pathname, "/exam/scale");
     assert.equal(await teacher.page.$eval('.sl-exam-bar-page[data-page="scale"]', (a) => a.getAttribute("aria-current")), "page");
   });
@@ -6441,9 +6448,9 @@ describe("the module's actions", () => {
     await page.waitForSelector(".sl-exam-pool-questions tbody tr .sl-exam-pool-box", { timeout: 20000 });
     const state = () => page.$$eval(".sl-exam-pool-questions tbody tr", (rows) => rows.map((row) => [row.getAttribute("aria-selected"), row.querySelector(".sl-exam-pool-box").checked]));
     assert.ok((await state()).every(([selected, checked]) => selected === "false" && checked === false));
-    await page.click(".sl-exam-pool-questions tbody tr:first-child td:nth-child(2)");
+    await click(page, ".sl-exam-pool-questions tbody tr:first-child td:nth-child(2)");
     assert.deepEqual((await state())[0], ["true", true], "a click on the row ticks its box");
-    await page.click(".sl-exam-pool-questions tbody tr:first-child .sl-exam-pool-box");
+    await click(page, ".sl-exam-pool-questions tbody tr:first-child .sl-exam-pool-box");
     assert.deepEqual((await state())[0], ["false", false], "a click on the box unchooses the row");
     await page.goto(`${applicationUrl}/exam/pool`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".sl-exam-pool-questions tbody tr", { timeout: 20000 });
@@ -6455,7 +6462,7 @@ describe("the module's actions", () => {
     await page.goto(`${applicationUrl}/exam/pool`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".sl-exam-pool-new", { timeout: 20000 });
     assert.equal(await page.$eval(".sl-exam-pool-new", (a) => a.hidden || a.offsetParent === null), false, "New question is shown without a chosen category");
-    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), page.click(".sl-exam-pool-new")]);
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(page, ".sl-exam-pool-new")]);
     await page.waitForSelector(".sl-exam-editor select[name=categoryId]", { timeout: 20000 });
     assert.deepEqual(
       await page.$eval(".sl-exam-editor select[name=categoryId]", (select) => [select.value, select.required, select.validity.valid]),
@@ -6551,10 +6558,10 @@ describe("the module's actions", () => {
     page.on("request", endSession);
     try {
       await whileUnanswered(teacher, path, async () => {
-        await page.click('button.sl-exam-add[aria-label="Add a column to Homework"]');
+        await click(page, 'button.sl-exam-add[aria-label="Add a column to Homework"]');
         await page.waitForSelector("dialog[open] input[name=name]");
         await page.type("dialog[open] input[name=name]", "After the session");
-        await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 }), page.click("dialog[open] button[type=submit]")]);
+        await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 }), click(page, "dialog[open] button[type=submit]")]);
       });
       assert.equal(refused, 1, "the request was answered with 401");
       assert.equal(new URL(page.url()).pathname, `/exam/courses/${course.id}/gradebook`, "the page is loaded anew (with a session, the server serves it again)");
@@ -6569,9 +6576,9 @@ describe("the module's actions", () => {
     const page = teacher.page;
     await page.goto(`${applicationUrl}/exam/courses/${course.id}/gradebook?semester=ws`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".sl-exam-sheet", { timeout: 20000 });
-    await page.click('button.sl-exam-add[aria-label="Add a column to Homework"]');
+    await click(page, 'button.sl-exam-add[aria-label="Add a column to Homework"]');
     await page.waitForSelector("dialog[open] sl-date-input .sl-date-input-toggle");
-    await page.click("dialog[open] sl-date-input .sl-date-input-toggle");
+    await click(page, "dialog[open] sl-date-input .sl-date-input-toggle");
     await page.waitForSelector("dialog[open] .sl-date-input-popup:not([hidden]) [role=grid]", { timeout: 5000 });
     const seen = await page.$eval("dialog[open]", (dialog) => {
       const popup = dialog.querySelector(".sl-date-input-popup").getBoundingClientRect();
@@ -6614,7 +6621,7 @@ describe("the module's actions", () => {
     const page = teacher.page;
     await page.goto(`${applicationUrl}/exam/courses/${created.id}`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".sl-exam-course-actions .sl-exam-record-rename", { timeout: 20000 });
-    await page.click(".sl-exam-course-actions .sl-exam-record-rename");
+    await click(page, ".sl-exam-course-actions .sl-exam-record-rename");
     await page.$eval(".sl-exam-course-actions input", (input) => {
       input.value = "";
     });
@@ -6624,9 +6631,9 @@ describe("the module's actions", () => {
     assert.equal(await page.$eval('.sl-exam-bar select[data-position="course"]', (select) => select.selectedOptions[0].textContent), "ZZ", "the bar shows the new name");
 
     await page.waitForSelector(".sl-exam-course-actions .sl-exam-record-delete", { timeout: 20000 });
-    await page.click(".sl-exam-course-actions .sl-exam-record-delete");
+    await click(page, ".sl-exam-course-actions .sl-exam-record-delete");
     assert.match(await page.$eval(".sl-exam-course-actions .sl-exam-record-delete", (b) => b.textContent), /^Click again to delete ZZ/);
-    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), page.click(".sl-exam-course-actions .sl-exam-record-delete")]);
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(page, ".sl-exam-course-actions .sl-exam-record-delete")]);
     assert.equal(new URL(page.url()).pathname, `/exam/classes/${gbClass.id}`, "the class page opens");
     assert.equal((await fetchAs(teacher, `/exam/api/courses/${created.id}`)).status, 404, "the course is gone");
   });
@@ -6640,8 +6647,8 @@ describe("the module's actions", () => {
       await page.goto(`${applicationUrl}/exam/courses/${created.id}`, { waitUntil: "domcontentloaded" });
       const remove = ".sl-exam-course-actions .sl-exam-record-delete";
       await page.waitForSelector(remove, { timeout: 20000 });
-      await page.click(remove);
-      await page.click(remove);
+      await click(page, remove);
+      await click(page, remove);
       await page.waitForFunction(() => document.querySelector(".sl-exam-course-actions .sl-exam-message")?.textContent, { timeout: 10000 });
       assert.match(await page.$eval(".sl-exam-course-actions .sl-exam-message", (el) => el.textContent), /gradebook columns 1, results 1/);
       assert.equal((await fetchAs(teacher, `/exam/api/courses/${created.id}`)).status, 200, "nothing changed");
@@ -6659,9 +6666,9 @@ describe("the module's actions", () => {
     await openLive(sitting);
     await teacher.page.waitForSelector(`${row}[data-status="writing"]`, { timeout: 20000 });
     await teacher.page.waitForSelector(".sl-exam-live-end", { visible: true, timeout: 10000 });
-    await teacher.page.click(".sl-exam-live-end");
+    await click(teacher.page, ".sl-exam-live-end");
     assert.match(await teacher.page.$eval(".sl-exam-live-end", (b) => b.textContent), /^Click again to end/);
-    await teacher.page.click(".sl-exam-live-end");
+    await click(teacher.page, ".sl-exam-live-end");
     await teacher.page.waitForSelector(`${row}[data-status="submitted"]`, { timeout: 15000 });
     assert.ok(database((db) => db.prepare("SELECT submitted_at FROM attempt WHERE id = ?").get(started.json.attempt).submitted_at), "submitted on the server");
   });
@@ -6683,7 +6690,7 @@ describe("the module's actions", () => {
       await teacher.page.$eval(".sl-exam-live-extend-minutes", (input) => {
         input.value = "10";
       });
-      await teacher.page.click(".sl-exam-live-extend");
+      await click(teacher.page, ".sl-exam-live-extend");
       const until = Date.now() + 10000;
       while ((await fetchAs(teacher, `/exam/api/tests/${test.id}`)).json.sittings[0].closesAt === sitting.closesAt) {
         assert.ok(Date.now() < until, "the extension is stored");
@@ -6705,13 +6712,13 @@ describe("the module's actions", () => {
     await page.goto(`${applicationUrl}/exam/courses/${course.id}/students/${first}?semester=ws`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".sl-exam-student-back", { timeout: 20000 });
     assert.equal(await page.$(".sl-exam-student-previous"), null, "the first has no previous");
-    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), page.click(".sl-exam-student-next")]);
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(page, ".sl-exam-student-next")]);
     assert.equal(`${new URL(page.url()).pathname}${new URL(page.url()).search}`, `/exam/courses/${course.id}/students/${second}?semester=ws`);
     await page.waitForSelector(".sl-exam-student-previous", { timeout: 20000 });
-    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), page.click(".sl-exam-student-previous")]);
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(page, ".sl-exam-student-previous")]);
     assert.equal(new URL(page.url()).pathname, `/exam/courses/${course.id}/students/${first}`);
     await page.waitForSelector(".sl-exam-student-back", { timeout: 20000 });
-    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), page.click(".sl-exam-student-back")]);
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(page, ".sl-exam-student-back")]);
     assert.equal(`${new URL(page.url()).pathname}${new URL(page.url()).search}`, `/exam/courses/${course.id}/gradebook?semester=ws`);
   });
 
@@ -6723,7 +6730,7 @@ describe("the module's actions", () => {
     try {
       await page.goto(`${applicationUrl}/exam/courses/${empty.id}/gradebook`, { waitUntil: "domcontentloaded" });
       await page.waitForSelector(".sl-exam-to-roster", { timeout: 20000 });
-      await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), page.click(".sl-exam-to-roster")]);
+      await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(page, ".sl-exam-to-roster")]);
       assert.equal(new URL(page.url()).pathname, `/exam/classes/${klass.id}`);
     } finally {
       assert.equal((await fetchAs(teacher, `/exam/api/courses/${empty.id}`, { method: "DELETE" })).status, 200);
@@ -6775,7 +6782,7 @@ describe("the interface in the reader's language and format", () => {
 
   /** Opens the column's dialog from its header. */
   async function openColumnDialog() {
-    await teacher.page.click(`th[data-column="${column.id}"] button.sl-exam-column-edit`);
+    await click(teacher.page, `th[data-column="${column.id}"] button.sl-exam-column-edit`);
     await teacher.page.waitForSelector("dialog[open] sl-date-input", { timeout: 5000 });
   }
 
@@ -6917,7 +6924,7 @@ describe("the interface in the reader's language and format", () => {
     assert.equal(storedDate(), "2026-10-29", "nothing is saved");
 
     // Closing the dialog after a save draws the sheet anew, with the saved date.
-    await teacher.page.click("dialog[open] .sl-exam-column-close");
+    await click(teacher.page, "dialog[open] .sl-exam-column-close");
     await waitFor(async () => (await columnHeader().catch(() => null))?.lines[0] === "29.10.", "the header shows the saved date");
 
     // Back to the column's own date, for anything after this.
@@ -6944,7 +6951,7 @@ describe("the interface in the reader's language and format", () => {
     const page = student.page;
     await page.goto(`${applicationUrl}/exam/my`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(`.sl-exam-attempt-open[data-test="${created.json.id}"] button`, { timeout: 20000 });
-    await page.click(`.sl-exam-attempt-open[data-test="${created.json.id}"] button`);
+    await click(page, `.sl-exam-attempt-open[data-test="${created.json.id}"] button`);
     await page.waitForSelector(".sl-exam-attempt-question", { timeout: 20000 });
     const shown = await page.evaluate(() => ({
       lang: document.documentElement.lang,
@@ -7072,10 +7079,10 @@ describe("the year change", () => {
     const page = teacher.page;
     await page.goto(`${applicationUrl}/exam/?year=${past.id}`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".sl-exam-year-close-button", { timeout: 20000 });
-    await page.click(".sl-exam-year-close-button");
+    await click(page, ".sl-exam-year-close-button");
     const years = async () => (await fetchAs(teacher, "/exam/api/years")).json.years.find((year) => year.id === past.id);
     assert.equal((await years()).closed, false, "the first click only asks");
-    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), page.click(".sl-exam-year-close-button")]);
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(page, ".sl-exam-year-close-button")]);
     await page.waitForSelector(".sl-exam-closed-note", { timeout: 20000 });
     assert.equal((await years()).closed, true);
     assert.equal(await page.$(".sl-exam-year-close-button"), null, "a closed year offers no closing");
@@ -7155,8 +7162,8 @@ describe("the year change", () => {
     const shown = await page.$$eval(`${section} .sl-exam-next-last input`, (boxes) => boxes.map((box) => [box.value, box.checked]));
     assert.deepEqual(shown.sort(), [[leaves, true], [stays, true]], "last year's roster is ticked");
     // The leaver is unticked; WMC is ticked for copying.
-    await page.click(`${section} input[value="${leaves}"]`);
-    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), page.click(`${section} .sl-exam-next-create`)]);
+    await click(page, `${section} input[value="${leaves}"]`);
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(page, `${section} .sl-exam-next-create`)]);
     const classId = Number(new URL(page.url()).pathname.split("/").pop());
     const created = (await fetchAs(teacher, `/exam/api/classes/${classId}`)).json;
     assert.equal(created.name, "4ychif");
@@ -7187,9 +7194,9 @@ describe("the year change", () => {
     const listed = await page.$eval(".sl-exam-retention", (section) => section.textContent);
     assert.ok(!listed.includes(leaves), "the report names nobody");
     assert.match(listed, new RegExp(`${report.records.teacherNotes} teacher notes? from (a )?live views?`), "the teacher notes on a line of their own");
-    await page.click(".sl-exam-retention-remove");
+    await click(page, ".sl-exam-retention-remove");
     assert.deepEqual((await fetchAs(teacher, "/exam/api/retention")).json, report, "the first click only asks");
-    await page.click(".sl-exam-retention-remove");
+    await click(page, ".sl-exam-retention-remove");
     await page.waitForSelector(".sl-exam-retention-done", { timeout: 20000 });
 
     assert.equal((await fetchAs(teacher, "/exam/api/retention")).json.students, 0);

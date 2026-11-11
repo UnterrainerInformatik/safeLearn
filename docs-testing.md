@@ -22,7 +22,7 @@ One run does the following:
 
 | FILE | WHAT IT CHECKS |
 | --- | --- |
-| `test/smoke.test.js` | The harness itself: both roles reach authenticated content, two sessions in one run stay independent in either order, and the two really are different users. |
+| `test/smoke.test.js` | The harness itself: both roles reach authenticated content, two sessions in one run stay independent in either order, and the two really are different users. Also the harness's `click`: it lands on a button the page replaces right after loading, and a selector that never appears fails within its timeout, naming the selector. |
 | `test/content.test.js` | The content suite. It imports the modules below so all of them run in one process — see [Why the checks are modules](#why-the-checks-are-modules). It also asserts that a run logs in exactly once per role. |
 | `test/checks/permissions.js` | Block-level and whole-file `@@@` directives in both directions, including the `admin` directive and both plural aliases (`teachers`, `students`), their effect on the navigation tree, time-bounded windows, and the teacher-to-student downgrade. |
 | `test/checks/views.js` | The `#exam`, `#practice` and `#answer` pseudo-roles, driven through the `ve` and `va` preferences. |
@@ -31,6 +31,7 @@ One run does the following:
 | `test/checks/presentation.js` | The deck built from the source's heading structure, fragments in a deck, the deck's own references, the document view, and the documented shortcut into it with the shift key held and without. |
 | `test/checks/deployment-surface.js` | What a running instance publishes over HTTP: that `keycloak.json`, the application's own sources and the dependency manifests are not served and that a refusal looks like a path with no file behind it, that the assets a page addresses still answer, that every same-origin reference of a rendered page resolves in all three views, and that `/hot-reload` — the one endpoint that answers before authentication — survives a parameter it cannot interpret. That the same endpoint names no file: on an instance spawned with `NEXT_AUTOSCAN=true`, `md/test-hot-reload-open.md` and `md/test-hot-reload-restricted.md` (under `@@@ teacher`) are modified in one sync while two anonymous clients listen — the one declaring the open file is sent `{ type: "page" }` and no path, and the one declaring both paths strung together is sent nothing, because a declared file must be exactly the modified one. |
 | `test/directive-grammar.test.js` | What a permission directive means, entry by entry: a table of edge-case directive lines read by `parseFirstLineForPermissions`, and the companion plugin's own reading of the same lines held against it. No browser, no login, no server — but it does need the plugin checkout, for the reason below. |
+| `test/check-conventions.test.js` | That no browser check clicks through `page.click(` or `frame.click(` directly; every click goes through the harness's `click` (see [Clicks and late state](#clicks-and-late-state--write-your-checks-accordingly)). Fails naming file and line. No browser, no login, no server. |
 | `test/coverage.test.js` | The coverage record. No browser, no login. Also asserts that `git` ignores no file under `md/`: such a file exists only in the working tree it was written in, and a check reading it fails on every other checkout (the handout's starter archive was lost to `*.zip` that way). |
 | `test/checks/exam-embedding.js` | Exam-module elements on an instance without the module: a notice per known element for a teacher (also in the presentation and document views), nothing for a student or a teacher in student view, no module script and no request to `/exam/`, and every path under `/exam/` answering as a path with nothing behind it. |
 | `test/exam.test.js` | The instance **with** the exam module, in a process and on a port of its own, against a database created for the run and removed afterwards — see [The exam-module run](#the-exam-module-run). |
@@ -207,6 +208,15 @@ Two rules follow, and they apply to every check built on this harness:
 
 * **Address content by path.** Never rely on where the login flow lands on its own — `/` resolves to the account's `lastVisitedUrl` when its `config.sl` says so. Navigate to the page you mean.
 * **Set every preference your check depends on, and assert only on values you just wrote.** Dark mode, start-page behavior and font settings all come out of that shared attribute. Never assume a starting state.
+
+### Clicks and late state — write your checks accordingly
+The client scripts draw bars, tables and trees after the page has loaded, and often draw them twice. A check that acts or measures in that moment passes or fails depending on which side was faster — on an unchanged tree too. Three harness functions take the timing out of a check's verdict:
+
+* **Click through `click(page, selector, options)`, never `page.click(selector)`.** It is built on Puppeteer's Locator: it waits until the element is attached, visible, enabled and no longer moving, and re-resolves the selector if the element is replaced before the click lands. Default timeout 10 s (`timeout`), Puppeteer's click options (`count`, `button`, …) pass through, and a failure names the selector and the URL. Works on frames too. Address the element by selector rather than by a handle you looked up before — a handle points at the node that may just have been replaced. A navigation click stays `Promise.all([page.waitForNavigation(…), click(page, selector)])`. `test/check-conventions.test.js` fails on a direct `page.click(` / `frame.click(`; clicks inside `evaluate` (`element.click()` in the page) are synchronous and stay as they are.
+* **Wait, then assert.** For a state the page reaches asynchronously — after a request, a toggle, a redraw — read it through `eventually(read, expected, { timeout })` and assert on the value it returns. It returns the last value it read, so a state that never arrives still fails with the check's own message.
+* **Measure a layout once it holds still.** After a scroll, a resize or a redraw, `whenStill(page, measure, { frames, args })` waits until `measure` (run in the page) returns the same over consecutive animation frames; then measure and assert.
+
+A longer timeout is not the fix for a race; it only makes the losing side rarer.
 
 ## Pointing it somewhere else
 Every value has a default; set only what you need to change. No file in the repository has to be edited.

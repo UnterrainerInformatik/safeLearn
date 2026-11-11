@@ -30,7 +30,7 @@
 import assert from "node:assert/strict";
 import { before, describe, test } from "node:test";
 
-import { render, setPreferences, sharedSession } from "../harness.js";
+import { click, render, setPreferences, sharedSession } from "../harness.js";
 
 /** Taller than a window, so a key that scrolled the page would show it. */
 const jumpPage = "/md/test-search-jump.md";
@@ -207,7 +207,7 @@ describe("search keyboard", () => {
       for (const anchor of document.querySelectorAll("#searchResults a")) anchor.dataset.stale = "1";
       document.getElementById("searchField").blur();
     });
-    await page.click("#searchField");
+    await click(page, "#searchField");
     // The click selected whatever stood there, so one press is the whole of
     // clearing it - and below the minimum length that costs no query.
     await page.keyboard.press("Backspace");
@@ -513,7 +513,7 @@ describe("search keyboard", () => {
 
     // The whole query stands selected, which is what a click into the field does.
     await page.evaluate(() => document.getElementById("searchField").blur());
-    await page.click("#searchField");
+    await click(page, "#searchField");
     let state = await stateOf(page);
     assert.equal(state.field.start, 0, "the click did not select the query");
     assert.equal(state.field.end, state.field.value.length, "the click did not select all of it");
@@ -575,7 +575,7 @@ describe("search keyboard", () => {
     page = await fresh(otherPage);
     await ask(page, oneQuery);
     const resultByPointer = await follow(page, () =>
-      page.click("#searchResults a.sl-search-name")
+      click(page, "#searchResults a.sl-search-name")
     );
     assert.deepEqual(
       resultByKey,
@@ -599,9 +599,9 @@ describe("search keyboard", () => {
 
     page = await fresh(otherPage);
     await ask(page, oneQuery);
-    await page.click("#searchResults .sl-search-expand");
+    await click(page, "#searchResults .sl-search-expand");
     const headingByPointer = await follow(page, () =>
-      page.click("#searchResults a.sl-search-heading")
+      click(page, "#searchResults a.sl-search-heading")
     );
     assert.deepEqual(
       headingByKey,
@@ -622,7 +622,7 @@ describe("search keyboard", () => {
     await ask(page, listQuery);
 
     await page.evaluate(() => document.getElementById("searchField").blur());
-    await page.click("#searchField");
+    await click(page, "#searchField");
     let state = await stateOf(page);
     assert.equal(state.field.start, 0, "a click into the field left the query unselected");
     assert.equal(state.field.end, listQuery.length, "a click into the field selected part of it");
@@ -770,17 +770,19 @@ describe("search keyboard", () => {
 
   // ---- One state, two ways of setting it ----
 
+  /** The chevron of the `index`th result, by selector so a click re-resolves it if the list is redrawn. */
+  const expanderOf = (index) => `#searchResults > :nth-child(${index + 1} of .sl-search-result) .sl-search-expand`;
+
   test("expanded is one state, whichever of the two opened it", async () => {
     const page = await fresh();
     const asked = await ask(page, listQuery);
     const openable = asked.results.find((result) => result.headings.length > 0);
 
     // Opened by pointer, walked into by key.
-    const entries = await page.$$("#searchResults .sl-search-result");
-    await (await entries[openable.index].$(".sl-search-expand")).click();
+    await click(page, expanderOf(openable.index));
     // Clicking a span moves the focus off the field; the reader's next act is to
     // put it back, and this is that act.
-    await page.click("#searchField");
+    await click(page, "#searchField");
     await selectResult(page, openable.index);
     await page.keyboard.press("ArrowDown");
     assertMark(
@@ -800,8 +802,7 @@ describe("search keyboard", () => {
       "arrow-right did not open the result"
     );
 
-    const entriesAgain = await page.$$("#searchResults .sl-search-result");
-    await (await entriesAgain[openableAgain.index].$(".sl-search-expand")).click();
+    await click(page, expanderOf(openableAgain.index));
     const state = await stateOf(page);
     for (const heading of openableAgain.headings) {
       const node = state.nodes.find((entry) => entry.id === heading.id);

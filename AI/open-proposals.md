@@ -38,20 +38,3 @@ Bestandsaufnahme vom 2026-11-11. Gerendert wird mit `marked` (`gfm`, `breaks`); 
    *Problem:* Wer zwischen zwei Folien die Leerzeile vergisst, bekommt eine `<h2>`, die niemand wollte, und vermutlich keinen Folienwechsel. Zu prüfen, wie `splitForReveal` das sieht.
 
 Schon in Ordnung und deshalb nicht Teil des Punkts: HTML-Kommentare `<!-- … -->` (der Sanitizer entfernt sie), einklappbare Callouts `> [!info]-`, `\|` in Wiki-Links innerhalb von Tabellen, BOM und unsichtbare Zeichen am Dateianfang, und Frontmatter (eigener Change `frontmatter-properties`).
-
-# Testing
-
-## Wackelige Browser-Checks stabil machen statt wiederholen
-Heute halten wir eine Liste wackeliger Checks in der Memory `flaky-content-checks` und lassen rote Läufe wiederholen bzw. gegen HEAD vergleichen (`git stash push -u`). Das kostet jedes Mal Viertelstunden und verdeckt echte Fehler: am 2026-11-11 wurde ein Rot der Modul-Leiste zuerst für eine Folge des Changes gehalten. Besser wäre, die Checks so umzubauen, dass sie nicht mehr vom Timing abhängen.
-
-Befund 2026-11-11 (Change `targeted-test-runs`): `test/exam.test.js` war auf **unverändertem HEAD in 3 von 4 Läufen rot**, jedes Mal mit einem anderen Check. Über alle Läufe des Tages (voller Lauf, drei auf dem Change, vier auf HEAD) gab es 11 echte Fehler:
-
-- **8× Klick-Race in Puppeteer**: 5× `Node is either not clickable or not an Element`, 3× `Node is detached from document`. Betroffen u. a. „the buttons to the pool and the online tests…“ (`test/exam.test.js:1657`), „a new course is created from the bar…“, „a planned sitting is not open at its time…“ und „the attendance table holds the teacher's note…“ (`:4268`). Mechanismus: der Test findet das Element per `page.click(selector)`, während das Client-JS Leiste bzw. Tabelle nach dem Laden neu zeichnet; das gefundene Element ist dann schon ersetzt oder hat noch keine Position.
-- **3× Assertion**: „and the group is as it was“ (`:4273`, Folgefehler des Detach davor), „the results are shown while no test is written“ (`:2445`, Zustand geprüft, bevor er umgeschaltet hat) und „column 0 moved from 294 to 94“ (`:991`, Sticky-Spalte gemessen, bevor das Layout steht).
-
-Ansatz:
-1. **Locator statt ElementHandle.** In `test/exam.test.js`, `test/checks/*.js` und `test/harness.js` stehen 187 `page.click(...)`, 12 `.click()` und kein einziger `page.locator(...)`. Puppeteer 25 hat die Locator-API: `page.locator(sel).click()` wartet, bis das Element im DOM hängt, sichtbar ist und stillsteht, und versucht es erneut, wenn es zwischendurch ersetzt wird. Ein Helfer im Harness plus mechanische Umstellung der Aufrufe; Klicks in `Promise.all` mit `waitForNavigation` gehen genauso.
-2. **Die Timing-Assertions einzeln** auf die Bedingung warten lassen (`waitForFunction`) statt sofort zu messen bzw. zu prüfen.
-3. **Die übrigen Einträge der Memory** (Reload-Backoff in `deployment-surface.js`, 390px-Viewport in `legibility.js`, Drag-Ghost `exam.test.js:5033`) haben andere Ursachen und gehören einzeln angesehen, ggf. im selben Change.
-
-Erfolgskriterium: mehrere `test/exam.test.js`-Läufe hintereinander und ein voller `npm test` grün ohne Wiederholung. Danach die behobenen Einträge aus `flaky-content-checks` streichen. Nicht Teil des Punkts: Parallelisierung und Isolation der geteilten Demo-Accounts.

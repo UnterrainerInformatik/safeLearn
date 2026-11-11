@@ -13,9 +13,11 @@
  */
 
 import assert from "node:assert/strict";
-import { after, test } from "node:test";
+import { after, describe, test } from "node:test";
 
-import { applicationUrl, currentUser, openSession, shutdown } from "./harness.js";
+import puppeteer from "puppeteer";
+
+import { applicationUrl, click, currentUser, openSession, shutdown } from "./harness.js";
 
 after(shutdown);
 
@@ -158,4 +160,50 @@ test("the two sessions differ in what they are allowed to see", async () => {
     await teacher.close();
     await student.close();
   }
+});
+
+describe("the harness's click", () => {
+  /**
+   * A page whose button is replaced by a new one 100 ms after loading, the way
+   * the client script redraws a bar or table: the old node is detached, the new
+   * one is the one that counts. Only the new one records a click.
+   */
+  const redrawnButton = `<!doctype html>
+    <button id="go">old</button>
+    <output id="clicked"></output>
+    <script>
+      setTimeout(() => {
+        const fresh = document.createElement("button");
+        fresh.id = "go";
+        fresh.textContent = "new";
+        fresh.addEventListener("click", () => { document.getElementById("clicked").textContent = "new"; });
+        document.getElementById("go").replaceWith(fresh);
+      }, 100);
+    </script>`;
+
+  let browser;
+  let page;
+  after(() => browser?.close());
+
+  test("lands on the element as it is after a redraw", async () => {
+    browser = await puppeteer.launch({ headless: true });
+    page = await browser.newPage();
+    await page.setContent(redrawnButton);
+    // The stale handle a direct click would take: the node that is about to go.
+    const stale = await page.$("#go");
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await assert.rejects(stale.click(), /detached|not clickable|not an Element/, "the old node is gone, as in the race");
+    await click(page, "#go");
+    assert.equal(await page.$eval("#clicked", (o) => o.textContent), "new", "the click reached the redrawn button");
+  });
+
+  test("an element that never appears fails in bounded time and is named", async () => {
+    const started = Date.now();
+    await assert.rejects(click(page, "#never-there", { timeout: 500 }), (error) => {
+      assert.match(error.message, /#never-there/, "the message names the selector");
+      assert.match(error.message, /about:blank/, "the message names the URL");
+      return true;
+    });
+    assert.ok(Date.now() - started < 3000, `it gave up after ${Date.now() - started} ms, not at its 500 ms bound`);
+  });
 });

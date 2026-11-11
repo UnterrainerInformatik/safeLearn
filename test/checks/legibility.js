@@ -28,7 +28,7 @@ import { before, describe, test } from "node:test";
 import { brotliDecompressSync, inflateSync } from "node:zlib";
 
 import { defaultTypefaces, typefaces } from "../../obsidian.js";
-import { applicationUrl, render, setPreferences, sharedSession } from "../harness.js";
+import { applicationUrl, click, eventually, render, setPreferences, sharedSession } from "../harness.js";
 
 const projectRoot = path.resolve(import.meta.dirname, "..", "..");
 const styleDir = path.join(projectRoot, "css");
@@ -625,6 +625,14 @@ describe("legibility", () => {
   test("a narrow viewport gets the layout written for it rather than a desktop one shrunk", async () => {
     await showCorpus({ width: 390 });
     try {
+      // Right after the page is shown its diagrams and images are still being
+      // laid out, and for a few frames the page can be wider than it ends up.
+      // A real overflow stays, so waiting for it to go cannot hide one.
+      await eventually(
+        () => session.page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1),
+        true,
+        { timeout: 5000 }
+      );
       const narrow = await session.page.evaluate(() => {
         const content = document.querySelector("#markdown-content");
         const sidebar = document.querySelector("#sidebar");
@@ -692,7 +700,7 @@ describe("legibility", () => {
       const closed = await onTheBurger();
       assert.ok(closed.reaches, `a tap on the burger should reach it, but lands on ${closed.instead}`);
 
-      await session.page.click(".topbar-burger");
+      await click(session.page, ".topbar-burger");
       await session.page.waitForFunction(
         () => document.querySelector("#sidebar").getBoundingClientRect().width > 0,
         { timeout: 10000 }
@@ -702,7 +710,7 @@ describe("legibility", () => {
         opened.reaches,
         `with the navigation open, a tap on the burger that closes it lands on ${opened.instead} instead`
       );
-      await session.page.click(".topbar-burger");
+      await click(session.page, ".topbar-burger");
     } finally {
       await session.page.setViewport({ width: 1280, height: 900 });
     }

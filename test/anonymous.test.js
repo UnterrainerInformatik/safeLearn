@@ -21,7 +21,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 
-import { expectRefusedStart, render, setPreferences, shutdown, startAnonymous } from "./harness.js";
+import { click, expectRefusedStart, render, setPreferences, shutdown, startAnonymous } from "./harness.js";
 
 const permissionsPage = "/md/test-perms.md";
 const teacherBlock = "Only visible to teachers.";
@@ -223,13 +223,13 @@ describe("without an identity provider, with teacher as the reader role", () => 
     await setPreferences(reader, { vt: 1 });
     await render(reader, permissionsPage);
     const reloaded = reader.page.waitForNavigation({ waitUntil: "domcontentloaded" });
-    await reader.page.click('label[for="studentTeacherFs"]');
+    await click(reader.page, 'label[for="studentTeacherFs"]');
     await reloaded;
     let { text } = await render(reader, permissionsPage);
     assert.ok(!text.includes(teacherBlock), "after switching the teacher view off, the teacher block is gone");
 
     const back = reader.page.waitForNavigation({ waitUntil: "domcontentloaded" });
-    await reader.page.click('label[for="studentTeacherFs"]');
+    await click(reader.page, 'label[for="studentTeacherFs"]');
     await back;
     ({ text } = await render(reader, permissionsPage));
     assert.ok(text.includes(teacherBlock), "after switching it back on, the teacher block is there again");
