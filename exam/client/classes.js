@@ -480,13 +480,13 @@ class YearNew extends ExamElement {
  * A checklist of people with nobody ticked, plus a way to tick everyone, and
  * the usernames of everyone ticked.
  */
-function checklist(people) {
+function checklist(people, className = "sl-exam-checklist") {
   const boxes = people.map((person) =>
     h("input", { type: "checkbox", value: person.username, "aria-label": displayPerson(person) })
   );
   const list = h(
     "ul",
-    { class: "sl-exam-checklist" },
+    { class: className },
     people.map((person, index) =>
       h("li", {}, h("label", {}, boxes[index], " ", displayPerson(person), " ", h("span", { class: "sl-exam-quiet" }, person.username)))
     )
@@ -517,7 +517,9 @@ class ClassNew extends ExamElement {
     const names = h("datalist", { id: "sl-exam-class-names" }, (directory.classes ?? []).map((name) => h("option", { value: displayClass(name) })));
     const nameInput = h("input", { name: "name", list: "sl-exam-class-names", required: true, placeholder: "5AHIF" });
     const members = h("div", {});
-    let list = checklist([]);
+    // The directory's members of a class, 50 and more: a list that scrolls by itself in the dialog.
+    const longList = "sl-exam-checklist sl-exam-checklist-long";
+    let list = checklist([], longList);
     members.append(list);
 
     const showMembers = (event) =>
@@ -526,7 +528,7 @@ class ClassNew extends ExamElement {
         if (!name) return;
         const answer = await examApi(`/directory/classes/${encodeURIComponent(name)}`);
         const waiting = directoryNotice(answer.state);
-        list = checklist(answer.candidates ?? []);
+        list = checklist(answer.candidates ?? [], longList);
         members.replaceChildren(
           waiting
             ? h("p", { class: "sl-exam-quiet" }, waiting)
@@ -593,7 +595,8 @@ class ClassView extends ExamElement {
         window.location.assign(`/exam/?year=${klass.year.id}`);
       },
     });
-    return readOnlyFor(klass.year, h("div", { class: "sl-exam" }, head, this.rosterSection(klass), this.addSection(klass, directory), this.courseSection(klass)));
+    this.roster = this.rosterSection(klass);
+    return readOnlyFor(klass.year, h("div", { class: "sl-exam" }, head, this.roster, this.addSection(klass, directory), this.courseSection(klass)));
   }
 
   rosterSection(klass) {
@@ -655,20 +658,50 @@ class ClassView extends ExamElement {
     );
   }
 
+  /**
+   * Redraws only the roster after a student was added. Adding a whole class is
+   * one click per student, in a row, so the rest of the page stays as the
+   * teacher left it: the list of missing members open, the search results in
+   * place, the scroll position where it was, and no loading flash between.
+   */
+  async redrawRoster() {
+    const klass = await examApi(`/classes/${encodeURIComponent(this.params.class)}`);
+    const roster = this.rosterSection(klass);
+    this.roster.replaceWith(roster);
+    this.roster = roster;
+  }
+
   addSection(klass, directory) {
     const line = messageLine();
     const onRoster = new Set(klass.roster.filter((entry) => !entry.leftAt).map((entry) => entry.username));
-    const add = (username) => (event) =>
+    let section = null;
+    let unit = null;
+    const add = (username, added = () => {}) => (event) =>
       act(event.target, line, async () => {
+        if (!username) return;
         await examApi(`/classes/${klass.id}/roster`, { method: "POST", body: { username } });
-        this.reload();
+        onRoster.add(username);
+        added();
+        // The person leaves every list of this section that offered them.
+        for (const item of section.querySelectorAll("li[data-username]")) {
+          if (item.dataset.username === username) item.remove();
+        }
+        const left = unit.querySelectorAll("li[data-username]").length;
+        const summary = unit.querySelector("summary");
+        if (summary && left > 0) summary.textContent = t("exam.classes.missingMembers", { count: left, name: displayClass(klass.name) });
+        if (summary && left === 0) {
+          const done = h("p", { class: "sl-exam-quiet" }, t("exam.classes.everyoneOnRoster", { name: displayClass(klass.name) }));
+          unit.replaceWith(done);
+          unit = done;
+        }
+        await this.redrawRoster();
       });
     const personRow = (person) =>
-      h("li", {}, displayPerson(person), " ", h("span", { class: "sl-exam-quiet" }, person.username), " ", h("button", { type: "button", class: "sl-exam-action", onclick: add(person.username) }, t("exam.classes.add")));
+      h("li", { "data-username": person.username }, displayPerson(person), " ", h("span", { class: "sl-exam-quiet" }, person.username), " ", h("button", { type: "button", class: "sl-exam-action", onclick: add(person.username) }, t("exam.classes.add")));
 
     const notice = directoryNotice(directory.state);
     const missing = (directory.candidates ?? []).filter((person) => !onRoster.has(person.username));
-    const unit = notice
+    unit = notice
       ? h("p", { class: "sl-exam-quiet" }, notice)
       : missing.length
         ? h("details", {}, h("summary", {}, t("exam.classes.missingMembers", { count: missing.length, name: displayClass(klass.name) })), h("ul", { class: "sl-exam-checklist" }, missing.map(personRow)))
@@ -690,16 +723,17 @@ class ClassView extends ExamElement {
       });
     const username = h("input", { placeholder: t("exam.classes.usernamePlaceholder"), "aria-label": t("exam.classes.addByUsernameLabel") });
 
-    return h(
+    section = h(
       "section",
       {},
       h("h2", {}, t("exam.classes.addStudents")),
       unit,
       h("p", {}, query, " ", h("button", { type: "button", class: "sl-exam-action", onclick: search }, t("exam.classes.searchDirectory"))),
       results,
-      h("p", {}, username, " ", h("button", { type: "button", class: "sl-exam-action", onclick: (event) => add(username.value.trim())(event) }, t("exam.classes.addByUsername"))),
+      h("p", {}, username, " ", h("button", { type: "button", class: "sl-exam-action", onclick: (event) => add(username.value.trim().toLowerCase(), () => (username.value = ""))(event) }, t("exam.classes.addByUsername"))),
       line
     );
+    return section;
   }
 
   courseSection(klass) {

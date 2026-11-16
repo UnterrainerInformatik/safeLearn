@@ -682,9 +682,19 @@ a.sl-exam-button.sl-exam-open:hover,
 
 /* A modal dialog scrolls what overflows it by the browser's own styles; the
    date field's calendar is meant to stand out over its edge instead, so the
-   dialog is not made to scroll by it. Its few fields always fit. */
+   dialog is not made to scroll by it. Its few fields always fit; a long list
+   scrolls by itself instead (below). */
 .sl-exam-dialog {
   overflow: visible;
+}
+
+/* The one dialog whose content can be long: a new class's checklist of the
+   directory's members, 50 and more. The list scrolls inside the dialog, so the
+   name field above it and Create below it stay in view. */
+.sl-exam-dialog .sl-exam-checklist-long {
+  max-height: 50vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .sl-exam-dialog form,

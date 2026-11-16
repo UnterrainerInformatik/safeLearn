@@ -505,6 +505,58 @@ describe("classes and courses", () => {
       page.off("dialog", onDialog);
     }
   });
+
+  test("adding students one after the other keeps the list of missing members open, without reloading the page", async () => {
+    const page = teacher.page;
+    // The student taken off above is missing again. A second one, where the
+    // realm's class has one, is taken off by the API; otherwise one who was
+    // never on the roster is added by username after the first.
+    const first = candidates[0].username;
+    const second = candidates[1]?.username;
+    if (second) {
+      const removed = await fetchAs(teacher, `/exam/api/classes/${klass.id}/roster/${second}`, { method: "DELETE" });
+      assert.equal(removed.status, 200, JSON.stringify(removed.json));
+    }
+    await page.goto(`${applicationUrl}/exam/classes/${klass.id}`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("sl-exam-class details summary", { timeout: 20000 });
+    await page.evaluate(() => {
+      window.slRosterMarker = true;
+      document.querySelector("sl-exam-class details").open = true;
+    });
+    const attendingRow = (name) => [...document.querySelectorAll(".sl-exam-roster tr")].some((tr) => tr.children[1]?.textContent === name && !tr.classList.contains("sl-exam-left"));
+    for (const username of [first, second].filter(Boolean)) {
+      await click(page, `sl-exam-class details li[data-username=${JSON.stringify(username)}] button`);
+      await page.waitForFunction(attendingRow, { timeout: 10000 }, username);
+      const state = await page.evaluate((name) => ({
+        marker: window.slRosterMarker === true,
+        open: document.querySelector("sl-exam-class details")?.open ?? null,
+        offered: !!document.querySelector(`sl-exam-class li[data-username="${name}"]`),
+      }), username);
+      assert.equal(state.marker, true, "the page was not reloaded");
+      assert.equal(state.offered, false, "the added student is no longer offered");
+      if (state.open !== null) assert.equal(state.open, true, "the list of missing members stays open");
+    }
+    const roster = (await fetchAs(teacher, `/exam/api/classes/${klass.id}`)).json.roster;
+    const dialog = await page.evaluate(() => {
+      // A new class's dialog with 60 members to tick: the list scrolls, Create stays in view.
+      const dialog = document.createElement("dialog");
+      dialog.className = "sl-exam-dialog sl-exam";
+      const list = document.createElement("ul");
+      list.className = "sl-exam-checklist sl-exam-checklist-long";
+      for (let i = 0; i < 60; i++) list.append(Object.assign(document.createElement("li"), { textContent: `Student ${i}` }));
+      const create = Object.assign(document.createElement("button"), { textContent: "Create" });
+      dialog.append(list, create);
+      document.body.append(dialog);
+      dialog.showModal();
+      const box = create.getBoundingClientRect();
+      const answer = { scrolls: list.scrollHeight > list.clientHeight, createVisible: box.top >= 0 && box.bottom <= window.innerHeight };
+      dialog.close();
+      dialog.remove();
+      return answer;
+    });
+    assert.deepEqual(dialog, { scrolls: true, createVisible: true }, "the long checklist scrolls and Create stays reachable");
+    assert.ok([first, second].filter(Boolean).every((name) => roster.some((entry) => entry.username === name && !entry.leftAt)), "both are on the roster");
+  });
 });
 
 describe("the gradebook", () => {
