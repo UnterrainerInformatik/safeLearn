@@ -12,12 +12,6 @@ Dazu am 2026-09-13 beobachtet: **manuell ausgelöste Syncs setzen `lastSync` nic
 
 # Exam
 
-## Offline-Test: Gruppen A und B unterschiedlich gewichten
-Ein Offline-Test mit zwei Handouts ist im Notenbuch genau eine Spalte mit einer Maximalpunktzahl (`offline-test`, „An offline test is an editable column of its gradebook category"). Die Gruppe jedes Teilnehmers wird in der Anwesenheitstabelle gespeichert, fließt aber in keine Berechnung ein. Gewünscht: nach dem Test die beiden Gruppen unterschiedlich gewichten können, wenn eine Angabe schwerer war, ohne dafür zwei getrennte Spalten anlegen zu müssen (die würden als zwei Tests zählen). Zu klären: eigene Maximalpunkte pro Gruppe, ein Skalierungsfaktor für eine Gruppe oder etwas anderes; und wie die Spalte im Sheet zeigt, dass ihre Felder unterschiedlich umgerechnet werden.
-
-## Navigation: „Online-Tests" in „Tests" umbenennen
-Die Testliste eines Kurses führt seit `2026-10-25-exam-offline-sittings` Online- und Offline-Tests gemeinsam, der Eintrag in Seitenübersicht/Nav heißt aber weiterhin „Online-Tests" (`i18n/de.json` u. a. Keys `…tests` in Zeile 129 und 797, `onlineTests`; en entsprechend „Online tests"). Umbenennen in „Tests". Dabei prüfen, welche Vorkommen wirklich nur Online-Tests meinen (z. B. die Gradebook-Kategorie `onlineTests`, „Meine Online-Tests und Ergebnisse", „Offene Online-Tests", `teacherHint`) und dort bleiben sollen.
-
 ## Begonnenen Online-Test abbrechen und verwerfen
 Ein Online-Test, dessen Sitzung schon offen ist und an dem schon Versuche laufen, soll abgebrochen werden können (end), und danach sollen seine Notenbuch-Spalte gelöscht und die Versuche verworfen werden, ohne dass der Test neu zusammengestellt oder ein Nachtermin angelegt werden muss. Heute ist ein Test nach dem ersten begonnenen Versuch nicht mehr löschbar und seine Fragen sind fix (`online-test`); Versuche verschwinden nur beim Neuansetzen einer Sitzung, und das nur durch einen Admin mit Zwei-Klick-Bestätigung (`exam-record-maintenance`). Gewünscht ist also ein Weg „Sitzung beenden → Versuche und Ergebnisse verwerfen → Test bleibt mit seinen Fragen bestehen und kann neu angesetzt werden". Zu klären: wer das darf (Lehrer oder nur Admin), Bestätigung mit Anzahl der verworfenen Versuche, und ob der Test danach wieder dem Pool folgt oder seinen Snapshot behält.
 
