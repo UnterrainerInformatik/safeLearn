@@ -80,7 +80,7 @@
       "examModule": "Prüfungsmodul",
       "examModuleTitle": "Klassen, Kurse und Notenbücher",
       "exams": "Tests",
-      "examsTitle": "Meine Online-Tests und Ergebnisse"
+      "examsTitle": "Meine Tests und Ergebnisse"
     }
   },
   "exam": {
@@ -91,11 +91,11 @@
       "fullscreenNotice": "Bitte bleib im Vollbild und wechsle nicht den Tab, bis du fertig bist und abgegeben hast, sonst kann es verdächtig wirken. Danke.",
       "handoutClosed": "Die Zeit ist abgelaufen. Die Angabe ist geschlossen.",
       "noTimeLimit": "noch kein Termin, keine Zeitgrenze",
-      "noneOpen": "Gerade ist für dich kein Online-Test offen.",
+      "noneOpen": "Gerade ist für dich kein Test offen.",
       "notSavedPreview": "nicht gespeichert (Probe)",
       "offlineDetails": "{subject} – {className} · Offline-Test ·",
       "offlineNoHandout": "Für diesen Test gibt es hier keine Angabe.",
-      "onlineTests": "Online-Tests",
+      "onlineTests": "Tests",
       "openDetails_one": "{subject} – {className} · {count} Minute ab dem Start",
       "openDetails_other": "{subject} – {className} · {count} Minuten ab dem Start",
       "openHandout": "Angabe öffnen",
@@ -126,7 +126,7 @@
       "newYear": "Neues Schuljahr",
       "pool": "Fragenpool",
       "scale": "Notenschlüssel",
-      "tests": "Online-Tests",
+      "tests": "Tests",
       "wholeYear": "Ganzes Jahr",
       "winterSemester": "Wintersemester",
       "year": "Schuljahr"
@@ -302,7 +302,7 @@
         "classHasCourses_other": "{name} hat noch {count} Kurse; nur eine Klasse ohne Kurse kann gelöscht werden.",
         "className": "Eine Klasse wird wie „5AHIF“ benannt: Buchstaben und Ziffern, keine Leerzeichen.",
         "courseExists": "Diese Klasse hat bereits einen Kurs {subject}.",
-        "courseInUse": "{subject} kann nicht gelöscht werden, solange etwas daran hängt: Notenbuch-Spalten {columns}, Ergebnisse {entries}, Noten {grades}, Online-Tests {tests}.",
+        "courseInUse": "{subject} kann nicht gelöscht werden, solange etwas daran hängt: Notenbuch-Spalten {columns}, Ergebnisse {entries}, Noten {grades}, Tests {tests}.",
         "courseLanguage": "Die Sprache eines Kurses ist eine von {languages}.",
         "courseSubject": "Ein Kurs braucht ein Fach, etwa WMC.",
         "noClass": "Es gibt keine Klasse {id}.",
@@ -776,7 +776,7 @@
       "window": "Zeitfenster"
     },
     "my": {
-      "openTests": "Offene Online-Tests",
+      "openTests": "Offene Tests",
       "results": "Meine Ergebnisse",
       "title": "Tests"
     },
@@ -794,7 +794,7 @@
       "scale": "Notenschlüssel",
       "solution": "{name} – Lösung",
       "student": "Schüler",
-      "tests": "Online-Tests",
+      "tests": "Tests",
       "tryTest": "Ausprobieren: {name}"
     },
     "participant": {
@@ -921,7 +921,7 @@
       "newTest": "Neuer Test",
       "noQuestions": "Dieser Test hat keine Fragen.",
       "noSittingYet": "Noch kein Termin.",
-      "noTestYet": "Noch kein Online-Test.",
+      "noTestYet": "Noch kein Test.",
       "noYear": "Es gibt noch kein Schuljahr.",
       "noneYet": "noch keiner",
       "notWrittenYet": "noch nicht geschrieben",

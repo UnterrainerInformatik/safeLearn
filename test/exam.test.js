@@ -1667,7 +1667,7 @@ describe("the module bar", () => {
     assert.deepEqual([home.class.chosen, home.course.create], [null, false], "no course is offered without a class");
   });
 
-  test("the buttons to the pool and the online tests are on every teacher page and keep what the bar has chosen", async () => {
+  test("the buttons to the pool and the tests are on every teacher page and keep what the bar has chosen", async () => {
     for (const reference of [
       "/exam/",
       `/exam/classes/${gbClass.id}`,
@@ -6898,6 +6898,7 @@ describe("the interface in the reader's language and format", () => {
       search: document.querySelector(".sidebar-title-search b")?.textContent.trim(),
       choices: [...document.querySelectorAll(".sl-menu-choice-label")].map((label) => label.textContent.trim()),
       pressed: [...document.querySelectorAll(".sl-menu-choice [aria-pressed='true']")].map((button) => button.textContent.trim()),
+      pool: document.querySelector(".sl-exam-bar-page[data-page='pool']")?.textContent.trim(),
       tests: document.querySelector(".sl-exam-bar-page[data-page='tests']")?.textContent.trim(),
       categories: [...document.querySelectorAll(".sl-exam-sheet .sl-exam-category")].map((cell) => cell.textContent.trim()),
     }));
@@ -6906,7 +6907,8 @@ describe("the interface in the reader's language and format", () => {
     assert.equal(shown.search, text("de", "app.sidebar.search"));
     assert.deepEqual(shown.choices, [text("de", "app.menu.language"), text("de", "app.menu.format")]);
     assert.deepEqual(shown.pressed, ["Deutsch", "20.10.2026"], "the menu marks the language and the format in effect");
-    assert.equal(shown.tests, text("de", "exam.bar.tests"));
+    assert.equal(shown.pool, text("de", "exam.bar.pool"));
+    assert.equal(shown.tests, "Tests", "the bar's button names tests, not only online tests");
     assert.ok(
       shown.categories.some((cell) => cell.startsWith(text("de", "exam.categories.onlineTests"))),
       `the sheet's categories are German: ${shown.categories.join(" | ")}`
@@ -6917,7 +6919,8 @@ describe("the interface in the reader's language and format", () => {
     await setPreferences(teacher, { lang: "en", loc: "de-AT" });
     await openGradebook();
     assert.equal(await teacher.page.evaluate(() => document.documentElement.lang), "en");
-    assert.equal(await teacher.page.$eval(".sl-exam-bar-page[data-page='tests']", (a) => a.textContent.trim()), "Online tests");
+    assert.equal(await teacher.page.$eval(".sl-exam-bar-page[data-page='pool']", (a) => a.textContent.trim()), "Question pool");
+    assert.equal(await teacher.page.$eval(".sl-exam-bar-page[data-page='tests']", (a) => a.textContent.trim()), "Tests");
     assert.deepEqual(await columnHeader(), { lines: ["20.10.", "/10"], title: "Language check\n20.10.2026\nout of 10 points" });
     await openColumnDialog();
     assert.deepEqual(await columnDate(), { value: "2026-10-20", shown: "20.10.2026" });

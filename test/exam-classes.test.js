@@ -363,7 +363,7 @@ describe("renaming and deleting years, classes and courses", () => {
 
     const withColumn = createCourse(db, klass.id, { subject: "A" });
     createColumn(db, withColumn.id, { kind: "test", name: "Empty", date: "2026-10-01", maxPoints: 10 });
-    blocked(withColumn, /columns 1, results 0, grades 0, online tests 0/);
+    blocked(withColumn, /columns 1, results 0, grades 0, tests 0/);
 
     const withResult = createCourse(db, klass.id, { subject: "B" });
     const column = createColumn(db, withResult.id, { kind: "test", name: "1st", date: "2026-10-01", maxPoints: 10 });
@@ -377,7 +377,7 @@ describe("renaming and deleting years, classes and courses", () => {
     const withTest = createCourse(db, klass.id, { subject: "D" });
     const at = new Date().toISOString();
     db.prepare("INSERT INTO test (course_id, name, created_at, updated_at) VALUES (?, 'T', ?, ?)").run(withTest.id, at, at);
-    blocked(withTest, /online tests 1/);
+    blocked(withTest, /, tests 1/);
 
     const empty = createCourse(db, klass.id, { subject: "E" });
     deleteCourse(db, empty.id);

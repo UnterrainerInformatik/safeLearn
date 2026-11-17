@@ -80,7 +80,7 @@
       "examModule": "Exam module",
       "examModuleTitle": "Classes, courses and gradebooks",
       "exams": "Exams",
-      "examsTitle": "My online tests and results"
+      "examsTitle": "My tests and results"
     }
   },
   "exam": {
@@ -91,11 +91,11 @@
       "fullscreenNotice": "Please stay in full screen and do not switch tabs until you have finished and submitted, or it may look suspicious. Thank you.",
       "handoutClosed": "The time is up. The handout is closed.",
       "noTimeLimit": "no sitting yet, no time limit",
-      "noneOpen": "No online test is open for you right now.",
+      "noneOpen": "No test is open for you right now.",
       "notSavedPreview": "not saved (preview)",
       "offlineDetails": "{subject} – {className} · offline test ·",
       "offlineNoHandout": "This test has no handout here.",
-      "onlineTests": "Online tests",
+      "onlineTests": "Tests",
       "openDetails_one": "{subject} – {className} · {count} minute once you start",
       "openDetails_other": "{subject} – {className} · {count} minutes once you start",
       "openHandout": "Open the handout",
@@ -126,7 +126,7 @@
       "newYear": "New school year",
       "pool": "Question pool",
       "scale": "Grading scale",
-      "tests": "Online tests",
+      "tests": "Tests",
       "wholeYear": "Whole year",
       "winterSemester": "Winter semester",
       "year": "Year"
@@ -302,7 +302,7 @@
         "classHasCourses_other": "{name} still has {count} courses; only a class without courses can be deleted.",
         "className": "A class is named like \"5AHIF\": letters and digits, no spaces.",
         "courseExists": "This class has a course {subject} already.",
-        "courseInUse": "{subject} cannot be deleted while anything depends on it: gradebook columns {columns}, results {entries}, grades {grades}, online tests {tests}.",
+        "courseInUse": "{subject} cannot be deleted while anything depends on it: gradebook columns {columns}, results {entries}, grades {grades}, tests {tests}.",
         "courseLanguage": "A course's language is one of {languages}.",
         "courseSubject": "A course needs a subject, such as WMC.",
         "noClass": "There is no class {id}.",
@@ -776,7 +776,7 @@
       "window": "Window"
     },
     "my": {
-      "openTests": "Open online tests",
+      "openTests": "Open tests",
       "results": "My results",
       "title": "Exams"
     },
@@ -794,7 +794,7 @@
       "scale": "Grading scale",
       "solution": "{name} – Solution",
       "student": "Student",
-      "tests": "Online tests",
+      "tests": "Tests",
       "tryTest": "Try: {name}"
     },
     "participant": {
@@ -921,7 +921,7 @@
       "newTest": "New test",
       "noQuestions": "This test has no questions.",
       "noSittingYet": "No sitting yet.",
-      "noTestYet": "No online test yet.",
+      "noTestYet": "No test yet.",
       "noYear": "There is no school year yet.",
       "noneYet": "none yet",
       "notWrittenYet": "not written yet",
