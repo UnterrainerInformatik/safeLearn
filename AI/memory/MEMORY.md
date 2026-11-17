@@ -43,3 +43,4 @@ Echter Ablageort: `/mnt/data/source/HTL/safeLearn/AI/memory/`
 - [safeLearn ist die Demo-Instanz](safelearn-is-demo-instance.md) — „Demo-Instanz“ = safeLearn selbst mit eigenem Deploy und eigenen Secrets; secureLectures ist eine zweite Instanz
 - [Tests gezielt, Suite einmal](test-runs-targeted-first.md) — volle `npm test` nur einmal am Ende; nach Fehlern nur betroffene Checks nachlaufen lassen
 - [secureLectures-Inhalt in Nextcloud](securelectures-content-nextcloud.md) — echter Inhalt liegt unter `/home/psilo/nextcloud/secureLectures/`, nicht im `md/` des Repos
+- [Commit+Push nach apply/archive](commit-push-after-apply-archive.md) — nach `/opsx:apply` und `/opsx:archive` immer committen und pushen, ohne zu fragen
