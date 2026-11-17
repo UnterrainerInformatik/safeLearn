@@ -958,7 +958,7 @@ Object.assign(TestDetail.prototype, {
           ? [
               " ",
               linkButton({ label: t("exam.offline.previewHandout"), href: `/exam/tests/${test.id}/handouts/${handout.group}/preview`, newWindow: true, class: "sl-exam-handout-preview" }),
-              handout.hasAnswers
+              handout.hasSolution
                 ? [" ", linkButton({ label: t("exam.offline.solutionHandout"), href: `/exam/tests/${test.id}/handouts/${handout.group}/solution`, newWindow: true, class: "sl-exam-handout-solution" })]
                 : null,
             ]

@@ -1065,7 +1065,7 @@
       "gradebookKindLabel": "Im Notenbuch",
       "handoutBroken": "hier ist keine Datei mehr",
       "handoutLabel": "Angabe {group}:",
-      "handoutNote": "Eine Angabe sehen anwesende Schüler:innen während des Zeitfensters, dargestellt wie für Schüler:innen mit der Prüfungsvariante. Sie wird bei jedem Aufruf aus der Datei gelesen, eine Korrektur erscheint also nach dem Neuladen.",
+      "handoutNote": "Eine Angabe sehen anwesende Schüler:innen während des Zeitfensters, dargestellt wie für Schüler:innen: die Übungsvariante sichtbar, Prüfungs- und Antwortblöcke ausgeblendet. Sie wird bei jedem Aufruf aus der Datei gelesen, eine Korrektur erscheint also nach dem Neuladen.",
       "handoutsHeading": "Angaben",
       "kind": "offline",
       "kindNote": "Wird im Klassenzimmer geschrieben; hier wird nichts beantwortet.",

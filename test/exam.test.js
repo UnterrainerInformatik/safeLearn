@@ -4229,7 +4229,7 @@ describe("offline tests and their handouts", () => {
     });
     assert.equal(answer.status, 200, JSON.stringify(answer.json));
     offline = answer.json;
-    assert.deepEqual(offline.handouts.map((h) => [h.group, h.path, h.resolves, h.hasAnswers]), [["A", handoutA, true, true], ["B", handoutB, true, false]]);
+    assert.deepEqual(offline.handouts.map((h) => [h.group, h.path, h.resolves, h.hasSolution]), [["A", handoutA, true, true], ["B", handoutB, true, false]]);
 
     const page = teacher.page;
     await page.goto(`${applicationUrl}/exam/tests/${offline.id}`, { waitUntil: "domcontentloaded" });
@@ -4242,7 +4242,7 @@ describe("offline tests and their handouts", () => {
     }));
     assert.deepEqual(shown.paths, [["A", handoutA, false], ["B", handoutB, false]]);
     assert.deepEqual(shown.previews, [`/exam/tests/${offline.id}/handouts/A/preview`, `/exam/tests/${offline.id}/handouts/B/preview`]);
-    assert.deepEqual(shown.solutions, [`/exam/tests/${offline.id}/handouts/A/solution`], "a solution only for the handout with answers");
+    assert.deepEqual(shown.solutions, [`/exam/tests/${offline.id}/handouts/A/solution`], "a solution only for the handout with exam or answer blocks");
     assert.equal(shown.questions, false, "no questions");
 
     const list = (await fetchAs(teacher, `/exam/api/tests?course=${course.id}`)).json.groups[0].tests;
@@ -4327,7 +4327,7 @@ describe("offline tests and their handouts", () => {
     assert.ok(await page.$(`${row}[data-group="B"]`), "and the group is as it was");
   });
 
-  test("started from its page, a present student sees their handout as a student with the exam variant, and its attachments", async () => {
+  test("started from its page, a present student sees their handout as a student with the practice variant, and its attachments", async () => {
     const screen = await teacher.page.browserContext().newPage();
     try {
       await screen.goto(`${applicationUrl}/exam/sittings/${sitting.id}/screen`, { waitUntil: "domcontentloaded" });
@@ -4357,8 +4357,8 @@ describe("offline tests and their handouts", () => {
 
     const text = await handoutText();
     assert.match(text, /HANDOUT-A-TASK/);
-    assert.match(text, /HANDOUT-EXAM-VARIANT/);
-    assert.doesNotMatch(text, /HANDOUT-PRACTICE-VARIANT|HANDOUT-ANSWER|HANDOUT-TEACHER-HINT|HANDOUT-B-TASK/);
+    assert.match(text, /HANDOUT-PRACTICE-VARIANT/);
+    assert.doesNotMatch(text, /HANDOUT-EXAM-VARIANT|HANDOUT-ANSWER|HANDOUT-TEACHER-HINT|HANDOUT-B-TASK/);
     assert.equal(isFramed(await frameOf(student.page)), false, "the handout page has no frame");
     const fullscreen = await student.page.evaluate(() => document.documentElement.requestFullscreen().then(() => document.fullscreenElement === document.documentElement, () => false));
     assert.equal(fullscreen, true, "the handout page in full screen");

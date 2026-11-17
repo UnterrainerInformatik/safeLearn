@@ -45,9 +45,9 @@ import {
 import { nextOpenTestsChange, openTestsOf, previewView, startAttempt } from "../exam/attempts.js";
 import { liveParticipant, liveSnapshot } from "../exam/live.js";
 import { setTeacherNote } from "../exam/teacher-notes.js";
-import { corpusFiles, handoutAttachmentCheck, handoutPath, servableHandout } from "../exam/handout.js";
+import { corpusFiles, handoutAttachmentCheck, handoutPath, hasSolution, servableHandout } from "../exam/handout.js";
 import { preParse, scanFiles } from "../obsidian.js";
-import { handoutViews } from "../permission-context.js";
+import { getPermissionContext, handoutViews } from "../permission-context.js";
 
 const temporaryDirs = [];
 const openDatabases = [];
@@ -115,6 +115,8 @@ before(async () => {
   write("POS/Class.md", "@@@ 4bhif\n# For the class\n");
   write("POS/Other.md", "@@@ 5ahif\n# For another class\n");
   write("POS/Later.md", "# Another file\n");
+  write("POS/ExamOnly.md", "@@@ teacher\n# Solutions in exam blocks\nTask.\n@@@ #exam\nSolution.\n@@@\n");
+  write("POS/AnswerOnly.md", "@@@ teacher\n# Solutions in answer blocks\nTask.\n@@@ 4bhif, #answer\nSolution.\n@@@\n");
   await scan();
 });
 
@@ -483,20 +485,54 @@ describe("a handout", () => {
     assert.ok(corpusFiles("4bhif").every((file) => file.path.endsWith(".md") && typeof file.folder === "string"));
   });
 
-  test("renders the exam variant and hides practice, answers and teacher blocks; the solution shows the answers", async () => {
+  test("renders the practice variant and hides exam, answers and teacher blocks, whatever the stored views; the solution shows exam and answers", async () => {
     const markdown = handoutA.split("\n").slice(1).join("\n");
-    const student = studentReq("anna");
-    student[handoutViews] = { answer: false };
-    const shown = await preParse(markdown, student, { embedDefaults: true });
-    assert.match(shown, /EXAM-VARIANT/);
-    assert.doesNotMatch(shown, /PRACTICE-VARIANT|ANSWER-TEXT|TEACHER-HINT/);
+    const participant = async (preferences) => {
+      const req = studentReq("anna");
+      if (preferences) {
+        (await getPermissionContext(req)).applyWrittenAttribute("config", JSON.stringify(preferences));
+        assert.match(await preParse(markdown, req), /ANSWER-TEXT/, "without the override the stored answer view shows the answers");
+      }
+      req[handoutViews] = { exam: false, answer: false };
+      return preParse(markdown, req, { embedDefaults: true });
+    };
+    for (const preferences of [null, { ve: 1, va: 1 }]) {
+      const shown = await participant(preferences);
+      assert.match(shown, /PRACTICE-VARIANT/, JSON.stringify(preferences));
+      assert.doesNotMatch(shown, /EXAM-VARIANT|ANSWER-TEXT|TEACHER-HINT/, JSON.stringify(preferences));
+    }
+
+    // The preview: a teacher with both views on is shown what the participant is.
+    const preview = teacherReq();
+    (await getPermissionContext(preview)).applyWrittenAttribute("config", JSON.stringify({ ve: 1, va: 1, vt: 1 }));
+    preview[handoutViews] = { exam: false, answer: false };
+    assert.equal(await preParse(markdown, preview, { embedDefaults: true }), await participant(null));
 
     const deck = teacherReq();
-    deck[handoutViews] = { answer: true };
+    deck[handoutViews] = { exam: true, answer: true };
     const solution = await preParse(markdown, deck, { embedDefaults: true });
     assert.match(solution, /EXAM-VARIANT/);
     assert.match(solution, /ANSWER-TEXT/);
     assert.doesNotMatch(solution, /PRACTICE-VARIANT|TEACHER-HINT/, "rendered as a student, the teacher's own blocks hidden");
+  });
+
+  test("an override without an exam field hides the exam variant", async () => {
+    const markdown = handoutA.split("\n").slice(1).join("\n");
+    const req = teacherReq();
+    (await getPermissionContext(req)).applyWrittenAttribute("config", JSON.stringify({ ve: 1, vt: 1 }));
+    assert.match(await preParse(markdown, req), /EXAM-VARIANT/, "without the override this teacher sees the exam variant");
+    req[handoutViews] = { answer: true };
+    const shown = await preParse(markdown, req, { embedDefaults: true });
+    assert.match(shown, /PRACTICE-VARIANT/);
+    assert.doesNotMatch(shown, /EXAM-VARIANT/);
+  });
+
+  test("offers a solution for #exam or #answer blocks, and none for neither", () => {
+    assert.equal(hasSolution("POS/LT1-A.md"), true, "both");
+    assert.equal(hasSolution("POS/ExamOnly.md"), true, "only #exam blocks");
+    assert.equal(hasSolution("POS/AnswerOnly.md"), true, "only #answer blocks");
+    assert.equal(hasSolution("POS/LT1-B.md"), false, "neither");
+    assert.equal(hasSolution("POS/Missing.md"), false, "does not resolve");
   });
 
   test("its views are not reachable by query, header or preference, and do not leak to another page", async () => {
@@ -504,8 +540,8 @@ describe("a handout", () => {
     const forged = studentReq("anna");
     forged.query = { handoutViews: "1", ve: "1", answer: "1" };
     forged.headers = { "x-handout-views": "1" };
-    forged.body = { handoutViews: { answer: true } };
-    forged.handoutViews = { answer: true };
+    forged.body = { handoutViews: { exam: true, answer: true } };
+    forged.handoutViews = { exam: true, answer: true };
     const page = await preParse(markdown, forged);
     assert.match(page, /PRACTICE-VARIANT/);
     assert.doesNotMatch(page, /EXAM-VARIANT|ANSWER-TEXT/);
@@ -531,7 +567,7 @@ describe("a handout's attachments", () => {
     startSitting(db, sitting.id, inMinutes(-1));
     assert.equal(await check("anna", "POS/diagram.png"), true, "the image it embeds");
     assert.equal(await check("anna", "POS/starter.zip"), true, "the archive it links");
-    assert.equal(await check("anna", "POS/exam-only.png"), true, "inside the exam variant");
+    assert.equal(await check("anna", "POS/exam-only.png"), false, "inside the exam variant");
     assert.equal(await check("anna", "POS/answer-only.png"), false, "inside the answers");
     assert.equal(await check("anna", "POS/hint.png"), false, "inside a teacher block");
     assert.equal(await check("anna", "POS/b.png"), false, "only the other group's handout references it");
@@ -548,7 +584,7 @@ describe("a handout's attachments", () => {
     assert.equal(await check("anna", "POS/diagram.png"), false, "right after the window closed");
   });
 
-  test("a teacher's previews and decks are served the answers' attachments, never the teacher blocks'", async () => {
+  test("a teacher's decks are served the exam variant's and the answers' attachments, never the teacher blocks'", async () => {
     const { db, course } = seeded();
     running(db, course);
     const check = (attachment) => handoutAttachmentCheck(db, teacherReq(), attachment, { username: "tea", teacher: true });

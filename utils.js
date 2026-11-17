@@ -50,9 +50,11 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
     const context = await getPermissionContext(req);
     const a = context.preferences;
     // The views a handout rendering fixes for this request alone (design D4 of
-    // exam-offline-sittings): rendered as a student whatever `vt` holds, the
-    // exam variant shown, the practice variant hidden, the answers per flag.
-    // Set by the server under a Symbol, never by anything the request carries.
+    // exam-offline-sittings, D1 of exam-handout-hides-exam-variant): rendered
+    // as a student whatever `vt` holds, the exam and the answer variant each
+    // per its flag, the practice variant as the exam's complement. A missing
+    // flag reads as hidden. Set by the server under a Symbol, never by
+    // anything the request carries.
     const handout = req?.[handoutViews] ?? null;
     // The student-view downgrade, as a choice between two sets built before
     // either was read. It used to delete `teacher`, `teachers` and `admin` from
@@ -83,11 +85,12 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
           // both, or a session ends up seeing neither version of the question.
           case "exam":
             // For security reasons hardcoded to only allow teachers and admins to view exam-questions.
-            // The handout rendering is the one exception, and it fixes both cases together.
-            clientAccess = handout !== null || (a.ve == 1 && (view.isAdmin || view.isTeacher));
+            // Under a handout rendering the module's flag decides both cases together; it is set
+            // only for a teacher's solution deck and attachment check, never for a participant.
+            clientAccess = handout !== null ? handout.exam === true : a.ve == 1 && (view.isAdmin || view.isTeacher);
             break;
           case "practice":
-            clientAccess = handout === null && !(a.ve == 1 && (view.isAdmin || view.isTeacher));
+            clientAccess = handout !== null ? handout.exam !== true : !(a.ve == 1 && (view.isAdmin || view.isTeacher));
             break;
           case "answer":
             clientAccess = handout !== null ? handout.answer === true : a.va == 1;

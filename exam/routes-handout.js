@@ -48,7 +48,7 @@ export function registerHandoutRoutes(router, { db, handle, startPage, renderHan
 
   // The participant's handout, while their sitting is open and they are
   // marked present: the file of their group, rendered for them as a student
-  // with the exam variant shown. Its element replaces the content with a
+  // with the practice variant shown and the exam and answer variants hidden. Its element replaces the content with a
   // notice when the sitting leaves their open tests (design D6).
   router.get(
     "/my/sittings/:id/handout",
@@ -57,7 +57,7 @@ export function registerHandoutRoutes(router, { db, handle, startPage, renderHan
       const sittingId = idParam(req.params.id);
       const handout = servableHandout(db, identityOf(req), sittingId);
       if (!handout) throw new NotFoundError("exam.errors.handouts.none");
-      const html = await rendered(handout.path, req, { answer: false });
+      const html = await rendered(handout.path, req, { exam: false, answer: false });
       const { t } = await i18nOf(req);
       const body = `
         ${embedPlaceholder("handout-watch", { sitting: String(sittingId) }, "")}
@@ -72,21 +72,22 @@ export function registerHandoutRoutes(router, { db, handle, startPage, renderHan
     teacherPage,
     handle(async (req, res) => {
       const { test, path: corpusPath } = teacherHandout(db, req.params.id, req.params.group);
-      const html = await rendered(corpusPath, req, { answer: false });
+      const html = await rendered(corpusPath, req, { exam: false, answer: false });
       const { t } = await i18nOf(req);
       const body = `<div class="sl-exam-handout">${html}</div>`;
       res.send(await wrapInPage(body, startPage(), req, { title: t("exam.handouts.previewTitle", { name: test.name, group: req.params.group }) }));
     })
   );
 
-  // The solution deck: the handout as a presentation with its answers shown,
+  // The solution deck: the handout as a presentation with its exam and answer
+  // variants shown and its practice variant hidden,
   // no student's name and no result in it.
   router.get(
     "/tests/:id/handouts/:group/solution",
     teacherPage,
     handle(async (req, res) => {
       const { test, path: corpusPath } = teacherHandout(db, req.params.id, req.params.group);
-      const html = await rendered(corpusPath, req, { answer: true });
+      const html = await rendered(corpusPath, req, { exam: true, answer: true });
       const { t } = await i18nOf(req);
       res.send(await wrapInReveal(splitForReveal(html), req, { title: t("exam.handouts.solutionTitle", { name: test.name, group: req.params.group }) }));
     })

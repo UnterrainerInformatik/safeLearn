@@ -1065,7 +1065,7 @@
       "gradebookKindLabel": "In the gradebook",
       "handoutBroken": "no file here any more",
       "handoutLabel": "Handout {group}:",
-      "handoutNote": "A handout is shown to present students during the window, rendered as for a student with the exam variant shown. It is read from the file at every request, so a correction reaches them on reload.",
+      "handoutNote": "A handout is shown to present students during the window, rendered as for a student: the practice variant shown, exam and answer blocks hidden. It is read from the file at every request, so a correction reaches them on reload.",
       "handoutsHeading": "Handouts",
       "kind": "offline",
       "kindNote": "Written in the classroom; nothing is answered here.",

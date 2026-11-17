@@ -1,7 +1,7 @@
 @@@ teacher
 # Handout fixture A
 
-The handout of an offline test (`exam-handout`). The file itself is for teachers only; the exam module shows it to the present participants of an open sitting, as a student, with the exam variant.
+The handout of an offline test (`exam-handout`). The file itself is for teachers only; the exam module shows it to the present participants of an open sitting, as a student, with the practice variant and without the exam and answer variants.
 
 HANDOUT-A-TASK: write a program that prints the diagram's numbers.
 

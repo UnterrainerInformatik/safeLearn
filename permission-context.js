@@ -283,7 +283,9 @@ async function buildPermissionContext(req) {
 /**
  * The key of the views the exam module's handout rendering fixes for one
  * request (`exam-handout`, exam-offline-sittings design D4): `req[handoutViews]
- * = { answer }`. A Symbol, so no body, query, header or cookie parser can
+ * = { exam, answer }`, each true to show that variant; a missing field reads
+ * as hidden, and the practice variant is shown exactly when the exam variant
+ * is not. A Symbol, so no body, query, header or cookie parser can
  * produce the property; only server code holding this export can set it, and
  * the module sets it only after the database has authorized the request, for
  * the duration of the render. `hasRoles` is its one reader.

@@ -41,14 +41,14 @@ export function handoutResolves(corpusPath) {
 }
 
 /**
- * Whether the raw file holds a `@@@` directive naming `#answer`: the textual
- * check behind the solution button. A false positive only shows a deck
- * without answers.
+ * Whether the raw file holds a `@@@` directive naming `#exam` or `#answer`:
+ * the textual check behind the solution button (design D3). A false positive
+ * only shows a deck without a solution.
  */
-export function hasAnswers(corpusPath) {
+export function hasSolution(corpusPath) {
   if (!handoutResolves(corpusPath)) return false;
   try {
-    return /@@@[^\n]*#answer\b/i.test(fs.readFileSync(mdFilesDirStructure[corpusPath].absolutePath, "utf8"));
+    return /@@@[^\n]*#(?:exam|answer)\b/i.test(fs.readFileSync(mdFilesDirStructure[corpusPath].absolutePath, "utf8"));
   } catch {
     return false;
   }
@@ -61,7 +61,7 @@ export function handoutsOf(test) {
     ["B", test.handout_b],
   ]
     .filter(([, corpusPath]) => corpusPath !== null && corpusPath !== undefined)
-    .map(([group, corpusPath]) => ({ group, path: corpusPath, resolves: handoutResolves(corpusPath), hasAnswers: hasAnswers(corpusPath) }));
+    .map(([group, corpusPath]) => ({ group, path: corpusPath, resolves: handoutResolves(corpusPath), hasSolution: hasSolution(corpusPath) }));
 }
 
 /**
@@ -143,15 +143,15 @@ function everyHandoutPath(db) {
  * The attachment gate's question to the module (design D7): whether a handout
  * open to this session references `attachment` in a place it may see, under
  * the views the handout rendering fixes. A participant's are the handouts
- * `servableHandout` would answer them right now, without the answers; a
- * teacher's are every handout of a test, with the answers, as the previews
- * and solution decks show them. Nothing is kept: the next request asks again.
+ * `servableHandout` would answer them right now, without the exam and answer
+ * variants; a teacher's are every handout of a test, with both, as the
+ * solution decks show them. Nothing is kept: the next request asks again.
  */
 export async function handoutAttachmentCheck(db, req, attachment, { username, teacher }) {
   if (typeof username !== "string") return false;
   const paths = teacher ? everyHandoutPath(db) : servableHandoutPaths(db, username);
   if (paths.length === 0) return false;
-  req[handoutViews] = { answer: teacher };
+  req[handoutViews] = { exam: teacher, answer: teacher };
   try {
     // One after the other: the views sit on the request they decide.
     for (const corpusPath of paths) {

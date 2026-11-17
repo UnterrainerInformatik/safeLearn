@@ -175,14 +175,14 @@ async function markedFor(req) {
  * the exam module has already authorized from its database. The first-line
  * directive is stripped without being evaluated - the one place a file's own
  * whole-file gate is set aside - and the views are fixed for the render
- * alone: as a student, the exam variant shown, the practice variant hidden,
- * the answers per `answer`. Inline blocks are decided by the session's roles
+ * alone: as a student, the exam variant per `exam` (the practice variant as
+ * its complement), the answers per `answer`. Inline blocks are decided by the session's roles
  * as on any page. Embedded module elements render their defaults, and no
  * attachment grant is recorded: the module answers for a handout's
  * attachments itself, from its database (design D7). Rejects when the file
  * cannot be read.
  */
-async function renderHandout(corpusPath, req, { answer = false } = {}) {
+async function renderHandout(corpusPath, req, { exam = false, answer = false } = {}) {
   await refreshAccessToken(req);
   const data = await fs.promises.readFile(path.join(__dirname, "md", corpusPath), "utf8");
   let d = splitFrontmatter(data, corpusPath).body;
@@ -190,7 +190,7 @@ async function renderHandout(corpusPath, req, { answer = false } = {}) {
     d = d.split("\n").slice(1).join("\n");
   }
   d = stripComments(d);
-  req[handoutViews] = { answer: answer === true };
+  req[handoutViews] = { exam: exam === true, answer: answer === true };
   try {
     d = await preParse(d, req, { embedDefaults: true });
     const marked = await markedFor(req);
