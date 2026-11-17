@@ -724,6 +724,68 @@ a.sl-exam-button.sl-exam-open:hover,
   border: 1px solid #545d68;
 }
 
+/* The factor A:B of an offline test's column (offline-test-group-factor D5):
+   a native slider between the letters A and B, the ratio beside it in
+   figures of one width so it does not jump while the knob moves. */
+.sl-exam-group-factor-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.sl-exam-group-factor-scale {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.sl-exam-dialog input.sl-exam-group-factor {
+  width: 12em;
+  max-width: 50vw;
+  margin: 0;
+  padding: 0;
+  accent-color: #7c3aed;
+  background: transparent;
+  border: none;
+}
+
+.sl-exam-group-factor-ratio {
+  font-variant-numeric: tabular-nums;
+  min-width: 9em;
+}
+
+.sl-exam-group-factor-hint {
+  flex-basis: 100%;
+}
+
+#markdown-content.dark-mode .sl-exam-dialog input.sl-exam-group-factor {
+  accent-color: #a78bfa;
+  background: transparent;
+  border: none;
+}
+
+/* A raised result's counted value after its field, and the header's mark of
+   a column with a factor A:B (offline-test-group-factor D6). */
+.sl-exam-counted {
+  margin-left: 4px;
+  font-size: 0.85em;
+  opacity: 0.7;
+  white-space: nowrap;
+}
+
+.sl-exam-group-factor-mark {
+  display: block;
+  font-size: 0.8em;
+  font-weight: 600;
+  color: #7c3aed;
+}
+
+#markdown-content.dark-mode .sl-exam-group-factor-mark {
+  color: #c4b5fd;
+}
+
 /* The module bar (`exam-navigation`): directly under the instance's top bar,
    which is fixed and 50px high, and staying there while the page scrolls. */
 .sl-exam-bar {

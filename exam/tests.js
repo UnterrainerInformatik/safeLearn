@@ -1054,3 +1054,26 @@ export function setAttendance(db, sittingId, username, { present, group } = {}) 
   db.prepare("UPDATE sitting_participant SET present = ?, handout_group = ? WHERE sitting_id = ? AND username = ?").run(nextPresent, nextGroup, sittingId, name);
   return { username: name, present: nextPresent === 1, group: nextGroup };
 }
+
+/**
+ * The handout group that counts for each participant of a course's offline
+ * tests (offline-test-group-factor design D3): their group in the latest
+ * sitting of the test that was started and in which they were marked present.
+ * Answers a map from `testId/username` to 'A' or 'B'; somebody missing from it
+ * counts as group A. A planned sitting is not one anybody was present at yet,
+ * so a scheduled make-up changes nothing before it starts. Shared by the
+ * gradebook, which raises the results of a group by the test's factor.
+ */
+export function countingGroups(db, courseId) {
+  const rows = db
+    .prepare(
+      `SELECT test_id, username, handout_group FROM (
+         SELECT s.test_id, p.username, p.handout_group,
+           ROW_NUMBER() OVER (PARTITION BY s.test_id, p.username ORDER BY s.started_at DESC, s.id DESC) AS latest
+         FROM sitting_participant p JOIN sitting s ON s.id = p.sitting_id JOIN test t ON t.id = s.test_id
+         WHERE t.course_id = ? AND t.kind = 'offline' AND s.started_at IS NOT NULL AND p.present = 1
+       ) WHERE latest = 1`
+    )
+    .all(courseId);
+  return new Map(rows.map((row) => [`${row.test_id}/${row.username}`, row.handout_group]));
+}

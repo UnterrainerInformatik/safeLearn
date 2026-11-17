@@ -4468,6 +4468,77 @@ describe("offline tests and their handouts", () => {
     assert.equal((await fetchAs(teacher, `/exam/api/tests/${offline.id}`, { method: "DELETE" })).status, 409);
     assert.equal((await fetchAs(teacher, `/exam/api/assessments/${column}`, { method: "DELETE" })).status, 409, "the column goes with its test only");
   });
+
+  test("the factor A:B: a slider in the column's dialog raises group B, the sheet marks it, and the student sees what it did", async () => {
+    const username = student.username.toLowerCase();
+    const column = (await fetchAs(teacher, `/exam/api/tests/${offline.id}`)).json.assessmentId;
+    const result = `/exam/api/assessments/${column}/results/${username}`;
+    // The column above holds a percentage; out of 24 points from here on.
+    assert.equal((await fetchAs(teacher, result, { method: "DELETE" })).status, 200);
+    assert.equal((await fetchAs(teacher, `/exam/api/assessments/${column}`, { method: "PUT", body: { maxPoints: 24 } })).status, 200);
+    assert.equal((await fetchAs(teacher, result, { method: "PUT", body: { points: 18 } })).status, 200);
+    await attendance({ present: true, group: "B" });
+
+    const page = teacher.page;
+    const openSheet = async () => {
+      await page.goto(`${applicationUrl}/exam/courses/${course.id}/gradebook`, { waitUntil: "domcontentloaded" });
+      await page.waitForSelector(`th[data-column="${column}"] .sl-exam-column-edit`, { timeout: 20000 });
+    };
+    await openSheet();
+    assert.equal(await page.$(`th[data-column="${column}"] .sl-exam-group-factor-mark`), null, "1:1 is not marked");
+    await click(page, `th[data-column="${column}"] .sl-exam-column-edit`);
+    await page.waitForSelector("dialog[open] input.sl-exam-group-factor", { timeout: 10000 });
+    assert.equal(await page.$eval("dialog[open] .sl-exam-group-factor-ratio", (o) => o.textContent), "A 1,00 : B 1,00");
+    await page.focus("dialog[open] input.sl-exam-group-factor");
+    for (let step = 0; step < 4; step += 1) await page.keyboard.press("ArrowRight");
+    assert.equal(await page.$eval("dialog[open] .sl-exam-group-factor-ratio", (o) => o.textContent), "A 1,00 : B 1,20", "four steps to the right");
+    await page.waitForFunction(() => document.querySelector("dialog[open] input.sl-exam-group-factor")?.classList.contains("is-saved"), { timeout: 10000, polling: 100 });
+    const stored = [];
+    for (const semester of ["ws", "ss"]) {
+      stored.push(...(await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=${semester}`)).json.columns.filter((c) => c.id === column));
+    }
+    assert.deepEqual(stored.map((c) => c.groupFactor), [{ a: 1, b: 1.2 }], "saved as the knob is let go");
+    await click(page, "dialog[open] .sl-exam-column-close");
+    await page.waitForFunction((id) => document.querySelector(`th[data-column="${id}"] .sl-exam-group-factor-mark`), { timeout: 20000, polling: 250 }, String(column));
+
+    const sheet = await page.evaluate((id, name) => ({
+      title: document.querySelector(`th[data-column="${id}"]`).title,
+      field: document.querySelector(`input.sl-exam-cell[data-assessment="${id}"][data-student="${name}"]`).value,
+      counted: document.querySelector(`input.sl-exam-cell[data-assessment="${id}"][data-student="${name}"]`).parentElement.querySelector(".sl-exam-counted").textContent.replace(/\s/g, " "),
+    }), String(column), username);
+    assert.match(sheet.title, /A 1,00 : B 1,20/, "hovering the header shows the ratio");
+    assert.deepEqual([sheet.field, sheet.counted], ["18", "→ 90 %"], "the field keeps the points, the counted value beside it");
+
+    await setPreferences(student, { lang: "de" });
+    try {
+      await student.page.goto(`${applicationUrl}/exam/my`, { waitUntil: "domcontentloaded" });
+      await student.page.waitForFunction(() => document.querySelector(".sl-exam-results")?.textContent.includes("POS Langtest 1"), { timeout: 20000, polling: 250 });
+      const own = await student.page.evaluate(() => document.querySelector(".sl-exam-results").textContent);
+      assert.match(own, /18\/24 · ×1,20 \(Gruppe B\) → 90\s%/, "the student sees the factor and the result it gave");
+    } finally {
+      await setPreferences(student, {});
+    }
+
+    // Back to the middle with 1:1, and no slider for a test with one handout.
+    await click(page, `th[data-column="${column}"] .sl-exam-column-edit`);
+    await page.waitForSelector("dialog[open] .sl-exam-group-factor-reset", { timeout: 10000 });
+    await click(page, "dialog[open] .sl-exam-group-factor-reset");
+    await page.waitForFunction(() => document.querySelector("dialog[open] input.sl-exam-group-factor")?.classList.contains("is-saved"), { timeout: 10000, polling: 100 });
+    assert.equal(await page.$eval("dialog[open] .sl-exam-group-factor-ratio", (o) => o.textContent), "A 1,00 : B 1,00");
+    await click(page, "dialog[open] .sl-exam-column-close");
+    await page.waitForFunction((id) => document.querySelector(`th[data-column="${id}"] .sl-exam-column-edit`) && !document.querySelector(`th[data-column="${id}"] .sl-exam-group-factor-mark`), { timeout: 20000, polling: 250 }, String(column));
+
+    const single = await fetchAs(teacher, `/exam/api/courses/${course.id}/offline-tests`, {
+      method: "POST",
+      body: { name: "POS Kurztest 1", durationMinutes: 20, gradebookKind: "test", handoutA },
+    });
+    assert.equal(single.status, 200, JSON.stringify(single.json));
+    await openSheet();
+    await click(page, `th[data-column="${single.json.assessmentId}"] .sl-exam-column-edit`);
+    await page.waitForSelector("dialog[open] .sl-exam-column-close", { timeout: 10000 });
+    assert.equal(await page.$("dialog[open] input.sl-exam-group-factor"), null, "one handout, no slider");
+    await click(page, "dialog[open] .sl-exam-column-close");
+  });
 });
 
 describe("the question editor", () => {

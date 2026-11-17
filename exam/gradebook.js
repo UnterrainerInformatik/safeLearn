@@ -26,7 +26,7 @@ import {
 } from "./classes.js";
 import { bandMidpoint, entryCategory, gradeFor, proposal, semesterOf, semesters, yearProposal } from "./grading.js";
 import { reviewOpenCondition } from "./attempts.js";
-import { viennaDate } from "./tests.js";
+import { countingGroups, viennaDate } from "./tests.js";
 
 /**
  * The kinds of manual column: those of the categories, and a project's `+`/`-`
@@ -157,6 +157,7 @@ function columnMax(value, kind) {
 }
 
 function columnFromRow(row, results = 0, notes = 0) {
+  const factor = row.group_factor ?? null;
   return {
     id: row.id,
     courseId: row.course_id,
@@ -172,12 +173,20 @@ function columnFromRow(row, results = 0, notes = 0) {
     projectId: row.project_id ?? null,
     // The offline test this column belongs to, which its header links to (`offline-test`).
     testId: row.test_id ?? null,
+    // An offline test's factor A:B and whether it counts, with two handouts (offline-test-group-factor D4).
+    ...(factor ? { groupFactor: { a: factor.a, b: factor.b }, twoHandouts: factor.twoHandouts } : {}),
   };
 }
 
+/** A test row's factor A:B; a database before migration 020 reads 1:1. */
+function factorOf(test) {
+  return { a: test.group_factor_a ?? 1, b: test.group_factor_b ?? 1, twoHandouts: test.handout_b !== null && test.handout_b !== undefined };
+}
+
 /**
- * The offline tests of a course by the column each one owns. Read from whole
- * rows, so a database before that migration still answers.
+ * The offline tests of a course by the column each one owns, as whole test
+ * rows. Read from whole rows, so a database before that migration still
+ * answers.
  */
 function testsByColumn(db, courseId) {
   return new Map(
@@ -185,14 +194,19 @@ function testsByColumn(db, courseId) {
       .prepare("SELECT * FROM test WHERE course_id = ?")
       .all(courseId)
       .filter((test) => test.assessment_id !== undefined && test.assessment_id !== null)
-      .map((test) => [test.assessment_id, test.id])
+      .map((test) => [test.assessment_id, test])
   );
+}
+
+/** A column's fields from the offline test it belongs to: `test_id` and `group_factor`, or nulls. */
+function testFields(test) {
+  return test ? { test_id: test.id, group_factor: factorOf(test) } : { test_id: null, group_factor: null };
 }
 
 /** A column's row with the offline test it belongs to, if any, as `test_id`. */
 function getColumnRow(db, id) {
   const found = db.prepare("SELECT * FROM assessment WHERE id = ?").get(id);
-  const row = found ? { ...found, test_id: testsByColumn(db, found.course_id).get(found.id) ?? null } : undefined;
+  const row = found ? { ...found, ...testFields(testsByColumn(db, found.course_id).get(found.id)) } : undefined;
   if (!row) throw new NotFoundError("exam.errors.gradebook.noColumn", { id });
   return row;
 }
@@ -254,7 +268,7 @@ export function courseColumns(db, courseId, semester = null) {
   const tests = testsByColumn(db, courseId);
   const rows = db.prepare("SELECT * FROM assessment WHERE course_id = ? ORDER BY held_on, created_at, id").all(courseId);
   const notes = columnNoteCounts(db, courseId, rows);
-  const manual = rows.map((row) => columnFromRow({ ...row, test_id: tests.get(row.id) ?? null }, counts.get(row.id) ?? 0, notes.get(row.id) ?? 0));
+  const manual = rows.map((row) => columnFromRow({ ...row, ...testFields(tests.get(row.id)) }, counts.get(row.id) ?? 0, notes.get(row.id) ?? 0));
   const projectDates = new Map(manual.filter((column) => column.kind === "project").map((column) => [column.id, column.date]));
   const sorted = [...onlineColumns(db, courseId), ...manual]
     .filter((column) => kindInUse(course, column.kind))
@@ -352,11 +366,27 @@ export function createColumn(db, courseId, input) {
 }
 
 /**
+ * A factor A:B as written through a column (offline-test-group-factor D4):
+ * only for an offline test's column with two handouts, each part from 1 to 2
+ * on the grid of 0.05 after rounding, and at most one of them above 1.
+ */
+function groupFactor(input, row) {
+  if (!row.group_factor?.twoHandouts) throw new InvalidInputError("exam.errors.gradebook.noGroupFactor");
+  const grid = (value) => (isNumber(value) ? Math.round(value * 20) / 20 : Number.NaN);
+  const a = grid(input?.a);
+  const b = grid(input?.b);
+  const inRange = (value) => value >= 1 && value <= 2;
+  if (!inRange(a) || !inRange(b) || (a > 1 && b > 1)) throw new InvalidInputError("exam.errors.gradebook.groupFactorRange");
+  return { a, b };
+}
+
+/**
  * Renames, re-dates or changes the maximum of a column; what `input` leaves
  * out stays. A new maximum recomputes every result from its points in one
  * transaction, and is refused while a result has more points than it. A column
  * holding results keeps counting in points or in percent: switching between
- * the two would change what every typed result means.
+ * the two would change what every typed result means. An offline test's
+ * column with two handouts also takes the test's `groupFactor` `{ a, b }`.
  */
 export function updateColumn(db, id, input = {}) {
   const row = getColumnRow(db, id);
@@ -364,6 +394,7 @@ export function updateColumn(db, id, input = {}) {
   const date = input.date === undefined ? row.held_on : columnDate(input.date, course.year);
   const name = input.name === undefined ? row.name : columnName(input.name, date);
   const maxPoints = input.maxPoints === undefined ? row.max_points : columnMax(input.maxPoints, row.kind);
+  const factor = input.groupFactor === undefined ? null : groupFactor(input.groupFactor, row);
   const results = resultCount(db, id);
   if (results > 0 && (maxPoints === null) !== (row.max_points === null)) {
     throw new InvalidInputError(row.max_points === null ? "exam.errors.gradebook.percentKeepsNoMax" : "exam.errors.gradebook.pointsKeepMax");
@@ -376,6 +407,7 @@ export function updateColumn(db, id, input = {}) {
   }
   inTransaction(db, () => {
     db.prepare("UPDATE assessment SET name = ?, held_on = ?, max_points = ? WHERE id = ?").run(name, date, maxPoints, id);
+    if (factor) db.prepare("UPDATE test SET group_factor_a = ?, group_factor_b = ? WHERE id = ?").run(factor.a, factor.b, row.test_id);
     if (maxPoints !== null && maxPoints !== row.max_points) {
       db.prepare("UPDATE manual_entry SET value = points / ?, updated_at = ? WHERE assessment_id = ?").run(maxPoints, now(), id);
     }
@@ -725,6 +757,32 @@ function onlineEntries(db, courseId, scale, username = null) {
 }
 
 /**
+ * What applies a course's factors A:B to its entries (offline-test-group-
+ * factor D2): an entry of an offline test's column with two handouts gets the
+ * group that counts for its student (D3) and that group's `factor`; where the
+ * factor is above 1 the stored fraction moves to `enteredValue` and `value`
+ * becomes it times the factor, capped at 1, with the grade derived from it.
+ * Nothing is written: the stored result stays as typed. Every other entry
+ * passes unchanged.
+ */
+function groupRaise(db, courseId, scale) {
+  const factors = new Map(
+    [...testsByColumn(db, courseId)].map(([columnId, test]) => [columnId, { testId: test.id, ...factorOf(test) }]).filter(([, factor]) => factor.twoHandouts)
+  );
+  if (factors.size === 0) return (entry) => entry;
+  const groups = countingGroups(db, courseId);
+  return (entry) => {
+    const factor = factors.get(entry.columnId);
+    if (!factor) return entry;
+    const group = groups.get(`${factor.testId}/${entry.username}`) ?? "A";
+    const times = group === "A" ? factor.a : factor.b;
+    if (times <= 1 || entry.value === null) return { ...entry, group, factor: 1 };
+    const value = Math.min(1, entry.value * times);
+    return { ...entry, group, factor: times, enteredValue: entry.value, value, grade: gradeFor(value, scale) };
+  };
+}
+
+/**
  * Every result of a course shown in its categories in use, for one student or
  * for all, oldest first, each with its column's kind, name, date and maximum:
  * the manual columns' results and the submitted attempts of the course's
@@ -741,10 +799,11 @@ function courseEntries(db, course, scale, username = null) {
     username === null
       ? db.prepare(`${select} ORDER BY a.held_on, a.created_at, a.id`).all(course.id)
       : db.prepare(`${select} AND e.username = ? ORDER BY a.held_on, a.created_at, a.id`).all(course.id, username);
+  const raise = groupRaise(db, course.id, scale);
   const manual = rows.map((row) => {
     const projectId = columns.get(row.assessment_id).project_id ?? null;
     const project = columns.get(projectId);
-    return entryFromRow({ ...row, project_id: projectId, project_held_on: project?.held_on, project_name: project?.name }, scale);
+    return raise(entryFromRow({ ...row, project_id: projectId, project_held_on: project?.held_on, project_name: project?.name }, scale));
   });
   const online = onlineEntries(db, course.id, scale, username);
   // A stable sort: entries of one date keep the order they had.
@@ -880,9 +939,17 @@ function resultsByColumn(entries, semester, year) {
       .filter((entry) => semesterOf(entry.semesterDate, year) === semester)
       .map((entry) => [
         entry.columnId,
-        gradeKinds.includes(entry.kind) ? { value: entry.value, points: entry.points, grade: entry.grade } : { value: entry.value, points: entry.points },
+        gradeKinds.includes(entry.kind)
+          ? { value: entry.value, points: entry.points, grade: entry.grade }
+          : { value: entry.value, points: entry.points, ...raisedFields(entry) },
       ])
   );
+}
+
+/** An entry's group, factor and the fraction entered, where a factor A:B applies to it (D4). */
+function raisedFields(entry) {
+  if (entry.group === undefined) return {};
+  return { group: entry.group, factor: entry.factor, enteredValue: entry.enteredValue ?? entry.value };
 }
 
 /** A student's notes by column id, for the columns of `semester`: `{ id: text }`. */
@@ -1041,7 +1108,7 @@ export function resultsOf(db, username, { yearId = null, today = now().slice(0, 
       className: course.className,
       leftAt: row.left_at,
       // Only this student's notes, by construction; joined after the proposals (design D3).
-      entries: withNotes(entries, courseNotes(db, course, key)).map(({ id, columnId, kind, category, value, points, maxPoints, grade, date, semesterDate: decides, projectId, projectName, name, note, attemptId, reviewOpen }) => ({
+      entries: withNotes(entries, courseNotes(db, course, key)).map(({ id, columnId, kind, category, value, points, maxPoints, grade, date, semesterDate: decides, projectId, projectName, name, note, attemptId, reviewOpen, ...rest }) => ({
         id,
         columnId,
         kind,
@@ -1058,6 +1125,8 @@ export function resultsOf(db, username, { yearId = null, today = now().slice(0, 
         note,
         // Only an online test's entry can be reviewed (exam-attempt-review D4).
         ...(kind === "online" ? { attemptId, reviewOpen } : {}),
+        // The group's factor, where it raised this result (offline-test-group-factor D6).
+        ...(rest.factor > 1 ? { group: rest.group, factor: rest.factor, enteredValue: rest.enteredValue } : {}),
       })),
       semesters: Object.fromEntries(
         shown.map((semester) => {

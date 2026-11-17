@@ -79,13 +79,39 @@ function parseNumber(text) {
   return value === null || value < 0 ? Number.NaN : value;
 }
 
-/** A result as it was entered: "17/24", "75 %", "+", "−" or "grade 2"; a dash for a cell holding only a note. */
+/**
+ * A result as it was entered: "17/24", "75 %", "+", "−" or "grade 2"; a dash
+ * for a cell holding only a note. A result raised by its group's factor A:B
+ * says so: "18/24 · ×1,20 (group B) → 90 %" (offline-test-group-factor D6).
+ */
 function entryResult(entry) {
   if (entry.value === null) return "–";
   if (isMark(entry)) return entry.value === 1 ? "+" : "−";
   if (isGraded(entry)) return t("exam.gradebook.gradeValue", { grade: entry.grade });
-  if (entry.maxPoints !== null) return `${format.number(entry.points)}/${format.number(entry.maxPoints)}`;
-  return percent(entry.value);
+  const entered = entry.maxPoints !== null ? `${format.number(entry.points)}/${format.number(entry.maxPoints)}` : percent(entry.enteredValue ?? entry.value);
+  if (!(entry.factor > 1)) return entered;
+  return t("exam.gradebook.raisedResult", { entered, factor: format.fixed(entry.factor), group: entry.group, counted: percent(entry.value) });
+}
+
+/** A factor A:B as the dialog and the header's tooltip show it: "A 1,00 : B 1,20". */
+function ratioText({ a, b }) {
+  return t("exam.gradebook.groupFactorRatio", { a: format.fixed(a), b: format.fixed(b) });
+}
+
+/** True for an offline test's column whose factor A:B counts and is not 1:1. */
+function hasGroupFactor(column) {
+  return Boolean(column.twoHandouts && column.groupFactor && (column.groupFactor.a > 1 || column.groupFactor.b > 1));
+}
+
+/** The slider's position for a factor A:B: 0 in the middle, a step of 0.05 each, negative towards A. */
+function sliderPosition({ a, b }) {
+  return Math.round((b - a) * 20);
+}
+
+/** The factor A:B of a slider position. */
+function factorAt(position) {
+  const raise = Math.round(Math.abs(position) * 5) / 100;
+  return position < 0 ? { a: 1 + raise, b: 1 } : { a: 1, b: 1 + raise };
 }
 
 /** A category's value for a table cell: "81,5 % · 2", or a dash without entries. */
@@ -155,6 +181,7 @@ function columnLines(column) {
   return [
     h("span", { class: "sl-exam-column-day" }, format.dayMonth(column.date)),
     column.maxPoints === null ? null : h("span", {}, `/${format.number(column.maxPoints)}`),
+    hasGroupFactor(column) ? h("span", { class: "sl-exam-group-factor-mark" }, t("exam.gradebook.groupFactorMark")) : null,
   ];
 }
 
@@ -163,7 +190,8 @@ function columnTitle(column) {
   const scoring =
     isMark(column) || isGraded(column) ? null : column.maxPoints === null ? t("exam.gradebook.inPercent") : t("exam.gradebook.outOfMax", { max: format.number(column.maxPoints) });
   if (column.kind === "project") return [t("exam.gradebook.endGradeTitle", { name: column.name }), displayDate(column.date)].join("\n");
-  return [namedByDate(column) ? null : column.name, displayDate(column.date), scoring].filter(Boolean).join("\n");
+  const factor = hasGroupFactor(column) ? t("exam.gradebook.groupFactorLine", { ratio: ratioText(column.groupFactor) }) : null;
+  return [namedByDate(column) ? null : column.name, displayDate(column.date), scoring, factor].filter(Boolean).join("\n");
 }
 
 function courseTitle(course) {
@@ -186,7 +214,20 @@ function cellText(column, result) {
   if (isMark(column)) return result.value === 1 ? "+" : "−";
   if (isGraded(column)) return String(result.grade);
   if (column.maxPoints !== null) return numberText(result.points);
-  return numberText(Math.round(result.value * 10000) / 100);
+  // The percentage entered, not the one a factor A:B raised it to.
+  return numberText(Math.round((result.enteredValue ?? result.value) * 10000) / 100);
+}
+
+/**
+ * The value a factor A:B makes a result count as, shown after its field:
+ * "→ 90 %", with the factor and group on hover; empty for any other result.
+ */
+function showCounted(counted, result) {
+  const raised = Boolean(result && result.factor > 1);
+  counted.hidden = !raised;
+  counted.textContent = raised ? `→ ${percent(result.value)}` : "";
+  if (raised) counted.title = t("exam.gradebook.countedValue", { value: percent(result.value), factor: format.fixed(result.factor), group: result.group });
+  else counted.removeAttribute("title");
 }
 
 /**
@@ -635,7 +676,9 @@ class GradebookView extends ExamElement {
     if (!editable) {
       const mark = noted === null ? null : h("span", { class: "sl-exam-note-mark", title: noted, "aria-label": noted });
       if (column.readOnly) return h("td", { class: mark ? "sl-exam-online-result sl-exam-noted-cell" : "sl-exam-online-result", "data-column": String(column.id), "data-student": row.username }, cellText(column, result), mark);
-      return h("td", { class: mark ? "sl-exam-noted-cell" : null }, cellText(column, result), mark);
+      const counted = h("span", { class: "sl-exam-counted" });
+      showCounted(counted, result);
+      return h("td", { class: mark ? "sl-exam-noted-cell" : null }, cellText(column, result), counted, mark);
     }
     const note = this.noteField(course, column, columnIndex, row, rowIndex, noted);
     if (column.readOnly) {
@@ -673,6 +716,9 @@ class GradebookView extends ExamElement {
       "data-student": row.username,
       "aria-label": `${displayPerson(row)} – ${column.name}`,
     });
+    // What a factor A:B makes the result count as (offline-test-group-factor D6).
+    const counted = h("span", { class: "sl-exam-counted" });
+    showCounted(counted, result);
     const path = `/assessments/${column.id}/results/${encodeURIComponent(row.username)}`;
     saveOnChange(field, {
       check: (text) => readCell(column, text).reason ?? null,
@@ -684,6 +730,7 @@ class GradebookView extends ExamElement {
       onSaved: (answer, sentText) => {
         if (!answer) return;
         stored = answer.results[column.id] ?? null;
+        showCounted(counted, stored);
         // A participation shortcut shows as the grade it was saved as, unless
         // something else has been typed meanwhile.
         if (participation && stored && field.value === sentText) {
@@ -713,7 +760,7 @@ class GradebookView extends ExamElement {
         field.saveNow();
       });
     }
-    return h("td", { class: "sl-exam-noted-cell", "data-column": String(column.id) }, field, note.mark, note.field);
+    return h("td", { class: "sl-exam-noted-cell", "data-column": String(column.id) }, field, counted, note.mark, note.field);
   }
 
   /**
@@ -840,6 +887,56 @@ class GradebookView extends ExamElement {
   }
 
   /**
+   * The factor A:B of an offline test's column (offline-test-group-factor
+   * D5): a slider from A to B, the middle 1:1, each step raising the group
+   * it moves towards by 0.05. The ratio beside it follows while it moves; the
+   * factor is saved when it is let go, so a drag is one write. "1:1" puts it
+   * back in the middle.
+   */
+  groupFactorField(column, put, onSaved) {
+    const ratio = h("output", { class: "sl-exam-group-factor-ratio" }, ratioText(column.groupFactor));
+    const slider = h("input", {
+      type: "range",
+      min: "-20",
+      max: "20",
+      step: "1",
+      class: "sl-exam-group-factor",
+      "aria-label": t("exam.gradebook.groupFactorSlider"),
+    });
+    slider.value = String(sliderPosition(column.groupFactor));
+    const follow = () => {
+      const text = ratioText(factorAt(Number(slider.value)));
+      ratio.textContent = text;
+      slider.setAttribute("aria-valuetext", text);
+    };
+    follow();
+    slider.addEventListener("input", follow);
+    saveOnChange(slider, { save: (value) => put({ groupFactor: factorAt(Number(value)) }), onSaved });
+    const reset = h(
+      "button",
+      {
+        type: "button",
+        class: "sl-exam-action sl-exam-group-factor-reset",
+        onclick: () => {
+          slider.value = "0";
+          follow();
+          slider.dispatchEvent(new Event("change"));
+        },
+      },
+      t("exam.gradebook.groupFactorReset")
+    );
+    return h(
+      "div",
+      { class: "sl-exam-group-factor-field" },
+      h("span", {}, t("exam.gradebook.groupFactor")),
+      h("span", { class: "sl-exam-group-factor-scale" }, h("span", { "aria-hidden": "true" }, "A"), slider, h("span", { "aria-hidden": "true" }, "B")),
+      ratio,
+      reset,
+      h("span", { class: "sl-exam-quiet sl-exam-group-factor-hint" }, t("exam.gradebook.groupFactorHint"))
+    );
+  }
+
+  /**
    * A column's dialog: its name, date and, where the category has one,
    * maximum. Opened by the `+` of a category (`column` null), it adds a column
    * on submit. Opened by a column's header, it saves each field as it changes
@@ -895,6 +992,8 @@ class GradebookView extends ExamElement {
       h("label", {}, `${t("exam.gradebook.date")} `, date),
       column || proposed < from || proposed > to ? null : h("span", { class: "sl-exam-quiet" }, `${semesterLabels[semester]}: ${displayDate(from)} – ${displayDate(to)}`),
       max ? h("label", {}, `${t("exam.gradebook.outOf")} `, max, ` ${t("exam.gradebook.points")}`) : null,
+      // Only an offline test's column with two handouts has a factor A:B (offline-test-group-factor D5).
+      column?.twoHandouts ? this.groupFactorField(column, put, afterSave) : null,
     ];
     const cancel = (label, className) => h("button", { type: "button", class: `sl-exam-action ${className}`, onclick: () => dialog.close() }, label);
 

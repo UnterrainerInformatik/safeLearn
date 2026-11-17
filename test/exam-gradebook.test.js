@@ -47,6 +47,7 @@ import {
   weightedMean,
   yearProposal,
 } from "../exam/grading.js";
+import { setAttendance } from "../exam/tests.js";
 
 const temporaryDirs = [];
 const openDatabases = [];
@@ -1297,5 +1298,149 @@ describe("participation as grades", () => {
 
     assert.throws(() => db.prepare("UPDATE manual_entry SET value = 0.5 WHERE id = 10").run(), /school year closed/, "the closed year's trigger is back");
     db.prepare("UPDATE manual_entry SET value = 0.5 WHERE id = 20").run();
+  });
+});
+
+describe("the factor A:B of an offline test", () => {
+  /**
+   * An offline test of the course with its column out of `maxPoints` (null
+   * for percent), handout B unless `twoHandouts` is false, and one started
+   * sitting for anna and ben, both present in group A. Written straight into
+   * the tables, so no corpus is needed for the handouts.
+   */
+  function offlineTest(db, course, { maxPoints = 24, twoHandouts = true } = {}) {
+    const at = "2026-11-03T08:00:00.000Z";
+    const columnId = Number(
+      db.prepare("INSERT INTO assessment (course_id, kind, name, held_on, max_points, created_at) VALUES (?, 'test', 'LT1', '2026-11-03', ?, ?)").run(course.id, maxPoints, at)
+        .lastInsertRowid
+    );
+    const testId = Number(
+      db
+        .prepare(
+          `INSERT INTO test (course_id, name, kind, duration_s, handout_a, handout_b, assessment_id, created_at, updated_at)
+           VALUES (?, 'LT1', 'offline', 6000, 'POS/A.md', ?, ?, ?, ?)`
+        )
+        .run(course.id, twoHandouts ? "POS/B.md" : null, columnId, at, at).lastInsertRowid
+    );
+    const sittingId = sitting(db, testId, at, ["anna", "ben"]);
+    return { columnId, testId, sittingId };
+  }
+
+  /** A started sitting of `testId` at `at` for `usernames`, everyone present in group A. */
+  function sitting(db, testId, at, usernames) {
+    const closes = new Date(Date.parse(at) + 6000 * 1000).toISOString();
+    const id = Number(
+      db.prepare("INSERT INTO sitting (test_id, opens_at, closes_at, duration_s, makeup, created_at, started_at) VALUES (?, ?, ?, 6000, 0, ?, ?)").run(testId, at, closes, at, at)
+        .lastInsertRowid
+    );
+    for (const username of usernames) db.prepare("INSERT INTO sitting_participant (sitting_id, username) VALUES (?, ?)").run(id, username);
+    return id;
+  }
+
+  const counted = (db, course, columnId, username) =>
+    courseOverview(db, course.id, "ws").students.find((row) => row.username === username).results[columnId];
+
+  test("the migration keeps every test at 1:1 and refuses both groups raised", () => {
+    const db = freshDatabase();
+    const { course } = (() => {
+      const schoolYear = createYear(db, year);
+      const klass = createClass(db, schoolYear.id, { name: "4BHIF", students: [{ username: "anna" }, { username: "ben" }] });
+      return { course: createCourse(db, klass.id, { subject: "WMC", language: "en", weights }) };
+    })();
+    const { testId } = offlineTest(db, course);
+    assert.deepEqual({ ...db.prepare("SELECT group_factor_a AS a, group_factor_b AS b FROM test WHERE id = ?").get(testId) }, { a: 1, b: 1 });
+    assert.throws(() => db.prepare("UPDATE test SET group_factor_a = 1.2, group_factor_b = 1.1 WHERE id = ?").run(testId), /CHECK/);
+    assert.throws(() => db.prepare("UPDATE test SET group_factor_b = 2.5 WHERE id = ?").run(testId), /CHECK/);
+    db.prepare("UPDATE test SET group_factor_b = 1.2 WHERE id = ?").run(testId);
+  });
+
+  test("raises the group's results by its factor, capped at the full result, and leaves the other group and the stored points alone", () => {
+    const { db, course } = gradebookFixture();
+    const { columnId, sittingId } = offlineTest(db, course);
+    setAttendance(db, sittingId, "ben", { group: "B" });
+    setResult(db, columnId, "anna", { points: 18 });
+    setResult(db, columnId, "ben", { points: 18 });
+    const column = updateColumn(db, columnId, { groupFactor: { a: 1, b: 1.2 } });
+    assert.deepEqual([column.groupFactor, column.twoHandouts], [{ a: 1, b: 1.2 }, true]);
+
+    const ben = counted(db, course, columnId, "ben");
+    assert.equal(ben.points, 18, "the field still shows the points entered");
+    assert.equal(ben.enteredValue, 0.75);
+    assert.equal(Math.round(ben.value * 1000) / 1000, 0.9, "18 / 24 × 1.20");
+    assert.deepEqual([ben.group, ben.factor], ["B", 1.2]);
+    assert.deepEqual(counted(db, course, columnId, "anna"), { value: 0.75, points: 18, group: "A", factor: 1, enteredValue: 0.75 }, "group A as entered");
+    assert.equal(db.prepare("SELECT value FROM manual_entry WHERE assessment_id = ? AND username = 'ben'").get(columnId).value, 0.75, "nothing is written");
+
+    setResult(db, columnId, "ben", { points: 22 });
+    assert.equal(counted(db, course, columnId, "ben").value, 1, "22 / 24 × 1.20 is capped at 100 %");
+
+    updateColumn(db, columnId, { groupFactor: { a: 1.1, b: 1 } });
+    assert.equal(Math.round(counted(db, course, columnId, "anna").value * 1000) / 1000, 0.825, "handout A was the harder one");
+    assert.equal(Math.round(counted(db, course, columnId, "ben").value * 10000) / 10000, Math.round((22 / 24) * 10000) / 10000);
+    updateColumn(db, columnId, { groupFactor: { a: 1, b: 1 } });
+    assert.equal(counted(db, course, columnId, "anna").value, 0.75, "back in the middle, both count as entered");
+  });
+
+  test("a percent column is raised too, and one handout ignores a stored factor", () => {
+    const { db, course } = gradebookFixture();
+    const { columnId, testId, sittingId } = offlineTest(db, course, { maxPoints: null });
+    setAttendance(db, sittingId, "ben", { group: "B" });
+    setResult(db, columnId, "ben", { percent: 50 });
+    updateColumn(db, columnId, { groupFactor: { a: 1, b: 1.5 } });
+    assert.equal(counted(db, course, columnId, "ben").value, 0.75);
+    assert.equal(counted(db, course, columnId, "ben").enteredValue, 0.5, "the percent typed stays readable");
+
+    db.prepare("UPDATE test SET handout_b = NULL WHERE id = ?").run(testId);
+    assert.deepEqual(counted(db, course, columnId, "ben"), { value: 0.5, points: null }, "no factor counts with one handout");
+    assert.deepEqual(db.prepare("SELECT group_factor_b AS b FROM test WHERE id = ?").get(testId).b, 1.5, "but it is kept");
+    assert.equal(updateColumn(db, columnId, {}).twoHandouts, false);
+  });
+
+  test("the proposal, the year grade and the student's results use the counted value; a regrouping takes effect without a write", () => {
+    const { db, course } = gradebookFixture();
+    const { columnId, sittingId } = offlineTest(db, course);
+    setResult(db, columnId, "anna", { points: 18 });
+    updateColumn(db, columnId, { groupFactor: { a: 1, b: 1.2 } });
+    const proposalOf = () => courseOverview(db, course.id, "ws").students.find((row) => row.username === "anna").proposal;
+    assert.equal(proposalOf().fraction, 0.75, "in group A, as entered");
+    const stamp = db.prepare("SELECT updated_at FROM manual_entry WHERE assessment_id = ?").get(columnId).updated_at;
+
+    setAttendance(db, sittingId, "anna", { group: "B" });
+    assert.equal(Math.round(proposalOf().fraction * 1000) / 1000, 0.9, "moved to group B, the proposal follows");
+    assert.equal(proposalOf().grade, 1);
+    assert.equal(db.prepare("SELECT updated_at FROM manual_entry WHERE assessment_id = ?").get(columnId).updated_at, stamp, "no write to the result");
+
+    const ss = courseOverview(db, course.id, "ss").students.find((row) => row.username === "anna");
+    assert.equal(Math.round(ss.proposal.fraction * 1000) / 1000, 0.9, "the year grade builds on the counted value");
+
+    const own = resultsOf(db, "anna", { today: "2026-11-20" }).courses[0];
+    assert.deepEqual(
+      own.entries.map((entry) => [entry.points, entry.maxPoints, entry.group, entry.factor, entry.enteredValue, Math.round(entry.value * 1000) / 1000, entry.grade]),
+      [[18, 24, "B", 1.2, 0.75, 0.9, 1]]
+    );
+    assert.equal(Math.round(own.semesters.ws.fraction * 1000) / 1000, 0.9);
+    const record = studentRecord(db, course.id, "anna").entries[0];
+    assert.deepEqual([record.factor, record.group], [1.2, "B"]);
+  });
+
+  test("refuses a factor out of range, both raised, and on a column without two handouts, leaving it unchanged", () => {
+    const { db, course } = gradebookFixture();
+    const { columnId } = offlineTest(db, course);
+    updateColumn(db, columnId, { groupFactor: { a: 1, b: 1.2 } });
+    const refused = (input) => assert.throws(() => updateColumn(db, columnId, { groupFactor: input }), (error) => error.key === "exam.errors.gradebook.groupFactorRange", JSON.stringify(input));
+    refused({ a: 1, b: 2.5 });
+    refused({ a: 1.1, b: 1.2 });
+    refused({ a: 0.8, b: 1 });
+    refused({ a: "x", b: 1 });
+    refused(null);
+    assert.deepEqual(courseColumns(db, course.id).find((c) => c.id === columnId).groupFactor, { a: 1, b: 1.2 }, "the factor stays as it was");
+    assert.deepEqual(updateColumn(db, columnId, { groupFactor: { a: 1, b: 1.234 } }).groupFactor, { a: 1, b: 1.25 }, "rounded to the grid of 0.05");
+
+    const single = offlineTest(db, course, { twoHandouts: false }).columnId;
+    const manual = column(db, course, { kind: "test", name: "Paper", date: "2026-11-04", maxPoints: 10 });
+    for (const id of [single, manual.id]) {
+      assert.throws(() => updateColumn(db, id, { groupFactor: { a: 1, b: 1.2 } }), (error) => error.key === "exam.errors.gradebook.noGroupFactor");
+    }
+    assert.equal(manual.groupFactor, undefined, "an ordinary column carries no factor");
   });
 });

@@ -163,6 +163,9 @@ export function createFormat(locale, lang = "en") {
     /** "1,5" / "1.5", with at most `digits` decimals. */
     number: (n, digits = 2) =>
       cached(`number${digits}`, locale, () => new Intl.NumberFormat(locale, { maximumFractionDigits: digits })).format(n),
+    /** "1,20" / "1.20": exactly `digits` decimals, for a factor. */
+    fixed: (n, digits = 2) =>
+      cached(`fixed${digits}`, locale, () => new Intl.NumberFormat(locale, { minimumFractionDigits: digits, maximumFractionDigits: digits })).format(n),
     /** "42 %" / "42%" for 0.42, with at most `digits` decimals. */
     percent: (fraction, digits = 0) =>
       cached(`percent${digits}`, locale, () => new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: digits })).format(

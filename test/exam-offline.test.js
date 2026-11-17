@@ -33,6 +33,7 @@ import {
   endSitting,
   extendSitting,
   getSitting,
+  countingGroups,
   getTest,
   listTests,
   rescheduleSitting,
@@ -456,6 +457,26 @@ describe("a make-up of an offline test", () => {
     startSitting(db, makeup.id);
     assert.equal(openTestsOf(db, "ben")[0].sittingId, makeup.id);
     assert.deepEqual(openTestsOf(db, "cara"), [], "the third has no sitting left");
+  });
+});
+
+describe("the group that counts for the factor A:B", () => {
+  test("is the group of the latest started sitting a participant was present at, otherwise A", () => {
+    const { db, course } = seeded();
+    const { test: offline, sitting } = running(db, course);
+    setAttendance(db, sitting.id, "ben", { present: false });
+    setAttendance(db, sitting.id, "cara", { present: false });
+    setAttendance(db, sitting.id, "anna", { group: "B" });
+    assert.deepEqual([...countingGroups(db, course.id)], [], "a planned sitting has nobody present yet");
+    startSitting(db, sitting.id, inMinutes(-1));
+    endSitting(db, sitting.id);
+    const makeup = createSitting(db, offline.id, { opensAt: inMinutes(60), participants: ["ben"] });
+    setAttendance(db, makeup.id, "ben", { group: "B" });
+    startSitting(db, makeup.id);
+    const groups = countingGroups(db, course.id);
+    assert.equal(groups.get(`${offline.id}/anna`), "B");
+    assert.equal(groups.get(`${offline.id}/ben`), "B", "absent from the first sitting, in group B at the make-up");
+    assert.equal(groups.has(`${offline.id}/cara`), false, "present in no sitting, so group A");
   });
 });
 
