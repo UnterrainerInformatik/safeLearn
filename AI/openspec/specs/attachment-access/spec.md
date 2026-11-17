@@ -52,9 +52,15 @@ A handout the exam module currently serves to a session (`exam-handout`) SHALL c
 
 #### Scenario: Referenced by a handout during the window
 
-- **WHEN** an attachment is referenced only in a handout restricted to teachers, inside its `#exam` block, and a present participant of the open sitting requests it
+- **WHEN** an attachment is referenced only in a handout restricted to teachers, outside any `@@@` block, and a present participant of the open sitting requests it
 - **THEN** it is served to that participant
 - **AND** it is not served to an absent participant or to a student of another class
+
+#### Scenario: Referenced by a handout only inside its exam variant
+
+- **WHEN** an attachment is referenced only in a handout restricted to teachers, inside its `#exam` block, and a present participant of the open sitting requests it
+- **THEN** it is not served to that participant, because the handout hides the exam variant from them
+- **AND** it is served to a teacher, because the handout's solution deck shows the exam variant
 
 #### Scenario: The participant is marked absent during the window
 
