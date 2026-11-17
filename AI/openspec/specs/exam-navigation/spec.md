@@ -125,7 +125,7 @@ While the module is active, the instance's top bar SHALL carry, on every page, o
 
 ### Requirement: The bar leads to the grading scale
 
-The module's bar SHALL carry, beside the question pool and the online tests, a button to the grading scale, marked while the scale is the page shown. The module's start page SHALL NOT carry a separate line of links to the module's pages.
+The module's bar SHALL carry, beside the question pool and the tests, a button to the grading scale, marked while the scale is the page shown. The module's start page SHALL NOT carry a separate line of links to the module's pages.
 
 #### Scenario: From any page to the scale
 
