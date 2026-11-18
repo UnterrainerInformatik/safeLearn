@@ -100,12 +100,22 @@ export function scoreAttempt(db, attemptId) {
 
 /**
  * For each question of a test's snapshot, how many submitted attempts
- * answered it correctly - by the rule `scoreAttempt` applies - out of how many
- * submitted attempts there are. Counts only, never who (`board-solution`).
+ * answered it correctly - by the rule `scoreAttempt` applies -, wrong, or left
+ * it blank (no answer chosen), out of how many submitted attempts there are;
+ * and for each answer how many submitted attempts chose it. A partly correct
+ * choice counts as wrong. Counts only, never who (`board-solution`).
  */
 export function correctShares(db, testId) {
   const submitted = db.prepare("SELECT COUNT(*) AS n FROM attempt WHERE test_id = ? AND submitted_at IS NOT NULL").get(testId).n;
   const correct = new Map();
+  const wrong = new Map();
+  const blank = new Map();
+  const chosen = new Map(
+    db
+      .prepare("SELECT a.id FROM test_answer a JOIN test_question q ON q.id = a.test_question_id WHERE q.test_id = ?")
+      .all(testId)
+      .map((row) => [row.id, 0])
+  );
   const chosenRows = db
     .prepare(
       `SELECT r.attempt_id AS attemptId, a.test_question_id AS questionId, a.id AS answerId
@@ -113,25 +123,30 @@ export function correctShares(db, testId) {
        WHERE t.test_id = ? AND t.submitted_at IS NOT NULL`
     )
     .all(testId);
-  const chosen = new Map();
+  const picks = new Map();
   for (const row of chosenRows) {
     const key = `${row.attemptId}:${row.questionId}`;
-    if (!chosen.has(key)) chosen.set(key, new Set());
-    chosen.get(key).add(row.answerId);
+    if (!picks.has(key)) picks.set(key, new Set());
+    picks.get(key).add(row.answerId);
+    chosen.set(row.answerId, (chosen.get(row.answerId) ?? 0) + 1);
   }
   const questions = db.prepare("SELECT id FROM test_question WHERE test_id = ?").all(testId);
   const correctOf = db.prepare("SELECT id FROM test_answer WHERE test_question_id = ? AND correct = 1");
   const attempts = db.prepare("SELECT id FROM attempt WHERE test_id = ? AND submitted_at IS NOT NULL").all(testId);
   for (const question of questions) {
     const right = correctOf.all(question.id).map((row) => row.id);
-    let count = 0;
+    let rightCount = 0;
+    let blankCount = 0;
     for (const attempt of attempts) {
-      const picked = chosen.get(`${attempt.id}:${question.id}`) ?? new Set();
-      if (picked.size === right.length && right.every((id) => picked.has(id))) count += 1;
+      const picked = picks.get(`${attempt.id}:${question.id}`) ?? new Set();
+      if (picked.size === 0) blankCount += 1;
+      else if (picked.size === right.length && right.every((id) => picked.has(id))) rightCount += 1;
     }
-    correct.set(question.id, count);
+    correct.set(question.id, rightCount);
+    blank.set(question.id, blankCount);
+    wrong.set(question.id, submitted - rightCount - blankCount);
   }
-  return { submitted, correct };
+  return { submitted, correct, wrong, blank, chosen };
 }
 
 /**

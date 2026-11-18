@@ -48,9 +48,10 @@ function escapeText(value) {
 /**
  * The board solution's slides (`board-solution`, design D11): a title slide,
  * then one per question in the test's own order and the course's language,
- * the correct answers marked and the share of submitted attempts that got the
- * question right - a number, never a name. Without a submitted attempt the
- * share is left out. The texts are the snapshot's, sanitized when imported.
+ * the correct answers marked, the share of submitted attempts that got the
+ * question right with the counts of correct, wrong and blank ones, and beside
+ * each answer how many chose it - numbers, never a name. Without a submitted
+ * attempt all of them are left out. The texts are the snapshot's, sanitized when imported.
  */
 function solutionSlides(test, shares) {
   const en = test.course.language === "en";
@@ -67,14 +68,17 @@ function solutionSlides(test, shares) {
     const correct = shares.correct.get(question.id) ?? 0;
     const share =
       shares.submitted > 0
-        ? `<p class="sl-board-share">${en ? "Answered correctly" : "Richtig beantwortet"}: ${Math.round((100 * correct) / shares.submitted)} %</p>`
+        ? `<p class="sl-board-share">${en ? "Answered correctly" : "Richtig beantwortet"}: ${Math.round((100 * correct) / shares.submitted)} % · ${correct} ${
+            en ? "correct" : "richtig"
+          } · ${shares.wrong.get(question.id) ?? 0} ${en ? "wrong" : "falsch"} · ${shares.blank.get(question.id) ?? 0} ${en ? "blank" : "leer"}</p>`
         : "";
+    const count = (answer) => (shares.submitted > 0 ? `<span class="sl-board-count">${shares.chosen.get(answer.id) ?? 0}×</span>` : "");
     const answers = question.answers
       .map(
         (answer) =>
           `<li class="${answer.correct ? "sl-board-correct" : "sl-board-wrong"}"><span class="sl-board-mark" aria-label="${
             answer.correct ? (en ? "correct" : "richtig") : en ? "wrong" : "falsch"
-          }">${answer.correct ? "✓" : "✗"}</span><div>${answer[text]}</div></li>`
+          }">${answer.correct ? "✓" : "✗"}</span><div>${answer[text]}</div>${count(answer)}</li>`
       )
       .join("");
     return `

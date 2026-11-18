@@ -2849,7 +2849,7 @@ describe("online tests: writing", () => {
     }
   });
 
-  test("a teacher shows a test's solution on the board: correct answers and the class's share, no names, no foreign host", async () => {
+  test("a teacher shows a test's solution on the board: correct answers, the class's share and counts, no names, no foreign host", async () => {
     const tests = (await fetchAs(teacher, `/exam/api/tests?course=${course.id}`)).json.groups[0].tests;
     const written = tests.find((t) => t.name === "Writing");
     const unwritten = tests.find((t) => t.name === "Preview");
@@ -2874,6 +2874,7 @@ describe("online tests: writing", () => {
           questions: [...document.querySelectorAll("section.sl-board-question")].map((s) => ({
             correct: s.querySelectorAll(".sl-board-correct").length,
             share: s.querySelector(".sl-board-share")?.textContent ?? null,
+            counts: [...s.querySelectorAll(".sl-board-answers li")].map((li) => li.querySelector(".sl-board-count")?.textContent ?? null),
           })),
         }));
         return { ...seen, hosts: [...hosts] };
@@ -2882,13 +2883,18 @@ describe("online tests: writing", () => {
       }
     };
 
-    const flags = (await fetchAs(teacher, `/exam/api/tests/${written.id}`)).json.questions.map((q) => q.answers.filter((a) => a.correct).length);
+    const flags = (await fetchAs(teacher, `/exam/api/tests/${written.id}`)).json.questions.map((q) => q.answers.map((a) => a.correct));
     const solved = await deck(written.id);
     assert.ok(solved.revealed, "the deck runs in the presentation view");
+    // The one submitted attempt answered every question correctly.
     assert.deepEqual(
       solved.questions,
-      flags.map((correct) => ({ correct, share: "Richtig beantwortet: 100 %" })),
-      "one slide per question, its correct answers marked and the share of the one submitted attempt"
+      flags.map((answers) => ({
+        correct: answers.filter(Boolean).length,
+        share: "Richtig beantwortet: 100 % · 1 richtig · 0 falsch · 0 leer",
+        counts: answers.map((correct) => (correct ? "1×" : "0×")),
+      })),
+      "one slide per question, its correct answers marked, the share and counts of the one submitted attempt and how often each answer was chosen"
     );
     assert.deepEqual(solved.hosts, [new URL(applicationUrl).host], `the deck contacts no other host: ${solved.hosts.join(", ")}`);
     const names = database((db) => db.prepare("SELECT username, given_name, family_name FROM student").all())
@@ -2898,7 +2904,7 @@ describe("online tests: writing", () => {
     assert.deepEqual(names.filter((name) => solved.html.toLowerCase().includes(name.toLowerCase())), [], "no student is named in the deck");
 
     const fresh = await deck(unwritten.id);
-    assert.ok(fresh.questions.length > 0 && fresh.questions.every((q) => q.correct > 0 && q.share === null), "a test nobody wrote shows the answers and no share");
+    assert.ok(fresh.questions.length > 0 && fresh.questions.every((q) => q.correct > 0 && q.share === null && q.counts.every((c) => c === null)), "a test nobody wrote shows the answers and no share, no counts");
 
     assert.deepEqual(await fetchAs(student, `/exam/tests/${written.id}/solution`), await fetchAs(student, absent), "a student finds no deck");
     await setPreferences(teacher, { vt: 0 });

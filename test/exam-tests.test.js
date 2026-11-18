@@ -605,6 +605,13 @@ describe("attempts", () => {
     const multi = writingView(db, attemptRow(db, ben)).questions.find((q) => q.type === "multichoiceset");
     saveAnswer(db, attemptRow(db, ben), multi.n, correctTokens(db, ben)[multi.n].slice(0, 1));
     assert.equal(correctShares(db, test.id).submitted, 1, "an open attempt does not count yet");
+    const whileOpen = correctShares(db, test.id);
+    assert.ok(questionIds.every((q) => whileOpen.wrong.get(q.id) === 0 && whileOpen.blank.get(q.id) === 0), "nor in the wrong or blank counts");
+    assert.equal(
+      [...whileOpen.chosen.values()].reduce((sum, n) => sum + n, 0),
+      db.prepare("SELECT COUNT(*) AS n FROM response WHERE attempt_id = ?").get(anna).n,
+      "nor in the options' counts"
+    );
     submitAttempt(db, attemptRow(db, ben));
 
     const shares = correctShares(db, test.id);
@@ -613,6 +620,29 @@ describe("attempts", () => {
       questionIds.map((q) => shares.correct.get(q.id)),
       questionIds.map(() => 1),
       "each question was answered correctly by Anna only"
+    );
+    const isMulti = (q) => q.type === "multichoiceset";
+    assert.deepEqual(
+      questionIds.map((q) => shares.wrong.get(q.id)),
+      questionIds.map((q) => (isMulti(q) ? 1 : 0)),
+      "Ben's partly correct choice counts as wrong"
+    );
+    assert.deepEqual(
+      questionIds.map((q) => shares.blank.get(q.id)),
+      questionIds.map((q) => (isMulti(q) ? 0 : 1)),
+      "Ben left the other questions blank"
+    );
+    for (const q of questionIds) assert.equal(shares.correct.get(q.id) + shares.wrong.get(q.id) + shares.blank.get(q.id), shares.submitted);
+
+    // Each answer is counted once per submitted attempt that chose it.
+    const answers = db
+      .prepare("SELECT a.id, a.correct FROM test_answer a JOIN test_question q ON q.id = a.test_question_id WHERE q.test_id = ?")
+      .all(test.id);
+    const bensPick = db.prepare("SELECT test_answer_id AS id FROM response WHERE attempt_id = ?").all(ben).map((row) => row.id);
+    assert.equal(bensPick.length, 1);
+    assert.deepEqual(
+      answers.map((a) => shares.chosen.get(a.id)),
+      answers.map((a) => (a.correct ? 1 : 0) + (a.id === bensPick[0] ? 1 : 0))
     );
   });
 
