@@ -42,5 +42,5 @@
 ## 6. Ship
 
 - [x] 6.1 Run the full `npm test` once. Verify: it is green (re-run only failing checks after fixes).
-- [ ] 6.2 Release the plugin: version in three places, push, tag, GitHub release with `main.js`, `manifest.json`, `styles.css`. Verify: the release is listed as latest.
-- [ ] 6.3 Commit and push safeLearn, then merge into secureLectures and push. Verify: a deploy run starts for HEAD in secureLectures.
+- [x] 6.2 Release the plugin: version in three places, push, tag, GitHub release with `main.js`, `manifest.json`, `styles.css`. Verify: the release is listed as latest.
+- [x] 6.3 Commit and push safeLearn, then merge into secureLectures and push. Verify: a deploy run starts for HEAD in secureLectures.
