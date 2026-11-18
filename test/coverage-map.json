@@ -317,6 +317,13 @@
         "md/test-md-file.md"
       ]
     },
+    "test/block-grammar.test.js": {
+      "what": "Where an inline @@@ block begins and ends (permission-block-grammar): a table of documents with their block line ranges - @@@ mid-line and in inline code, marker lines in closed backtick and tilde fences, an unclosed fence, a stray closer, an opener inside an open block, an unclosed block, indented markers, CRLF, a whole-file directive and the shape of the POSE3-OO incident - run against the server's resolveInlineBlocks and the companion plugin's resolveBlocks. A row either side reads differently fails here, naming that side. Needs no browser, no login and no server; it does need the plugin checkout the AI/plugin symlink points at.",
+      "guards": [
+        "obsidian.js"
+      ],
+      "corpus": []
+    },
     "test/directive-grammar.test.js": {
       "what": "What a permission directive means, entry by entry: a table of edge-case directive lines read by parseFirstLineForPermissions, covering the permissive cases of parseLocalDateTime that a hand-written mirror gets wrong. It is the oracle the companion plugin's own grammar is held against - the plugin's parseDirectiveEntries reads the same table and has to reach the same conclusion per entry, so a divergence fails here rather than misinforming a person writing a document. Needs no browser, no login and no server; it does need the plugin checkout the AI/plugin symlink points at.",
       "guards": [

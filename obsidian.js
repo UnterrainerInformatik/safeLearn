@@ -60,8 +60,6 @@ const timedPermissionEntries = new Map();
 let visibilityInterval = null;
 let visibilityChangeCallback = null;
 
-const inlinePermissionRegex = /^[ \t]*@@@(.*?)\n([\s\S]*?)@@@/gms;
-
 let codeList = [];
 let openNavTreeScript = "";
 
@@ -434,10 +432,163 @@ function hasTimedWindow(entry) {
   return Boolean(entry?.window && (entry.window.start || entry.window.end));
 }
 
+// ################### The inline block grammar ###################
+//
+// Where an inline `@@@` block begins and ends (`permission-block-grammar`). The
+// companion plugin reads documents by the same rules in `resolveBlocks`, and
+// `test/block-grammar.test.js` holds the two to one table. It used to be a
+// regular expression that ended a block at the next `@@@` anywhere - in a
+// sentence, in inline code, in a code block - and a teacher note mentioning
+// `` `@@@ #exam` `` paired every later block one step off, which showed a class
+// every model solution of a test. A line scanner states the rules one at a time.
+
+/** An opening marker: `@@@` at the start of a line naming something. */
+const opensInlineBlock = /^[ \t]*@@@[ \t]*\S/;
+/** A closing marker: a line of nothing but `@@@`. */
+const closesInlineBlock = /^[ \t]*@@@[ \t]*$/;
+
+/** The fence a line opens, or null: three or more backticks or tildes at its start. */
+function fenceOpenedBy(text) {
+  const match = /^[ \t]*(`{3,}|~{3,})(.*)$/.exec(text);
+  if (!match) return null;
+  // CommonMark: a backtick fence's info string holds no backtick, so a line
+  // like ```` ```a``` ```` is inline code rather than a fence.
+  if (match[1][0] === "`" && match[2].includes("`")) return null;
+  return { char: match[1][0], length: match[1].length };
+}
+
+/** Whether a line closes `fence`: as many of its characters or more, and nothing else. */
+function closesFence(text, fence) {
+  const match = /^[ \t]*(`{3,}|~{3,})[ \t]*$/.exec(text);
+  return match !== null && match[1][0] === fence.char && match[1].length >= fence.length;
+}
+
+/**
+ * Which lines (by index) stand inside a closed fenced code block, fence lines
+ * included. Fences are paired first, and a fence that is never closed protects
+ * nothing: CommonMark would let it run to the end, and every `@@@ #exam` below
+ * it would become code text shown to everyone. The plugin pairs fences by the
+ * same rule, so it never reads a marker as code that the server acts on.
+ */
+function fencedLineIndices(texts, first) {
+  const fenced = new Array(texts.length).fill(false);
+  let i = first;
+  while (i < texts.length) {
+    const fence = fenceOpenedBy(texts[i]);
+    if (fence === null) {
+      i += 1;
+      continue;
+    }
+    let close = -1;
+    for (let j = i + 1; j < texts.length; j++) {
+      if (closesFence(texts[j], fence)) {
+        close = j;
+        break;
+      }
+    }
+    if (close === -1) {
+      i += 1;
+      continue;
+    }
+    for (let k = i; k <= close; k++) fenced[k] = true;
+    i = close + 1;
+  }
+  return fenced;
+}
+
+/**
+ * Every inline `@@@` block of `md`, and every closing line that closed nothing.
+ *
+ * The grammar, in the order it is applied:
+ * - lines are split on `\n`; a trailing `\r` is ignored when a line is read, and
+ *   kept in every offset, so CRLF output is what it was;
+ * - lines inside a closed fenced code block are code and never markers;
+ * - a block opens on an opening marker and closes on the first later closing
+ *   marker - `@@@` anywhere else in a line is text;
+ * - an opening marker inside an open block opens nothing, and is recorded so a
+ *   shown body can drop it;
+ * - a closing marker with no open block closes nothing, and is recorded so it
+ *   is not shown either;
+ * - a block that is never closed runs to the end of the document.
+ *
+ * With `fileDirective`, the first line is the whole-file directive and no block;
+ * most callers split it off before they ask, the index does not.
+ *
+ * Each block carries `start` (its opening line), `end` (after the closing `@@@`,
+ * or the end of the document), `contentStart` and `contentEnd` (its body,
+ * without the closing `@@@` but with that line's indentation, as the regular
+ * expression it replaces had it), `entries`, `closed`, `innerDirectives`
+ * (`{ start, end }` of every opener inside it, line ending included), and
+ * `fromLine` / `toLine`, counted from 1 like the plugin counts them.
+ */
+export function resolveInlineBlocks(md, { fileDirective = false } = {}) {
+  const blocks = [];
+  const strayClosers = [];
+  if (typeof md !== "string" || md.length === 0) {
+    return { blocks, strayClosers };
+  }
+
+  const lines = [];
+  for (let position = 0; ; ) {
+    const newline = md.indexOf("\n", position);
+    const textEnd = newline === -1 ? md.length : newline;
+    lines.push({
+      start: position,
+      end: newline === -1 ? md.length : newline + 1,
+      text: md.slice(position, textEnd).replace(/\r$/, ""),
+    });
+    if (newline === -1) break;
+    position = newline + 1;
+  }
+  const first = fileDirective ? 1 : 0;
+  const fenced = fencedLineIndices(
+    lines.map((line) => line.text),
+    first
+  );
+
+  let open = null;
+  const close = (contentEnd, end, closed, lastIndex) => {
+    const opener = lines[open.index];
+    blocks.push({
+      start: opener.start,
+      end,
+      contentStart: opener.end,
+      contentEnd,
+      entries: parsePermissionEntries(opener.text.replace(/^[ \t]*@@@/, "")),
+      closed,
+      innerDirectives: open.inner,
+      fromLine: open.index + 1,
+      toLine: lastIndex + 1,
+    });
+    open = null;
+  };
+
+  for (let i = first; i < lines.length; i++) {
+    if (fenced[i]) continue;
+    const line = lines[i];
+    if (open === null) {
+      if (opensInlineBlock.test(line.text)) {
+        open = { index: i, inner: [] };
+      } else if (closesInlineBlock.test(line.text)) {
+        strayClosers.push({ start: line.start, end: line.end, line: i + 1 });
+      }
+    } else if (closesInlineBlock.test(line.text)) {
+      const at = line.start + line.text.indexOf("@@@");
+      close(at, at + 3, true, i);
+    } else if (opensInlineBlock.test(line.text)) {
+      open.inner.push({ start: line.start, end: line.end });
+    }
+  }
+  if (open !== null) {
+    close(md.length, md.length, false, lines.length - 1);
+  }
+  return { blocks, strayClosers };
+}
+
 /**
  * Every inline `@@@` block of a document, as the file writes it: where the block
- * begins and ends, where its body begins and ends, and the entries its directive
- * parses to.
+ * begins and ends, where its body begins and ends, the entries its directive
+ * parses to, whether it was closed, and the line it opens on.
  *
  * What is deliberately absent is any verdict. Who may see a block depends on the
  * session asking and on the moment it asks - `role-resolution` makes that the
@@ -446,25 +597,16 @@ function hasTimedWindow(entry) {
  * stores this shape and nothing more; the decision is taken by
  * `filterForbiddenSegments` when a request actually asks.
  */
-function extractInlinePermissionBlocks(markdown) {
-  if (typeof markdown !== "string" || markdown.length === 0) {
-    return [];
-  }
-  const regex = new RegExp(inlinePermissionRegex);
-  const blocks = [];
-  let match;
-  while ((match = regex.exec(markdown)) !== null) {
-    const end = match.index + match[0].length;
-    blocks.push({
-      start: match.index,
-      end,
-      // The body ends three characters - the closing `@@@` - before the block.
-      contentStart: end - 3 - match[2].length,
-      contentEnd: end - 3,
-      entries: parsePermissionEntries(match[1]),
-    });
-  }
-  return blocks;
+function extractInlinePermissionBlocks(markdown, options = {}) {
+  return resolveInlineBlocks(markdown, options).blocks.map((block) => ({
+    start: block.start,
+    end: block.end,
+    contentStart: block.contentStart,
+    contentEnd: block.contentEnd,
+    entries: block.entries,
+    closed: block.closed,
+    line: block.fromLine,
+  }));
 }
 
 function registerTimedPermissionEntries(fileFullPath, sourceKey, entries = []) {
@@ -566,10 +708,10 @@ export function registerVisibilityChangeCallback(callback) {
 async function readCorpusFile(filePath) {
   // Frontmatter first, as at every read of a corpus file: what the index holds
   // is the body, and its directive is the body's first line.
-  const { body, properties } = splitFrontmatter(
-    await fs.promises.readFile(filePath, "utf8"),
-    filePath
-  );
+  const raw = await fs.promises.readFile(filePath, "utf8");
+  const { body, properties } = splitFrontmatter(raw, filePath);
+  // How many lines the frontmatter took, so a block's line is the file's line.
+  const bodyLineOffset = raw.endsWith(body) ? raw.slice(0, raw.length - body.length).split("\n").length - 1 : 0;
   // `readline` handed the first line over without its line ending, whichever of
   // the two it was, and `parseFirstLineForPermissions` is held to the same input
   // as before.
@@ -590,7 +732,11 @@ async function readCorpusFile(filePath) {
     text,
     // The property values, for `candidatePaths` to propose the file by.
     propertyText: propertyValuesText(properties),
-    blocks: extractInlinePermissionBlocks(text),
+    // The directive line stays in `text`, so the resolver is told it is one.
+    blocks: extractInlinePermissionBlocks(text, { fileDirective: permissions !== null }).map((block) => ({
+      ...block,
+      line: block.line + bodyLineOffset,
+    })),
     references: extractAttachmentReferences(text),
   };
 }
@@ -1038,6 +1184,7 @@ export async function scanFiles(prefix, dir, resetFonts = false, root = dir) {
   // Against the `filesMap` this scan rebuilt, so an attachment added since the
   // last one is found without opening the page that embeds it.
   rebuildAttachmentIndex(currentEntries);
+  logUnclosedBlocks(currentEntries);
   grantEpoch += 1;
 
   return { added, removed, modified };
@@ -1229,60 +1376,62 @@ export async function preParse(md, req, options = {}) {
  * for the rendered page.
  */
 export async function filterForbiddenSegments(md, req) {
-  const regex = new RegExp(inlinePermissionRegex);
-  const matches = [];
-  let match;
-  while ((match = regex.exec(md)) !== null) {
-    matches.push(match);
-  }
-  if (matches.length === 0) {
+  const { blocks, strayClosers } = resolveInlineBlocks(md);
+  if (blocks.length === 0 && strayClosers.length === 0) {
     // Nothing to decide, so nothing to resolve a context for: a document that
     // carries no inline directive must not cost a lookup.
     return [{ text: md, offset: 0 }];
   }
-  // Awaited once, ahead of the fan-out below. Every block of the document is
-  // then decided against the same reference time, so a window cannot close
-  // between the first paragraph of a page and the last.
-  const { referenceDate } = await getPermissionContext(req);
-  const visible = await Promise.all(
-    matches.map(async ([, perms]) => {
-      const permissionEntries = parsePermissionEntries(perms);
-      if (permissionEntries.length === 0) {
-        return false;
-      }
-      const activeRoles = getActivePermissionRoles(permissionEntries, referenceDate);
-      if (activeRoles.length === 0) {
-        return false;
-      }
-      return hasSomeRoles(req, activeRoles, true);
-    })
-  );
+  let visible = [];
+  if (blocks.length > 0) {
+    // Awaited once, ahead of the fan-out below. Every block of the document is
+    // then decided against the same reference time, so a window cannot close
+    // between the first paragraph of a page and the last.
+    const { referenceDate } = await getPermissionContext(req);
+    visible = await Promise.all(
+      blocks.map(async ({ entries }) => {
+        if (entries.length === 0) {
+          return false;
+        }
+        const activeRoles = getActivePermissionRoles(entries, referenceDate);
+        if (activeRoles.length === 0) {
+          return false;
+        }
+        return hasSomeRoles(req, activeRoles, true);
+      })
+    );
+  }
+
+  // What is taken out, as ranges of `md`: a hidden block whole; of a shown one
+  // its opening line, every opener inside it and its closing `@@@`; and every
+  // closing line that closed nothing. What lies between them survives.
+  const cuts = strayClosers.map(({ start, end }) => [start, end]);
+  blocks.forEach((block, i) => {
+    if (!visible[i]) {
+      cuts.push([block.start, block.end]);
+      return;
+    }
+    cuts.push([block.start, block.contentStart]);
+    for (const inner of block.innerDirectives) cuts.push([inner.start, inner.end]);
+    cuts.push([block.contentEnd, block.end]);
+  });
+  cuts.sort((a, b) => a[0] - b[0]);
 
   const segments = [];
   // An empty passage is not a passage. Two adjacent blocks leave one between
   // them, and carrying it would put a zero-length segment into every offset the
   // search reports against.
-  const keep = (text, offset) => {
-    if (text.length > 0) {
-      segments.push({ text, offset });
+  const keep = (from, to) => {
+    if (to > from) {
+      segments.push({ text: md.slice(from, to), offset: from });
     }
   };
-
   let carried = 0;
-  for (let i = 0; i < matches.length; i++) {
-    const [fullMatch, , content] = matches[i];
-    keep(md.slice(carried, matches[i].index), carried);
-    if (visible[i]) {
-      // Where the block's body sits in the original: the match ends with the
-      // closing `@@@`, so the body ends three characters before the match does.
-      // Derived from the end rather than from the opening line, because the
-      // directive the regex reads before the first newline is itself matched
-      // with the `s` flag.
-      keep(content, matches[i].index + fullMatch.length - 3 - content.length);
-    }
-    carried = matches[i].index + fullMatch.length;
+  for (const [from, to] of cuts) {
+    keep(carried, from);
+    carried = Math.max(carried, to);
   }
-  keep(md.slice(carried), carried);
+  keep(carried, md.length);
   return segments;
 }
 
@@ -3192,6 +3341,23 @@ function rebuildAttachmentIndex(indexEntries) {
     console.log(`[Attachments] unreferenced: ${attachment}`);
   }
   console.log(`[Attachments] ${paths.length} unreferenced attachment(s)`);
+}
+
+/**
+ * Names every inline block that is never closed (`permission-block-grammar`,
+ * design D6). Such a block runs to the end of its document and hides all of it
+ * from those it does not address - fail closed, but an author should learn that
+ * a forgotten `@@@` took the rest of the page. Once per block and scan, a line
+ * each, as the unreferenced attachments are named.
+ */
+function logUnclosedBlocks(indexEntries) {
+  for (const [fullPath, entry] of indexEntries) {
+    for (const block of entry.blocks) {
+      if (block.closed === false) {
+        console.log(`[Blocks] unclosed: ${fullPath.slice(dirPrefix.length)}:${block.line}`);
+      }
+    }
+  }
 }
 
 /**

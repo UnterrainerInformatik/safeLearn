@@ -30,6 +30,7 @@ import {
   obsidianMarkedExtensions,
   preParse,
   scanFiles,
+  searchCorpus,
   slugify,
   splitForReveal,
 } from "../obsidian.js";
@@ -82,6 +83,7 @@ function session(groups, name, page = "host.md") {
 
 const student = (page) => session({ student: true }, "Stu Dent", page);
 const teacher = (page) => session({ teacher: true }, "Tea Cher", page);
+const classMember = (page) => session({ student: true, "3bhif": true }, "Kla Ssen", page);
 
 /** The body of a page as `app.js` sends it to the page and document views. */
 async function render(markdown, req = student()) {
@@ -95,6 +97,28 @@ async function render(markdown, req = student()) {
 async function renderDeck(markdown, req = student()) {
   return splitForReveal(await render(markdown, req));
 }
+
+/**
+ * The body of the incident test (`permission-block-grammar`), its whole-file
+ * directive split off as `app.js` splits it: a teacher note naming the solution
+ * blocks in running text, then six questions, each followed by its solution.
+ */
+const incidentBody = [
+  "# Test 1",
+  "",
+  "@@@ teacher",
+  "Die Musterlösung steht in den `@@@ #exam`-Blöcken.",
+  "@@@",
+  ...[1, 2, 3, 4, 5, 6].flatMap((n) => [
+    "",
+    `## Aufgabe ${n}`,
+    `Frage ${n} zur Vererbung?`,
+    "@@@ #exam",
+    `Lösung ${n}: Kapselung.`,
+    "@@@",
+  ]),
+  "",
+].join("\n");
 
 const dom = (html) => new JSDOM(html).window.document;
 const text = (html) => dom(html).body.textContent.replace(/\s+/g, " ").trim();
@@ -157,6 +181,7 @@ before(async () => {
   write("Pictures.md", "Picture note.\n\n![[diagram.png]]\n");
   write("A.md", "Text of A.\n\n![[B]]\n");
   write("B.md", "Text of B.\n\n![[A]]\n");
+  write("Incident.md", `@@@ teacher, 3bhif\n${incidentBody}`);
   for (let level = 1; level <= maximumEmbedDepth + 2; level++) {
     write(`Deep${level}.md`, `Level ${level}.\n\n![[Deep${level + 1}]]\n`);
   }
@@ -459,5 +484,65 @@ describe("note embeds", () => {
     }
     assert.doesNotMatch(shown, new RegExp(`Level ${maximumEmbedDepth + 1}\\.`));
     assert.match(shown, new RegExp(`!\\[\\[Deep${maximumEmbedDepth + 1}\\]\\]`));
+  });
+});
+
+describe("inline blocks are read line by line (`permission-block-grammar`)", () => {
+  test("a class member sees every question of the incident test and no solution", async () => {
+    const shown = text(await render(incidentBody, classMember()));
+    for (let n = 1; n <= 6; n++) assert.match(shown, new RegExp(`Frage ${n} zur Vererbung\\?`));
+    assert.doesNotMatch(shown, /Lösung|Kapselung|Musterlösung|#exam|@@@/);
+  });
+
+  test("a syntax example in a fence shows as code to everyone", async () => {
+    for (const marks of [fence, "~~~"]) {
+      const markdown = ["Example:", "", marks, "@@@ teacher", "secret", "@@@", marks, "", "After.", ""].join("\n");
+      for (const req of [student(), teacher()]) {
+        const code = dom(await render(markdown, req)).querySelector("pre code");
+        assert.ok(code, `${marks}: the example is a code block`);
+        assert.equal(code.textContent.trim(), "@@@ teacher\nsecret\n@@@");
+      }
+    }
+  });
+
+  test("an unclosed teacher block hides to the end, and a teacher sees it without the directive", async () => {
+    const markdown = "Intro.\n\n@@@ teacher\nHidden one.\n\nHidden two.\n";
+    assert.equal(text(await render(markdown, student())), "Intro.");
+    assert.equal(text(await render(markdown, teacher())), "Intro. Hidden one. Hidden two.");
+  });
+
+  test("an opener inside an open block is never shown, and opens nothing", async () => {
+    const markdown = "@@@ teacher\nQuestion.\n\n@@@ #exam\nAnswer.\n@@@\n\nAfter.\n";
+    assert.equal(text(await render(markdown, student())), "After.");
+    assert.equal(text(await render(markdown, teacher())), "Question. Answer. After.");
+  });
+
+  test("a stray closing line is not shown and does not shift the block after it", async () => {
+    const markdown = "Intro.\n\n@@@\n\nText.\n\n@@@ #exam\nAnswer.\n@@@\n";
+    assert.equal(text(await render(markdown, student())), "Intro. Text.");
+  });
+
+  test("a word only in the incident's solutions finds nothing for a class member", async () => {
+    const found = (await searchCorpus(classMember(), "Vererbung")).results.map((result) => result.name);
+    assert.ok(found.includes("Incident"), `the questions are found: ${JSON.stringify(found)}`);
+    const hidden = (await searchCorpus(classMember(), "Kapselung")).results.map((result) => result.name);
+    assert.deepEqual(hidden, []);
+  });
+
+  test("a scan names every unclosed block once, by its line in the file", async () => {
+    write("Unclosed.md", "---\ntitle: Unclosed\n---\nIntro.\n\n@@@ teacher\nForgotten.\n");
+    const logged = [];
+    console.log = (...args) => logged.push(args.map(String).join(" "));
+    try {
+      await scanFiles("md/", corpus);
+    } finally {
+      console.log = originalLog;
+      rmSync(path.join(corpus, "Unclosed.md"));
+      await scan();
+    }
+    assert.deepEqual(
+      logged.filter((line) => line.startsWith("[Blocks]")),
+      ["[Blocks] unclosed: Unclosed.md:6"]
+    );
   });
 });

@@ -838,6 +838,42 @@ describe("a tag the plugin cannot resolve costs only itself", () => {
       );
     }));
 
+  test("marker lines in a code fence are code, and a closer in a fence does not end a block", async () =>
+    watched("fenced-markers", async () => {
+      // `permission-block-grammar`: the server reads a fenced marker as code,
+      // so the plugin may frame nothing there - and a `@@@` line in a fence
+      // inside a block is no closing marker either.
+      const name = "constructed-fenced-markers.md";
+      await writeDocument(
+        name,
+        [
+          "Example:",
+          "```",
+          "@@@ teacher",
+          "secret",
+          "@@@",
+          "```",
+          "",
+          "@@@ #exam",
+          "~~~",
+          "@@@",
+          "~~~",
+          "Solution.",
+          "@@@",
+          "After.",
+        ].join("\n")
+      );
+      const container = await open(name, views.livePreview);
+      const found = await markers(container);
+
+      assert.deepEqual(
+        linesWith(found, "permission-block"),
+        [8, 9, 10, 11, 12, 13],
+        "Lines 2 to 6 are a code example and carry no frame. The block opened on line 8 runs past " +
+          "the fenced `@@@` on line 10 to its own closing line 13."
+      );
+    }));
+
   test("a closing marker with nothing open does not turn what follows into a block", async () =>
     watched("orphaned-closing-marker", async () => {
       const name = "constructed-orphan.md";
@@ -2041,6 +2077,26 @@ describe("the reading view", () => {
         inReading,
         inEditor,
         "The two views show the same directive with the same entries and the same distinctions."
+      );
+    }));
+
+  test("a marker example in a code block stays standing, unframed", async () =>
+    watched("reading-fenced-markers", async () => {
+      const name = "constructed-reading-fenced-markers.md";
+      await writeDocument(name, ["Example:", "", "```", "@@@ teacher", "secret", "@@@", "```", "", "After."].join("\n"));
+
+      const container = await open(name, views.reading);
+      await reveal(container, "After.");
+
+      const shown = await visibleText(container);
+      assert.ok(
+        shown.includes("@@@ teacher") && shown.includes("secret"),
+        `A syntax example in a code block is shown as written: ${JSON.stringify(shown)}`
+      );
+      assert.equal(
+        await styleOf(container, "safelearn-read-block", ["border-top-width"]),
+        null,
+        "No frame is drawn around a code example."
       );
     }));
 

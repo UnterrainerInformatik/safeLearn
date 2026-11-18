@@ -117,6 +117,7 @@ before(async () => {
   write("POS/Other.md", "@@@ 5ahif\n# For another class\n");
   write("POS/Later.md", "# Another file\n");
   write("POS/ExamOnly.md", "@@@ teacher\n# Solutions in exam blocks\nTask.\n@@@ #exam\nSolution.\n@@@\n");
+  write("POS/MentionOnly.md", "@@@ teacher\n# Notes\nDie Musterlösung steht in den `@@@ #exam`-Blöcken.\n\n```\n@@@ #answer\nx\n@@@\n```\n");
   write("POS/AnswerOnly.md", "@@@ teacher\n# Solutions in answer blocks\nTask.\n@@@ 4bhif, #answer\nSolution.\n@@@\n");
   await scan();
 });
@@ -553,6 +554,7 @@ describe("a handout", () => {
     assert.equal(hasSolution("POS/ExamOnly.md"), true, "only #exam blocks");
     assert.equal(hasSolution("POS/AnswerOnly.md"), true, "only #answer blocks");
     assert.equal(hasSolution("POS/LT1-B.md"), false, "neither");
+    assert.equal(hasSolution("POS/MentionOnly.md"), false, "named only in running text and in code");
     assert.equal(hasSolution("POS/Missing.md"), false, "does not resolve");
   });
 

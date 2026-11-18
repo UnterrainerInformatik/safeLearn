@@ -18,6 +18,10 @@ import {
   mdFilesDir,
   mdFilesDirStructure,
   normalizeCorpusPath,
+  parseFirstLineForPermissions,
+  resolveInlineBlocks,
+  splitFrontmatter,
+  stripComments,
 } from "../obsidian.js";
 import { handoutViews, normalizeRole } from "../permission-context.js";
 import { InvalidInputError, now } from "./classes.js";
@@ -41,17 +45,26 @@ export function handoutResolves(corpusPath) {
 }
 
 /**
- * Whether the raw file holds a `@@@` directive naming `#exam` or `#answer`:
- * the textual check behind the solution button (design D3). A false positive
- * only shows a deck without a solution.
+ * Whether the file holds an inline block whose directive names `#exam` or
+ * `#answer`: the check behind the solution button (design D3). Blocks are found
+ * by the one block grammar (`permission-block-grammar`), so `` `@@@ #exam` ``
+ * mentioned in running text or shown in a code block is no solution. The
+ * whole-file directive is set aside, as the handout rendering sets it aside.
  */
 export function hasSolution(corpusPath) {
   if (!handoutResolves(corpusPath)) return false;
+  let raw;
   try {
-    return /@@@[^\n]*#(?:exam|answer)\b/i.test(fs.readFileSync(mdFilesDirStructure[corpusPath].absolutePath, "utf8"));
+    raw = fs.readFileSync(mdFilesDirStructure[corpusPath].absolutePath, "utf8");
   } catch {
     return false;
   }
+  const { body } = splitFrontmatter(raw, mdFilesDirStructure[corpusPath].absolutePath);
+  const firstLine = body.split("\n", 1)[0].replace(/\r$/, "");
+  const { blocks } = resolveInlineBlocks(stripComments(body), {
+    fileDirective: parseFirstLineForPermissions(firstLine) !== null,
+  });
+  return blocks.some(({ entries }) => entries.some(({ role }) => role === "#exam" || role === "#answer"));
 }
 
 /** The handouts of a test row, A first: each with its path and whether it resolves. */

@@ -111,6 +111,24 @@ before(async () => {
   write("assets/teacher-linked.pdf");
   write("one/handout.pdf");
   write("two/handout.pdf");
+  write("assets/solution.png");
+  // The shape of the incident test (`permission-block-grammar`): a teacher note
+  // naming the solution blocks in running text, then a question and its solution.
+  write(
+    "incident.md",
+    [
+      "@@@ teacher, 4bhif",
+      "# Test",
+      "@@@ teacher",
+      "Die Musterlösung steht in den `@@@ #exam`-Blöcken.",
+      "@@@",
+      "Frage 1?",
+      "@@@ #exam",
+      "![[solution.png]]",
+      "@@@",
+      "",
+    ].join("\n")
+  );
 
   write(
     "page.md",
@@ -400,6 +418,12 @@ describe("who is served an attachment", () => {
     preferences({ vt: 1, ve: 1 });
     assert.equal(await mayServeAttachment(teacher(), "assets/exam.png"), true);
     assert.equal(await mayServeAttachment(student(), "assets/exam.png"), false);
+  });
+
+  test("an image only in a solution block stays hidden when running text names `@@@ #exam`", async () => {
+    preferences({ vt: 1, ve: 1 });
+    assert.equal(await mayServeAttachment(classMember(), "assets/solution.png"), false);
+    assert.equal(await mayServeAttachment(teacher(), "assets/solution.png"), true);
   });
 
   test("an ambiguous embed makes neither file servable", async () => {

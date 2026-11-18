@@ -103,6 +103,15 @@ Some more text visible to all again.
 ```
 Of course you can use full Obsidian-flavor-markdown within the directives.
 
+#### Where a block begins and ends
+The server and the Obsidian plugin read blocks by the same rules, so the block the plugin frames is the block the server hides or shows:
+* **Markers are whole lines.** A block opens on a line that starts with `@@@` (spaces or tabs in front are fine, as inside a list item) and names something. It closes on the next line that holds nothing but `@@@`.
+* **`@@@` anywhere else is text.** In the middle of a sentence or in inline code, as in "the solutions are in the `` `@@@ #exam` `` blocks", it neither opens nor closes anything.
+* **Code blocks are code.** Marker lines inside a fenced code block (```` ``` ```` or `~~~`) are shown as written, so you can write syntax examples. A fence that is never closed protects nothing.
+* **A stray closing line is ignored.** A `@@@` line with no open block closes nothing and is not shown.
+* **An opening line inside a block opens nothing.** Blocks do not nest: the outer directive decides the whole block up to its closing line, and the inner directive line is not shown.
+* **An unclosed block hides to the end.** A block that is never closed runs to the end of the document and is hidden from everyone it does not address. The server logs `[Blocks] unclosed: <file>:<line>` for it, so check your closing lines.
+
 ### Time-bound visibility
 Every role inside a permission directive may optionally define a visibility window. Append a timestamp in square brackets directly after the role name:
 

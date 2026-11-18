@@ -28,6 +28,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 
+import { resolveInlineBlocks } from "../../obsidian.js";
+
 import {
   accountLookups,
   applicationUrl,
@@ -42,7 +44,7 @@ const projectRoot = path.resolve(import.meta.dirname, "..", "..");
 const corpusFile = (name) => path.join(projectRoot, "md", name);
 
 /** The term that reaches the seam only once the two passages are joined. */
-const seamTerm = "NAHTLINKS\nNAHTRECHTS";
+const seamTerm = "NAHTLINKS\n\nNAHTRECHTS";
 
 /** A term that is in no corpus file, and the answer every refusal must look like. */
 const absentTerm = "ZZZNICHTIMKORPUS";
@@ -181,7 +183,15 @@ describe("search", () => {
     // Built here rather than taken from the application: the check has to know
     // that the term really is in the text a naive search would have matched.
     const written = readFileSync(corpusFile("test-search-blocks.md"), "utf8");
-    const joined = written.replace(/^[ \t]*@@@(.*?)\n([\s\S]*?)@@@/gms, "");
+    // Every block removed by the server's own grammar (`permission-block-grammar`).
+    const { blocks } = resolveInlineBlocks(written);
+    let joined = "";
+    let carried = 0;
+    for (const block of blocks) {
+      joined += written.slice(carried, block.start);
+      carried = block.end;
+    }
+    joined += written.slice(carried);
     assert.ok(
       joined.includes(seamTerm),
       `removing the blocks of md/test-search-blocks.md does not produce ${JSON.stringify(seamTerm)}, ` +

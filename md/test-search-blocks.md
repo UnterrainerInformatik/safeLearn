@@ -23,12 +23,13 @@ neither demo session is:
 ## The seam a removed block leaves behind
 Removing the block below puts the end of the line above it directly against the
 start of the text after it. The joined document then reads the marker at the end
-of that line, a line break, and the marker the next line starts with - a sequence
-no one wrote, and one that must never be reported as a match. Each of the two
-markers occurs exactly once in this file, so a match on the pair can only have
-come from the join.
+of that line, an empty line, and the marker the line after the block starts with -
+a sequence no one wrote, and one that must never be reported as a match. Each of
+the two markers occurs exactly once in this file, so a match on the pair can only
+have come from the join.
 
 Die linke Haelfte endet mit NAHTLINKS
 @@@ teacher
 >Only teachers read this block.
-@@@NAHTRECHTS beginnt die rechte Haelfte.
+@@@
+NAHTRECHTS beginnt die rechte Haelfte.
