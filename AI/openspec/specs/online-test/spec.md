@@ -42,6 +42,8 @@ Until the first attempt of a test has started, a teacher SHALL be able to rename
 
 If rescheduling or deleting sittings leaves a test with no attempt and no sitting that has opened, the test SHALL drop its snapshot, take the pool's current version of its questions and follow the pool again. A question deleted from the pool in the meantime SHALL no longer be part of the test.
 
+Discarding the test while its first sitting is open (`exam-record-maintenance`) SHALL leave it with no attempt and no sitting. It SHALL then follow the pool again in the same way, and the teacher SHALL again be able to rename it, change its questions, delete it and schedule a new sitting for it, as for a test that was never started.
+
 #### Scenario: Deleting a written test
 
 - **WHEN** a teacher deletes a test of which one student has started an attempt
@@ -61,6 +63,21 @@ If rescheduling or deleting sittings leaves a test with no attempt and no sittin
 
 - **WHEN** a teacher reschedules a make-up sitting of a test whose first sitting has submitted attempts
 - **THEN** the test keeps its snapshot
+
+#### Scenario: A discarded test is editable again
+
+- **WHEN** a teacher discards a test whose open sitting has two attempts, and then swaps one of its questions and renames it
+- **THEN** both changes are saved, the test holds the new question as the pool has it, and the test has no sitting
+
+#### Scenario: A discarded test follows the pool
+
+- **WHEN** a question of a test was edited in the pool after the test's sitting had opened, and the teacher then discards the test
+- **THEN** the test shows the edited question
+
+#### Scenario: A discarded test can be deleted
+
+- **WHEN** a teacher deletes a test they have just discarded
+- **THEN** the test is gone, together with its usage records
 
 ### Requirement: A test without questions cannot be scheduled or written
 
