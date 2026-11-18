@@ -198,6 +198,7 @@ class LiveView extends ExamElement {
     this.notes = new Map();
     this.yearClosed = snapshot.course.yearClosed === true;
     this.testId = snapshot.test.id;
+    this.testName = snapshot.test.name;
     this.sitting = snapshot.sitting;
     this.offline = snapshot.kind === "offline";
     this.handouts = snapshot.test.handouts ?? [];
@@ -406,7 +407,47 @@ class LiveView extends ExamElement {
         minutes,
         button({ label: t("exam.live.extend"), class: "sl-exam-live-extend", action: () => send("extend", { minutes: Number(minutes.value) }) })
       ),
-      confirmButton({ class: "sl-exam-live-end", label: t("exam.live.endNow"), armed: t("exam.live.endNowArmed"), action: () => send("end") })
+      confirmButton({ class: "sl-exam-live-end", label: t("exam.live.endNow"), armed: t("exam.live.endNowArmed"), action: () => send("end") }),
+      // Discarding is the first sitting's alone, while it is open (discard-started-online-test D2).
+      sitting.makeup || this.offline ? null : this.discardControl()
+    );
+  }
+
+  /**
+   * Discard test, next to End now (discard-started-online-test D6): the second
+   * click names how many attempts go, the count the view last drew. A count
+   * that changed meanwhile is refused; the view then draws the current one.
+   */
+  discardControl() {
+    return confirmButton({
+      class: "sl-exam-live-discard",
+      label: t("exam.live.discard"),
+      armed: () => t("exam.live.discardArmed", { count: this.testAttempts ?? 0 }),
+      action: async () => {
+        this.windowMessage.textContent = "";
+        try {
+          await examApi(`/tests/${this.testId}/discard`, { method: "POST", body: { attempts: this.testAttempts ?? 0 } });
+          this.discarded();
+        } catch (error) {
+          this.windowMessage.textContent = error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.frame.saveFailed");
+          if (error instanceof ExamApiError && error.status === 409) await this.poll();
+        }
+      },
+    });
+  }
+
+  /** The test was discarded: the sitting is gone, so the view stops and leads back to the test. */
+  discarded() {
+    if (this.dataset.mode === "discarded") return;
+    this.stopAll();
+    this.dataset.mode = "discarded";
+    this.show(
+      h(
+        "div",
+        { class: "sl-exam sl-exam-live" },
+        h("p", { class: "sl-exam-message sl-exam-live-discarded", role: "status" }, t("exam.live.discarded")),
+        h("p", {}, h("a", { class: "sl-exam-live-back", href: `/exam/tests/${this.testId}` }, this.testName ?? String(this.testId)))
+      )
     );
   }
 
@@ -523,6 +564,7 @@ class LiveView extends ExamElement {
   draw(snapshot) {
     this.syncClock(snapshot.serverTime);
     this.sitting = snapshot.sitting;
+    this.testAttempts = snapshot.test.attempts ?? 0;
     this.received = performance.now();
     this.participants = new Map(snapshot.participants.map((participant) => [participant.username, { ...participant, at: performance.now() }]));
     this.order = new Map(snapshot.participants.map((participant, index) => [participant.username, index]));
@@ -933,6 +975,7 @@ class LiveView extends ExamElement {
     source.addEventListener("beats", (event) => this.silence(JSON.parse(event.data)));
     source.addEventListener("renew", () => this.connect());
     source.addEventListener("refused", () => this.studentView());
+    source.addEventListener("discarded", () => this.discarded());
     source.addEventListener("error", () => {
       if (this.source !== source) return;
       this.failures = (this.failures ?? 0) + 1;
@@ -969,6 +1012,8 @@ class LiveView extends ExamElement {
       if (this.dataset.mode === "waiting") this.pollOnly();
     } catch (error) {
       if (error instanceof ExamApiError && error.status === 403) this.studentView();
+      // The sitting is gone: its test was discarded, and the stream ended before it could say so.
+      else if (error instanceof ExamApiError && error.status === 404) this.discarded();
       // Only the view for the class says so: the live view has its stream to
       // fall back on. A 401 has already sent the page into the login.
       else if (this.params.screen === "1" && error.status !== 401) {

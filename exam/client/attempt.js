@@ -247,6 +247,7 @@ class WriteTest extends ExamElement {
     source.addEventListener("tests", (event) => {
       const { tests } = JSON.parse(event.data);
       window.dispatchEvent(new CustomEvent("sl-exam-open-tests", { detail: { count: tests.length } }));
+      if (this.writingAttempt) this.checkAttempt();
       if (!this.listing) return;
       const shown = this.params.test === undefined ? tests : tests.filter((test) => String(test.testId) === this.params.test);
       if (openKey(shown) !== this.shownKey) this.show(this.openTests(shown));
@@ -267,6 +268,31 @@ class WriteTest extends ExamElement {
     clearTimeout(this.retry);
     this.source?.close();
     this.source = null;
+  }
+
+  /**
+   * While an attempt is written, a change of the open tests may be its test
+   * discarded (discard-started-online-test D5): the page asks for its own
+   * attempt, and one that is gone ends the writing page.
+   */
+  async checkAttempt() {
+    const attempt = this.writingAttempt;
+    try {
+      await examApi(`/attempts/${attempt}`);
+    } catch (error) {
+      if (error instanceof ExamApiError && error.status === 404 && this.writingAttempt === attempt) this.discarded();
+    }
+  }
+
+  /** The attempt is gone: every report stops, full screen is left, and the student is told why. */
+  discarded() {
+    this.writingAttempt = null;
+    this.stop?.();
+    this.show(
+      h("div", { class: "sl-exam sl-exam-attempt sl-exam-attempt-discarded" }, h("p", { role: "status" }, h("strong", {}, t("exam.attempt.discarded"))))
+    );
+    this.announce(false);
+    leaveFullscreen();
   }
 
   async load() {
@@ -390,6 +416,9 @@ class WriteTest extends ExamElement {
     this.stop?.();
     this.preview = writing.preview === true;
     this.attempt = writing.attempt;
+    // A real attempt listens to the stream of open tests, also when resumed by a reload.
+    this.writingAttempt = this.preview ? null : writing.attempt;
+    if (!this.preview) this.watch();
     this.announce(true);
     this.status = h("p", { class: "sl-exam-message", role: "status" });
     this.countdown = h("span", { class: "sl-exam-countdown", "aria-live": "off" });
@@ -553,6 +582,8 @@ class WriteTest extends ExamElement {
         state.textContent = refusal(error);
         state.dataset.state = "refused";
         if (error instanceof ExamApiError && error.status === 409) this.finish();
+        // A save refused because the attempt is gone: its test was discarded.
+        if (error instanceof ExamApiError && error.status === 404) this.checkAttempt();
       } finally {
         inFlight = false;
         if (queued !== null) {
@@ -714,7 +745,8 @@ class WriteTest extends ExamElement {
       for (const input of this.querySelectorAll(".sl-exam-writing input, .sl-exam-writing button")) input.disabled = false;
       this.endsAt = performance.now() + answer.remainingMs;
     } catch (error) {
-      this.status.textContent = refusal(error);
+      if (error instanceof ExamApiError && error.status === 404) this.discarded();
+      else this.status.textContent = refusal(error);
     }
   }
 
@@ -762,6 +794,7 @@ class WriteTest extends ExamElement {
   }
 
   resultPage(result) {
+    this.writingAttempt = null;
     this.announce(false);
     return h(
       "div",

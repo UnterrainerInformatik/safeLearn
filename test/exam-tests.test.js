@@ -27,10 +27,12 @@ import { getQuestion, listQuestions } from "../exam/pool.js";
 import { NotFoundError } from "../exam/classes.js";
 import { importPool } from "../exam/pool-import.js";
 import {
+  createOfflineTest,
   createSitting,
   createTest,
   deleteSitting,
   deleteTest,
+  discardTest,
   endSitting,
   extendSitting,
   getTest,
@@ -1303,6 +1305,136 @@ describe("rescheduling a sitting that is over", () => {
     assert.equal(getQuestion(db, ids[0]).usage[0].usedOn, "2027-02-23");
     assert.deepEqual(courseOverview(db, course.id, "ws").columns, []);
     assert.deepEqual(courseOverview(db, course.id, "ss").columns.map((column) => [column.name, column.date]), [["Moved", "2027-02-23"]]);
+  });
+});
+
+describe("discarding a test while its first sitting is open", () => {
+  /** The class with Carla as well, a test of all three questions and its sitting open now. */
+  function open(seed = seeded()) {
+    addToRoster(seed.db, seed.klass.id, { username: "carla" });
+    const test = createTest(seed.db, seed.course.id, { name: "Broken", questionIds: seed.ids });
+    const sitting = createSitting(seed.db, test.id, { opensAt: inMinutes(60), closesAt: inMinutes(110), durationMinutes: 15 });
+    seed.db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ? WHERE id = ?").run(inMinutes(-1), inMinutes(49), sitting.id);
+    return { ...seed, test, sitting };
+  }
+  const count = (db, table) => db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
+  const tables = ["attempt", "attempt_question", "attempt_token", "response", "sitting", "sitting_participant", "result_note", "teacher_note"];
+  const counts = (db) => Object.fromEntries(tables.map((table) => [table, count(db, table)]));
+
+  test("every attempt, sitting and note goes, and the test follows the pool and is editable again", () => {
+    const { db, course, test, sitting, ids } = open();
+    submitAttempt(db, attemptRow(db, startAttempt(db, "anna", test.id).attemptId));
+    const ben = startAttempt(db, "ben", test.id).attemptId;
+    saveAnswer(db, attemptRow(db, ben), 1, correctTokens(db, ben)[1]);
+    startAttempt(db, "carla", test.id);
+    createSitting(db, test.id, { opensAt: inMinutes(200), closesAt: inMinutes(260), participants: ["anna"] });
+    setTeacherNote(db, test.id, "ben", "Looked at the neighbour's screen");
+    setNote(db, course.id, `test-${test.id}`, "anna", "Well done");
+    saveQuestion(db, ids[2], edited(db, ids[2], "<p>edited after the opening</p>"));
+    assert.notEqual(textsOf(db, test.id)[2], "<p>edited after the opening</p>", "the begun test keeps its snapshot");
+    assert.deepEqual(courseOverview(db, course.id, "ws").columns.map((column) => column.testId), [test.id]);
+
+    const discarded = discardTest(db, test.id, { attempts: 3 });
+    assert.equal(discarded.discardedSittingId, sitting.id);
+    assert.deepEqual([discarded.name, discarded.started, discarded.sittings], ["Broken", false, []]);
+    for (const [table, n] of Object.entries(counts(db))) assert.equal(n, 0, `${table} is empty`);
+    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+    assert.equal(textsOf(db, test.id)[2], "<p>edited after the opening</p>", "the test took the pool's version");
+    assert.deepEqual(courseOverview(db, course.id, "ws").columns, [], "no column left in the gradebook");
+    assert.equal(getQuestion(db, ids[0]).usage[0].usedOn, viennaDate(new Date().toISOString()), "used today until a new sitting");
+
+    const renamed = updateTest(db, test.id, { name: "Fixed", questionIds: [ids[0], ids[1]] });
+    assert.deepEqual([renamed.name, renamed.questions.map((q) => q.questionId)], ["Fixed", [ids[0], ids[1]]]);
+    assert.deepEqual(deleteTest(db, test.id), { deleted: test.id });
+    assert.equal(count(db, "question_usage"), 0);
+  });
+
+  test("a count that differs from the confirmed one is refused and changes nothing", () => {
+    const { db, test } = open();
+    startAttempt(db, "anna", test.id);
+    startAttempt(db, "ben", test.id);
+    const before = counts(db);
+    assert.throws(() => discardTest(db, test.id, { attempts: 1 }), /changed/);
+    assert.throws(() => discardTest(db, test.id, {}), ConflictError, "none confirmed");
+    assert.deepEqual(counts(db), before);
+  });
+
+  test("a scheduled or closed first sitting is refused, and so is one where only a make-up is open", () => {
+    const { db, test, sitting } = open();
+    startAttempt(db, "anna", test.id);
+    db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ? WHERE id = ?").run(inMinutes(60), inMinutes(120), sitting.id);
+    const scheduled = counts(db);
+    assert.throws(() => discardTest(db, test.id, { attempts: 1 }), (error) => error instanceof ConflictError && error.key === "exam.errors.tests.discardNotOpen");
+    assert.deepEqual(counts(db), scheduled);
+    db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ? WHERE id = ?").run(inMinutes(-60), inMinutes(-10), sitting.id);
+    assert.throws(() => discardTest(db, test.id, { attempts: 1 }), (error) => error.key === "exam.errors.tests.discardNotOpen", "a closed one");
+    const makeup = createSitting(db, test.id, { opensAt: inMinutes(5), closesAt: inMinutes(60), participants: ["ben"] });
+    db.prepare("UPDATE sitting SET opens_at = ? WHERE id = ?").run(inMinutes(-1), makeup.id);
+    startAttempt(db, "ben", test.id);
+    const makeupOpen = counts(db);
+    assert.throws(() => discardTest(db, test.id, { attempts: 2 }), (error) => error.key === "exam.errors.tests.discardMakeupOpen");
+    assert.deepEqual(counts(db), makeupOpen);
+  });
+
+  test("the route is a teacher's, not only an admin's, and tells the former sitting's live view", async () => {
+    const dbPath = temporaryPath();
+    const saved = { path: process.env.EXAM_DB_PATH, periods: process.env.SCHOOL_PERIODS, fetch: global.fetch };
+    process.env.EXAM_DB_PATH = dbPath;
+    delete process.env.SCHOOL_PERIODS;
+    const started = await init({ startPage: () => "/index.html" });
+    const { db } = openDatabase(dbPath);
+    openDatabases.push(db);
+    const { course, test, sitting } = open(seeded(db));
+    startAttempt(db, "anna", test.id);
+    global.fetch = async () => ({ ok: true, json: async () => ({ attributes: { config: [JSON.stringify({ vt: 1 })] } }) });
+    const app = express();
+    app.use(express.json());
+    app.use((req, res, next) => {
+      const username = req.get("X-As");
+      req.user = {
+        name: username,
+        preferred_username: username,
+        accessToken: "access-token",
+        accessTokenDecoded: { preferred_username: username },
+        keycloakConfig: { "auth-server-url": "https://identity.example/", realm: "demo", resource: "safelearn" },
+        rolesCalculated: JSON.stringify({ [req.get("X-Role")]: true }),
+      };
+      next();
+    });
+    app.use("/exam", started.router);
+    const server = app.listen(0);
+    const heard = [];
+    const stop = listen(sitting.id, (event) => heard.push(event));
+    try {
+      const discard = (as, role, attempts) =>
+        saved.fetch(`http://127.0.0.1:${server.address().port}/exam/api/tests/${test.id}/discard`, {
+          method: "POST",
+          headers: { "X-As": as, "X-Role": role, "Content-Type": "application/json" },
+          body: JSON.stringify({ attempts }),
+        });
+      assert.equal((await discard("anna", "student", 1)).status, 403, "a student");
+      assert.equal((await discard("tdent", "teacher", 2)).status, 409, "a count that changed");
+      assert.equal(count(db, "attempt"), 1, "nothing changed");
+      const answer = await discard("tdent", "teacher", 1);
+      assert.equal(answer.status, 200);
+      assert.deepEqual((await answer.json()).sittings, []);
+      assert.deepEqual(heard, [{ type: "discarded", username: null, testId: test.id }]);
+      assert.deepEqual(courseOverview(db, course.id, "ws").columns, [], "the gradebook lists no column of the test");
+    } finally {
+      stop();
+      await new Promise((resolve) => server.close(resolve));
+      global.fetch = saved.fetch;
+      if (saved.path === undefined) delete process.env.EXAM_DB_PATH;
+      else process.env.EXAM_DB_PATH = saved.path;
+      if (saved.periods !== undefined) process.env.SCHOOL_PERIODS = saved.periods;
+    }
+  });
+
+  test("an offline test is refused", () => {
+    const { db, course } = seeded();
+    const offline = createOfflineTest(db, course.id, { name: "Paper", durationMinutes: 50, gradebookKind: "test" });
+    assert.throws(() => discardTest(db, offline.id, { attempts: 0 }), (error) => error.key === "exam.errors.tests.discardOffline");
+    assert.deepEqual(getTest(db, offline.id).id, offline.id);
   });
 });
 

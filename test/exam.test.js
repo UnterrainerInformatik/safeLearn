@@ -6786,6 +6786,51 @@ describe("the module's actions", () => {
     assert.ok(database((db) => db.prepare("SELECT submitted_at FROM attempt WHERE id = ?").get(started.json.attempt).submitted_at), "submitted on the server");
   });
 
+  test("Discard test in the live view takes the student off the attempt and leaves the test without a sitting, editable again", async () => {
+    const { test, sitting } = await openSitting("Discarded");
+    let discarded = false;
+    try {
+      const started = await fetchAs(student, `/exam/api/tests/${test.id}/attempt`, { method: "POST" });
+      assert.equal(started.status, 200, JSON.stringify(started.json));
+      // The student's page resumes the attempt, behind the gate to full screen.
+      await openPage(student.page, "/exam/my", ".sl-exam-writing");
+      // The test page offers the same button while the first sitting is open.
+      await openPage(teacher.page, `/exam/tests/${test.id}`, ".sl-exam-test-discard");
+      await click(teacher.page, ".sl-exam-test-discard");
+      assert.equal(await teacher.page.$eval(".sl-exam-test-discard", (b) => b.textContent), "Click again: delete 1 attempt and discard the test");
+      const row = `sl-exam-live tr[data-username="${student.username.toLowerCase()}"]`;
+      await openLive(sitting);
+      await teacher.page.waitForSelector(`${row}[data-status="writing"]`, { timeout: 20000 });
+      await teacher.page.waitForSelector(".sl-exam-live-discard", { visible: true, timeout: 10000 });
+      await click(teacher.page, ".sl-exam-live-discard");
+      assert.equal(await teacher.page.$eval(".sl-exam-live-discard", (b) => b.textContent), "Click again: delete 1 attempt and discard the test");
+      await click(teacher.page, ".sl-exam-live-discard");
+      discarded = true;
+      await teacher.page.waitForSelector(".sl-exam-live-discarded", { timeout: 15000 });
+      assert.equal(await teacher.page.$eval(".sl-exam-live-back", (a) => new URL(a.href).pathname), `/exam/tests/${test.id}`, "the way back to the test");
+
+      await student.page.waitForSelector(".sl-exam-attempt-discarded", { timeout: 15000 });
+      assert.equal(await student.page.$(".sl-exam-writing"), null, "the attempt is gone from the page");
+      assert.equal(await student.page.evaluate(() => document.fullscreenElement), null, "out of full screen");
+      const save = await fetchAs(student, `/exam/api/attempts/${started.json.attempt}/questions/1`, { method: "PUT", body: { tokens: [] } });
+      assert.equal(save.status, 404, "a later save is refused");
+
+      const gradebook = (await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=ws`)).json;
+      assert.ok(!gradebook.columns.some((column) => column.testId === test.id), "no gradebook column for the test");
+
+      await openPage(teacher.page, `/exam/tests/${test.id}`, ".sl-exam-test-sittings-section");
+      assert.equal(await teacher.page.$(".sl-exam-test-sittings li"), null, "no sitting left");
+      assert.ok(await teacher.page.$(".sl-exam-test-remove"), "its questions can be changed again");
+      const renamed = await fetchAs(teacher, `/exam/api/tests/${test.id}`, { method: "PUT", body: { name: "Discarded, fixed", questionIds: questions.slice(1).map((q) => q.id) } });
+      assert.equal(renamed.status, 200, JSON.stringify(renamed.json));
+    } finally {
+      if (!discarded) {
+        const attempt = database((db) => db.prepare("SELECT id FROM attempt WHERE test_id = ?").get(test.id)?.id);
+        if (attempt) await fetchAs(student, `/exam/api/attempts/${attempt}/submit`, { method: "POST" });
+      } else await fetchAs(teacher, `/exam/api/tests/${test.id}`, { method: "DELETE" });
+    }
+  });
+
   test("Extend in the live view gives a student cut short by the window the longer time", async () => {
     const { test, sitting } = await openSitting("Extended", { openedAgo: 10, closesIn: 3, minutes: 10 });
     assert.equal((await fetchAs(student, `/exam/api/tests/${test.id}/attempt`, { method: "POST" })).status, 200);

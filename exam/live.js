@@ -213,7 +213,8 @@ export function liveSnapshot(db, sittingId, at = now(), { screen = false } = {})
       state: sittingState({ opensAt: sitting.opens_at, closesAt: sitting.closes_at, offline, startedAt: sitting.started_at }, at),
     },
     kind: test.kind,
-    test: { id: test.id, name: test.name, kind: test.kind, handouts: offline ? handoutsOf(test) : [] },
+    // `attempts` counts the test's attempts, every sitting's: the number discarding it confirms.
+    test: { id: test.id, name: test.name, kind: test.kind, handouts: offline ? handoutsOf(test) : [], attempts: attempts.size },
     // A closed year's notes are read-only (`school-year-change`); the view disables their fields.
     course: { id: course.id, subject: course.subject, language: course.language, className: course.className, yearClosed: course.year.closed === true },
     participants: participantRows(db, sittingId).map((row) =>

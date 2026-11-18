@@ -451,6 +451,18 @@ class TestDetail extends ExamElement {
                       ),
                     ]
                   : null,
+                // While the first sitting is open, the whole test can be discarded (discard-started-online-test D2, D6).
+                !sitting.makeup && sitting.state === "open"
+                  ? [
+                      " ",
+                      confirmButton({
+                        class: "sl-exam-test-discard",
+                        label: t("exam.live.discard"),
+                        armed: () => t("exam.live.discardArmed", { count: test.attempts.started }),
+                        action: () => this.discardTest(test, sitting),
+                      }),
+                    ]
+                  : null,
                 this.sittingLine(sitting)
               )
             )
@@ -788,6 +800,28 @@ class TestDetail extends ExamElement {
   editSitting(test, sitting, reschedule = false) {
     this.drawSittingForm(test, sitting, reschedule);
     this.sittingForm.scrollIntoView({ block: "nearest" });
+  }
+
+  /**
+   * Discards the test with every attempt the page counted; the page then
+   * shows it without a sitting, editable again. A count that changed is
+   * refused at the sitting, and the button's next armed label names the
+   * current one.
+   */
+  async discardTest(test, sitting) {
+    try {
+      await examApi(`/tests/${test.id}/discard`, { method: "POST", body: { attempts: test.attempts.started } });
+      this.reload();
+    } catch (error) {
+      this.sittingLine(sitting).textContent = refusal(error);
+      if (error instanceof ExamApiError && error.status === 409) {
+        try {
+          test.attempts = (await examApi(`/tests/${test.id}`)).attempts;
+        } catch {
+          // The refusal stays told; the next load counts again.
+        }
+      }
+    }
   }
 
   async deleteSitting(sitting) {

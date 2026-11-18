@@ -6,7 +6,8 @@
  * 403, and the pages are not there for it (`gate.js`). Taking back what
  * students have written - deleting a written test, removing a question from
  * one, deleting an attempt, rescheduling a sitting that has some - is an
- * admin's alone.
+ * admin's alone; only discarding a test while its first sitting is open is a
+ * teacher's too.
  */
 
 import {
@@ -15,6 +16,7 @@ import {
   createTest,
   deleteSitting,
   deleteTest,
+  discardTest,
   endSitting,
   extendSitting,
   getTest,
@@ -140,6 +142,14 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
     const { deleted, ...sitting } = rescheduleSitting(db, idParam(req.params.id), req.body ?? {}, { admin: await actsAsAdmin(req) });
     for (const username of deleted) notify(sitting.id, "deleted", username);
     return announcedLive(sitting);
+  });
+  // Discarding a test while its first sitting is open (discard-started-online-test
+  // D1, D4) is a teacher's: every attempt and sitting goes, the students' pages
+  // and the former sitting's live view are told.
+  api("post", "/tests/:id/discard", (req) => {
+    const { discardedSittingId, ...test } = discardTest(db, idParam(req.params.id), req.body ?? {});
+    notify(discardedSittingId, "discarded", null, { testId: test.id });
+    return announced(test);
   });
   api("post", "/attempts/:id/release", (req) => releaseAttempt(db, idParam(req.params.id)));
   api("get", "/tests/:id/preview", (req) => previewView(db, idParam(req.params.id)));

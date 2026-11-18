@@ -252,8 +252,9 @@ const ARMED_MS = 5000;
  * second one does - the module's one way of asking twice, never a browser
  * dialog. It falls back to its first state when it loses the focus, on Escape,
  * on a click anywhere else, and after five seconds; the armed label is
- * announced (`aria-live`). `kind` defaults to `danger`; `action` gets the
- * second click's event.
+ * announced (`aria-live`). `armed` may be a function, asked at each first
+ * click, for a label that names a count the page keeps current. `kind`
+ * defaults to `danger`; `action` gets the second click's event.
  */
 export function confirmButton({ class: className, label, armed, action, kind = "danger", ...props }) {
   const element = h("button", { ...props, type: "button", class: actionClass(kind, className), "aria-live": "polite" }, label);
@@ -274,8 +275,9 @@ export function confirmButton({ class: className, label, armed, action, kind = "
   element.addEventListener("click", (event) => {
     if (element.dataset.armed !== "1") {
       element.dataset.armed = "1";
-      element.textContent = armed;
-      if (named !== null) element.setAttribute("aria-label", armed);
+      const armedLabel = typeof armed === "function" ? armed() : armed;
+      element.textContent = armedLabel;
+      if (named !== null) element.setAttribute("aria-label", armedLabel);
       timer = setTimeout(disarm, ARMED_MS);
       document.addEventListener("pointerdown", elsewhere, true);
       return;

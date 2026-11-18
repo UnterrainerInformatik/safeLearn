@@ -110,11 +110,24 @@ export function registerLiveRoutes(router, { db, handle, startPage }) {
             stream.close();
             return;
           }
-          deliver();
+          try {
+            deliver();
+          } catch (error) {
+            // The sitting is gone - its test was discarded meanwhile: the stream has nothing left to tell.
+            if (!(error instanceof NotFoundError)) throw error;
+            stream.close();
+          }
         });
       };
       stop = listen(sittingId, (event) =>
         checked(() => {
+          // The test was discarded (discard-started-online-test D4): the sitting
+          // is gone, so the view is told once and the stream ends.
+          if (event.type === "discarded") {
+            stream.send("discarded", { testId: event.testId });
+            stream.close();
+            return;
+          }
           const at = new Date().toISOString();
           const snapshot = liveSnapshot(db, sittingId, at);
           stream.send("change", {

@@ -793,6 +793,44 @@ export function rescheduleSitting(db, id, { opensAt, closesAt, attempts } = {}, 
 }
 
 /**
+ * Discards an online test while its first sitting is open
+ * (discard-started-online-test design D1-D3): every attempt of the test goes
+ * with its answers, running or submitted, every sitting goes with it - the
+ * make-ups that cannot have opened yet included - and so do the notes in its
+ * gradebook column and the teachers' notes on its participants. The test
+ * keeps its name and questions and follows the pool again, as if it had never
+ * been started. Only as many attempts as `attempts` confirms may go. Answers
+ * the test and the id of the former first sitting, whose live view is told.
+ */
+export function discardTest(db, id, { attempts } = {}, at = now()) {
+  const test = testRow(db, id);
+  if (test.kind === "offline") throw new ConflictError("exam.errors.tests.discardOffline");
+  return inTransaction(db, () => {
+    const first = firstSitting(db, id);
+    const state = (row) => sittingState({ opensAt: row.opens_at, closesAt: row.closes_at }, at);
+    if (first === null || state(first) !== "open") {
+      const makeupOpen = db
+        .prepare("SELECT * FROM sitting WHERE test_id = ? AND makeup = 1")
+        .all(id)
+        .some((row) => state(row) === "open");
+      throw new ConflictError(makeupOpen ? "exam.errors.tests.discardMakeupOpen" : "exam.errors.tests.discardNotOpen");
+    }
+    const written = db.prepare("SELECT COUNT(*) AS n FROM attempt WHERE test_id = ?").get(id).n;
+    if (written !== (attempts ?? 0)) throw new ConflictError("exam.errors.tests.attemptsChanged");
+    // An attempt's questions, tokens, answers and refused browsers go with it,
+    // a sitting's participants with the sitting. The sitting is not ended
+    // through `endSitting` first: that would grade attempts only to delete them.
+    db.prepare("DELETE FROM result_note WHERE test_id = ?").run(id);
+    db.prepare("DELETE FROM teacher_note WHERE test_id = ?").run(id);
+    db.prepare("DELETE FROM attempt WHERE test_id = ?").run(id);
+    db.prepare("DELETE FROM sitting WHERE test_id = ?").run(id);
+    followPoolIfNotBegun(db, id, at);
+    refreshUsageDate(db, id);
+    return { ...getTest(db, id), discardedSittingId: first.id };
+  });
+}
+
+/**
  * Deletes a sitting that has not opened yet - an offline one also once it is
  * over, never while its window is open. A first sitting goes only after
  * its make-ups. A test left with no attempt and no opened sitting follows the
