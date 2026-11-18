@@ -19,9 +19,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { after, before, describe, test } from "node:test";
+import { after, afterEach, before, beforeEach, describe, test } from "node:test";
 
-import { click, expectRefusedStart, render, setPreferences, shutdown, startAnonymous } from "./harness.js";
+import { click, expectRefusedStart, keepEvidenceOnFailure, openPage, render, setPreferences, shutdown, startAnonymous } from "./harness.js";
+
+keepEvidenceOnFailure(import.meta.filename, { beforeEach, afterEach });
 
 const permissionsPage = "/md/test-perms.md";
 const teacherBlock = "Only visible to teachers.";
@@ -262,7 +264,7 @@ describe("without an identity provider, with teacher as the reader role", () => 
   test("with start with the last page on, the root sends the reader to the page it read last", async () => {
     await setPreferences(reader, { vt: 1, sl: 1 });
     await render(reader, examPage);
-    await reader.page.goto(`${instance.url}/`, { waitUntil: "domcontentloaded" });
+    await openPage(reader, "/", "#markdown-content");
     assert.equal(new URL(reader.page.url()).pathname, examPage);
   });
 

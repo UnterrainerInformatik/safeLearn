@@ -73,3 +73,7 @@ AI/claude/scheduled_tasks.lock
 # only; a local trial run must not get them committed.
 /deploy/.env
 /deploy/keycloak.json
+
+# What a failed browser check leaves behind (keepEvidenceOnFailure in
+# test/harness.js): URL, screenshot, document and console errors per page.
+test/.evidence/

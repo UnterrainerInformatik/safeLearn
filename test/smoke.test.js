@@ -13,12 +13,29 @@
  */
 
 import assert from "node:assert/strict";
-import { after, describe, test } from "node:test";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import puppeteer from "puppeteer";
 
-import { applicationUrl, click, currentUser, openSession, shutdown } from "./harness.js";
+import {
+  applicationUrl,
+  click,
+  consoleErrors,
+  currentUser,
+  eventually,
+  forgetConsoleErrors,
+  keepEvidenceOnFailure,
+  openPage,
+  openSession,
+  shutdown,
+  trackPage,
+  writeEvidence,
+} from "./harness.js";
 
+keepEvidenceOnFailure(import.meta.filename, { beforeEach, afterEach });
 after(shutdown);
 
 /**
@@ -31,10 +48,7 @@ const studentOnlyText = "Only visible to Stu Dent";
 
 /** Reads the rendered markdown of a page. */
 async function readPage(session, urlPath) {
-  await session.page.goto(`${applicationUrl}${urlPath}`, { waitUntil: "domcontentloaded" });
-  // `textContent`, because this returns as soon as the document has parsed and a
-  // page view is served hidden until init() shows it: `innerText` reports what
-  // is rendered, and a hidden body renders nothing.
+  await openPage(session, urlPath, "#markdown-content");
   return session.page.$eval("#markdown-content", (element) => element.textContent);
 }
 
@@ -202,6 +216,94 @@ describe("the harness's click", () => {
     await assert.rejects(click(page, "#never-there", { timeout: 500 }), (error) => {
       assert.match(error.message, /#never-there/, "the message names the selector");
       assert.match(error.message, /about:blank/, "the message names the URL");
+      return true;
+    });
+    assert.ok(Date.now() - started < 3000, `it gave up after ${Date.now() - started} ms, not at its 500 ms bound`);
+  });
+});
+
+describe("the harness's console-error record and failure evidence", () => {
+  let browser;
+  let page;
+  after(() => browser?.close());
+
+  /** Logs `message` as a console error from inside the page. */
+  const logError = (message) => page.evaluate((text) => console.error(text), message);
+
+  test("a check sees the console errors of its own run and none of the one before", async () => {
+    browser = await puppeteer.launch({ headless: true });
+    page = await browser.newPage();
+    trackPage(page, "probe");
+    await page.setContent("<!doctype html><p>probe</p>");
+
+    await logError("from the previous check");
+    await eventually(() => consoleErrors(page), ["from the previous check"]);
+    // What `keepEvidenceOnFailure` does before every check.
+    forgetConsoleErrors();
+    await logError("from this check");
+
+    assert.deepEqual(
+      await eventually(() => consoleErrors(page), ["from this check"]),
+      ["from this check"],
+      "the record holds exactly the error of the current check"
+    );
+  });
+
+  test("the evidence of a failed check holds the URL, a screenshot, the document and the console errors", async () => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "safelearn-evidence-"));
+    try {
+      await page.setContent('<!doctype html><p id="marker">evidence marker</p>');
+      forgetConsoleErrors();
+      await logError("the logged failure");
+      await eventually(() => consoleErrors(page), ["the logged failure"]);
+
+      const written = await writeEvidence(directory, { error: new Error("the check's own failure") });
+      assert.equal(written, 1, "one tracked page, one set of evidence");
+      assert.deepEqual(
+        readdirSync(directory).sort(),
+        ["failure.txt", "probe-console.txt", "probe-dom.html", "probe-screenshot.png", "probe-url.txt"],
+        "four files for the page, named by its label, and the failure"
+      );
+      assert.equal(readFileSync(path.join(directory, "probe-url.txt"), "utf8").trim(), page.url());
+      assert.match(readFileSync(path.join(directory, "probe-dom.html"), "utf8"), /evidence marker/);
+      assert.match(readFileSync(path.join(directory, "probe-console.txt"), "utf8"), /the logged failure/);
+      assert.match(readFileSync(path.join(directory, "failure.txt"), "utf8"), /the check's own failure/);
+      const png = readFileSync(path.join(directory, "probe-screenshot.png"));
+      assert.equal(png.subarray(1, 4).toString("ascii"), "PNG", "the screenshot is a PNG");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+    assert.ok(!existsSync(directory));
+  });
+});
+
+describe("the harness's openPage", () => {
+  let browser;
+  let page;
+  after(() => browser?.close());
+
+  /** A page whose `#ready` is in the document, hidden, from the start, and shown after `showAfterMs` (never, if null). */
+  const revealedLater = (showAfterMs) =>
+    "data:text/html," +
+    encodeURIComponent(
+      `<!doctype html><p id="ready" hidden>ready</p>` +
+        (showAfterMs === null ? "" : `<script>setTimeout(() => { document.getElementById("ready").hidden = false; }, ${showAfterMs});</script>`)
+    );
+
+  test("waits for an element that is in the document at once but shown only later", async () => {
+    browser = await puppeteer.launch({ headless: true });
+    page = await browser.newPage();
+    await openPage(page, revealedLater(300), "#ready");
+    assert.equal(await page.$eval("#ready", (element) => element.checkVisibility()), true, "the element is shown when openPage returns");
+  });
+
+  test("an element that stays hidden fails in bounded time, naming the path, the selector and the URL", async () => {
+    const address = revealedLater(null);
+    const started = Date.now();
+    await assert.rejects(openPage(page, address, "#ready", { timeout: 500 }), (error) => {
+      assert.ok(error.message.startsWith(`${address} never showed #ready within 500 ms`), error.message);
+      assert.match(error.message, /in the document but not visible/, "the message says what was missing");
+      assert.match(error.message, /the page ended up at data:text\/html/, "the message names the final URL");
       return true;
     });
     assert.ok(Date.now() - started < 3000, `it gave up after ${Date.now() - started} ms, not at its 500 ms bound`);

@@ -17,9 +17,12 @@
  */
 
 import assert from "node:assert/strict";
-import { after, before, test } from "node:test";
+import { after, afterEach, before, beforeEach, test } from "node:test";
 
-import { knownRoles, loginCount, sharedRoles, shutdown } from "./harness.js";
+import { keepEvidenceOnFailure, knownRoles, loginCount, sharedRoles, shutdown } from "./harness.js";
+
+// Registered before the check modules are imported, so it covers every one of them.
+keepEvidenceOnFailure(import.meta.filename, { beforeEach, afterEach });
 
 /**
  * Logins beyond one per role, each named. `session-lifecycle.js` signs its

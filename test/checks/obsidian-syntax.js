@@ -32,6 +32,7 @@ import {
   eventually,
   hostKinds,
   hostsContactedWhile,
+  openPage,
   render,
   setPreferences,
   sharedSession,
@@ -198,7 +199,7 @@ describe("obsidian syntax", () => {
     // so the browser's own resolution of the fragment lands at the top; the
     // page has to scroll there itself once it is shown.
     const { page } = await render(student(), "/md/test-content-list.md");
-    await page.goto(`${new URL(demo, applicationUrl).href}#summary`, { waitUntil: "domcontentloaded" });
+    await openPage(page, `${new URL(demo, applicationUrl).href}#summary`, "#summary");
     const shown = await eventually(
       () =>
         page.$eval("#summary", (heading) => ({

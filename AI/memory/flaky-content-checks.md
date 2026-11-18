@@ -1,6 +1,6 @@
 ---
 name: flaky-content-checks
-description: Browser checks that failed by timing - fixed 2026-11-11 (stabilize-flaky-browser-checks); a red check is now evidence, not noise. History of what each "flaky" one really was
+description: Browser checks that failed by timing - fixed 2026-11-11 and again 2026-11-18 (stabilize-exam-suite-checks); a red check is evidence, read test/.evidence first. History of what each "flaky" one really was
 metadata:
   type: project
 ---
@@ -9,6 +9,13 @@ Since 2026-11-11 (change `stabilize-flaky-browser-checks`) no known flaky browse
 
 **Why:** a red browser check is evidence against the working tree again. Re-running, or comparing against HEAD via `git stash push -u`, is no longer the default reaction.
 **How to apply:** if a check goes red, investigate it. If it really is timing, fix it with the rules in `docs-testing.md` ("Clicks and late state"): `click(page, selector)` from the harness instead of `page.click`, `eventually(...)` before asserting on late state, `whenStill(...)` before measuring layout. The guard `test/check-conventions.test.js` refuses a direct `page.click(` / `frame.click(`. Only once it is understood, add a new entry here with its cause. See [[browser-verification]], [[test-runs-targeted-first]].
+
+**2026-11-18 (change `stabilize-exam-suite-checks`):** the suite was red again in some runs. A failed browser check now leaves evidence in `test/.evidence/<file>/<check>/` (URL, screenshot, DOM, console errors per page, failure with causes): **read it before re-running.** Every navigation goes through the harness's `openPage(session, path, readySelector)` (waits until shown and still); `check-conventions` refuses `page.goto(`. Every describe of `test/exam.test.js` runs alone (`examFixture` finds or creates year, 9XGB/GB, the two pool questions). Acceptance: three `exam.test.js` runs 192/192. What the red checks were:
+
+- **`net::ERR_NETWORK_CHANGED`** (a whole describe cancelled at login): **environment**. Another project's Docker containers were being recreated every 20–40 s; each start/stop changes a network interface and Chrome aborts requests in flight. Not a finding — do not touch containers during a run.
+- **Question editor "Title is missing" → 422, navigation timeout**: `page.type` right after `waitForSelector` without `visible`, while the body was still served hidden. Typing into a hidden body loses every character silently. Fixed by waiting for visible (also after every click-started navigation).
+- **Review link and gradebook column header "could not click within 10000 ms"** while present and visible in the screenshot: page opened via `goto` + in-DOM wait. Not reproduced afterwards (not even under full CPU load); mitigated by `openPage`. `click` failures now print the element's box over two frames, what is on top, viewport, scroll, fullscreen — if it comes back, that says which cause. Known trap: while another page of the same browser context is in front, the session page is `hidden` and `requestAnimationFrame` stops, so the Locator's stability wait hangs; close extra pages in `finally`.
+- Not a regression: `exam-attempt-review` is fine, the check was the problem.
 
 What the former entries turned out to be:
 

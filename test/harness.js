@@ -16,7 +16,7 @@
 
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -521,6 +521,7 @@ export async function startAnonymous({ readerRoles = [], env = {} } = {}) {
     const context = await running.createBrowserContext();
     openContexts.add(context);
     const page = await context.newPage();
+    trackPage(page, "reader");
     page.setDefaultNavigationTimeout(navigationTimeoutMs);
     page.setDefaultTimeout(navigationTimeoutMs);
     await page.goto(`${url}/`, { waitUntil: "domcontentloaded" });
@@ -601,7 +602,153 @@ async function ensureBrowser() {
     userDataDir: profileDir,
     defaultViewport: { width: 1400, height: 900 },
   });
+  // Every page of the run is tracked, including one a check opens itself with
+  // `context.newPage()`, so a failure leaves evidence of it too. Pages the
+  // harness opens are tracked right where it opens them, before their first
+  // navigation; this listener catches the rest.
+  browser.on("targetcreated", async (target) => {
+    if (target.type() !== "page") return;
+    const page = await target.page().catch(() => null);
+    if (page) trackPage(page);
+  });
   return browser;
+}
+
+// ################### Console errors and failure evidence ###################
+
+/** Page -> `{ label, errors }` for every page of this run that is still open. */
+const trackedPages = new Map();
+
+/**
+ * Starts collecting what `page` logs as an error: `console.error` calls and
+ * uncaught exceptions. `label` names the page in the evidence of a failed
+ * check — the role of its session, as a rule. Safe to call more than once; a
+ * later call with a label only renames the page.
+ *
+ * Exported so the harness's own check can attach it to a page of its own.
+ */
+export function trackPage(page, label) {
+  const known = trackedPages.get(page);
+  if (known) {
+    if (label) known.label = label;
+    return known;
+  }
+  const entry = { label: label ?? null, errors: [] };
+  trackedPages.set(page, entry);
+  page.on("console", (message) => {
+    if (message.type() !== "error") return;
+    // A failed load says only "Failed to load resource"; the address is in its location.
+    const text = message.text();
+    const where = text.startsWith("Failed to load resource") ? message.location()?.url : null;
+    entry.errors.push(where ? `${text} (${where})` : text);
+  });
+  page.on("pageerror", (error) => entry.errors.push(`uncaught: ${error?.message ?? String(error)}`));
+  page.once("close", () => trackedPages.delete(page));
+  return entry;
+}
+
+/**
+ * The errors `page` has logged since the current check started (see
+ * `forgetConsoleErrors`), in the order it logged them.
+ */
+export function consoleErrors(page) {
+  return [...(trackedPages.get(page)?.errors ?? [])];
+}
+
+/** Starts the console-error record of every tracked page afresh; called before each check. */
+export function forgetConsoleErrors() {
+  for (const entry of trackedPages.values()) entry.errors.length = 0;
+}
+
+/** Where a failed check's evidence goes. Listed in `.gitignore`. */
+export const evidenceDir = path.join(import.meta.dirname, ".evidence");
+
+/** A test name as a directory name: lowercase words joined by dashes, bounded in length. */
+function slug(name) {
+  const words = name
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return words.slice(0, 120).replace(/-+$/, "") || "unnamed";
+}
+
+/** `work()`, or `null` once `ms` have passed or it fails: evidence never holds up a run. */
+async function bounded(work, ms = 10_000) {
+  let timer;
+  try {
+    return await Promise.race([
+      work().catch(() => null),
+      new Promise((resolve) => (timer = setTimeout(() => resolve(null), ms))),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Writes the evidence of one failed check into `directory`: per tracked page,
+ * its URL, a full-page screenshot, its document and the console errors it
+ * logged during the check. Returns the number of pages written.
+ *
+ * No cookie and no storage is read: the tokens of a session live in its
+ * server-side session and in cookies, never in the document.
+ */
+export async function writeEvidence(directory, { error } = {}) {
+  await mkdir(directory, { recursive: true });
+  const used = new Map();
+  let written = 0;
+  for (const [page, entry] of [...trackedPages]) {
+    if (page.isClosed()) continue;
+    const base = entry.label ?? "page";
+    const seen = used.get(base) ?? 0;
+    used.set(base, seen + 1);
+    const name = seen === 0 ? base : `${base}-${seen + 1}`;
+    const file = (suffix) => path.join(directory, `${name}-${suffix}`);
+    await writeFile(file("url.txt"), `${page.url()}\n`);
+    await bounded(() => page.screenshot({ path: file("screenshot.png"), fullPage: true }));
+    const dom = await bounded(() => page.evaluate(() => document.documentElement.outerHTML));
+    await writeFile(file("dom.html"), dom ?? "(the document could not be read)\n");
+    await writeFile(file("console.txt"), entry.errors.length > 0 ? `${entry.errors.join("\n")}\n` : "(no console errors)\n");
+    written++;
+  }
+  if (error) {
+    // The runner wraps the check's own error (ERR_TEST_FAILURE); the stack that
+    // names the line of the check is in its causes.
+    const chain = [];
+    for (let link = error; link && chain.length < 5; link = link.cause) chain.push(link.stack ?? link.message ?? String(link));
+    await writeFile(path.join(directory, "failure.txt"), `${chain.join("\n--- caused by ---\n")}\n`);
+  }
+  return written;
+}
+
+/**
+ * Registers, for the test file `testFile` (pass `import.meta.filename`), the
+ * hooks that keep evidence of a failed browser check: before each check the
+ * console-error record starts afresh, and after a check that failed — by an
+ * assertion, a timeout or an error — `writeEvidence` writes into
+ * `test/.evidence/<file>/<test-name>/`, and the check's output names that
+ * directory in one line.
+ *
+ * The file's evidence directory is emptied when this is called, at the start
+ * of the file's run, so what lies there belongs to its last run, and a run
+ * that passes leaves it empty.
+ *
+ * The runner's `beforeEach` and `afterEach` are handed in rather than
+ * imported, so the harness stays free of the test framework; `afterEach`'s
+ * context is read for `passed`, `error`, `fullName` and `diagnostic`, which
+ * `node:test` provides.
+ */
+export function keepEvidenceOnFailure(testFile, { beforeEach, afterEach }) {
+  const fileDir = path.join(evidenceDir, path.basename(testFile).replace(/\.test\.js$|\.js$/, ""));
+  rmSync(fileDir, { recursive: true, force: true });
+  beforeEach(() => forgetConsoleErrors());
+  afterEach(async (context) => {
+    if (context.passed !== false) return;
+    const directory = path.join(fileDir, slug(context.fullName ?? context.name));
+    const pages = await writeEvidence(directory, { error: context.error });
+    context.diagnostic(`evidence of ${pages} page(s): ${path.relative(projectRoot, directory)}/`);
+  });
 }
 
 async function closeBrowser() {
@@ -823,6 +970,7 @@ async function newSession(role, { confineToKnownHosts = false } = {}) {
   openContexts.add(context);
 
   const page = await context.newPage();
+  trackPage(page, role);
   page.setDefaultNavigationTimeout(navigationTimeoutMs);
   page.setDefaultTimeout(navigationTimeoutMs);
 
@@ -1263,6 +1411,58 @@ export async function render(session, pagePath, { view = "page" } = {}) {
   return { page: session.page, text, url: session.page.url(), view, path: pagePath };
 }
 
+/** How long `openPage` waits for its page to show what the check needs, unless told otherwise. */
+export const openTimeoutMs = 20_000;
+
+/**
+ * Navigates `target` — a session, or a page — to `pagePath` (a path of the
+ * application, or a full address) and returns once `readySelector` is shown:
+ * visible, with a box, and holding still over two frames.
+ *
+ * This is the one way a browser check navigates. `page.goto` resolves when the
+ * document has loaded, and `waitForSelector` without `visible` when an element
+ * is in the DOM; the client script fills or reveals the page after both, so a
+ * check that reads or clicks then races it. Waiting here, for what the check
+ * is about to use, ends that race in one place.
+ *
+ * `readySelector` names what the check reads or acts on first, or the root the
+ * page draws into when the check asserts that something is absent.
+ * `timeout` bounds the wait for it, `openTimeoutMs` by default. Fails naming the
+ * path, the selector and the URL the page ended up at, not with the timeout of
+ * a later click. Returns the navigation's response, as `page.goto` does.
+ */
+export async function openPage(target, pagePath, readySelector, { timeout = openTimeoutMs } = {}) {
+  const page = target.page ?? target;
+  const address = /^[a-z]+:/i.test(pagePath) ? pagePath : `${target.baseUrl ?? applicationUrl}${pagePath}`;
+  let response;
+  try {
+    response = await page.goto(address, { waitUntil: "domcontentloaded" });
+  } catch (error) {
+    throw new Error(`could not open ${pagePath}: ${error.message}`, { cause: error });
+  }
+  const started = Date.now();
+  try {
+    await page.waitForSelector(readySelector, { visible: true, timeout });
+  } catch (error) {
+    const present = await page.$(readySelector).then((handle) => handle !== null, () => false);
+    throw new Error(
+      `${pagePath} never showed ${readySelector} within ${timeout} ms ` +
+        `(${present ? "it is in the document but not visible" : "it is not in the document"}); ` +
+        `the page ended up at ${page.url()}`,
+      { cause: error }
+    );
+  }
+  await whenStill(
+    page,
+    (selector) => {
+      const box = document.querySelector(selector)?.getBoundingClientRect();
+      return box ? [box.x, box.y, box.width, box.height] : null;
+    },
+    { args: [readySelector], timeout: Math.max(500, timeout - (Date.now() - started)) }
+  );
+  return response;
+}
+
 /** How long `click` waits for its element to become actionable, unless told otherwise. */
 export const clickTimeoutMs = 10_000;
 
@@ -1292,11 +1492,51 @@ export async function click(target, selector, { timeout = clickTimeoutMs, stable
   try {
     await locator.click(options);
   } catch (error) {
+    const state = await bounded(() => actionability(target, selector), 3000);
     throw new Error(
-      `could not click ${selector} within ${timeout} ms on ${target.url()}: ${error.message}`,
+      `could not click ${selector} within ${timeout} ms on ${target.url()}: ${error.message}` +
+        (state ? `\nwhat the element looked like then: ${JSON.stringify(state)}` : ""),
       { cause: error }
     );
   }
+}
+
+/**
+ * Why an element may not have been clickable, read without changing the page:
+ * how many elements match, the first one's box over two frames, whether it is
+ * enabled, what lies on top of its centre, and the viewport and scroll
+ * position. Goes into the failure of `click`, so a timeout can be told apart
+ * into "never there", "never held still" and "covered".
+ */
+function actionability(target, selector) {
+  return target.evaluate(async (selector) => {
+    const matches = document.querySelectorAll(selector);
+    const element = matches[0];
+    if (!element) return { matches: 0 };
+    const rect = () => {
+      const box = element.getBoundingClientRect();
+      return [Math.round(box.x), Math.round(box.y), Math.round(box.width), Math.round(box.height)];
+    };
+    const first = rect();
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const second = rect();
+    const [x, y, width, height] = second;
+    const top = document.elementFromPoint(x + width / 2, y + height / 2);
+    const describe = (node) =>
+      node ? `${node.localName}${node.id ? `#${node.id}` : ""}${node.classList.length ? `.${[...node.classList].join(".")}` : ""}` : null;
+    return {
+      matches: matches.length,
+      connected: element.isConnected,
+      box: first,
+      boxOneFrameLater: second,
+      visible: element.checkVisibility?.({ checkOpacity: true, checkVisibilityCSS: true }) ?? null,
+      disabled: element.disabled ?? null,
+      onTop: top === element || element.contains(top) ? "itself" : describe(top),
+      viewport: [window.innerWidth, window.innerHeight],
+      scroll: [Math.round(window.scrollX), Math.round(window.scrollY)],
+      fullscreen: describe(document.fullscreenElement),
+    };
+  }, selector);
 }
 
 /**

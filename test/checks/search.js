@@ -34,6 +34,7 @@ import {
   accountLookups,
   applicationUrl,
   click,
+  openPage,
   render,
   roles,
   setPreferences,
@@ -650,9 +651,8 @@ describe("search", () => {
       pagePath.split("/").map(encodeURIComponent).join("/") +
       (query ? `?${query}` : "");
     await session.page.evaluate(() => sessionStorage.clear());
-    await session.page.goto(address, { waitUntil: "domcontentloaded" });
-    await session.page.waitForSelector("#markdown-content");
-    await session.page.waitForFunction(() => document.body.style.display === "");
+    // Shown, not merely present: the body is hidden until the page reveals it.
+    await openPage(session, address, "#markdown-content");
     return session.page;
   }
 

@@ -22,7 +22,7 @@
 import assert from "node:assert/strict";
 import { before, describe, test } from "node:test";
 
-import { applicationUrl, click, render, setPreferences, sharedSession } from "../harness.js";
+import { applicationUrl, click, openPage, render, setPreferences, sharedSession } from "../harness.js";
 
 const fixture = "/md/test-frontmatter.md";
 const headerOnly = "/md/test-frontmatter-header-only.md";
@@ -247,8 +247,7 @@ describe("frontmatter", () => {
 
   test("the print view carries the footer on every page", async () => {
     const session = sessions.get("teacher");
-    await session.page.goto(`${applicationUrl}${fixture}?print-pdf=true&reveal=true`, { waitUntil: "domcontentloaded" });
-    await session.page.waitForSelector(".reveal .pdf-page", { timeout: 20000 });
+    await openPage(session, `${fixture}?print-pdf=true&reveal=true`, ".reveal .pdf-page");
     await session.page.waitForFunction(
       () => document.querySelectorAll(".reveal .pdf-page > .sl-deck-footer").length > 0,
       { timeout: 10000 }

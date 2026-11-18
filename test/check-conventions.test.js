@@ -2,8 +2,9 @@
  * Conventions the browser checks follow, checked against their source.
  *
  * No browser, no login, no server: this file only reads the check files. It
- * turns "every click goes through the harness's `click`" from a rule in
- * docs-testing.md into a failure that names the file and line breaking it.
+ * turns "every click goes through the harness's `click`" and "every
+ * navigation goes through the harness's `openPage`" from rules in
+ * docs-testing.md into failures that name the file and line breaking them.
  *
  * Why the rule exists: `page.click(selector)` resolves the selector once and
  * clicks that node. When the client script redraws the element right after the
@@ -71,5 +72,46 @@ test("no browser check clicks a page or frame directly instead of through the ha
     found,
     [],
     `click through the harness's \`click(page, selector)\`, which waits for an actionable element:\n${found.join("\n")}`
+  );
+});
+
+/**
+ * `page.goto(`, `student.page.goto(` and the like: a navigation outside the
+ * harness. `page.goto` resolves once the document has loaded, before the
+ * client script has filled or shown the page, so a check that reads or clicks
+ * right after it races the script. The harness's `openPage` waits until the
+ * element the check needs is shown.
+ */
+const directGoto = /\b(?:\w+\.)*page\.goto\(/;
+
+/** The lines of `source` that navigate a page directly, as `file:line: text`. */
+function directGotos(file, source) {
+  return source
+    .split("\n")
+    .map((text, index) => ({ text, line: index + 1 }))
+    .filter(({ text }) => !commentLine.test(text) && directGoto.test(text))
+    .map(({ text, line }) => `${file}:${line}: ${text.trim()}`);
+}
+
+test("the scan finds a direct navigation and passes over one through the harness", () => {
+  const source = [
+    'await openPage(student, "/exam/my", ".sl-exam-results");',
+    "// page.goto(address) is what this replaces",
+    'await teacher.page.goto(`${applicationUrl}/exam/`, { waitUntil: "domcontentloaded" });',
+    'await keycloak.goto(endSessionUrl());',
+  ].join("\n");
+  assert.deepEqual(directGotos("fixture.js", source), [
+    'fixture.js:3: await teacher.page.goto(`${applicationUrl}/exam/`, { waitUntil: "domcontentloaded" });',
+  ]);
+});
+
+test("no browser check navigates a page directly instead of through the harness's openPage", () => {
+  const found = browserCheckFiles()
+    .filter((file) => file !== "test/harness.js")
+    .flatMap((file) => directGotos(file, readFileSync(path.join(projectRoot, file), "utf8")));
+  assert.deepEqual(
+    found,
+    [],
+    `navigate through the harness's \`openPage(session, path, readySelector)\`, which waits until the page shows what the check needs:\n${found.join("\n")}`
   );
 });
