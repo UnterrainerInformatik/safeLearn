@@ -921,7 +921,7 @@ function handoutDate(iso) {
 
 /**
  * The sitting whose date `DATE` stands for when no participant's sitting is
- * given - the teacher's preview and the solution deck (design D5): the first
+ * given - the teacher's preview and the solution page (design D5): the first
  * started one, otherwise the first planned one, otherwise none.
  */
 function previewSitting(db, testId) {

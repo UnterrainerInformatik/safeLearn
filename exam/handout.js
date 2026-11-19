@@ -187,7 +187,7 @@ function everyHandoutPath(db) {
  * the views the handout rendering fixes. A participant's are the handouts
  * `servableHandout` would answer them right now, without the exam and answer
  * variants; a teacher's are every handout of a test, with both, as the
- * solution decks show them. Nothing is kept: the next request asks again.
+ * solution pages show them. Nothing is kept: the next request asks again.
  */
 export async function handoutAttachmentCheck(db, req, attachment, { username, teacher }) {
   if (typeof username !== "string") return false;

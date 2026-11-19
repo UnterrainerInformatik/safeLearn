@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines how a corpus Markdown file becomes the handout of an offline test: chosen by the teacher, kept valid until the start, shown to each present participant during the window under fixed views and nowhere else, and shown to the teacher afterwards as a solution deck.
+Defines how a corpus Markdown file becomes the handout of an offline test: chosen by the teacher, kept valid until the start, shown to each present participant during the window under fixed views and nowhere else, and shown to the teacher afterwards as a solution page.
 
 ## Requirements
 
@@ -107,23 +107,23 @@ An attachment the served handout references SHALL be served to that participant 
 - **WHEN** the window closes and the participant requests `starter.zip` again
 - **THEN** it is not served
 
-### Requirement: A teacher presents a handout's solution as a deck
+### Requirement: A teacher opens a handout's solution as a page
 
-For each handout that contains at least one `#exam` or `#answer` block, the test's page SHALL offer the teacher a button that opens the handout as a presentation of its solution: rendered as for a participant, but with the exam variant and the answer variant shown and the practice variant hidden. The deck SHALL show no student's name and no result. It SHALL be available at any time, during and after the window. The deck and every request it makes SHALL be refused to any session that does not act as a teacher, including a teacher in student view. A handout with neither an `#exam` nor an `#answer` block SHALL offer no solution button.
+For each handout that contains at least one `#exam` or `#answer` block, the test's page SHALL offer the teacher a button that opens the handout's solution as a page of the module, not as a presentation, since a handout is running text: rendered as for a participant, but with the exam variant and the answer variant shown and the practice variant hidden. The page SHALL show no student's name and no result. It SHALL be available at any time, during and after the window. The page and every request it makes SHALL be refused to any session that does not act as a teacher, including a teacher in student view. A handout with neither an `#exam` nor an `#answer` block SHALL offer no solution button.
 
 #### Scenario: Discussing the test in the next lesson
 
 - **WHEN** a teacher presses the solution button of handout A
-- **THEN** a presentation of handout A opens with its exam blocks and its answer blocks shown, and its practice variant and its `@@@ teacher` blocks hidden
+- **THEN** a page of handout A opens, not a presentation, with its exam blocks and its answer blocks shown, and its practice variant and its `@@@ teacher` blocks hidden
 
 #### Scenario: Solutions only in exam blocks
 
 - **WHEN** a handout holds its solutions in `@@@ #exam` blocks and has no `#answer` block
-- **THEN** the test's page offers the solution button for it, and the deck shows those solutions
+- **THEN** the test's page offers the solution button for it, and the solution page shows those solutions
 
 #### Scenario: A student opens the solution URL
 
-- **WHEN** a student requests the solution deck of a handout of a test they wrote
+- **WHEN** a student requests the solution page of a handout of a test they wrote
 - **THEN** the request is refused
 
 #### Scenario: No answers in the file
@@ -137,9 +137,9 @@ An inline Obsidian comment whose whole content is `var` followed by a name, writ
 
 An offline test SHALL hold one value per variable name, shared by its handouts A and B. The test's page SHALL show one field for every variable found in the current content of its resolving handouts, scanned again each time the page is shown, in the order the variables first appear, A before B, and each name once. A teacher SHALL be able to set and change these values at any time, also while a sitting is open. A value SHALL be a single line of at most 500 characters and SHALL NOT contain `%%` or `@@@`. An empty value SHALL count as no value. A value whose variable no longer appears in either handout SHALL be kept, and SHALL NOT be shown.
 
-Two names SHALL be filled by the module, and the teacher SHALL NOT be able to set them. The test's page SHALL show them read-only. `CLASS` SHALL be the class of the test's course. `DATE` SHALL be the date of the sitting, written as day, month and four-digit year separated by dots: the day it was started, or the day it is planned for while it has not started. In the participant's handout, `DATE` SHALL be that of the participant's sitting. In the teacher's preview and solution deck, it SHALL be that of the test's first started sitting, or of its first planned sitting while none has started. Without any sitting it SHALL have no value.
+Two names SHALL be filled by the module, and the teacher SHALL NOT be able to set them. The test's page SHALL show them read-only. `CLASS` SHALL be the class of the test's course. `DATE` SHALL be the date of the sitting, written as day, month and four-digit year separated by dots: the day it was started, or the day it is planned for while it has not started. In the participant's handout, `DATE` SHALL be that of the participant's sitting. In the teacher's preview and solution page, it SHALL be that of the test's first started sitting, or of its first planned sitting while none has started. Without any sitting it SHALL have no value.
 
-The participant's handout, the teacher's preview and the solution deck SHALL show every variable replaced by its value. The value SHALL be rendered as part of the handout's Markdown, sanitized like the rest of it. A variable without a value SHALL be shown as its name between `‹` and `›`. Every other view of the file SHALL keep hiding a variable as a comment: its page, search, the attachment check and the Obsidian plugin.
+The participant's handout, the teacher's preview and the solution page SHALL show every variable replaced by its value. The value SHALL be rendered as part of the handout's Markdown, sanitized like the rest of it. A variable without a value SHALL be shown as its name between `‹` and `›`. Every other view of the file SHALL keep hiding a variable as a comment: its page, search, the attachment check and the Obsidian plugin.
 
 #### Scenario: Filling in the PIN
 
@@ -154,7 +154,7 @@ The participant's handout, the teacher's preview and the solution deck SHALL sho
 #### Scenario: A make-up on another day
 
 - **WHEN** the first sitting was started on 2026-11-14 and a make-up of the same test is started on 2026-11-21
-- **THEN** a participant of the make-up sees `21.11.2026` as the date, and the solution deck shows `14.11.2026`
+- **THEN** a participant of the make-up sees `21.11.2026` as the date, and the solution page shows `14.11.2026`
 
 #### Scenario: One list for two handouts
 

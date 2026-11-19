@@ -86,7 +86,7 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
           case "exam":
             // For security reasons hardcoded to only allow teachers and admins to view exam-questions.
             // Under a handout rendering the module's flag decides both cases together; it is set
-            // only for a teacher's solution deck and attachment check, never for a participant.
+            // only for a teacher's solution page and attachment check, never for a participant.
             clientAccess = handout !== null ? handout.exam === true : a.ve == 1 && (view.isAdmin || view.isTeacher);
             break;
           case "practice":

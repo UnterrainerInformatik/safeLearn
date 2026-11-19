@@ -1,7 +1,7 @@
 /**
  * The routes of the offline tests' handouts (`exam-handout`, exam-offline-
  * sittings design D5, D6): the participant's handout during the window, the
- * teacher's preview and solution deck, and the corpus list the teacher's
+ * teacher's preview and solution page, and the corpus list the teacher's
  * picker is built from.
  *
  * The participant's page is authorized from the database at every request -
@@ -15,7 +15,7 @@ import { getCourse, NotFoundError } from "./classes.js";
 import { identityOf, requireTeacher, teacherPage } from "./gate.js";
 import { corpusFiles, handoutResolves, servableHandout } from "./handout.js";
 import { variablesFor } from "./tests.js";
-import { embedPlaceholder, splitForReveal, wrapInPage, wrapInReveal } from "../obsidian.js";
+import { embedPlaceholder, wrapInPage } from "../obsidian.js";
 import { i18nOf } from "../i18n/server.js";
 
 /** A record id from the path; anything but a positive integer names nothing. */
@@ -80,9 +80,9 @@ export function registerHandoutRoutes(router, { db, handle, startPage, renderHan
     })
   );
 
-  // The solution deck: the handout as a presentation with its exam and answer
-  // variants shown and its practice variant hidden,
-  // no student's name and no result in it.
+  // The solution page: the handout as a page of running text with its exam
+  // and answer variants shown and its practice variant hidden, no student's
+  // name and no result in it. A handout is prose, not slides, so it is no deck.
   router.get(
     "/tests/:id/handouts/:group/solution",
     teacherPage,
@@ -90,7 +90,8 @@ export function registerHandoutRoutes(router, { db, handle, startPage, renderHan
       const { test, path: corpusPath } = teacherHandout(db, req.params.id, req.params.group);
       const html = await rendered(corpusPath, req, { exam: true, answer: true, vars: variablesFor(db, test.id) });
       const { t } = await i18nOf(req);
-      res.send(await wrapInReveal(splitForReveal(html), req, { title: t("exam.handouts.solutionTitle", { name: test.name, group: req.params.group }) }));
+      const body = `<div class="sl-exam-handout sl-exam-handout-solution-page">${html}</div>`;
+      res.send(await wrapInPage(body, startPage(), req, { title: t("exam.handouts.solutionTitle", { name: test.name, group: req.params.group }) }));
     })
   );
 

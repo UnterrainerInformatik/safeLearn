@@ -75,7 +75,7 @@ The presentation view exists to be driven in front of a class. Replacing or upgr
 
 ### Requirement: Every slide fits the screen
 
-A deck is shown on a projector or a classroom monitor, so every slide SHALL fit wholly on the screen it is shown on. A slide whose content is larger than the space the deck has SHALL be scaled down, its proportions kept, until all of it is visible: text, images, code, tables and embedded documents alike. Nothing on a slide SHALL be cut off or need scrolling. The application SHALL NOT split a slide into several. This SHALL hold for every deck the application renders: a presentation of the corpus, a handout's solution deck and a test's board solution. It SHALL follow a change of the window's size, and it SHALL hold for a slide revealed step by step with all its steps shown.
+A deck is shown on a projector or a classroom monitor, so every slide SHALL fit wholly on the screen it is shown on. A slide whose content is larger than the space the deck has SHALL be scaled down, its proportions kept, until all of it is visible: text, images, code, tables and embedded documents alike. Nothing on a slide SHALL be cut off or need scrolling. The application SHALL NOT split a slide into several. This SHALL hold for every deck the application renders: a presentation of the corpus and a test's board solution. It SHALL follow a change of the window's size, and it SHALL hold for a slide revealed step by step with all its steps shown.
 
 #### Scenario: A question with a large image on the board
 

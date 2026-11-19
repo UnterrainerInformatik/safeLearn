@@ -60,7 +60,7 @@ A handout the exam module currently serves to a session (`exam-handout`) SHALL c
 
 - **WHEN** an attachment is referenced only in a handout restricted to teachers, inside its `#exam` block, and a present participant of the open sitting requests it
 - **THEN** it is not served to that participant, because the handout hides the exam variant from them
-- **AND** it is served to a teacher, because the handout's solution deck shows the exam variant
+- **AND** it is served to a teacher, because the handout's solution page shows the exam variant
 
 #### Scenario: The participant is marked absent during the window
 

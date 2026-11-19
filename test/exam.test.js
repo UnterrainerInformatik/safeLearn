@@ -4426,7 +4426,7 @@ describe("offline tests and their handouts", () => {
     await reloadedWith("HANDOUT-A-TASK");
   });
 
-  test("extending moves the window for everyone, and the solution deck is a teacher's alone", async () => {
+  test("extending moves the window for everyone, and the solution page is a teacher's alone", async () => {
     const before = (await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/live`)).json.sitting.closesAt;
     const extended = await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/extend`, { method: "POST", body: { minutes: 10 } });
     assert.equal(extended.status, 200, JSON.stringify(extended.json));
@@ -4434,28 +4434,16 @@ describe("offline tests and their handouts", () => {
     assert.equal((await fetchAs(student, "/exam/api/my/tests")).json.tests.find((t) => t.sittingId === sitting.id).closesAt, extended.json.closesAt);
 
     const deck = `/exam/tests/${offline.id}/handouts/A/solution`;
-    await openPage(teacher.page, `${deck}`, ".reveal .slides");
-    const slides = await teacher.page.evaluate(() => document.querySelector(".reveal .slides").textContent);
-    assert.match(slides, /HANDOUT-ANSWER/);
-    assert.match(slides, /HANDOUT-EXAM-VARIANT/);
-    assert.doesNotMatch(slides, /HANDOUT-PRACTICE-VARIANT|HANDOUT-TEACHER-HINT/);
-    // Every slide shown in turn: only one larger than the deck is shrunk.
-    await teacher.page.waitForFunction(() => window.Reveal?.isReady(), { timeout: 20000 });
-    const fitted = await teacher.page.evaluate(async () => {
-      const size = Reveal.getComputedSlideSize();
-      const rows = [];
-      for (const slide of Reveal.getSlides()) {
-        const { h, v } = Reveal.getIndices(slide);
-        Reveal.slide(h, v);
-        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-        rows.push({ larger: slide.scrollHeight > size.height + 2 || slide.scrollWidth > size.width + 2, fit: slide.hasAttribute("data-sl-fit") });
-      }
-      return rows;
-    });
-    assert.ok(fitted.length > 0 && fitted.every((row) => row.larger === row.fit), `a fit exactly on the slides larger than the deck: ${JSON.stringify(fitted)}`);
+    await openPage(teacher.page, `${deck}`, ".sl-exam-handout");
+    const solution = await teacher.page.evaluate(() => document.querySelector(".sl-exam-handout").textContent);
+    assert.match(solution, /HANDOUT-ANSWER/);
+    assert.match(solution, /HANDOUT-EXAM-VARIANT/);
+    assert.doesNotMatch(solution, /HANDOUT-PRACTICE-VARIANT|HANDOUT-TEACHER-HINT/);
+    // A handout is running text: the solution is a page, not a presentation.
+    assert.equal(await teacher.page.evaluate(() => document.querySelector(".reveal .slides") === null), true, "the solution is no deck");
     // Not the shared account's name: it is `student`, a word the fixture's prose uses.
-    assert.ok(!slides.includes(other), "no participant's name");
-    assert.deepEqual(await fetchAs(student, deck), await fetchAs(student, absent), "a student finds no deck");
+    assert.ok(!solution.includes(other), "no participant's name");
+    assert.deepEqual(await fetchAs(student, deck), await fetchAs(student, absent), "a student finds no solution page");
     await setPreferences(teacher, { vt: 0 });
     try {
       assert.deepEqual(await fetchAs(teacher, deck), await fetchAs(teacher, absent), "nor does a teacher in student view");

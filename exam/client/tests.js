@@ -11,7 +11,7 @@
  * An offline test (`offline-test`, `exam-handout`) is listed beside them by
  * its kind, and its page shows its duration, its gradebook category, its
  * handouts - a path that no longer resolves in red - chosen in the picker,
- * their preview and solution deck, the values of their variables - a name
+ * their preview and solution page, the values of their variables - a name
  * without one in red - and its sittings, which are planned and
  * started from their attendance page; it has no questions.
  *
