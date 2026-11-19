@@ -15,6 +15,7 @@ import fs from "node:fs";
 import {
   getActivePermissionRoles,
   handoutReferencesVisibly,
+  handoutVariables,
   mdFilesDir,
   mdFilesDirStructure,
   normalizeCorpusPath,
@@ -65,6 +66,34 @@ export function hasSolution(corpusPath) {
     fileDirective: parseFirstLineForPermissions(firstLine) !== null,
   });
   return blocks.some(({ entries }) => entries.some(({ role }) => role === "#exam" || role === "#answer"));
+}
+
+/**
+ * The names of the variables `%%var NAME%%` in the handouts of a test row
+ * (`exam-handout`, offline-handout-variables design D4): the union over the
+ * handouts that resolve, read again at every call, in the order they first
+ * appear, A before B, each once. The text is read as `renderHandout` fills
+ * it: without frontmatter and without a whole-file directive.
+ */
+export function handoutVariableNames(test) {
+  const names = [];
+  for (const corpusPath of [test.handout_a, test.handout_b]) {
+    if (!handoutResolves(corpusPath)) continue;
+    let raw;
+    try {
+      raw = fs.readFileSync(mdFilesDirStructure[corpusPath].absolutePath, "utf8");
+    } catch {
+      continue;
+    }
+    let body = splitFrontmatter(raw, mdFilesDirStructure[corpusPath].absolutePath).body;
+    if (parseFirstLineForPermissions(body.split("\n", 1)[0].replace(/\r$/, "")) !== null) {
+      body = body.split("\n").slice(1).join("\n");
+    }
+    for (const name of handoutVariables(body)) {
+      if (!names.includes(name)) names.push(name);
+    }
+  }
+  return names;
 }
 
 /** The handouts of a test row, A first: each with its path and whether it resolves. */

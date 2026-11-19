@@ -24,6 +24,7 @@ import {
   removeWrittenQuestion,
   rescheduleSitting,
   setAttendance,
+  setTestVariables,
   startSitting,
   updateSitting,
   updateTest,
@@ -110,6 +111,8 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
   api("post", "/courses/:id/offline-tests", (req) => createOfflineTest(db, idParam(req.params.id), req.body ?? {}));
   api("get", "/tests/:id", (req) => getTest(db, idParam(req.params.id)));
   api("put", "/tests/:id", (req) => updateTest(db, idParam(req.params.id), req.body ?? {}));
+  // The values of an offline test's handout variables (`exam-handout`), in every state of the test.
+  api("put", "/tests/:id/variables", (req) => setTestVariables(db, idParam(req.params.id), req.body?.values));
   // Each write of a sitting tells the students' streams of open tests.
   const announced = (answer) => {
     notifySittings();

@@ -16,7 +16,7 @@
 import { EventEmitter } from "node:events";
 
 import { getCourse, NotFoundError, now } from "./classes.js";
-import { sittingState } from "./tests.js";
+import { sittingState, testVariables } from "./tests.js";
 import { handoutsOf } from "./handout.js";
 import { browserLabel } from "./user-agent.js";
 import { teacherNoteOf, teacherNotesOf } from "./teacher-notes.js";
@@ -214,7 +214,15 @@ export function liveSnapshot(db, sittingId, at = now(), { screen = false } = {})
     },
     kind: test.kind,
     // `attempts` counts the test's attempts, every sitting's: the number discarding it confirms.
-    test: { id: test.id, name: test.name, kind: test.kind, handouts: offline ? handoutsOf(test) : [], attempts: attempts.size },
+    // `missingVariables`: the handout variables without a value, which block the start (`exam-handout`).
+    test: {
+      id: test.id,
+      name: test.name,
+      kind: test.kind,
+      handouts: offline ? handoutsOf(test) : [],
+      missingVariables: offline ? testVariables(db, test, sitting).filter((variable) => variable.missing).map((variable) => variable.name) : [],
+      attempts: attempts.size,
+    },
     // A closed year's notes are read-only (`school-year-change`); the view disables their fields.
     course: { id: course.id, subject: course.subject, language: course.language, className: course.className, yearClosed: course.year.closed === true },
     participants: participantRows(db, sittingId).map((row) =>

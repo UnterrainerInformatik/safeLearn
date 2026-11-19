@@ -488,6 +488,7 @@
         "gradebookKind": "An offline test counts as a test or as a short test.",
         "handoutGroup": "The group is A or B.",
         "handoutUnresolved": "Handout {group} ({path}) is not there any more. Choose it again or remove it.",
+        "handoutVariablesMissing": "These handout variables have no value yet: {names}. Fill them in on the test's page.",
         "keepOneQuestion": "A test keeps at least one question; delete the test instead.",
         "makeupDuration": "A make-up keeps the duration of the first sitting; it cannot change while there are make-ups.",
         "makeupParticipants": "A make-up is written by the students chosen for it.",
@@ -508,6 +509,7 @@
         "oneQuestion": "A test needs at least one question.",
         "onlineNoAttendance": "An online sitting has no attendance table.",
         "onlineNoStart": "An online sitting opens by its time, not by a button.",
+        "onlineNoVariables": "Only an offline test has handout variables.",
         "opensBeforeCloses": "A sitting has to open before it closes.",
         "presentFlag": "Present is yes or no.",
         "questionIds": "A test's questions are given by their ids.",
@@ -521,6 +523,9 @@
         "sittingRunning": "The sitting is running. End it first.",
         "sittingStarted": "This sitting has been started already.",
         "startFormat": "The start has to be a date and time.",
+        "variableAuto": "{name} is filled in by the module and cannot be set.",
+        "variableName": "{name} is no variable name: capital letters, digits and _, starting with a letter.",
+        "variableValue": "The value is refused: one line of at most 500 characters, without %% and without @@@.",
         "writtenCannotDelete": "This test has been written and cannot be deleted.",
         "writtenQuestionsFixed": "This test has been written; its questions cannot change any more."
       },
@@ -1092,6 +1097,7 @@
       "minutes": "{minutes} min",
       "newTest": "New offline test",
       "noHandout": "No handout.",
+      "noVariables": "The handouts have no variables. Write %%var NAME%% in a handout to fill in a value here.",
       "notStarted": "not started",
       "notStartedYet": "Not started yet",
       "plan": "Plan",
@@ -1107,7 +1113,14 @@
       "start": "Start",
       "startBlocked": "Handout {group} ({path}) is not there any more: choose it again or remove it.",
       "startNote": "The sitting opens only when you press Start on its attendance page.",
-      "summary": "{present} present · {absent} absent"
+      "summary": "{present} present · {absent} absent",
+      "variableClassNote": "the course's class, filled in by the module",
+      "variableDateNote": "the sitting's date, filled in by the module",
+      "variableMissing": "no value yet",
+      "variableNoDate": "no sitting yet",
+      "variablesHeading": "Variables",
+      "variablesMissing": "Variables without a value:",
+      "variablesNote": "A handout marks what changes from test to test with %%var NAME%%, a name in capital letters. Each name gets one value here, shared by both handouts, and can be corrected at any time, during the window too: students see the new value on reload. A name without a value blocks the start."
     }
   }
 }

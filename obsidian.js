@@ -3135,6 +3135,19 @@ export function stripComments(markdown) {
   if (typeof markdown !== "string" || !markdown.includes("%%")) {
     return markdown;
   }
+  return cutRanges(markdown, commentRanges(markdown), () => "");
+}
+
+/**
+ * The comment ranges of `markdown`, in order, as `stripComments` cuts them:
+ * `[start, end, inner]` with `inner` the text between the marks, or null for a
+ * block comment that runs to the end without a closing mark. A text that is no
+ * string or holds no `%%` has none.
+ */
+export function commentRanges(markdown) {
+  if (typeof markdown !== "string" || !markdown.includes("%%")) {
+    return [];
+  }
   const masked = maskCode(markdown);
   const ranges = [];
   let mark = masked.indexOf("%%");
@@ -3147,25 +3160,77 @@ export function stripComments(markdown) {
     }
     if (close === -1) {
       if (block) {
-        ranges.push([mark, markdown.length]);
+        ranges.push([mark, markdown.length, null]);
         break;
       }
       mark = masked.indexOf("%%", mark + 2);
       continue;
     }
-    ranges.push([mark, close + 2]);
+    ranges.push([mark, close + 2, markdown.slice(mark + 2, close)]);
     mark = masked.indexOf("%%", close + 2);
   }
+  return ranges;
+}
+
+/** `markdown` with each range replaced by what `replace(range)` returns. */
+function cutRanges(markdown, ranges, replace) {
   if (ranges.length === 0) {
     return markdown;
   }
   let result = "";
   let from = 0;
-  for (const [start, end] of ranges) {
-    result += markdown.slice(from, start);
-    from = end;
+  for (const range of ranges) {
+    result += markdown.slice(from, range[0]) + replace(range);
+    from = range[1];
   }
   return result + markdown.slice(from);
+}
+
+/**
+ * The content of a comment that makes it a handout variable (`exam-handout`):
+ * `var` and a name of an upper-case letter followed by upper-case letters,
+ * digits or `_`, on one line, with whitespace allowed around it.
+ */
+const handoutVariablePattern = /^[ \t]*var[ \t]+([A-Z][A-Z0-9_]*)[ \t]*$/;
+
+/** A name a handout variable may have. */
+export const handoutVariableName = /^[A-Z][A-Z0-9_]*$/;
+
+function variableOf(range) {
+  if (range[2] === null) return null;
+  const match = handoutVariablePattern.exec(range[2]);
+  return match ? match[1] : null;
+}
+
+/**
+ * The names of the handout variables `%%var NAME%%` in `markdown`, in the order
+ * they first appear, each once. They are comment ranges found by the comment
+ * scanner, so a mark in code or inside a larger comment is none.
+ */
+export function handoutVariables(markdown) {
+  const names = [];
+  for (const range of commentRanges(markdown)) {
+    const name = variableOf(range);
+    if (name !== null && !names.includes(name)) names.push(name);
+  }
+  return names;
+}
+
+/**
+ * `markdown` with every handout variable replaced by `values[name]`, or by
+ * `‹NAME›` when it has no value, and every other comment cut as
+ * `stripComments` cuts it.
+ */
+export function fillVariables(markdown, values = {}) {
+  if (typeof markdown !== "string" || !markdown.includes("%%")) {
+    return markdown;
+  }
+  return cutRanges(markdown, commentRanges(markdown), (range) => {
+    const name = variableOf(range);
+    if (name === null) return "";
+    const value = Object.hasOwn(values, name) ? values[name] : undefined;
+    return typeof value === "string" && value !== "" ? value : `‹${name}›`;
+  });
 }
 
 const htmlEntities = { "&amp;": "&", "&quot;": '"', "&#39;": "'", "&lt;": "<", "&gt;": ">" };

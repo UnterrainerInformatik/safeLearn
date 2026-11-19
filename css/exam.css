@@ -2814,6 +2814,24 @@ sl-date-input .sl-date-input-grid button.is-disabled {
   padding-left: 1.2em;
 }
 
+/* A handout variable without a value: its name in red, as an unresolved handout (`exam-handout`). */
+.sl-exam-variable-name.is-missing {
+  color: var(--sl-exam-broken);
+  font-weight: 600;
+}
+
+.sl-exam-variables {
+  padding-left: 1.2em;
+}
+
+.sl-exam-variables li {
+  margin: 0.3em 0;
+}
+
+.sl-exam-variable-value {
+  width: min(32em, 100%);
+}
+
 .sl-exam-handouts li {
   margin: 0.3em 0;
 }

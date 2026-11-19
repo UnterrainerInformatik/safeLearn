@@ -18,7 +18,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { stripComments } from "../obsidian.js";
+import { stripComments, handoutVariables, fillVariables } from "../obsidian.js";
 
 const fence = "```";
 
@@ -147,4 +147,53 @@ test("a text without marks outside code comes back identical", () => {
 test("anything that is not a string is returned as is", () => {
   assert.equal(stripComments(undefined), undefined);
   assert.equal(stripComments(null), null);
+});
+
+test("a handout variable is an inline comment whose whole content is var and a name", () => {
+  assert.deepEqual(handoutVariables("PIN: %%var PIN%%\n"), ["PIN"]);
+  assert.deepEqual(handoutVariables("PIN: %% var  PIN %%\n"), ["PIN"]);
+  assert.deepEqual(handoutVariables("#### Test - %%var CLASS%% - %%var DATE%% - X\n"), ["CLASS", "DATE"]);
+  assert.deepEqual(handoutVariables("A %%var LINK_2%%\n"), ["LINK_2"]);
+});
+
+test("other comments, code and a mark inside a block comment are no variables", () => {
+  assert.deepEqual(handoutVariables("A %%var pin%% B\n"), []);
+  assert.deepEqual(handoutVariables("A %% var: PIN %% B\n"), []);
+  assert.deepEqual(handoutVariables("A %%var 1PIN%% B\n"), []);
+  assert.deepEqual(handoutVariables("A `%%var PIN%%` B\n"), []);
+  assert.deepEqual(handoutVariables(`${fence}\n%%var PIN%%\n${fence}\n`), []);
+  assert.deepEqual(handoutVariables("%%\nnotes %%var PIN%%\n"), []);
+  assert.deepEqual(handoutVariables("%%\nvar PIN\n%%\n"), []);
+  assert.deepEqual(handoutVariables("Text without marks\n"), []);
+  assert.deepEqual(handoutVariables(undefined), []);
+});
+
+test("variables come in the order they first appear, each once", () => {
+  assert.deepEqual(
+    handoutVariables("%%var B%% %%var A%%\nx %%var B%% %%note%% %%var C%%\n"),
+    ["B", "A", "C"]
+  );
+});
+
+test("fillVariables puts in values, marks a missing one and cuts the other comments", () => {
+  assert.equal(
+    fillVariables("PIN: %%var PIN%% %%note%% link %%var LINK%%\n", { PIN: "4711" }),
+    "PIN: 4711  link ‹LINK›\n"
+  );
+  assert.equal(fillVariables("A %%var PIN%%\n", { PIN: "" }), "A ‹PIN›\n");
+  assert.equal(fillVariables("A %%var pin%% B\n", { pin: "x" }), "A  B\n");
+  assert.equal(fillVariables("A `%%var PIN%%` B\n", { PIN: "x" }), "A `%%var PIN%%` B\n");
+  assert.equal(fillVariables("A %%var toString%% B\n"), "A  B\n");
+  assert.equal(fillVariables("A %%var CONSTRUCTOR%% B\n", {}), "A ‹CONSTRUCTOR› B\n");
+});
+
+test("fillVariables without variables cuts exactly what stripComments cuts", () => {
+  for (const text of [
+    "Absatz eins.\n\n%%\nNotiz\n%%\n\nAbsatz zwei.\n",
+    "A %%x%% B %%y%% C\n",
+    "Eins.\n\n%%note text\n\nmore\n",
+    "Text without marks\n",
+  ]) {
+    assert.equal(fillVariables(text, {}), stripComments(text));
+  }
 });

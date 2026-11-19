@@ -38,16 +38,23 @@ import {
   listTests,
   rescheduleSitting,
   setAttendance,
+  setTestVariables,
   startSitting,
   updateSitting,
   updateTest,
+  variablesFor,
   viennaDate,
 } from "../exam/tests.js";
+import { init } from "../exam/index.js";
+import express from "express";
 import { nextOpenTestsChange, openTestsOf, previewView, startAttempt } from "../exam/attempts.js";
 import { liveParticipant, liveSnapshot } from "../exam/live.js";
 import { setTeacherNote } from "../exam/teacher-notes.js";
 import { corpusFiles, handoutAttachmentCheck, handoutPath, hasSolution, servableHandout } from "../exam/handout.js";
-import { preParse, scanFiles } from "../obsidian.js";
+import { Marked } from "marked";
+
+import { fillVariables, preParse, scanFiles } from "../obsidian.js";
+import { sanitizeHtml } from "../sanitize.js";
 import { getPermissionContext, handoutViews } from "../permission-context.js";
 
 const temporaryDirs = [];
@@ -107,6 +114,8 @@ const handoutA = [
   "",
 ].join("\n");
 
+const varA = "@@@ teacher\n#### Test - %%var CLASS%% - %%var DATE%% - Quarkus REST Basics\n\nAbgabe: %%var SUBMISSION_LINK%%\n\nPIN: %%var FRANKLYN_PIN%%\n";
+
 before(async () => {
   corpus = fs.mkdtempSync(path.join(os.tmpdir(), "safelearn-offline-corpus-"));
   for (const file of ["POS/diagram.png", "POS/starter.zip", "POS/exam-only.png", "POS/answer-only.png", "POS/hint.png", "POS/b.png"]) write(file);
@@ -116,6 +125,9 @@ before(async () => {
   write("POS/Class.md", "@@@ 4bhif\n# For the class\n");
   write("POS/Other.md", "@@@ 5ahif\n# For another class\n");
   write("POS/Later.md", "# Another file\n");
+  write("POS/Var-A.md", varA);
+  write("POS/Var-B.md", "@@@ teacher\nPIN: %%var FRANKLYN_PIN%%\n\nAbgabe: %%var SUBMISSION_LINK_B%% `%%var CODE%%`\n");
+  write("POS/Var-Auto.md", "@@@ teacher\n#### Test - %%var CLASS%% - %%var DATE%%\n%%var lower%% %% var: PIN %%\n");
   write("POS/ExamOnly.md", "@@@ teacher\n# Solutions in exam blocks\nTask.\n@@@ #exam\nSolution.\n@@@\n");
   write("POS/MentionOnly.md", "@@@ teacher\n# Notes\nDie Musterlösung steht in den `@@@ #exam`-Blöcken.\n\n```\n@@@ #answer\nx\n@@@\n```\n");
   write("POS/AnswerOnly.md", "@@@ teacher\n# Solutions in answer blocks\nTask.\n@@@ 4bhif, #answer\nSolution.\n@@@\n");
@@ -200,6 +212,29 @@ describe("the migration to offline tests", () => {
     assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
     assert.throws(() => db.prepare("UPDATE test SET handout_b = 'x.md' WHERE id = 1").run(), /CHECK/, "a second handout needs a first");
     assert.throws(() => db.prepare("UPDATE sitting_participant SET handout_group = 'C'").run(), /CHECK/);
+  });
+
+  test("to handout variables adds their table, and deleting a test removes its values", () => {
+    const dbPath = temporaryPath();
+    const db = new DatabaseSync(dbPath);
+    openDatabases.push(db);
+    db.exec("PRAGMA foreign_keys = ON");
+    migrate(db, dbPath, readMigrations().slice(0, 20));
+    const year = createYear(db, { name: "2026/27", startsOn: "2026-09-07", summerStartsOn: "2027-02-15", endsOn: "2027-07-02" });
+    const klass = createClass(db, year.id, { name: "4bhif", students: [{ username: "anna" }] });
+    const course = createCourse(db, klass.id, { subject: "POS", language: "de" });
+    const offline = createOfflineTest(db, course.id, { name: "LT", durationMinutes: 50, gradebookKind: "test", handoutA: "POS/LT1-A.md" });
+    const other = createOfflineTest(db, course.id, { name: "LT2", durationMinutes: 50, gradebookKind: "test", handoutA: "POS/LT1-A.md" });
+
+    assert.deepEqual(migrate(db, dbPath, readMigrations().slice(0, 21)), { from: 20, to: 21 });
+    const insert = db.prepare("INSERT INTO test_variable (test_id, name, value) VALUES (?, ?, ?)");
+    insert.run(offline.id, "FRANKLYN_PIN", "4711");
+    insert.run(other.id, "FRANKLYN_PIN", "1234");
+    assert.throws(() => insert.run(offline.id, "pin", "x"), /CHECK/, "a name the syntax cannot write");
+    assert.throws(() => insert.run(offline.id, "PIN-2", "x"), /CHECK/);
+    assert.throws(() => insert.run(offline.id, "EMPTY", ""), /CHECK/, "an empty value is no row");
+    deleteTest(db, offline.id);
+    assert.deepEqual(db.prepare("SELECT test_id, name FROM test_variable").all().map((row) => ({ ...row })), [{ test_id: other.id, name: "FRANKLYN_PIN" }]);
   });
 });
 
@@ -577,6 +612,19 @@ describe("a handout", () => {
     assert.equal(req[handoutViews], undefined, "the views are gone after the check");
     assert.match(await preParse(markdown, req), /PRACTICE-VARIANT/);
   });
+  test("a variable's value is rendered and sanitized with the rest of the file", async () => {
+    // The steps of `renderHandout` after the directive: fill, pre-parse, Markdown, sanitizer.
+    const req = studentReq("anna");
+    req[handoutViews] = { exam: false, answer: false };
+    const markdown = "Abgabe: %%var LINK%%\n\nPIN: %%var PIN%% %%note%%\n\nRaum: %%var ROOM%%\n";
+    const filled = fillVariables(markdown, { LINK: "https://example.org", PIN: "<script>alert(1)</script>**4711**" });
+    const html = sanitizeHtml(await new Marked({ gfm: true }).parse(await preParse(filled, req, { embedDefaults: true })));
+    assert.match(html, /<a href="https:\/\/example\.org">https:\/\/example\.org<\/a>/, "a bare URL becomes a link");
+    assert.match(html, /<strong>4711<\/strong>/, "inline Markdown in a value works");
+    assert.doesNotMatch(html, /<script|alert/, "a script in a value is sanitized away");
+    assert.match(html, /Raum: ‹ROOM›/, "a variable without a value");
+    assert.doesNotMatch(html, /note/, "other comments are cut");
+  });
 });
 
 describe("a handout's attachments", () => {
@@ -614,5 +662,189 @@ describe("a handout's attachments", () => {
     assert.equal(await check("POS/answer-only.png"), true);
     assert.equal(await check("POS/exam-only.png"), true);
     assert.equal(await check("POS/hint.png"), false, "rendered as a student");
+  });
+});
+
+describe("a handout's variables", () => {
+  /** An offline test with the variable handouts, and a sitting planned for `opensAt`. */
+  function withVariables(db, course, options = {}) {
+    const test = createOfflineTest(db, course.id, { name: "Quarkus", durationMinutes: 50, gradebookKind: "test", handoutA: "POS/Var-A.md", handoutB: "POS/Var-B.md", ...options });
+    return test;
+  }
+  const names = (test) => test.variables.map((variable) => variable.name);
+  const stored = (db) => db.prepare("SELECT test_id, name, value FROM test_variable ORDER BY test_id, name").all().map((row) => ({ ...row }));
+
+  test("are the union of A and B in the order they first appear, with CLASS and DATE filled by the module", () => {
+    const { db, course } = seeded();
+    const test = withVariables(db, course);
+    assert.deepEqual(names(test), ["CLASS", "DATE", "SUBMISSION_LINK", "FRANKLYN_PIN", "SUBMISSION_LINK_B"]);
+    assert.deepEqual(test.variables[0], { name: "CLASS", value: "4BHIF", auto: true, missing: false });
+    assert.deepEqual(test.variables[1], { name: "DATE", value: null, auto: true, missing: false }, "without a sitting no date, and never missing");
+    assert.deepEqual(test.variables[3], { name: "FRANKLYN_PIN", value: null, auto: false, missing: true });
+    const set = setTestVariables(db, test.id, { FRANKLYN_PIN: " 4711 " });
+    assert.deepEqual(set.variables[3], { name: "FRANKLYN_PIN", value: "4711", auto: false, missing: false });
+    assert.deepEqual(variablesFor(db, test.id), { CLASS: "4BHIF", FRANKLYN_PIN: "4711" });
+    assert.deepEqual(names(withVariables(db, course, { handoutB: null })), ["CLASS", "DATE", "SUBMISSION_LINK", "FRANKLYN_PIN"]);
+    assert.deepEqual(names(withVariables(db, course, { handoutA: "POS/Var-Auto.md", handoutB: null })), ["CLASS", "DATE"], "a lower-case name and other comments are none");
+    assert.deepEqual(createOfflineTest(db, course.id, { name: "Plain", durationMinutes: 50, gradebookKind: "test", handoutA: "POS/LT1-A.md" }).variables, []);
+  });
+
+  test("DATE is the participant's sitting, started or planned; the preview's is the first started sitting", () => {
+    const { db, course } = seeded();
+    const test = withVariables(db, course);
+    const first = createSitting(db, test.id, { opensAt: "2027-01-20T08:00:00.000Z" });
+    assert.equal(variablesFor(db, test.id, first.id).DATE, "20.01.2027", "the planned day");
+    assert.equal(variablesFor(db, test.id).DATE, "20.01.2027", "the preview before any start");
+    setTestVariables(db, test.id, { SUBMISSION_LINK: "a", FRANKLYN_PIN: "b", SUBMISSION_LINK_B: "c" });
+    startSitting(db, first.id, "2026-11-14T08:00:00.000Z");
+    assert.equal(variablesFor(db, test.id, first.id).DATE, "14.11.2026", "the started day");
+    const makeup = createSitting(db, test.id, { opensAt: "2027-01-27T08:00:00.000Z", participants: ["anna"] });
+    assert.equal(variablesFor(db, test.id, makeup.id).DATE, "27.01.2027");
+    startSitting(db, makeup.id, "2026-11-21T08:00:00.000Z");
+    assert.equal(variablesFor(db, test.id, makeup.id).DATE, "21.11.2026", "the make-up's own day");
+    assert.equal(variablesFor(db, test.id).DATE, "14.11.2026", "the preview and the deck: the first started sitting");
+    assert.equal(getTest(db, test.id).variables[1].value, "14.11.2026");
+    assert.equal(getSitting(db, makeup.id).variables[1].value, "21.11.2026");
+  });
+
+  test("a value whose variable leaves both files is kept, not shown, and comes back with it", () => {
+    const { db, course } = seeded();
+    const test = withVariables(db, course, { handoutB: null });
+    setTestVariables(db, test.id, { FRANKLYN_PIN: "4711" });
+    try {
+      write("POS/Var-A.md", varA.replace("PIN: %%var FRANKLYN_PIN%%\n", "%%var ROOM%%\n"));
+      const changed = getTest(db, test.id);
+      assert.deepEqual(names(changed), ["CLASS", "DATE", "SUBMISSION_LINK", "ROOM"], "an added variable appears, a removed one goes");
+      assert.equal(changed.variables[3].missing, true);
+      assert.deepEqual(variablesFor(db, test.id), { CLASS: "4BHIF" });
+      assert.deepEqual(stored(db), [{ test_id: test.id, name: "FRANKLYN_PIN", value: "4711" }]);
+    } finally {
+      write("POS/Var-A.md", varA);
+    }
+    assert.equal(getTest(db, test.id).variables.find((variable) => variable.name === "FRANKLYN_PIN").value, "4711");
+  });
+
+  test("an empty value deletes it; every refusal leaves the stored values as they were", () => {
+    const { db, course } = seeded();
+    const test = withVariables(db, course);
+    setTestVariables(db, test.id, { FRANKLYN_PIN: "4711", SUBMISSION_LINK: "https://classroom.github.com/a/abc123" });
+    const before = stored(db);
+    for (const [values, key] of [
+      [{ CLASS: "5AHIF" }, "exam.errors.tests.variableAuto"],
+      [{ FRANKLYN_PIN: "1", DATE: "1.1.2027" }, "exam.errors.tests.variableAuto"],
+      [{ FRANKLYN_PIN: "1", pin: "x" }, "exam.errors.tests.variableName"],
+      [{ "PIN-2": "x" }, "exam.errors.tests.variableName"],
+      [{ FRANKLYN_PIN: "47\n11" }, "exam.errors.tests.variableValue"],
+      [{ FRANKLYN_PIN: "47\r11" }, "exam.errors.tests.variableValue"],
+      [{ FRANKLYN_PIN: "a %%note%%" }, "exam.errors.tests.variableValue"],
+      [{ FRANKLYN_PIN: "@@@ teacher" }, "exam.errors.tests.variableValue"],
+      [{ FRANKLYN_PIN: "x".repeat(501) }, "exam.errors.tests.variableValue"],
+      [{ FRANKLYN_PIN: 4711 }, "exam.errors.tests.variableValue"],
+      [["FRANKLYN_PIN"], "exam.errors.tests.variableValue"],
+      [undefined, "exam.errors.tests.variableValue"],
+    ]) {
+      assert.equal(keyOf(() => setTestVariables(db, test.id, values)), key, JSON.stringify(values));
+      assert.deepEqual(stored(db), before, JSON.stringify(values));
+    }
+    setTestVariables(db, test.id, { FRANKLYN_PIN: "x".repeat(500) });
+    setTestVariables(db, test.id, { FRANKLYN_PIN: "", SUBMISSION_LINK: null });
+    assert.deepEqual(stored(db), [], "an empty value is no value");
+    const online = Number(db.prepare("INSERT INTO test (course_id, name, created_at, updated_at) VALUES (?, 'Online', 'x', 'x')").run(course.id).lastInsertRowid);
+    assert.equal(keyOf(() => setTestVariables(db, online, { PIN: "1" })), "exam.errors.tests.onlineNoVariables");
+  });
+
+  test("starting is refused while a variable has no value, and names them; CLASS and DATE need nothing", () => {
+    const { db, course } = seeded();
+    const test = withVariables(db, course);
+    const sitting = createSitting(db, test.id, { opensAt: inMinutes(30) });
+    assert.throws(
+      () => startSitting(db, sitting.id),
+      (error) => error.key === "exam.errors.tests.handoutVariablesMissing" && error.params.names === "SUBMISSION_LINK, FRANKLYN_PIN, SUBMISSION_LINK_B"
+    );
+    assert.deepEqual(getSitting(db, sitting.id).variables.filter((variable) => variable.missing).map((variable) => variable.name), ["SUBMISSION_LINK", "FRANKLYN_PIN", "SUBMISSION_LINK_B"]);
+    setTestVariables(db, test.id, { SUBMISSION_LINK: "a", FRANKLYN_PIN: "4711" });
+    assert.throws(() => startSitting(db, sitting.id), (error) => error.params?.names === "SUBMISSION_LINK_B");
+    assert.equal(getSitting(db, sitting.id).startedAt ?? null, null, "not started");
+    setTestVariables(db, test.id, { SUBMISSION_LINK_B: "b" });
+    assert.ok(startSitting(db, sitting.id).startedAt);
+    // Correcting a value during the window.
+    setTestVariables(db, test.id, { FRANKLYN_PIN: "4712" });
+    assert.equal(variablesFor(db, test.id, sitting.id).FRANKLYN_PIN, "4712");
+
+    const auto = withVariables(db, course, { handoutA: "POS/Var-Auto.md", handoutB: null });
+    const autoSitting = createSitting(db, auto.id, { opensAt: inMinutes(30) });
+    assert.ok(startSitting(db, autoSitting.id).startedAt, "only CLASS and DATE");
+  });
+
+  test("the route is a teacher's, and the handout routes render with the saved values", async () => {
+    const dbPath = temporaryPath();
+    const saved = { path: process.env.EXAM_DB_PATH, periods: process.env.SCHOOL_PERIODS, fetch: global.fetch };
+    process.env.EXAM_DB_PATH = dbPath;
+    delete process.env.SCHOOL_PERIODS;
+    const renders = [];
+    const renderHandout = async (corpusPath, req, options) => {
+      renders.push({ corpusPath, ...options });
+      return `<p>${corpusPath}</p>`;
+    };
+    const started = await init({ startPage: () => "/index.html", renderHandout });
+    const { db } = openDatabase(dbPath);
+    openDatabases.push(db);
+    const { course } = (() => {
+      const year = createYear(db, { name: "2026/27", startsOn: "2026-09-07", summerStartsOn: "2027-02-15", endsOn: "2027-07-02" });
+      const klass = createClass(db, year.id, { name: "4bhif", students: [{ username: "anna" }, { username: "ben" }, { username: "cara" }] });
+      return { course: createCourse(db, klass.id, { subject: "POS", language: "de" }) };
+    })();
+    const test = withVariables(db, course, { handoutB: null });
+    const sitting = createSitting(db, test.id, { opensAt: inMinutes(30) });
+    global.fetch = async () => ({ ok: true, json: async () => ({ attributes: { config: [JSON.stringify({ vt: 1 })] } }) });
+    const app = express();
+    app.use(express.json());
+    app.use((req, res, next) => {
+      const username = req.get("X-As");
+      req.user = {
+        name: username,
+        preferred_username: username,
+        accessToken: "access-token",
+        accessTokenDecoded: { preferred_username: username },
+        keycloakConfig: { "auth-server-url": "https://identity.example/", realm: "demo", resource: "safelearn" },
+        rolesCalculated: JSON.stringify({ [req.get("X-Role")]: true }),
+      };
+      next();
+    });
+    app.use("/exam", started.router);
+    const server = app.listen(0);
+    try {
+      const base = `http://127.0.0.1:${server.address().port}/exam`;
+      const put = (as, role, values) =>
+        saved.fetch(`${base}/api/tests/${test.id}/variables`, {
+          method: "PUT",
+          headers: { "X-As": as, "X-Role": role, "Content-Type": "application/json" },
+          body: JSON.stringify({ values }),
+        });
+      assert.equal((await put("anna", "student", { FRANKLYN_PIN: "1" })).status, 403, "a student");
+      assert.deepEqual(getTest(db, test.id).variables.find((variable) => variable.name === "FRANKLYN_PIN").value, null);
+      assert.equal((await put("tdent", "teacher", { CLASS: "x" })).status, 400, "a refused value");
+      const answer = await put("tdent", "teacher", { FRANKLYN_PIN: "4711", SUBMISSION_LINK: "https://example.org" });
+      assert.equal(answer.status, 200);
+      assert.equal((await answer.json()).variables.find((variable) => variable.name === "FRANKLYN_PIN").value, "4711", "it answers with the test");
+
+      const ask = (url, as, role) => saved.fetch(`${base}${url}`, { headers: { "X-As": as, "X-Role": role } });
+      assert.equal((await ask(`/tests/${test.id}/handouts/A/preview`, "tdent", "teacher")).status, 200);
+      assert.deepEqual(renders.pop().vars, { CLASS: "4BHIF", DATE: viennaDate(sitting.opensAt).split("-").reverse().join("."), SUBMISSION_LINK: "https://example.org", FRANKLYN_PIN: "4711" });
+      assert.equal((await ask(`/tests/${test.id}/handouts/A/solution`, "tdent", "teacher")).status, 200);
+      assert.equal(renders.pop().vars.FRANKLYN_PIN, "4711", "the deck");
+      startSitting(db, sitting.id);
+      assert.equal((await put("tdent", "teacher", { FRANKLYN_PIN: "4712" })).status, 200, "during the window");
+      assert.equal((await ask(`/my/sittings/${sitting.id}/handout`, "anna", "student")).status, 200);
+      const participant = renders.pop();
+      assert.equal(participant.vars.FRANKLYN_PIN, "4712", "the participant's handout");
+      assert.equal(participant.vars.DATE, viennaDate(getSitting(db, sitting.id).startedAt).split("-").reverse().join("."));
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+      global.fetch = saved.fetch;
+      if (saved.path === undefined) delete process.env.EXAM_DB_PATH;
+      else process.env.EXAM_DB_PATH = saved.path;
+      if (saved.periods !== undefined) process.env.SCHOOL_PERIODS = saved.periods;
+    }
   });
 });

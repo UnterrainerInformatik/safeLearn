@@ -14,6 +14,7 @@
 import { getCourse, NotFoundError } from "./classes.js";
 import { identityOf, requireTeacher, teacherPage } from "./gate.js";
 import { corpusFiles, handoutResolves, servableHandout } from "./handout.js";
+import { variablesFor } from "./tests.js";
 import { embedPlaceholder, splitForReveal, wrapInPage, wrapInReveal } from "../obsidian.js";
 import { i18nOf } from "../i18n/server.js";
 
@@ -57,7 +58,7 @@ export function registerHandoutRoutes(router, { db, handle, startPage, renderHan
       const sittingId = idParam(req.params.id);
       const handout = servableHandout(db, identityOf(req), sittingId);
       if (!handout) throw new NotFoundError("exam.errors.handouts.none");
-      const html = await rendered(handout.path, req, { exam: false, answer: false });
+      const html = await rendered(handout.path, req, { exam: false, answer: false, vars: variablesFor(db, handout.testId, sittingId) });
       const { t } = await i18nOf(req);
       const body = `
         ${embedPlaceholder("handout-watch", { sitting: String(sittingId) }, "")}
@@ -72,7 +73,7 @@ export function registerHandoutRoutes(router, { db, handle, startPage, renderHan
     teacherPage,
     handle(async (req, res) => {
       const { test, path: corpusPath } = teacherHandout(db, req.params.id, req.params.group);
-      const html = await rendered(corpusPath, req, { exam: false, answer: false });
+      const html = await rendered(corpusPath, req, { exam: false, answer: false, vars: variablesFor(db, test.id) });
       const { t } = await i18nOf(req);
       const body = `<div class="sl-exam-handout">${html}</div>`;
       res.send(await wrapInPage(body, startPage(), req, { title: t("exam.handouts.previewTitle", { name: test.name, group: req.params.group }) }));
@@ -87,7 +88,7 @@ export function registerHandoutRoutes(router, { db, handle, startPage, renderHan
     teacherPage,
     handle(async (req, res) => {
       const { test, path: corpusPath } = teacherHandout(db, req.params.id, req.params.group);
-      const html = await rendered(corpusPath, req, { exam: true, answer: true });
+      const html = await rendered(corpusPath, req, { exam: true, answer: true, vars: variablesFor(db, test.id) });
       const { t } = await i18nOf(req);
       res.send(await wrapInReveal(splitForReveal(html), req, { title: t("exam.handouts.solutionTitle", { name: test.name, group: req.params.group }) }));
     })

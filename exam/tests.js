@@ -42,7 +42,8 @@ import {
 import { viennaLocal } from "./client/periods.js";
 import { finalizeDue } from "./attempts.js";
 import { entryCategory } from "./grading.js";
-import { handoutGroups, handoutPath, handoutResolves, handoutsOf } from "./handout.js";
+import { handoutGroups, handoutPath, handoutResolves, handoutsOf, handoutVariableNames } from "./handout.js";
+import { handoutVariableName } from "../obsidian.js";
 
 /** The calendar date in Vienna of an ISO timestamp, as `YYYY-MM-DD`. */
 export function viennaDate(iso) {
@@ -581,7 +582,8 @@ export function getSitting(db, id) {
   const row = sittingRow(db, id);
   const test = testRow(db, row.test_id);
   const sitting = testSittings(db, row.test_id).find((candidate) => candidate.id === id);
-  return { ...sitting, testId: test.id, testName: test.name, courseId: test.course_id, kind: test.kind ?? "online", handouts: offlineFields(db, test).handouts };
+  const variables = test.kind === "offline" ? testVariables(db, test, row) : [];
+  return { ...sitting, testId: test.id, testName: test.name, courseId: test.course_id, kind: test.kind ?? "online", handouts: test.kind === "offline" ? handoutsOf(test) : [], variables };
 }
 
 /**
@@ -897,14 +899,117 @@ function dateInYear(iso, year) {
 
 /** What a test answers beyond the online fields: an offline test's duration, column and handouts. */
 function offlineFields(db, row) {
-  if (row.kind !== "offline") return { handouts: [] };
+  if (row.kind !== "offline") return { handouts: [], variables: [] };
   const column = row.assessment_id === null ? null : db.prepare("SELECT kind FROM assessment WHERE id = ?").get(row.assessment_id);
   return {
     durationS: row.duration_s,
     gradebookKind: column?.kind ?? null,
     assessmentId: row.assessment_id,
     handouts: handoutsOf(row),
+    variables: testVariables(db, row),
   };
+}
+
+/** The handout variables the module fills itself; a teacher cannot set them (design D4). */
+export const autoVariables = Object.freeze(["CLASS", "DATE"]);
+
+/** A Vienna date `YYYY-MM-DD` as a handout writes it: `DD.MM.YYYY`. */
+function handoutDate(iso) {
+  const [year, month, day] = viennaDate(iso).split("-");
+  return `${day}.${month}.${year}`;
+}
+
+/**
+ * The sitting whose date `DATE` stands for when no participant's sitting is
+ * given - the teacher's preview and the solution deck (design D5): the first
+ * started one, otherwise the first planned one, otherwise none.
+ */
+function previewSitting(db, testId) {
+  return (
+    db.prepare("SELECT * FROM sitting WHERE test_id = ? AND started_at IS NOT NULL ORDER BY started_at, id LIMIT 1").get(testId) ??
+    db.prepare("SELECT * FROM sitting WHERE test_id = ? ORDER BY opens_at, id LIMIT 1").get(testId) ??
+    null
+  );
+}
+
+/**
+ * The variables of an offline test's handouts as its page shows them
+ * (`exam-handout`, design D4): `{ name, value, auto, missing }` for every name
+ * the resolving handouts hold now, in their order. `CLASS` is the course's
+ * class and `DATE` the date of `sitting` - started, otherwise planned - or of
+ * the preview's sitting when none is given; both are never missing. Every
+ * other name has its stored value, or none and is missing.
+ */
+export function testVariables(db, row, sitting = undefined) {
+  const names = handoutVariableNames(row);
+  if (names.length === 0) return [];
+  const stored = new Map(db.prepare("SELECT name, value FROM test_variable WHERE test_id = ?").all(row.id).map((entry) => [entry.name, entry.value]));
+  return names.map((name) => {
+    // As every page shows a class (`displayClass`): stored in lower case, written in capitals.
+    if (name === "CLASS") return { name, value: getCourse(db, row.course_id).className.toUpperCase(), auto: true, missing: false };
+    if (name === "DATE") {
+      const dated = sitting === undefined ? previewSitting(db, row.id) : sitting;
+      return { name, value: dated ? handoutDate(dated.started_at ?? dated.opens_at) : null, auto: true, missing: false };
+    }
+    const value = stored.get(name) ?? null;
+    return { name, value, auto: false, missing: value === null };
+  });
+}
+
+/**
+ * The values `renderHandout` fills a handout of test `testId` with: a name to
+ * its value, for the names that have one. `DATE` is that of `sittingId` for a
+ * participant's handout, and that of the preview's sitting without one
+ * (design D5).
+ */
+export function variablesFor(db, testId, sittingId = null) {
+  const row = testRow(db, testId);
+  if (row.kind !== "offline") return {};
+  const sitting = sittingId === null ? undefined : sittingRow(db, sittingId);
+  const values = {};
+  for (const { name, value } of testVariables(db, row, sitting)) {
+    if (value !== null) values[name] = value;
+  }
+  return values;
+}
+
+/** The longest value a handout variable may have. */
+const variableValueMax = 500;
+
+/**
+ * Sets the values of an offline test's handout variables (design D3, D4):
+ * `values` maps a name to its value, and an empty value removes it. Refused,
+ * with nothing written, for `CLASS` and `DATE`, for a name the syntax cannot
+ * write, and for a value that is no single line of at most 500 characters or
+ * holds `%%` or `@@@`. Allowed in every state of the test, during the window
+ * too. Names not given keep their values.
+ */
+export function setTestVariables(db, id, values) {
+  const test = testRow(db, id);
+  if (test.kind !== "offline") throw new ConflictError("exam.errors.tests.onlineNoVariables");
+  if (values === null || typeof values !== "object" || Array.isArray(values)) throw new InvalidInputError("exam.errors.tests.variableValue");
+  const writes = Object.entries(values).map(([name, value]) => {
+    if (autoVariables.includes(name)) throw new InvalidInputError("exam.errors.tests.variableAuto", { name });
+    if (!handoutVariableName.test(name)) throw new InvalidInputError("exam.errors.tests.variableName", { name });
+    if (value !== null && typeof value !== "string") throw new InvalidInputError("exam.errors.tests.variableValue", { name });
+    const text = (value ?? "").trim();
+    if (/[\r\n]/.test(text) || text.includes("%%") || text.includes("@@@") || text.length > variableValueMax) {
+      throw new InvalidInputError("exam.errors.tests.variableValue", { name });
+    }
+    return [name, text];
+  });
+  return inTransaction(db, () => {
+    for (const [name, text] of writes) {
+      if (text === "") {
+        db.prepare("DELETE FROM test_variable WHERE test_id = ? AND name = ?").run(id, name);
+      } else {
+        db.prepare(
+          "INSERT INTO test_variable (test_id, name, value) VALUES (?, ?, ?) ON CONFLICT (test_id, name) DO UPDATE SET value = excluded.value"
+        ).run(id, name, text);
+      }
+    }
+    return getTest(db, id);
+  });
 }
 
 /**
@@ -1053,8 +1158,10 @@ function updateOfflineSitting(db, row, test, input = {}) {
 /**
  * Starts an offline sitting now (design D2): its window runs from `at` for
  * the test's duration, and its column is dated by the day. Refused for an
- * online sitting, for one already started, and while a handout of the test
- * does not resolve - the refusal names the handout to choose again.
+ * online sitting, for one already started, while a handout of the test
+ * does not resolve - the refusal names the handout to choose again - and
+ * while a variable of a handout has no value - the refusal names them
+ * (`exam-handout`, offline-handout-variables design D6).
  */
 export function startSitting(db, id, at = now()) {
   const row = sittingRow(db, id);
@@ -1063,6 +1170,8 @@ export function startSitting(db, id, at = now()) {
   requireNotStarted(row);
   const broken = handoutsOf(test).find((handout) => !handout.resolves);
   if (broken) throw new ConflictError("exam.errors.tests.handoutUnresolved", { group: broken.group, path: broken.path });
+  const missing = testVariables(db, test, row).filter((variable) => variable.missing).map((variable) => variable.name);
+  if (missing.length > 0) throw new ConflictError("exam.errors.tests.handoutVariablesMissing", { names: missing.join(", ") });
   inTransaction(db, () => {
     db.prepare("UPDATE sitting SET started_at = ?, opens_at = ?, closes_at = ? WHERE id = ?").run(at, at, plannedClose(at, row.duration_s), id);
     refreshColumnDate(db, row.test_id);

@@ -4562,6 +4562,124 @@ describe("offline tests and their handouts", () => {
   });
 });
 
+describe("an offline test's handout variables", () => {
+  const handout = "test-exam-variables-handout.md";
+  let student;
+  let teacher;
+  let course;
+  let offline;
+  let sitting;
+
+  const pinField = `.sl-exam-test-variables li[data-variable="FRANKLYN_PIN"] input`;
+  const pinName = `.sl-exam-test-variables li[data-variable="FRANKLYN_PIN"] code.sl-exam-variable-name`;
+
+  /** Types `value` into the PIN field of the test's page and waits for its save. */
+  async function fillPin(value) {
+    const page = teacher.page;
+    await openPage(page, `/exam/tests/${offline.id}`, pinField);
+    await page.$eval(pinField, (input) => (input.value = ""));
+    await page.focus(pinField);
+    await page.keyboard.type(value);
+    await page.keyboard.press("Tab");
+    const stored = async () => (await fetchAs(teacher, `/exam/api/tests/${offline.id}`)).json.variables.find((v) => v.name === "FRANKLYN_PIN").value;
+    for (let tries = 0; (await stored()) !== value; tries += 1) {
+      assert.ok(tries < 40, `the field saved ${value}`);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    await page.waitForFunction((selector) => !document.querySelector(selector).classList.contains("is-missing"), { timeout: 10000 }, pinName);
+  }
+
+  /** The participant's handout as the student's browser shows it. */
+  async function handoutText() {
+    await openPage(student.page, `/exam/my/sittings/${sitting.id}/handout`, ".sl-exam-handout");
+    return student.page.$eval(".sl-exam-handout", (div) => div.textContent.replace(/\s+/g, " "));
+  }
+
+  before(async () => {
+    student = await sharedSession("student");
+    teacher = await sharedSession("teacher");
+    await setPreferences(student, {});
+    await setPreferences(teacher, {});
+    let year = (await fetchAs(teacher, "/exam/api/years")).json.current;
+    if (!year) {
+      year = (
+        await fetchAs(teacher, "/exam/api/years", {
+          method: "POST",
+          body: { name: "2026/27", startsOn: "2026-09-07", summerStartsOn: "2027-02-15", endsOn: "2027-07-02" },
+        })
+      ).json;
+    }
+    for (const entry of (await fetchAs(student, "/exam/api/my/tests")).json?.tests ?? []) {
+      if (entry.attempt) await fetchAs(student, `/exam/api/attempts/${entry.attempt.attemptId}/submit`, { method: "POST" });
+    }
+    const klass = await fetchAs(teacher, `/exam/api/years/${year.id}/classes`, { method: "POST", body: { name: "9XVAR", students: [student.username] } });
+    assert.equal(klass.status, 200, JSON.stringify(klass.json));
+    const created = await fetchAs(teacher, `/exam/api/classes/${klass.json.id}/courses`, { method: "POST", body: { subject: "POS", language: "de" } });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    course = created.json;
+  });
+
+  after(async () => {
+    if (sitting?.id) await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/end`, { method: "POST" });
+  });
+
+  test("a variable without a value blocks the start and is shown in red; CLASS and DATE are read-only", async () => {
+    const answer = await fetchAs(teacher, `/exam/api/courses/${course.id}/offline-tests`, {
+      method: "POST",
+      body: { name: "Quarkus REST Basics", durationMinutes: 50, gradebookKind: "test", handoutA: handout },
+    });
+    assert.equal(answer.status, 200, JSON.stringify(answer.json));
+    offline = answer.json;
+    assert.deepEqual(offline.variables.map((v) => [v.name, v.auto, v.missing]), [["CLASS", true, false], ["DATE", true, false], ["FRANKLYN_PIN", false, true]]);
+    const planned = await fetchAs(teacher, `/exam/api/tests/${offline.id}/sittings`, { method: "POST", body: { opensAt: new Date(Date.now() + 5 * 60000).toISOString() } });
+    assert.equal(planned.status, 200, JSON.stringify(planned.json));
+    sitting = planned.json;
+
+    const page = teacher.page;
+    await openPage(page, `/exam/tests/${offline.id}`, ".sl-exam-test-variables");
+    const shown = await page.$$eval(".sl-exam-test-variables li", (lis) =>
+      lis.map((li) => [li.dataset.variable, Boolean(li.querySelector("input")), li.querySelector("code").classList.contains("is-missing"), li.querySelector(".sl-exam-variable-auto")?.textContent ?? null])
+    );
+    assert.deepEqual(shown, [
+      ["CLASS", false, false, "9XVAR"],
+      ["DATE", false, false, viennaLocal(sitting.opensAt).date.split("-").reverse().join(".")],
+      ["FRANKLYN_PIN", true, true, null],
+    ]);
+
+    const refused = await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/start`, { method: "POST" });
+    assert.equal(refused.status, 409);
+    assert.match(JSON.stringify(refused.json), /FRANKLYN_PIN/, "the refusal names the variable");
+    await openPage(page, `/exam/sittings/${sitting.id}/live`, `.sl-exam-live-missing-variables code[data-variable="FRANKLYN_PIN"].is-missing`);
+    assert.equal(await page.$eval(".sl-exam-live-start", (b) => b.disabled), true, "the start button is disabled");
+    assert.match(await page.$eval(".sl-exam-live-start-blocked", (s) => s.textContent), /FRANKLYN_PIN/);
+    assert.equal((await fetchAs(student, `/exam/api/tests/${offline.id}/variables`, { method: "PUT", body: { values: { FRANKLYN_PIN: "1" } } })).status, 403, "a student");
+  });
+
+  test("filled in, the sitting starts and a present participant sees the class, today's date and the PIN, corrected on reload", async () => {
+    await fillPin("4711");
+    const page = teacher.page;
+    await openPage(page, `/exam/sittings/${sitting.id}/live`, ".sl-exam-live-start");
+    assert.equal(await page.$(".sl-exam-live-missing-variables"), null, "nothing in red any more");
+    await click(page, ".sl-exam-live-start");
+    await page.waitForFunction(() => document.querySelector(".sl-exam-live-badge")?.dataset.state === "open", { timeout: 10000 });
+
+    const today = viennaLocal(new Date().toISOString()).date.split("-").reverse().join(".");
+    const text = await handoutText();
+    assert.match(text, new RegExp(`Test - 9XVAR - ${today.replaceAll(".", "\\.")} - Quarkus REST Basics`));
+    assert.match(text, /HANDOUT-VARIABLES-TASK: log in to Franklyn with the PIN 4711\./);
+    assert.doesNotMatch(text, /‹|var /, "no variable left over");
+
+    await fillPin("4712");
+    assert.match(await handoutText(), /with the PIN 4712\./, "the corrected value after a reload");
+
+    // The file's own page keeps hiding the variables as comments.
+    await openPage(page, `/md/${handout}`, "#markdown-content");
+    const own = await page.$eval("#markdown-content", (div) => div.textContent);
+    assert.match(own, /HANDOUT-VARIABLES-TASK/);
+    assert.doesNotMatch(own, /4712|FRANKLYN_PIN|9XVAR/);
+  });
+});
+
 describe("the question editor", () => {
   let student;
   let teacher;

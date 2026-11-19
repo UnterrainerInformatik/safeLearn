@@ -11,7 +11,8 @@
  * An offline test (`offline-test`, `exam-handout`) is listed beside them by
  * its kind, and its page shows its duration, its gradebook category, its
  * handouts - a path that no longer resolves in red - chosen in the picker,
- * their preview and solution deck, and its sittings, which are planned and
+ * their preview and solution deck, the values of their variables - a name
+ * without one in red - and its sittings, which are planned and
  * started from their attendance page; it has no questions.
  *
  * A snapshot's texts are stored markup, sanitized when the pool was imported,
@@ -938,6 +939,7 @@ Object.assign(TestDetail.prototype, {
       this.offlineForm(test),
       this.message,
       this.handoutsSection(test),
+      this.variablesSection(test),
       this.offlineSittingsSection(test)
     ));
   },
@@ -1007,6 +1009,64 @@ Object.assign(TestDetail.prototype, {
       rows.length === 0 ? h("p", { class: "sl-exam-quiet" }, t("exam.offline.noHandout")) : h("ul", { class: "sl-exam-handouts" }, rows),
       next ? h("p", {}, button({ label: t("exam.offline.addHandout", { group: next }), class: "sl-exam-handout-add", "data-group": next, action: () => choose(next) })) : null,
       h("p", { class: "sl-exam-quiet" }, t("exam.offline.handoutNote"))
+    );
+  },
+
+  /**
+   * The handouts' variables `%%var NAME%%` (`exam-handout`): a field per name,
+   * in the order the handouts use them, saved when it changes, at any time -
+   * during the window too. `CLASS` and `DATE` are filled by the module and
+   * shown read-only. A name without a value is in red, and blocks the start.
+   */
+  variablesSection(test) {
+    const variables = test.variables ?? [];
+    const rows = variables.map((variable) => {
+      const name = h(
+        "code",
+        { class: variable.missing ? "sl-exam-variable-name is-missing" : "sl-exam-variable-name", title: variable.missing ? t("exam.offline.variableMissing") : null },
+        variable.name
+      );
+      if (variable.auto) {
+        return h(
+          "li",
+          { "data-variable": variable.name, "data-auto": "1" },
+          name,
+          " ",
+          h("span", { class: "sl-exam-variable-auto" }, variable.value ?? t("exam.offline.variableNoDate")),
+          " ",
+          h("span", { class: "sl-exam-quiet" }, variable.name === "CLASS" ? t("exam.offline.variableClassNote") : t("exam.offline.variableDateNote"))
+        );
+      }
+      const message = h("span", { class: "sl-exam-message", role: "status" });
+      const input = h("input", {
+        type: "text",
+        class: "sl-exam-variable-value",
+        name: `variable-${variable.name}`,
+        maxlength: "500",
+        value: variable.value ?? "",
+        "aria-label": variable.name,
+      });
+      input.addEventListener("change", async () => {
+        message.textContent = "";
+        try {
+          const answer = await examApi(`/tests/${test.id}/variables`, { method: "PUT", body: { values: { [variable.name]: input.value } } });
+          const now = (answer.variables ?? []).find((candidate) => candidate.name === variable.name);
+          const missing = !now || now.missing;
+          name.classList.toggle("is-missing", missing);
+          name.title = missing ? t("exam.offline.variableMissing") : "";
+          if (now && now.value !== null) input.value = now.value;
+        } catch (error) {
+          message.textContent = ` ${refusal(error)}`;
+        }
+      });
+      return h("li", { "data-variable": variable.name }, h("label", {}, name, " ", input), message);
+    });
+    return h(
+      "section",
+      { class: "sl-exam-test-variables" },
+      h("h2", {}, t("exam.offline.variablesHeading")),
+      rows.length === 0 ? h("p", { class: "sl-exam-quiet" }, t("exam.offline.noVariables")) : h("ul", { class: "sl-exam-variables" }, rows),
+      h("p", { class: "sl-exam-quiet" }, t("exam.offline.variablesNote"))
     );
   },
 

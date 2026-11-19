@@ -96,7 +96,7 @@ const { mode: authMode } = establishAuthMode();
 const app = express();
 app.set("trust proxy", true);
 
-import { registerEmbedHandler, registerEmbedClientScript, registerOpenTestsCheck, obsidianMarkedExtensions, scanFiles, scanFonts, preParse, manipulateHtml, anchorHeadings, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions, splitFrontmatter, stripComments, wrapAsDocument, resolveFileVisibility, registerVisibilityChangeCallback, searchCorpus, minimumQueryLength, recordAttachmentGrants, hasAttachmentGrant, dropAttachmentGrants, mayServeAttachment, normalizeCorpusPath, registerHandoutAttachmentCheck, mayServeHandoutAttachment } from "./obsidian.js";
+import { registerEmbedHandler, registerEmbedClientScript, registerOpenTestsCheck, obsidianMarkedExtensions, scanFiles, scanFonts, preParse, manipulateHtml, anchorHeadings, wrapInPage, wrapInReveal, splitForReveal, parseFirstLineForPermissions, splitFrontmatter, stripComments, fillVariables, wrapAsDocument, resolveFileVisibility, registerVisibilityChangeCallback, searchCorpus, minimumQueryLength, recordAttachmentGrants, hasAttachmentGrant, dropAttachmentGrants, mayServeAttachment, normalizeCorpusPath, registerHandoutAttachmentCheck, mayServeHandoutAttachment } from "./obsidian.js";
 
 import chokidar from "chokidar";
 import { openEventStream } from "./event-stream.js";
@@ -179,17 +179,19 @@ async function markedFor(req) {
  * its complement), the answers per `answer`. Inline blocks are decided by the session's roles
  * as on any page. Embedded module elements render their defaults, and no
  * attachment grant is recorded: the module answers for a handout's
- * attachments itself, from its database (design D7). Rejects when the file
- * cannot be read.
+ * attachments itself, from its database (design D7). Its variables
+ * `%%var NAME%%` are replaced by `vars[NAME]`, or by `‹NAME›` without a value,
+ * where every other view cuts them as comments; the value is then rendered and
+ * sanitized with the rest of the file. Rejects when the file cannot be read.
  */
-async function renderHandout(corpusPath, req, { exam = false, answer = false } = {}) {
+async function renderHandout(corpusPath, req, { exam = false, answer = false, vars = {} } = {}) {
   await refreshAccessToken(req);
   const data = await fs.promises.readFile(path.join(__dirname, "md", corpusPath), "utf8");
   let d = splitFrontmatter(data, corpusPath).body;
   if (parseFirstLineForPermissions(d.split("\n")[0]) !== null) {
     d = d.split("\n").slice(1).join("\n");
   }
-  d = stripComments(d);
+  d = fillVariables(d, vars ?? {});
   req[handoutViews] = { exam: exam === true, answer: answer === true };
   try {
     d = await preParse(d, req, { embedDefaults: true });

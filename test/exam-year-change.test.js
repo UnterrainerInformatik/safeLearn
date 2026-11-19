@@ -130,6 +130,10 @@ function filledYear(db) {
   if (db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'teacher_note'").get()) {
     setTeacherNote(db, quiz.id, "anna", "Looked at the neighbour's screen twice\ncheck against Huber");
   }
+  // A handout variable's value once the schema has them (021).
+  if (db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'test_variable'").get()) {
+    db.prepare("INSERT INTO test_variable (test_id, name, value) VALUES (?, 'FRANKLYN_PIN', '4711')").run(quiz.id);
+  }
   return { year, klass, course, column, quiz, sitting, attemptId, startedAt };
 }
 

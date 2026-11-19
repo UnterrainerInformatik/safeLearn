@@ -183,6 +183,8 @@ There are two kinds, exactly as in Obsidian:
 - Any other `%%` opens an inline comment, which must close on the same line. If it does not, the `%%` is shown as written.
 
 A `%%` inside code is not a comment. Inline code, a fenced block and a `mermaid` block (which has `%%` comments of its own) keep their marks, so a Java format string such as `String.format("%.1f%%", rate)` stays intact. A comment at the top of a file does not disturb the permission directive: that is still read from the first line as written.
+
+Comments are hidden, except variables in exam handouts: an inline comment whose whole content is `var NAME`, such as `%%var FRANKLYN_PIN%%`, is a placeholder that the exam module fills with the test's value when it shows the file as an offline test's handout (see `docs-exam-module.md`, "Handout variables"). On the file's own page, in search and in Obsidian it is a comment like any other and stays hidden.
 ## Footnotes
 Obsidian's [footnotes](https://obsidian.md/help/syntax#Footnotes) render as numbered, linked superscripts, both the referenced kind and the inline kind:
 

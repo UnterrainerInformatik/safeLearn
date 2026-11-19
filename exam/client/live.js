@@ -202,6 +202,7 @@ class LiveView extends ExamElement {
     this.sitting = snapshot.sitting;
     this.offline = snapshot.kind === "offline";
     this.handouts = snapshot.test.handouts ?? [];
+    this.missingVariables = snapshot.test.missingVariables ?? [];
     this.badge = h("span", { class: "sl-exam-live-badge" });
     this.state = h("span", { class: "sl-exam-quiet sl-exam-live-state", role: "status" });
     // The window is drawn only when it changes, the time beside it every
@@ -454,16 +455,23 @@ class LiveView extends ExamElement {
   /**
    * Start, for an offline sitting not yet started: its window opens now for
    * the test's duration. Disabled, with the reason beside it, while a handout
-   * does not resolve - the server refuses it too.
+   * does not resolve or a handout variable has no value - the server refuses
+   * it too.
    */
   startControl(sitting) {
     const broken = this.handouts.find((handout) => !handout.resolves);
+    const missing = this.missingVariables.join(", ");
+    const blocked = broken
+      ? t("exam.offline.startBlocked", { group: broken.group, path: broken.path })
+      : missing
+        ? t("exam.errors.tests.handoutVariablesMissing", { names: missing })
+        : null;
     this.startButton = button({
       label: t("exam.offline.start"),
       kind: "primary",
       class: "sl-exam-live-start",
-      disabled: Boolean(broken),
-      title: broken ? t("exam.offline.startBlocked", { group: broken.group, path: broken.path }) : null,
+      disabled: blocked !== null,
+      title: blocked,
       hidden: Boolean(sitting.startedAt),
       action: async () => {
         this.windowMessage.textContent = "";
@@ -477,11 +485,11 @@ class LiveView extends ExamElement {
     });
     return [
       this.startButton,
-      broken ? h("span", { class: "sl-exam-message sl-exam-live-start-blocked", role: "status" }, ` ${t("exam.offline.startBlocked", { group: broken.group, path: broken.path })}`) : null,
+      blocked ? h("span", { class: "sl-exam-message sl-exam-live-start-blocked", role: "status" }, ` ${blocked}`) : null,
     ];
   }
 
-  /** The test's handouts, a path that does not resolve in red. */
+  /** The test's handouts, a path that does not resolve in red, then the variables without a value in red. */
   handoutLine() {
     if (this.handouts.length === 0) return h("p", { class: "sl-exam-quiet sl-exam-live-handouts" }, t("exam.offline.noHandout"));
     return h(
@@ -491,7 +499,18 @@ class LiveView extends ExamElement {
         index ? " · " : null,
         `${t("exam.offline.handoutLabel", { group: handout.group })} `,
         h("code", { class: handout.resolves ? "sl-exam-handout-path" : "sl-exam-handout-path is-broken", "data-group": handout.group }, handout.path),
-      ])
+      ]),
+      this.missingVariables.length > 0
+        ? [
+            h("br", {}),
+            h(
+              "span",
+              { class: "sl-exam-live-missing-variables" },
+              `${t("exam.offline.variablesMissing")} `,
+              this.missingVariables.flatMap((name, index) => [index ? ", " : null, h("code", { class: "sl-exam-variable-name is-missing", "data-variable": name }, name)])
+            ),
+          ]
+        : null
     );
   }
 
