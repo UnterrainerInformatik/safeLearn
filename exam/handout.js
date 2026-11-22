@@ -70,41 +70,47 @@ export function hasSolution(corpusPath) {
 }
 
 /**
- * The names of the variables `%%var NAME%%` in the handouts of a test row
- * (`exam-handout`, offline-handout-variables design D4): the union over the
- * handouts that resolve, read again at every call, in the order they first
- * appear, A before B, each once. The text is read as `renderHandout` fills
- * it: without frontmatter and without a whole-file directive.
+ * The names of the variables `%%var NAME%%` in the handout at `corpusPath`
+ * (`exam-handout`, offline-handout-variables design D4), in the order they
+ * first appear, each once, read again at every call; none for a path that does
+ * not resolve or cannot be read. The text is read as `renderHandout` fills it:
+ * without frontmatter and without a whole-file directive.
  */
-export function handoutVariableNames(test) {
-  const names = [];
-  for (const corpusPath of [test.handout_a, test.handout_b]) {
-    if (!handoutResolves(corpusPath)) continue;
-    let raw;
-    try {
-      raw = fs.readFileSync(mdFilesDirStructure[corpusPath].absolutePath, "utf8");
-    } catch {
-      continue;
-    }
-    let body = splitFrontmatter(raw, mdFilesDirStructure[corpusPath].absolutePath).body;
-    if (parseFirstLineForPermissions(body.split("\n", 1)[0].replace(/\r$/, "")) !== null) {
-      body = body.split("\n").slice(1).join("\n");
-    }
-    for (const name of handoutVariables(body)) {
-      if (!names.includes(name)) names.push(name);
-    }
+export function variableNamesOf(corpusPath) {
+  if (!handoutResolves(corpusPath)) return [];
+  let raw;
+  try {
+    raw = fs.readFileSync(mdFilesDirStructure[corpusPath].absolutePath, "utf8");
+  } catch {
+    return [];
   }
-  return names;
+  let body = splitFrontmatter(raw, mdFilesDirStructure[corpusPath].absolutePath).body;
+  if (parseFirstLineForPermissions(body.split("\n", 1)[0].replace(/\r$/, "")) !== null) {
+    body = body.split("\n").slice(1).join("\n");
+  }
+  return [...new Set(handoutVariables(body))];
 }
 
-/** The handouts of a test row, A first: each with its path and whether it resolves. */
+/**
+ * The names of the variables in the handouts of a test row: the union over
+ * the handouts that resolve, A before B, each once (`variableNamesOf`).
+ */
+export function handoutVariableNames(test) {
+  return [...new Set([...variableNamesOf(test.handout_a), ...variableNamesOf(test.handout_b)])];
+}
+
+/**
+ * The handouts of a test row, A first: each with its path, whether it
+ * resolves, whether it has a solution and the names of its own variables (a
+ * print is of one handout, print-offline-handout design D3).
+ */
 export function handoutsOf(test) {
   return [
     ["A", test.handout_a],
     ["B", test.handout_b],
   ]
     .filter(([, corpusPath]) => corpusPath !== null && corpusPath !== undefined)
-    .map(([group, corpusPath]) => ({ group, path: corpusPath, resolves: handoutResolves(corpusPath), hasSolution: hasSolution(corpusPath) }));
+    .map(([group, corpusPath]) => ({ group, path: corpusPath, resolves: handoutResolves(corpusPath), hasSolution: hasSolution(corpusPath), variables: variableNamesOf(corpusPath) }));
 }
 
 /**

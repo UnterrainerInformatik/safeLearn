@@ -244,6 +244,11 @@ const restrictedFiles = [
     directive: ["teacher"],
     content: "HANDOUT-VARIABLES-TASK",
   },
+  {
+    path: "/md/test-exam-print-handout.md",
+    directive: ["teacher"],
+    content: "HANDOUT-PRINT-TASK",
+  },
   // The directive on the line after its frontmatter (`frontmatter-properties`).
   {
     path: "/md/test-frontmatter.md",

@@ -42,5 +42,6 @@ Echter Ablageort: `/mnt/data/source/HTL/safeLearn/AI/memory/`
 - [Directory-Service darf schreiben](directory-service-write-rights.md) — seit 2026-10-24 manage-users + manage-clients an unterrainer und Demo-Realm, für den examparticipant-Umschalter
 - [safeLearn ist die Demo-Instanz](safelearn-is-demo-instance.md) — „Demo-Instanz“ = safeLearn selbst mit eigenem Deploy und eigenen Secrets; secureLectures ist eine zweite Instanz
 - [Tests gezielt, Suite einmal](test-runs-targeted-first.md) — volle `npm test` nur einmal am Ende; nach Fehlern nur betroffene Checks nachlaufen lassen
-- [secureLectures-Inhalt in Nextcloud](securelectures-content-nextcloud.md) — echter Inhalt liegt unter `/home/psilo/nextcloud/secureLectures/`, nicht im `md/` des Repos
+- [secureLectures-Inhalt in Nextcloud](securelectures-content-nextcloud.md) — echter Inhalt liegt unter `/mnt/data/nextcloud/secureLectures/`, nicht im `md/` des Repos
 - [Commit+Push nach apply/archive](commit-push-after-apply-archive.md) — nach `/opsx:apply` und `/opsx:archive` immer committen, pushen und gleich nach secureLectures mergen+pushen, ohne zu fragen
+- [Vor Analyse pullen](pull-before-analysis.md) — erst `git fetch`/Stand gegen origin prüfen, Gerald committet von anderen Rechnern; Snapshot beim Session-Start kann veraltet sein

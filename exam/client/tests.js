@@ -56,6 +56,45 @@ export function periodLabel(periods, from, to = from) {
 }
 
 /**
+ * The print buttons of one resolving handout (print-offline-handout design
+ * D4): Print and, where it has a solution, Print solution, each opening the
+ * printed document in a new tab. `base` is the page the routes hang off
+ * (`/exam/tests/1` or `/exam/sittings/4`), `missing` the handout's variables
+ * without a value: while there is one, both are disabled and the names are
+ * shown beside them in red. The server refuses such a print too.
+ */
+export function handoutPrintControls(base, handout, missing) {
+  const blocked = missing.length > 0;
+  const control = (solution) => {
+    const label = solution ? t("exam.offline.printSolution") : t("exam.offline.printHandout");
+    const className = solution ? "sl-exam-handout-print-solution" : "sl-exam-handout-print";
+    return blocked
+      ? button({ label, class: className, disabled: true, title: `${t("exam.offline.printBlocked")} ${missing.join(", ")}` })
+      : linkButton({ label, href: `${base}/handouts/${handout.group}/${solution ? "solution/" : ""}print`, newWindow: true, class: className });
+  };
+  return h(
+    "span",
+    { class: "sl-exam-handout-prints", "data-group": handout.group },
+    control(false),
+    handout.hasSolution ? [" ", control(true)] : null,
+    blocked
+      ? h(
+          "span",
+          { class: "sl-exam-message sl-exam-handout-print-blocked" },
+          ` ${t("exam.offline.printBlocked")} `,
+          missing.flatMap((name, index) => [index ? ", " : null, h("code", { class: "sl-exam-variable-name is-missing", "data-variable": name }, name)])
+        )
+      : null
+  );
+}
+
+/** The variables of `handout` that `variables` - a test's, `{ name, value }` - hold no value for. */
+function printMissing(handout, variables) {
+  const without = new Set((variables ?? []).filter((variable) => variable.value === null).map((variable) => variable.name));
+  return (handout.variables ?? []).filter((name) => without.has(name));
+}
+
+/**
  * A sitting's window as an element: the day and its periods when it lies on
  * period boundaries, otherwise its clock times, the end without its date when
  * it closes on the day it opens.
@@ -971,10 +1010,12 @@ Object.assign(TestDetail.prototype, {
 
   /**
    * The handouts: each path - in red when no file is there any more - with
-   * Change, Remove, Preview and, for a file with answers, Solution; then a
-   * button to choose A, or B beside a set A.
+   * Change, Remove, Preview and, for a file with answers, Solution, then their
+   * print buttons; then a button to choose A, or B beside a set A.
    */
   handoutsSection(test) {
+    // Redrawn when a variable's value changes, so a print follows the fields.
+    this.printSlots = new Map();
     const choose = async (group) => {
       const path = await pickHandout(test.course.id);
       if (path !== null) this.change({ [`handout${group}`]: path });
@@ -997,6 +1038,8 @@ Object.assign(TestDetail.prototype, {
               handout.hasSolution
                 ? [" ", linkButton({ label: t("exam.offline.solutionHandout"), href: `/exam/tests/${test.id}/handouts/${handout.group}/solution`, newWindow: true, class: "sl-exam-handout-solution" })]
                 : null,
+              " ",
+              this.printSlot(test, handout),
             ]
           : null
       )
@@ -1010,6 +1053,21 @@ Object.assign(TestDetail.prototype, {
       next ? h("p", {}, button({ label: t("exam.offline.addHandout", { group: next }), class: "sl-exam-handout-add", "data-group": next, action: () => choose(next) })) : null,
       h("p", { class: "sl-exam-quiet" }, t("exam.offline.handoutNote"))
     );
+  },
+
+  /** The place of a handout's print buttons, drawn from the test's variables now. */
+  printSlot(test, handout) {
+    const slot = h("span", {});
+    this.printSlots.set(handout.group, { slot, handout });
+    this.drawPrints(test);
+    return slot;
+  },
+
+  /** Draws every handout's print buttons again from `test.variables`. */
+  drawPrints(test) {
+    for (const { slot, handout } of this.printSlots.values()) {
+      slot.replaceChildren(handoutPrintControls(`/exam/tests/${test.id}`, handout, printMissing(handout, test.variables)));
+    }
   },
 
   /**
@@ -1050,6 +1108,10 @@ Object.assign(TestDetail.prototype, {
         message.textContent = "";
         try {
           const answer = await examApi(`/tests/${test.id}/variables`, { method: "PUT", body: { values: { [variable.name]: input.value } } });
+          if (Array.isArray(answer.variables)) {
+            test.variables = answer.variables;
+            this.drawPrints(test);
+          }
           const now = (answer.variables ?? []).find((candidate) => candidate.name === variable.name);
           const missing = !now || now.missing;
           name.classList.toggle("is-missing", missing);

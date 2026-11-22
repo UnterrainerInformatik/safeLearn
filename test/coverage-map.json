@@ -524,7 +524,8 @@
         "md/test-exam-writing-beside-results.md",
         "md/test-exam-handout.md",
         "md/test-exam-handout-b.md",
-        "md/test-exam-variables-handout.md"
+        "md/test-exam-variables-handout.md",
+        "md/test-exam-print-handout.md"
       ]
     },
     "test/exam-foundation.test.js": {

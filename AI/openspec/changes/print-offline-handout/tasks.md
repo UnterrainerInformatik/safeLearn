@@ -1,0 +1,18 @@
+## 1. Server
+
+- [x] 1.1 Give `wrapAsDocument` in `obsidian.js` a `title` option, with `req.file.name` as the fallback (design D2). Verify that `?document` on a corpus page still carries the file's name as its title, and that a call with `title` and no `req.file` does not throw.
+- [x] 1.2 In `exam/handout.js`, extract `variableNamesOf(corpusPath)` from `handoutVariableNames`, which then builds the union from it with unchanged output, and add `variables` to each entry of `handoutsOf` (design D3). Verify with unit tests: the union keeps its order (A before B, each name once), and each handout lists only its own names.
+- [x] 1.3 Add `printBlockers(db, test, group, sitting)` to `exam/tests.js`. It returns the names of that handout's variables without a value, `DATE` included when the test has no sitting (design D3). Verify with unit tests in `test/exam-tests.test.js`: a missing value of A blocks A and not B, `DATE` blocks without a sitting and not with a planned one, and `CLASS` never blocks.
+- [x] 1.4 Add the four print routes to `exam/routes-handout.js` behind `teacherPage`, rendered like the preview and the solution, wrapped with `wrapAsDocument` inside `<div class="sl-exam-handout">`, throwing `ConflictError("exam.errors.handouts.printVariablesMissing", { names })` from `printBlockers`, and `NotFoundError` for an unknown sitting, an online test, an unresolved handout, or a solution print of a handout without a solution (design D1). Verify with route tests: a student and a teacher in student view are refused without the file's content, a missing value answers 409 naming it, the sitting route fills that sitting's `DATE`, and the test route fills the preview's `DATE`.
+
+## 2. Client and texts
+
+- [x] 2.1 In `exam/client/tests.js` `handoutsSection`, add "Print" beside Preview and "Print solution" beside Solution, as link buttons opening a new tab. Disable them with the missing names in red while one of `handout.variables` has no value in `test.variables` (design D4). Verify with the browser check in 3.1.
+- [x] 2.2 In `exam/client/live.js` `handoutLine`, add the same buttons beside each resolving handout path, linking to the sitting's routes and disabled from `missingVariables` filtered to `handout.variables`. Verify with the browser check in 3.1.
+- [x] 2.3 Add the keys to `i18n/de.json` and `i18n/en.json` in BabelEdit format: the two button labels, the disabled-reason text and `exam.errors.handouts.printVariablesMissing`. Verify with `test/i18n-catalog.test.js`.
+
+## 3. Verification and docs
+
+- [x] 3.1 Add a browser check in `test/exam-offline.test.js` with a handout fixture containing `CLASS`, `DATE`, a teacher-set variable, a `#variant-private` and a `#variant-public` block. While the value is missing, the print button is disabled and the name is shown. Once it is filled, the print opens in a new tab with no top bar and no navigation, with the class, the planned date and the value filled, the public variant shown and the private variant hidden. The solution's print shows the private variant. A print from a make-up sitting's page shows that sitting's date. Verify by running this check alone and seeing it pass.
+- [x] 3.2 Describe printing in `docs-exam-module.md` (where the buttons are, which date, the refusal, copies through the print dialog), and update the exam section of `AI/architecture.md`. Verify that the text matches the delta spec.
+- [x] 3.3 Run the targeted tests first (`test/exam-tests.test.js`, the handout route tests, the new browser check, `test/i18n-catalog.test.js`), then the full `npm test` once. Verify that both are green, or record the failures that are unrelated to this change.

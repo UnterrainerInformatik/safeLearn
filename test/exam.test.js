@@ -4668,6 +4668,136 @@ describe("an offline test's handout variables", () => {
   });
 });
 
+describe("printing an offline test's handout", () => {
+  const handout = "test-exam-print-handout.md";
+  let student;
+  let teacher;
+  let course;
+  let offline;
+  const sittings = [];
+
+  const prints = `.sl-exam-handouts li[data-group="A"] .sl-exam-handout-prints`;
+  const dotted = (iso) => viennaLocal(iso).date.split("-").reverse().join(".");
+  const inDays = (days) => new Date(Date.now() + days * 86400000).toISOString();
+
+  /** The text of a printed document opened at `href` in the teacher's page, with whether it carries any page chrome. */
+  async function printedAt(href) {
+    await openPage(teacher.page, href, ".sl-exam-handout");
+    return teacher.page.evaluate(() => ({
+      text: document.querySelector("#markdown-content").textContent.replace(/\s+/g, " "),
+      chrome: Boolean(document.querySelector("#topbar, #sidebar, nav, .sl-exam-bar")),
+    }));
+  }
+
+  before(async () => {
+    student = await sharedSession("student");
+    teacher = await sharedSession("teacher");
+    await setPreferences(student, {});
+    await setPreferences(teacher, {});
+    let year = (await fetchAs(teacher, "/exam/api/years")).json.current;
+    if (!year) {
+      year = (
+        await fetchAs(teacher, "/exam/api/years", {
+          method: "POST",
+          body: { name: "2026/27", startsOn: "2026-09-07", summerStartsOn: "2027-02-15", endsOn: "2027-07-02" },
+        })
+      ).json;
+    }
+    for (const entry of (await fetchAs(student, "/exam/api/my/tests")).json?.tests ?? []) {
+      if (entry.attempt) await fetchAs(student, `/exam/api/attempts/${entry.attempt.attemptId}/submit`, { method: "POST" });
+    }
+    const klass = await fetchAs(teacher, `/exam/api/years/${year.id}/classes`, { method: "POST", body: { name: "9XPRT", students: [student.username] } });
+    assert.equal(klass.status, 200, JSON.stringify(klass.json));
+    const created = await fetchAs(teacher, `/exam/api/classes/${klass.json.id}/courses`, { method: "POST", body: { subject: "POS", language: "de" } });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    course = created.json;
+  });
+
+  after(async () => {
+    for (const sitting of sittings) await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/end`, { method: "POST" });
+  });
+
+  test("disabled while a value is missing, the print opens in a new tab without chrome, filled, with the public variant; the solution's shows the private one", async () => {
+    const answer = await fetchAs(teacher, `/exam/api/courses/${course.id}/offline-tests`, {
+      method: "POST",
+      body: { name: "Quickie REST", durationMinutes: 20, gradebookKind: "shorttest", handoutA: handout },
+    });
+    assert.equal(answer.status, 200, JSON.stringify(answer.json));
+    offline = answer.json;
+    const page = teacher.page;
+    const blockedNames = () => page.$$eval(`${prints} .sl-exam-handout-print-blocked code.is-missing`, (codes) => codes.map((code) => code.dataset.variable));
+
+    await openPage(page, `/exam/tests/${offline.id}`, `${prints} .sl-exam-handout-print`);
+    assert.equal(await page.$eval(`${prints} .sl-exam-handout-print`, (b) => b.tagName === "BUTTON" && b.disabled), true, "no sitting: disabled");
+    assert.equal(await page.$eval(`${prints} .sl-exam-handout-print-solution`, (b) => b.disabled), true);
+    assert.deepEqual(await blockedNames(), ["DATE", "ROOM"], "DATE has no value without a sitting");
+    const refused = await fetchAs(teacher, `/exam/tests/${offline.id}/handouts/A/print`);
+    assert.equal(refused.status, 409);
+    assert.match(JSON.stringify(refused.json), /DATE, ROOM/, "the address itself is refused, naming them");
+
+    const planned = await fetchAs(teacher, `/exam/api/tests/${offline.id}/sittings`, { method: "POST", body: { opensAt: inDays(2) } });
+    assert.equal(planned.status, 200, JSON.stringify(planned.json));
+    sittings.push(planned.json);
+    await openPage(page, `/exam/tests/${offline.id}`, `${prints} .sl-exam-handout-print`);
+    assert.deepEqual(await blockedNames(), ["ROOM"], "a planned sitting dates it");
+
+    const room = `.sl-exam-test-variables li[data-variable="ROOM"] input`;
+    await page.focus(room);
+    await page.keyboard.type("E42");
+    await page.keyboard.press("Tab");
+    await page.waitForSelector(`${prints} a.sl-exam-handout-print`, { timeout: 10000 });
+    assert.equal(await page.$(`${prints} .sl-exam-handout-print-blocked`), null, "the names go once the value is saved, without a reload");
+    assert.equal(await page.$eval(`${prints} a.sl-exam-handout-print`, (a) => a.target), "_blank", "a new tab");
+
+    const opened = teacher.context.waitForTarget((target) => target.url().endsWith(`/exam/tests/${offline.id}/handouts/A/print`), { timeout: 10000 });
+    await click(page, `${prints} a.sl-exam-handout-print`);
+    const tab = await (await opened).page();
+    try {
+      await tab.waitForFunction(() => document.querySelector(".sl-exam-handout") && document.body.style.display !== "none", { timeout: 15000 });
+      const shown = await tab.evaluate(() => ({
+        text: document.querySelector("#markdown-content").textContent.replace(/\s+/g, " "),
+        chrome: Boolean(document.querySelector("#topbar, #sidebar, nav, .sl-exam-bar")),
+      }));
+      assert.equal(shown.chrome, false, "no top bar and no navigation");
+      assert.match(shown.text, new RegExp(`Quickie - 9XPRT - ${dotted(planned.json.opensAt).replaceAll(".", "\\.")} - REST \\(Gruppe A\\)`), "the class and the planned date");
+      assert.match(shown.text, /HANDOUT-PRINT-TASK: hand the paper in at room E42\./);
+      assert.match(shown.text, /PRINT-PUBLIC-VARIANT/);
+      assert.doesNotMatch(shown.text, /PRINT-PRIVATE-VARIANT|‹/);
+    } finally {
+      await tab.close();
+    }
+
+    const solution = await printedAt(await page.$eval(`${prints} a.sl-exam-handout-print-solution`, (a) => a.getAttribute("href")));
+    assert.equal(solution.chrome, false);
+    assert.match(solution.text, /PRINT-PRIVATE-VARIANT/, "the solution's print shows the private variant");
+    assert.doesNotMatch(solution.text, /PRINT-PUBLIC-VARIANT/);
+    const reference = `/exam/tests/${offline.id}/handouts/A/print`;
+    const asStudent = await fetchAs(student, reference);
+    assert.ok(asStudent.status !== 200 || asStudent.servedFrom !== reference, "a student is not served it");
+  });
+
+  test("a print from a make-up's page shows that sitting's date, the test's page the first started one", async () => {
+    const [first] = sittings;
+    const started = await fetchAs(teacher, `/exam/api/sittings/${first.id}/start`, { method: "POST" });
+    assert.equal(started.status, 200, JSON.stringify(started.json));
+    const makeup = await fetchAs(teacher, `/exam/api/tests/${offline.id}/sittings`, { method: "POST", body: { opensAt: inDays(4), participants: [student.username.toLowerCase()] } });
+    assert.equal(makeup.status, 200, JSON.stringify(makeup.json));
+    sittings.push(makeup.json);
+
+    const page = teacher.page;
+    const linePrint = `.sl-exam-live-handouts .sl-exam-handout-prints[data-group="A"] a.sl-exam-handout-print`;
+    await openPage(page, `/exam/sittings/${makeup.json.id}/live`, linePrint);
+    const href = await page.$eval(linePrint, (a) => a.getAttribute("href"));
+    assert.equal(href, `/exam/sittings/${makeup.json.id}/handouts/A/print`);
+    assert.match((await printedAt(href)).text, new RegExp(`Quickie - 9XPRT - ${dotted(makeup.json.opensAt).replaceAll(".", "\\.")} - REST`), "the make-up's own date");
+    assert.match(
+      (await printedAt(`/exam/tests/${offline.id}/handouts/A/print`)).text,
+      new RegExp(`Quickie - 9XPRT - ${dotted(new Date().toISOString()).replaceAll(".", "\\.")} - REST`),
+      "the test's page: the first started sitting, started today"
+    );
+  });
+});
+
 describe("the question editor", () => {
   let student;
   let teacher;

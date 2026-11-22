@@ -4827,9 +4827,12 @@ export async function wrapInPage(html, startPage, req, options = {}) {
 /**
  * `options.properties` are the file's frontmatter properties; only `header`
  * and `footer` are shown, around the content, and no properties message.
+ * `options.title` names a document that is no corpus file - the exam module's
+ * printed handout - and is used instead of `req.file.name`.
  */
 export async function wrapAsDocument(html, req, options = {}) {
   const { lang, loc } = await i18nOf(req);
+  const title = options.title !== undefined ? escapeHtmlAttribute(options.title) : req.file.name;
   const { header, footer } = fileHeaderAndFooter(options.properties ?? null);
   const pre = `
       <!DOCTYPE html>
@@ -4844,7 +4847,7 @@ export async function wrapAsDocument(html, req, options = {}) {
         <link rel="stylesheet" href="/css/main.css">
         <link rel="stylesheet" href="/node_modules/katex/dist/katex.min.css">
         <link rel="shortcut icon" href="/assets/favicon.ico" type="image/x-icon" />
-        <title>${req.file.name}</title>
+        <title>${title}</title>
       </head>
       <body style="display: none;">
         <div id="wrapper">

@@ -36,6 +36,7 @@ import {
   countingGroups,
   getTest,
   listTests,
+  printBlockers,
   rescheduleSitting,
   setAttendance,
   setTestVariables,
@@ -50,10 +51,10 @@ import express from "express";
 import { nextOpenTestsChange, openTestsOf, previewView, startAttempt } from "../exam/attempts.js";
 import { liveParticipant, liveSnapshot } from "../exam/live.js";
 import { setTeacherNote } from "../exam/teacher-notes.js";
-import { corpusFiles, handoutAttachmentCheck, handoutPath, hasSolution, servableHandout } from "../exam/handout.js";
+import { corpusFiles, handoutAttachmentCheck, handoutPath, handoutsOf, handoutVariableNames, hasSolution, servableHandout, variableNamesOf } from "../exam/handout.js";
 import { Marked } from "marked";
 
-import { fillVariables, preParse, scanFiles } from "../obsidian.js";
+import { fillVariables, preParse, scanFiles, wrapAsDocument } from "../obsidian.js";
 import { sanitizeHtml } from "../sanitize.js";
 import { getPermissionContext, handoutViews } from "../permission-context.js";
 
@@ -790,6 +791,43 @@ describe("a handout's variables", () => {
     assert.ok(startSitting(db, autoSitting.id).startedAt, "only CLASS and DATE");
   });
 
+  test("each handout lists its own names, and the union keeps A before B with each name once", () => {
+    assert.deepEqual(variableNamesOf("POS/Var-A.md"), ["CLASS", "DATE", "SUBMISSION_LINK", "FRANKLYN_PIN"]);
+    assert.deepEqual(variableNamesOf("POS/Var-B.md"), ["FRANKLYN_PIN", "SUBMISSION_LINK_B"], "a mark in inline code is none");
+    assert.deepEqual(variableNamesOf("POS/Missing.md"), [], "a path that does not resolve has none");
+    assert.deepEqual(variableNamesOf(null), []);
+    const row = { handout_a: "POS/Var-A.md", handout_b: "POS/Var-B.md" };
+    assert.deepEqual(handoutVariableNames(row), ["CLASS", "DATE", "SUBMISSION_LINK", "FRANKLYN_PIN", "SUBMISSION_LINK_B"]);
+    assert.deepEqual(handoutVariableNames({ handout_a: "POS/Var-B.md", handout_b: "POS/Var-A.md" }), ["FRANKLYN_PIN", "SUBMISSION_LINK_B", "CLASS", "DATE", "SUBMISSION_LINK"]);
+    assert.deepEqual(
+      handoutsOf(row).map(({ group, variables }) => ({ group, variables })),
+      [
+        { group: "A", variables: ["CLASS", "DATE", "SUBMISSION_LINK", "FRANKLYN_PIN"] },
+        { group: "B", variables: ["FRANKLYN_PIN", "SUBMISSION_LINK_B"] },
+      ]
+    );
+  });
+
+  test("a print is kept back by its own handout's names without a value, DATE without a sitting among them, never CLASS", () => {
+    const { db, course } = seeded();
+    const test = withVariables(db, course);
+    const row = () => db.prepare("SELECT * FROM test WHERE id = ?").get(test.id);
+    assert.deepEqual(printBlockers(db, row(), "A"), ["DATE", "SUBMISSION_LINK", "FRANKLYN_PIN"], "no sitting: DATE has no value");
+    assert.deepEqual(printBlockers(db, row(), "B"), ["FRANKLYN_PIN", "SUBMISSION_LINK_B"], "B holds no DATE");
+    const planned = createSitting(db, test.id, { opensAt: "2027-01-20T08:00:00.000Z" });
+    assert.deepEqual(printBlockers(db, row(), "A"), ["SUBMISSION_LINK", "FRANKLYN_PIN"], "a planned sitting dates the print");
+    assert.deepEqual(printBlockers(db, row(), "A", db.prepare("SELECT * FROM sitting WHERE id = ?").get(planned.id)), ["SUBMISSION_LINK", "FRANKLYN_PIN"]);
+    setTestVariables(db, test.id, { SUBMISSION_LINK: "a", FRANKLYN_PIN: "4711" });
+    assert.deepEqual(printBlockers(db, row(), "A"), [], "a missing value of B does not keep A back");
+    assert.deepEqual(printBlockers(db, row(), "B"), ["SUBMISSION_LINK_B"]);
+    const auto = withVariables(db, course, { handoutA: "POS/Var-Auto.md", handoutB: null });
+    const autoRow = db.prepare("SELECT * FROM test WHERE id = ?").get(auto.id);
+    assert.deepEqual(printBlockers(db, autoRow, "A"), ["DATE"], "CLASS never blocks");
+    createSitting(db, auto.id, { opensAt: inMinutes(30) });
+    assert.deepEqual(printBlockers(db, autoRow, "A"), []);
+    assert.deepEqual(printBlockers(db, autoRow, "B"), [], "a group without a handout has no names");
+  });
+
   test("the route is a teacher's, and the handout routes render with the saved values", async () => {
     const dbPath = temporaryPath();
     const saved = { path: process.env.EXAM_DB_PATH, periods: process.env.SCHOOL_PERIODS, fetch: global.fetch };
@@ -853,6 +891,129 @@ describe("a handout's variables", () => {
       const participant = renders.pop();
       assert.equal(participant.vars.FRANKLYN_PIN, "4712", "the participant's handout");
       assert.equal(participant.vars.DATE, viennaDate(getSitting(db, sitting.id).startedAt).split("-").reverse().join("."));
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+      global.fetch = saved.fetch;
+      if (saved.path === undefined) delete process.env.EXAM_DB_PATH;
+      else process.env.EXAM_DB_PATH = saved.path;
+      if (saved.periods !== undefined) process.env.SCHOOL_PERIODS = saved.periods;
+    }
+  });
+  test("the print view takes its title from the corpus file, or from the title a module page names", async () => {
+    const saved = global.fetch;
+    global.fetch = async () => ({ ok: true, json: async () => ({ attributes: { config: [JSON.stringify({ vt: 1 })] } }) });
+    try {
+      const corpusPage = await wrapAsDocument("<p>x</p>", { ...teacherReq(), file: { name: "LT1-A.md" } });
+      assert.match(corpusPage, /<title>LT1-A\.md<\/title>/, "?document on a corpus page");
+      const modulePage = await wrapAsDocument("<p>x</p>", teacherReq(), { title: "Quiz <A> & B" });
+      assert.match(modulePage, /<title>Quiz &lt;A&gt; &amp; B<\/title>/, "no req.file, the title escaped");
+    } finally {
+      global.fetch = saved;
+    }
+  });
+
+  test("a print is a teacher's, refused naming what has no value, and dated by its page's sitting", async () => {
+    const dbPath = temporaryPath();
+    const saved = { path: process.env.EXAM_DB_PATH, periods: process.env.SCHOOL_PERIODS, fetch: global.fetch };
+    process.env.EXAM_DB_PATH = dbPath;
+    delete process.env.SCHOOL_PERIODS;
+    const renders = [];
+    const renderHandout = async (corpusPath, req, options) => {
+      renders.push({ corpusPath, ...options });
+      return `<p>FILE-CONTENT ${corpusPath} ${options.vars.DATE ?? ""}</p>`;
+    };
+    const started = await init({ startPage: () => "/index.html", renderHandout });
+    const { db } = openDatabase(dbPath);
+    openDatabases.push(db);
+    const year = createYear(db, { name: "2026/27", startsOn: "2026-09-07", summerStartsOn: "2027-02-15", endsOn: "2027-07-02" });
+    const klass = createClass(db, year.id, { name: "4bhif", students: [{ username: "anna" }, { username: "ben" }, { username: "cara" }] });
+    const course = createCourse(db, klass.id, { subject: "POS", language: "de" });
+    const test = withVariables(db, course);
+    const plain = withVariables(db, course, { name: "Plain", handoutA: "POS/Open.md", handoutB: null });
+    let view = { vt: 1 };
+    global.fetch = async () => ({ ok: true, json: async () => ({ attributes: { config: [JSON.stringify(view)] } }) });
+    const app = express();
+    app.use((req, res, next) => {
+      const username = req.get("X-As");
+      req.user = {
+        name: username,
+        preferred_username: username,
+        accessToken: "access-token",
+        accessTokenDecoded: { preferred_username: username },
+        keycloakConfig: { "auth-server-url": "https://identity.example/", realm: "demo", resource: "safelearn" },
+        rolesCalculated: JSON.stringify({ [req.get("X-Role")]: true }),
+      };
+      next();
+    });
+    app.use("/exam", started.router);
+    app.use((req, res) => res.status(404).send("UNMATCHED"));
+    const server = app.listen(0);
+    try {
+      const base = `http://127.0.0.1:${server.address().port}/exam`;
+      const ask = async (url, as = "tdent", role = "teacher") => {
+        const answer = await saved.fetch(`${base}${url}`, { headers: { "X-As": as, "X-Role": role } });
+        return { status: answer.status, text: await answer.text() };
+      };
+      const print = `/tests/${test.id}/handouts/A/print`;
+
+      const noSitting = await ask(print);
+      assert.equal(noSitting.status, 409, "no sitting: DATE has no value");
+      assert.match(JSON.parse(noSitting.text).error, /DATE, SUBMISSION_LINK, FRANKLYN_PIN/);
+      const first = createSitting(db, test.id, { opensAt: "2027-01-20T08:00:00.000Z" });
+      assert.match(JSON.parse((await ask(print)).text).error, /SUBMISSION_LINK, FRANKLYN_PIN/, "a planned sitting dates it");
+      setTestVariables(db, test.id, { SUBMISSION_LINK: "a", FRANKLYN_PIN: "4711" });
+      assert.equal((await ask(`/tests/${test.id}/handouts/B/print`)).status, 409, "B still misses SUBMISSION_LINK_B");
+      assert.equal(renders.length, 0, "a refused print renders nothing");
+
+      const page = await ask(print);
+      assert.equal(page.status, 200, "before the start");
+      assert.match(page.text, /<div class="sl-exam-handout"><p>FILE-CONTENT POS\/Var-A.md 20.01.2027<\/p><\/div>/);
+      assert.match(page.text, /<title>Quarkus – handout A<\/title>/);
+      assert.doesNotMatch(page.text, /id="topbar"|id="sidebar"/, "no top bar and no navigation");
+      assert.deepEqual(renders.pop(), { corpusPath: "POS/Var-A.md", variantPrivate: false, optional: false, vars: { CLASS: "4BHIF", DATE: "20.01.2027", SUBMISSION_LINK: "a", FRANKLYN_PIN: "4711" } });
+      // Var-A holds no solution block, so its solution's print is not found, like the missing button.
+      assert.equal((await ask(`/tests/${test.id}/handouts/A/solution/print`)).text, "UNMATCHED");
+
+      setTestVariables(db, test.id, { SUBMISSION_LINK_B: "b" });
+      startSitting(db, first.id, "2026-11-14T08:00:00.000Z");
+      const makeup = createSitting(db, test.id, { opensAt: "2027-01-27T08:00:00.000Z", participants: ["anna"] });
+      assert.equal((await ask(print)).status, 200);
+      assert.equal(renders.pop().vars.DATE, "14.11.2026", "the test's page: the first started sitting");
+      assert.equal((await ask(`/sittings/${makeup.id}/handouts/A/print`)).status, 200);
+      assert.equal(renders.pop().vars.DATE, "27.01.2027", "a make-up's page: its own date");
+      assert.equal((await ask(`/sittings/${first.id}/handouts/A/print`)).status, 200);
+      assert.equal(renders.pop().vars.DATE, "14.11.2026");
+
+      const lt = withVariables(db, course, { name: "LT", handoutA: "POS/LT1-A.md", handoutB: "POS/LT1-B.md" });
+      const ltSitting = createSitting(db, lt.id, { opensAt: inMinutes(30) });
+      const solution = await ask(`/sittings/${ltSitting.id}/handouts/A/solution/print`);
+      assert.equal(solution.status, 200);
+      assert.match(solution.text, /<div class="sl-exam-handout sl-exam-handout-solution-page">/);
+      assert.match(solution.text, /<title>LT – solution A<\/title>/);
+      assert.deepEqual(renders.pop(), { corpusPath: "POS/LT1-A.md", variantPrivate: true, optional: true, vars: {} }, "a file without variables gets none");
+      assert.equal((await ask(`/tests/${lt.id}/handouts/B/solution/print`)).text, "UNMATCHED", "B has no solution");
+      assert.equal((await ask(`/tests/${plain.id}/handouts/A/print`)).status, 200, "a handout without variables prints at once");
+      renders.pop();
+
+      for (const url of [print, `/tests/${lt.id}/handouts/A/solution/print`, `/sittings/${makeup.id}/handouts/A/print`, `/sittings/${ltSitting.id}/handouts/A/solution/print`]) {
+        const student = await ask(url, "anna", "student");
+        assert.equal(student.text, "UNMATCHED", `a student: ${url}`);
+        view = { vt: 0 };
+        const downgraded = await ask(url);
+        view = { vt: 1 };
+        assert.equal(downgraded.text, "UNMATCHED", `a teacher in student view: ${url}`);
+      }
+      for (const url of [
+        `/sittings/9999/handouts/A/print`,
+        `/sittings/x/handouts/A/print`,
+        `/tests/${test.id}/handouts/C/print`,
+        `/tests/9999/handouts/A/print`,
+      ]) {
+        assert.equal((await ask(url)).text, "UNMATCHED", url);
+      }
+      const online = Number(db.prepare("INSERT INTO test (course_id, name, created_at, updated_at) VALUES (?, 'Online', 'x', 'x')").run(course.id).lastInsertRowid);
+      assert.equal((await ask(`/tests/${online}/handouts/A/print`)).text, "UNMATCHED", "an online test");
+      assert.equal(renders.length, 0, "no refusal rendered the file");
     } finally {
       await new Promise((resolve) => server.close(resolve));
       global.fetch = saved.fetch;

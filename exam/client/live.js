@@ -48,7 +48,7 @@
 
 import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, linkButton, saveOnChange, t } from "./frame.js";
 import { candidateMark, candidateNote, displayClass, displayPerson } from "./classes.js";
-import { displayWindow } from "./tests.js";
+import { displayWindow, handoutPrintControls } from "./tests.js";
 import { setTone } from "./row-tone.js";
 
 const stateLabels = {
@@ -489,7 +489,11 @@ class LiveView extends ExamElement {
     ];
   }
 
-  /** The test's handouts, a path that does not resolve in red, then the variables without a value in red. */
+  /**
+   * The test's handouts, a path that does not resolve in red and each that
+   * resolves with its print buttons, dated with this sitting
+   * (print-offline-handout design D4); then the variables without a value in red.
+   */
   handoutLine() {
     if (this.handouts.length === 0) return h("p", { class: "sl-exam-quiet sl-exam-live-handouts" }, t("exam.offline.noHandout"));
     return h(
@@ -499,6 +503,16 @@ class LiveView extends ExamElement {
         index ? " · " : null,
         `${t("exam.offline.handoutLabel", { group: handout.group })} `,
         h("code", { class: handout.resolves ? "sl-exam-handout-path" : "sl-exam-handout-path is-broken", "data-group": handout.group }, handout.path),
+        handout.resolves
+          ? [
+              " ",
+              handoutPrintControls(
+                `/exam/sittings/${this.sitting.id}`,
+                handout,
+                this.missingVariables.filter((name) => (handout.variables ?? []).includes(name))
+              ),
+            ]
+          : null,
       ]),
       this.missingVariables.length > 0
         ? [

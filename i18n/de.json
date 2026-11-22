@@ -546,7 +546,8 @@
         "bWithoutA": "Bitte zuerst Angabe A wählen, dann Angabe B.",
         "none": "Diese Angabe gibt es nicht.",
         "notFound": "Unter {path} gibt es keine Markdown-Datei.",
-        "path": "Eine Angabe muss eine Markdown-Datei des Korpus sein."
+        "path": "Eine Angabe muss eine Markdown-Datei des Korpus sein.",
+        "printVariablesMissing": "Die Angabe wird nicht gedruckt, solange diese Variablen keinen Wert haben: {names}. Bitte auf der Seite des Tests eintragen; DATE ist das Datum eines geplanten Termins."
       }
     },
     "frame": {
@@ -1110,6 +1111,9 @@
       "previewHandout": "Vorschau",
       "removeHandout": "Entfernen",
       "solutionHandout": "Lösung",
+      "printHandout": "Drucken",
+      "printSolution": "Lösung drucken",
+      "printBlocked": "Zum Drucken fehlt ein Wert für:",
       "start": "Starten",
       "startBlocked": "Angabe {group} ({path}) gibt es nicht mehr: bitte neu wählen oder entfernen.",
       "startNote": "Der Termin öffnet erst, wenn auf seiner Anwesenheitsseite Starten gedrückt wird.",

@@ -546,7 +546,8 @@
         "bWithoutA": "Choose handout A before handout B.",
         "none": "There is no such handout.",
         "notFound": "There is no Markdown file at {path}.",
-        "path": "A handout has to be a Markdown file of the corpus."
+        "path": "A handout has to be a Markdown file of the corpus.",
+        "printVariablesMissing": "The handout is not printed while these variables have no value: {names}. Fill them in on the test's page; DATE takes the date of a planned sitting."
       }
     },
     "frame": {
@@ -1110,6 +1111,9 @@
       "previewHandout": "Preview",
       "removeHandout": "Remove",
       "solutionHandout": "Solution",
+      "printHandout": "Print",
+      "printSolution": "Print solution",
+      "printBlocked": "Printing needs a value for:",
       "start": "Start",
       "startBlocked": "Handout {group} ({path}) is not there any more: choose it again or remove it.",
       "startNote": "The sitting opens only when you press Start on its attendance page.",

@@ -42,7 +42,7 @@ import {
 import { viennaLocal } from "./client/periods.js";
 import { finalizeDue } from "./attempts.js";
 import { entryCategory } from "./grading.js";
-import { handoutGroups, handoutPath, handoutResolves, handoutsOf, handoutVariableNames } from "./handout.js";
+import { handoutGroups, handoutPath, handoutResolves, handoutsOf, handoutVariableNames, variableNamesOf } from "./handout.js";
 import { handoutVariableName } from "../obsidian.js";
 
 /** The calendar date in Vienna of an ISO timestamp, as `YYYY-MM-DD`. */
@@ -954,6 +954,22 @@ export function testVariables(db, row, sitting = undefined) {
     const value = stored.get(name) ?? null;
     return { name, value, auto: false, missing: value === null };
   });
+}
+
+/**
+ * What keeps handout `group` of the offline test row `test` from being printed
+ * (print-offline-handout design D3): the names of that handout's own variables
+ * without a value, in their order. `DATE` is that of `sitting`, or of the
+ * preview's sitting without one, and counts here - unlike `missing` - when
+ * there is no sitting at all: paper cannot be corrected. `CLASS` always has a
+ * value. A missing value of the other handout does not keep this one back.
+ */
+export function printBlockers(db, test, group, sitting = undefined) {
+  const corpusPath = group === "A" ? test.handout_a : group === "B" ? test.handout_b : null;
+  const own = new Set(variableNamesOf(corpusPath));
+  return testVariables(db, test, sitting)
+    .filter((variable) => own.has(variable.name) && variable.value === null)
+    .map((variable) => variable.name);
 }
 
 /**
