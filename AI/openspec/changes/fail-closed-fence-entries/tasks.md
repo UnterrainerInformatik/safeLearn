@@ -24,7 +24,7 @@
 
 - [x] 4.1 `AI/plugin/main.ts`: mirror D1 in the window parser; mark a discarded window's entry as closed; mark `#variant-private` + `#variant-public` as the "hides from everyone" error (`plugin-editor-decorations` delta)
 - [x] 4.2 Plugin tests; run `test:obsidian` (with `SAFELEARN_OBSIDIAN_APP` and `AI/plugin` on origin/master)
-- [ ] 4.3 Plugin release
+- [x] 4.3 Plugin release
 
 ## 5. Docs and rollout
 
