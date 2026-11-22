@@ -15,15 +15,15 @@ The following paragraph is only visible to Stu Dent:
 @@@ stu dent
 >Only visible to Stu Dent
 @@@
-# NO Nested Permissions!
-Nested permissions don't work due to the way we parse the permission-declarations (regexp).
+# Two Blocks One After The Other
+Two blocks that follow each other are decided each on its own. A block inside a block is shown only where both are, see `test-nested-blocks.md`.
 
 The following paragraph is only visible to 5BHIF:
 @@@ 5bhif
 >Only visible to users in 5BHIF group.
 @@@
 
-The following paragraph is only visible to teachers in group 5BHIF:
+The following paragraph is only visible to teachers:
 @@@ teacher
->Only visible to users being in teachers AND 5bhif groups.
+>Only visible to teachers, in the second block.
 @@@

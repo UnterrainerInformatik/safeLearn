@@ -151,7 +151,7 @@ const blocks = [
     what: "the second teacher block",
     page: permissionsPage,
     role: "teacher",
-    text: "Only visible to users being in teachers AND 5bhif groups.",
+    text: "Only visible to teachers, in the second block.",
   },
   { what: "the admin block", page: timedPage, role: "admin", text: "Admins only!!!" },
   aliasBlock,

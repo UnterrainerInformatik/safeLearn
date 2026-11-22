@@ -56,6 +56,7 @@ import {
   answerSectionContent,
   answerSemesterTable,
   blockBoxes,
+  nestedFrames,
   callSearchDirectory,
   checkDirectoryClass,
   chooseDirectoryResults,
@@ -1517,6 +1518,97 @@ describe("the marker that closes a block is shown as the blank line the frame cl
         (await visibleText(container)).includes("Gated, and never closed."),
         "The last line of an unclosed block is text a person wrote, and it stays on screen."
       );
+    }));
+});
+
+// ################### Nested blocks (nest-permission-blocks) ###################
+
+describe("nested blocks are framed per level", () => {
+  /** The frame data of the element showing `needle`. */
+  const lineOf = (frames, needle) => {
+    const found = frames.find((frame) => frame.text === needle);
+    assert.ok(found, `No framed element shows ${JSON.stringify(needle)}. Framed: ${JSON.stringify(frames.map((f) => f.text))}`);
+    return found;
+  };
+
+  test("two levels: the inner frame inside the outer one, in a different shade", async () =>
+    watched("nested-two-levels", async () => {
+      const name = "constructed-nested-two.md";
+      await writeDocument(name, ["Intro.", "@@@ 4bhif", "blah", "@@@ Rene Wildberger", "blubb", "@@@", "after inner", "@@@", "Outro."].join("\n"));
+      const container = await open(name, views.livePreview);
+      await placeCursorAfter("Intro.");
+      const frames = await nestedFrames(container);
+
+      const outer = lineOf(frames, "blah");
+      const inner = lineOf(frames, "blubb");
+      assert.ok(!outer.classes.some((c) => c.startsWith("permission-depth-")), `The outer text is drawn as an outermost block: ${outer.classes}`);
+      assert.ok(inner.classes.includes("permission-depth-1"), `The inner text is drawn one level down: ${inner.classes}`);
+      assert.equal(inner.tints.length, 2, `The inner line is framed by two levels. Tints: ${JSON.stringify(inner.tints)}`);
+      assert.notEqual(inner.tints[0], inner.tints[1], `A block and the block directly inside it never share a shade: ${JSON.stringify(inner.tints)}`);
+      assert.ok(lineOf(frames, "after inner").classes.every((c) => !c.startsWith("permission-depth-")), "The text after the inner block is the outer block's again");
+      assert.ok(!frames.some((frame) => frame.text.includes("Outro.")), "The text after the nest carries no frame");
+      assert.ok(!(await visibleText(container)).includes("@@@"), "No marker of the nest is on screen with the cursor elsewhere");
+    }));
+
+  test("three levels: each level differs in shade from the one around it", async () =>
+    watched("nested-three-levels", async () => {
+      const name = "constructed-nested-three.md";
+      await writeDocument(
+        name,
+        ["Intro.", "@@@ 4bhif", "a", "@@@ teacher", "b", "@@@ #optional", "c", "@@@", "d", "@@@", "e", "@@@", "Outro."].join("\n")
+      );
+      const container = await open(name, views.livePreview);
+      await placeCursorAfter("Intro.");
+      const deepest = lineOf(await nestedFrames(container), "c");
+      assert.ok(deepest.classes.includes("permission-depth-2"), `${deepest.classes}`);
+      assert.equal(deepest.tints.length, 3, `Three levels of frame: ${JSON.stringify(deepest.tints)}`);
+      assert.notEqual(deepest.tints[0], deepest.tints[1], `third and second level: ${JSON.stringify(deepest.tints)}`);
+      assert.notEqual(deepest.tints[1], deepest.tints[2], `second and first level: ${JSON.stringify(deepest.tints)}`);
+    }));
+
+  test("blocks side by side inside one block share a shade", async () =>
+    watched("nested-side-by-side", async () => {
+      const name = "constructed-nested-siblings.md";
+      await writeDocument(name, ["Intro.", "@@@ 4bhif", "@@@ teacher", "first", "@@@", "@@@ #optional", "second", "@@@", "@@@", "Outro."].join("\n"));
+      const container = await open(name, views.livePreview);
+      await placeCursorAfter("Intro.");
+      const frames = await nestedFrames(container);
+      const first = lineOf(frames, "first");
+      const second = lineOf(frames, "second");
+      assert.equal(first.tints[0], second.tints[0], `Both nested blocks are one level down: ${JSON.stringify([first.tints, second.tints])}`);
+      assert.notEqual(first.tints[0], first.tints[1], `and differ from the block around them: ${JSON.stringify(first.tints)}`);
+    }));
+});
+
+describe("a block that is not closed is marked as open", () => {
+  test("a forgotten inner closing line marks the outer block open to the end, and typing it clears that", async () =>
+    watched("nested-open-marking", async () => {
+      const name = "constructed-nested-open.md";
+      await writeDocument(name, ["Intro.", "@@@ 4bhif", "outer text", "@@@ #optional", "inner text", "@@@", "rest of the page", "", "Last line."].join("\n"));
+      const container = await open(name, views.livePreview);
+      await placeCursorAfter("Intro.");
+
+      let frames = await nestedFrames(container);
+      for (const needle of ["outer text", "inner text", "rest of the page", "Last line."]) {
+        const frame = frames.find((f) => f.text.includes(needle));
+        assert.ok(frame?.classes.includes("permission-open-0"), `${JSON.stringify(needle)} is inside the open outer block: ${JSON.stringify(frame)}`);
+        assert.ok(frame.outerEdge > 2, `The open block's edge is drawn heavier: ${JSON.stringify(frame)}`);
+      }
+      assert.ok(!frames.some((f) => f.classes.includes("permission-block-end")), "The open block has no floor");
+      const inner = frames.find((f) => f.text.includes("inner text"));
+      assert.ok(!inner.classes.some((c) => c.startsWith("permission-open-") && c !== "permission-open-0"), `The inner block is closed: ${inner.classes}`);
+      assert.ok(frames.some((f) => f.classes.includes("permission-nest-end")), "The inner block has its floor");
+
+      // The missing closing line, typed after the inner block's.
+      await placeCursorAfter("rest of the page");
+      await type("\n@@@");
+      await placeCursorAfter("Intro.");
+      frames = await nestedFrames(container);
+      assert.ok(!frames.some((f) => f.classes.some((c) => c.startsWith("permission-open-"))), `No open marking is left: ${JSON.stringify(frames.map((f) => f.classes))}`);
+      assert.ok(frames.some((f) => f.classes.includes("permission-block-end")), "The outer block is closed and has its floor");
+      assert.ok(!frames.some((f) => f.text.includes("Last line.")), "The line after the closer is outside the block");
+      const outer = frames.find((f) => f.text.includes("outer text"));
+      assert.ok(outer.outerEdge > 0 && outer.outerEdge < 1.5, `A closed block's edge: ${JSON.stringify(outer)}`);
     }));
 });
 

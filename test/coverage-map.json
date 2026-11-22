@@ -61,7 +61,7 @@
       ]
     },
     "test/checks/views.js": {
-      "what": "The #variant-private, #variant-public and #optional pseudo-roles, driven through the ve and va preferences. That a session takes its view preferences from the account alone: a forged safelearn_config/safelearn_last cookie of the mode without an identity provider changes neither the page, nor the / redirect, nor the stored preferences, and is never set or cleared by the response; ?ve=1&vt=1 in the query changes nothing. That every presentation of a page - page, ?reveal, ?document and print - carries the same permitted content for a student, a teacher in the student view and a teacher.",
+      "what": "The #variant-private, #variant-public and #optional pseudo-roles, driven through the ve and va preferences. That a session takes its view preferences from the account alone: a forged safelearn_config/safelearn_last cookie of the mode without an identity provider changes neither the page, nor the / redirect, nor the stored preferences, and is never set or cleared by the response; ?ve=1&vt=1 in the query changes nothing. That every presentation of a page - page, ?reveal, ?document and print - carries the same permitted content for a student, a teacher in the student view and a teacher. That a block nested in a block is shown only to those every enclosing block admits: on md/test-nested-blocks.md the admin account named by the inner block, the teacher account as another member of the outer teacher group and the student account outside it, with the nested #optional block shown only inside the group and only with the optional view on.",
       "guards": [
         "utils.js",
         "obsidian.js",
@@ -72,7 +72,8 @@
       ],
       "corpus": [
         "md/test-exam-practice-question.md",
-        "md/test-perms.md"
+        "md/test-perms.md",
+        "md/test-nested-blocks.md"
       ]
     },
     "test/checks/rendering.js": {
@@ -318,7 +319,7 @@
       ]
     },
     "test/block-grammar.test.js": {
-      "what": "Where an inline @@@ block begins and ends (permission-block-grammar): a table of documents with their block line ranges - @@@ mid-line and in inline code, marker lines in closed backtick and tilde fences, an unclosed fence, a stray closer, an opener inside an open block, an unclosed block, indented markers, CRLF, a whole-file directive and the shape of the POSE3-OO incident - run against the server's resolveInlineBlocks and the companion plugin's resolveBlocks. A row either side reads differently fails here, naming that side. Needs no browser, no login and no server; it does need the plugin checkout the AI/plugin symlink points at.",
+      "what": "Where an inline @@@ block begins and ends (permission-block-grammar): a table of documents with their block line ranges - @@@ mid-line and in inline code, marker lines in closed backtick and tilde fences, an unclosed fence, a stray closer, an opener inside an open block, two and three levels of nesting, blocks side by side in a block, a nest whose inner or outer block is unclosed, a closer in code within a nested block, an unclosed block, indented markers, CRLF, a whole-file directive and the shape of the POSE3-OO incident - run against the server's resolveInlineBlocks and the companion plugin's resolveBlocks. A row either side reads differently fails here, naming that side. Needs no browser, no login and no server; it does need the plugin checkout the AI/plugin symlink points at.",
       "guards": [
         "obsidian.js"
       ],
@@ -767,6 +768,13 @@
       "what": "The one-off migration tool for the view-marker rename: it rewrites #exam, #practice and #answer to #variant-private, #variant-public and #optional only where they follow @@@ on their line - marker lines, indented or inside a code fence, and @@@ mentions in running text or inline code, in any case - and leaves a bare tag alone; a dry run writes nothing, --write rewrites, only Markdown outside dot-directories is touched, and what remains is listed with its line.",
       "guards": [
         "tools/rename-view-markers.mjs"
+      ],
+      "corpus": []
+    },
+    "test/unclosed-blocks.test.js": {
+      "what": "That no inline @@@ block in md/, at any nesting level, is left without a closing line of its own - such a block runs to the end of its document and hides the rest from everyone it does not admit, so a forgotten closer would only show as missing content. Reads every Markdown file of md/ offline, by the one block grammar, so marker lines in code fences and comments do not count; names file and directive line.",
+      "guards": [
+        "obsidian.js"
       ],
       "corpus": []
     },

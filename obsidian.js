@@ -582,13 +582,15 @@ function fencedLineIndices(texts, first) {
  * - lines are split on `\n`; a trailing `\r` is ignored when a line is read, and
  *   kept in every offset, so CRLF output is what it was;
  * - lines inside a closed fenced code block are code and never markers;
- * - a block opens on an opening marker and closes on the first later closing
- *   marker - `@@@` anywhere else in a line is text;
- * - an opening marker inside an open block opens nothing, and is recorded so a
- *   shown body can drop it;
+ * - a block opens on an opening marker and closes on a later closing marker -
+ *   `@@@` anywhere else in a line is text;
+ * - an opening marker inside an open block opens a block nested in it, and a
+ *   closing marker closes the innermost open block, so blocks pair like
+ *   brackets;
  * - a closing marker with no open block closes nothing, and is recorded so it
  *   is not shown either;
- * - a block that is never closed runs to the end of the document.
+ * - a block that is never closed runs to the end of the document, at every
+ *   level: when the closing lines run out, every block still open does.
  *
  * With `fileDirective`, the first line is the whole-file directive and no block;
  * most callers split it off before they ask, the index does not.
@@ -596,9 +598,11 @@ function fencedLineIndices(texts, first) {
  * Each block carries `start` (its opening line), `end` (after the closing `@@@`,
  * or the end of the document), `contentStart` and `contentEnd` (its body,
  * without the closing `@@@` but with that line's indentation, as the regular
- * expression it replaces had it), `entries`, `closed`, `innerDirectives`
- * (`{ start, end }` of every opener inside it, line ending included), and
- * `fromLine` / `toLine`, counted from 1 like the plugin counts them.
+ * expression it replaces had it), `entries`, `closed`, `depth` (0 for a block
+ * no other block encloses), `parent` (the index in `blocks` of the block
+ * directly enclosing it, or null), and `fromLine` / `toLine`, counted from 1
+ * like the plugin counts them. Blocks are listed by `start`, so a parent always
+ * comes before the blocks nested in it.
  */
 export function resolveInlineBlocks(md, { fileDirective = false } = {}) {
   const blocks = [];
@@ -625,40 +629,44 @@ export function resolveInlineBlocks(md, { fileDirective = false } = {}) {
     first
   );
 
-  let open = null;
+  // The blocks still open, outermost first. Each is given its place in `blocks`
+  // when it opens, so a parent's index is known to the blocks nested in it.
+  const open = [];
   const close = (contentEnd, end, closed, lastIndex) => {
-    const opener = lines[open.index];
-    blocks.push({
-      start: opener.start,
-      end,
-      contentStart: opener.end,
-      contentEnd,
-      entries: parsePermissionEntries(opener.text.replace(/^[ \t]*@@@/, "")),
-      closed,
-      innerDirectives: open.inner,
-      fromLine: open.index + 1,
-      toLine: lastIndex + 1,
-    });
-    open = null;
+    const block = blocks[open.pop()];
+    block.end = end;
+    block.contentEnd = contentEnd;
+    block.closed = closed;
+    block.toLine = lastIndex + 1;
   };
 
   for (let i = first; i < lines.length; i++) {
     if (fenced[i]) continue;
     const line = lines[i];
-    if (open === null) {
-      if (opensInlineBlock.test(line.text)) {
-        open = { index: i, inner: [] };
-      } else if (closesInlineBlock.test(line.text)) {
-        strayClosers.push({ start: line.start, end: line.end, line: i + 1 });
-      }
+    if (opensInlineBlock.test(line.text)) {
+      open.push(blocks.length);
+      blocks.push({
+        start: line.start,
+        end: md.length,
+        contentStart: line.end,
+        contentEnd: md.length,
+        entries: parsePermissionEntries(line.text.replace(/^[ \t]*@@@/, "")),
+        closed: false,
+        depth: open.length - 1,
+        parent: open.length > 1 ? open[open.length - 2] : null,
+        fromLine: i + 1,
+        toLine: lines.length,
+      });
     } else if (closesInlineBlock.test(line.text)) {
-      const at = line.start + line.text.indexOf("@@@");
-      close(at, at + 3, true, i);
-    } else if (opensInlineBlock.test(line.text)) {
-      open.inner.push({ start: line.start, end: line.end });
+      if (open.length === 0) {
+        strayClosers.push({ start: line.start, end: line.end, line: i + 1 });
+      } else {
+        const at = line.start + line.text.indexOf("@@@");
+        close(at, at + 3, true, i);
+      }
     }
   }
-  if (open !== null) {
+  while (open.length > 0) {
     close(md.length, md.length, false, lines.length - 1);
   }
   return { blocks, strayClosers };
@@ -684,6 +692,8 @@ function extractInlinePermissionBlocks(markdown, options = {}) {
     contentEnd: block.contentEnd,
     entries: block.entries,
     closed: block.closed,
+    depth: block.depth,
+    parent: block.parent,
     line: block.fromLine,
   }));
 }
@@ -1464,13 +1474,14 @@ export async function filterForbiddenSegments(md, req) {
     // carries no inline directive must not cost a lookup.
     return [{ text: md, offset: 0 }];
   }
-  let visible = [];
+  const shown = [];
   if (blocks.length > 0) {
     // Awaited once, ahead of the fan-out below. Every block of the document is
     // then decided against the same reference time, so a window cannot close
     // between the first paragraph of a page and the last.
     const { referenceDate } = await getPermissionContext(req);
-    visible = await Promise.all(
+    // Each level by its own directive first, as a block on its own is decided.
+    const own = await Promise.all(
       blocks.map(async ({ entries }) => {
         if (entries.length === 0) {
           return false;
@@ -1478,19 +1489,26 @@ export async function filterForbiddenSegments(md, req) {
         return directiveAdmits(req, entries, referenceDate);
       })
     );
+    // Then down the nest: a nested block is shown only where every block
+    // enclosing it is (`role-resolution`). Roles combine with OR within one
+    // directive and with AND across levels, which no single entry list could
+    // say. Blocks come by `start`, so a parent is settled before its children.
+    blocks.forEach((block, i) => {
+      shown[i] = own[i] && (block.parent === null || shown[block.parent]);
+    });
   }
 
-  // What is taken out, as ranges of `md`: a hidden block whole; of a shown one
-  // its opening line, every opener inside it and its closing `@@@`; and every
-  // closing line that closed nothing. What lies between them survives.
+  // What is taken out, as ranges of `md`: a hidden block whole, the blocks
+  // nested in it with it; of a shown one its opening line and its closing `@@@`;
+  // and every closing line that closed nothing. Ranges overlap where blocks
+  // nest, and the walk below merges them. What lies between them survives.
   const cuts = strayClosers.map(({ start, end }) => [start, end]);
   blocks.forEach((block, i) => {
-    if (!visible[i]) {
+    if (!shown[i]) {
       cuts.push([block.start, block.end]);
       return;
     }
     cuts.push([block.start, block.contentStart]);
-    for (const inner of block.innerDirectives) cuts.push([inner.start, inner.end]);
     cuts.push([block.contentEnd, block.end]);
   });
   cuts.sort((a, b) => a[0] - b[0]);

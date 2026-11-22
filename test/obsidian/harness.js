@@ -2688,6 +2688,42 @@ export async function styleOf(container, className, properties) {
 }
 
 /**
+ * What the browser drew for each element of a permission block, top to bottom:
+ * its text, its classes, the tint of every level it is framed by, innermost
+ * first, and the width of its outermost side edge.
+ *
+ * A line inside a nested block draws the frames around it as background layers
+ * (`styles.css`): per level its two edges and its tint, innermost level first,
+ * after the lid and the floor. A line of an outermost block draws its tint as
+ * its background colour. The tints are read from what the browser computed, so
+ * a rule that never loaded or was overridden shows as a tint that is missing or
+ * the same at two levels.
+ */
+export async function nestedFrames(container) {
+  return page.evaluate((selector) => {
+    const root = document.querySelector(selector);
+    if (!root) return [];
+    const colours = (image) => [...image.matchAll(/linear-gradient\(([a-z-]+\([^)]*\)|[^,()]+), /g)].map((match) => match[1]);
+    return [...root.querySelectorAll(".permission-block")]
+      .map((element) => {
+        const style = getComputedStyle(element);
+        const layers = style.backgroundImage === "none" ? [] : colours(style.backgroundImage);
+        // Lid and floor, then three layers per level: left edge, right edge, tint.
+        const tints = layers.length > 2 ? layers.slice(2).filter((_, index) => index % 3 === 2) : [style.backgroundColor];
+        const sizes = style.backgroundSize.split(",").map((size) => size.trim());
+        return {
+          top: element.getBoundingClientRect().top,
+          text: (element.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 40),
+          classes: [...element.classList],
+          tints,
+          outerEdge: layers.length > 2 ? parseFloat(sizes[sizes.length - 2]) : parseFloat(style.borderLeftWidth) || 0,
+        };
+      })
+      .sort((a, b) => a.top - b.top);
+  }, container);
+}
+
+/**
  * The markup of what is on screen, for the one question text cannot answer:
  * whether taking a tag out of a line left the formatting around it standing.
  */

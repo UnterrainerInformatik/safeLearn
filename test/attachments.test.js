@@ -156,6 +156,10 @@ before(async () => {
       "",
     ].join("\n")
   );
+  // A teacher block nested in a class block (nest-permission-blocks): the image
+  // is for the teachers of 4bhif, and for nobody else.
+  write("assets/nested.png");
+  write("nested.md", "# Nested\n@@@ 4bhif\nFor the class.\n@@@ teacher\n![[nested.png]]\n@@@\n@@@\n");
   write("teachers.md", "@@@ teacher\n# Teachers\n![[everywhere.png]]\n");
   write("class.md", "# Class\n@@@ 4bhif\n![[everywhere.png]]\n@@@\n");
   write("open.md", "# Open\n![[everywhere.png]]\n");
@@ -390,6 +394,17 @@ describe("who is served an attachment", () => {
     preferences({ vt: 1 });
     assert.equal(await mayServeAttachment(student(), "assets/teacher-only.png"), false);
     assert.equal(await mayServeAttachment(teacher(), "assets/teacher-only.png"), true);
+  });
+
+  test("a reference inside a teacher block nested in a class block needs both", async () => {
+    preferences({ vt: 1 });
+    assert.equal(await mayServeAttachment(teacher(), "assets/nested.png"), false, "a teacher outside 4bhif");
+    assert.equal(await mayServeAttachment(classMember(), "assets/nested.png"), false, "a member of 4bhif, no teacher");
+    assert.equal(
+      await mayServeAttachment(session({ teacher: true, "4bhif": true }, "Tea Cher"), "assets/nested.png"),
+      true,
+      "a teacher of 4bhif"
+    );
   });
 
   test("a wiki link serves its attachment where the link is visible", async () => {

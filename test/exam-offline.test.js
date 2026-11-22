@@ -130,6 +130,7 @@ before(async () => {
   write("POS/Var-B.md", "@@@ teacher\nPIN: %%var FRANKLYN_PIN%%\n\nAbgabe: %%var SUBMISSION_LINK_B%% `%%var CODE%%`\n");
   write("POS/Var-Auto.md", "@@@ teacher\n#### Test - %%var CLASS%% - %%var DATE%%\n%%var lower%% %% var: PIN %%\n");
   write("POS/ExamOnly.md", "@@@ teacher\n# Solutions in exam blocks\nTask.\n@@@ #variant-private\nSolution.\n@@@\n");
+  write("POS/NestedOnly.md", "# Test\n@@@ 4ahif\nFrage?\n@@@ #variant-private\nLösung.\n@@@\n@@@\n");
   write("POS/MentionOnly.md", "@@@ teacher\n# Notes\nDie Musterlösung steht in den `@@@ #variant-private`-Blöcken.\n\n```\n@@@ #optional\nx\n@@@\n```\n");
   write("POS/AnswerOnly.md", "@@@ teacher\n# Solutions in answer blocks\nTask.\n@@@ 4bhif, #optional\nSolution.\n@@@\n");
   write("POS/Retired.md", "@@@ teacher\n# Solutions under a retired name\nTask.\n@@@ #exam\nRETIRED-SOLUTION\n@@@\n");
@@ -592,6 +593,7 @@ describe("a handout", () => {
     assert.equal(hasSolution("POS/AnswerOnly.md"), true, "only #optional blocks");
     assert.equal(hasSolution("POS/LT1-B.md"), false, "neither");
     assert.equal(hasSolution("POS/MentionOnly.md"), false, "named only in running text and in code");
+    assert.equal(hasSolution("POS/NestedOnly.md"), true, "its only #variant-private block is nested in another block");
     assert.equal(hasSolution("POS/Missing.md"), false, "does not resolve");
   });
 

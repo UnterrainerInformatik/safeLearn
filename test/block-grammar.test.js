@@ -13,6 +13,9 @@
  * plugin's `resolveBlocks` are held to it. A row one side reads differently fails
  * here, naming that side.
  *
+ * Blocks nest like brackets, so each is listed with its nesting depth, by the
+ * line it opens on.
+ *
  * Line ranges because that is the unit both sides share: the plugin walks lines,
  * the server offsets. What a reader is then shown of a block is checked against
  * the server alone, in `test/obsidian-syntax.test.js` and
@@ -108,11 +111,62 @@ const rows = [
     blocks: [{ from: 4, to: 6, closed: true }],
   },
   {
-    why: "an opener inside an open block opens nothing; the blocks after it stay where they are",
-    document: doc("Intro.", "@@@ 4ahif", "Q", "@@@ #variant-private", "sol", "@@@", "After.", "@@@ teacher", "t", "@@@"),
+    why: "an opener inside an open block opens a nested block; the blocks after the nest stay where they are",
+    document: doc("Intro.", "@@@ 4ahif", "Q", "@@@ #variant-private", "sol", "@@@", "@@@", "After.", "@@@ teacher", "t", "@@@"),
     blocks: [
-      { from: 2, to: 6, closed: true },
-      { from: 8, to: 10, closed: true },
+      { from: 2, to: 7, closed: true },
+      { from: 4, to: 6, closed: true, depth: 1 },
+      { from: 9, to: 11, closed: true },
+    ],
+  },
+  {
+    why: "two levels: the first closing line closes the inner block, the second the outer one",
+    document: doc("Intro.", "@@@ 4bhif", "blah", "@@@ Rene Wildberger", "blubb", "@@@", "@@@", "After."),
+    blocks: [
+      { from: 2, to: 7, closed: true },
+      { from: 4, to: 6, closed: true, depth: 1 },
+    ],
+  },
+  {
+    why: "three levels pair like brackets",
+    document: doc("Intro.", "@@@ 4bhif", "a", "@@@ teacher", "b", "@@@ #optional", "c", "@@@", "d", "@@@", "e", "@@@", "After."),
+    blocks: [
+      { from: 2, to: 12, closed: true },
+      { from: 4, to: 10, closed: true, depth: 1 },
+      { from: 6, to: 8, closed: true, depth: 2 },
+    ],
+  },
+  {
+    why: "two blocks side by side inside one block are both one level down",
+    document: doc("Intro.", "@@@ 4bhif", "@@@ teacher", "t", "@@@", "@@@ #optional", "o", "@@@", "@@@"),
+    blocks: [
+      { from: 2, to: 9, closed: true },
+      { from: 3, to: 5, closed: true, depth: 1 },
+      { from: 6, to: 8, closed: true, depth: 1 },
+    ],
+  },
+  {
+    why: "an inner block that is never closed leaves its outer block unclosed, too; both run to the end",
+    document: doc("Intro.", "@@@ 4bhif", "a", "@@@ #variant-private", "b"),
+    blocks: [
+      { from: 2, to: 5, closed: false },
+      { from: 4, to: 5, closed: false, depth: 1 },
+    ],
+  },
+  {
+    why: "one closing line for a nest of two closes the inner block; the outer one runs to the end",
+    document: doc("Intro.", "@@@ 4bhif", "a", "@@@ #variant-private", "b", "@@@", "c"),
+    blocks: [
+      { from: 2, to: 7, closed: false },
+      { from: 4, to: 6, closed: true, depth: 1 },
+    ],
+  },
+  {
+    why: "a closing line in a code fence inside a nested block closes nothing",
+    document: doc("Intro.", "@@@ 4bhif", "@@@ teacher", fence, "@@@", fence, "t", "@@@", "o", "@@@", "After."),
+    blocks: [
+      { from: 2, to: 10, closed: true },
+      { from: 3, to: 8, closed: true, depth: 1 },
     ],
   },
   {
@@ -155,7 +209,7 @@ function serverBlocks(document) {
   const { blocks } = resolveInlineBlocks(document, {
     fileDirective: parseFirstLineForPermissions(firstLine) !== null,
   });
-  return blocks.map((block) => ({ from: block.fromLine, to: block.toLine, closed: block.closed }));
+  return blocks.map((block) => ({ from: block.fromLine, to: block.toLine, closed: block.closed, depth: block.depth }));
 }
 
 async function pluginBlocks() {
@@ -165,12 +219,15 @@ async function pluginBlocks() {
   return (document) =>
     resolveBlocks(linesOfText(document))
       .blocks.filter((block) => block.kind === "permission")
-      .map((block) => ({ from: block.from, to: block.to, closed: block.closed }));
+      .map((block) => ({ from: block.from, to: block.to, closed: block.closed, depth: block.depth }));
 }
+
+/** A row's blocks as both sides report them: by where they open, `depth` 0 unless the row says otherwise. */
+const expected = (row) => row.blocks.map((block) => ({ depth: 0, ...block }));
 
 test("the server resolves every document of the table to the blocks the table states", () => {
   for (const row of rows) {
-    assert.deepEqual(serverBlocks(row.document), row.blocks, `server: ${row.why}\n${JSON.stringify(row.document)}`);
+    assert.deepEqual(serverBlocks(row.document), expected(row), `server: ${row.why}\n${JSON.stringify(row.document)}`);
   }
 });
 
@@ -179,6 +236,6 @@ test("the plugin resolves every document of the table to the blocks the table st
   for (const row of rows) {
     // Plain objects across the vm boundary, so `deepEqual` compares values, not realms.
     const found = JSON.parse(JSON.stringify(resolve(row.document)));
-    assert.deepEqual(found, row.blocks, `plugin: ${row.why}\n${JSON.stringify(row.document)}`);
+    assert.deepEqual(found, expected(row), `plugin: ${row.why}\n${JSON.stringify(row.document)}`);
   }
 });

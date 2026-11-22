@@ -613,6 +613,49 @@ describe("a directive only narrows", () => {
     }
   });
 
+  // A nested block requires every block enclosing it (nest-permission-blocks,
+  // `role-resolution`): each level decided on its own, then AND down the nest.
+  /** Whether the body of the block `inner` nested in the block `outer` is shown to `req`. */
+  async function showsNested(req, outer, inner) {
+    const md = `before\n${outer}\nOUTER\n${inner}\nSECRET\n@@@\n@@@\nafter\n`;
+    const text = (await filterForbiddenSegments(md, req)).map((segment) => segment.text).join("");
+    assert.ok(text.includes("before") && text.includes("after"), "the text around the nest always stays");
+    assert.doesNotMatch(text, /@@@/, "no marker line is shown");
+    if (text.includes("SECRET")) assert.ok(text.includes("OUTER"), "never the nested body without its parent");
+    return text.includes("SECRET");
+  }
+
+  test("a nested view marker is shown exactly where both markers in one directive would be", async () => {
+    for (const preferences of [
+      { vt: 1, ve: 1, va: 1 },
+      { vt: 1, ve: 1, va: 0 },
+      { vt: 1, ve: 0, va: 1 },
+      { vt: 0, ve: 1, va: 1 },
+    ]) {
+      stubAccount(preferences);
+      for (const make of [teacherSession, student, adminSession]) {
+        assert.equal(
+          await showsNested(make(), "@@@ #variant-private", "@@@ #optional"),
+          await shows(make(), "@@@ #variant-private, #optional"),
+          JSON.stringify(preferences)
+        );
+      }
+    }
+  });
+
+  test("an admin is shown no nested block of an outer block whose window has closed", async () => {
+    at("2026-10-05T10:00:00");
+    stubAccount({ vt: 1, ve: 1, va: 1 });
+    assert.equal(await showsNested(adminSession(), "@@@ 4bhif[to 2026-09-30T18:00:00]", "@@@ teacher"), false);
+    assert.equal(await shows(adminSession(), "@@@ teacher"), true, "the control: the inner directive on its own");
+  });
+
+  test("a teacher outside the outer class is not shown the nested teacher block", async () => {
+    stubAccount({ vt: 1, va: 1 });
+    assert.equal(await showsNested(teacherSession(), "@@@ 4bhif", "@@@ teacher"), false);
+    assert.equal(await showsNested(session({ "4bhif": true, teacher: true }, "Tea Cher"), "@@@ 4bhif", "@@@ teacher"), true);
+  });
+
   test("a closed window on a view marker hides the block", async () => {
     at("2026-10-05T10:00:00");
     stubAccount({ vt: 1, va: 1 });

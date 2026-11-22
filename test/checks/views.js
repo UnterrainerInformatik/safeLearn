@@ -217,6 +217,68 @@ describe("views", () => {
     }
   });
 
+  // ---- Nested blocks (nest-permission-blocks) ----
+
+  const nestedPage = "/md/test-nested-blocks.md";
+  const nested = {
+    outer: "NESTED-OUTER:",
+    person: "NESTED-PERSON",
+    optional: "NESTED-OPTIONAL",
+    outerAfter: "NESTED-OUTER-AFTER",
+    pageEnd: "NESTED-PAGE-END",
+  };
+
+  /** Which of the nested page's passages the session of `role` is shown under `values`. */
+  async function nestedShown(role, values) {
+    const session = await sharedSession(role);
+    await setPreferences(session, values);
+    const { text } = await render(session, nestedPage);
+    assert.ok(text.includes("Nested blocks"), `${nestedPage} did not render for ${role}`);
+    assert.doesNotMatch(text, /@@@/, `no marker line of ${nestedPage} reaches the ${role} session`);
+    return Object.fromEntries(Object.entries(nested).map(([key, marker]) => [key, text.includes(marker)]));
+  }
+
+  test("a nested block is shown only to those every enclosing block admits", async () => {
+    // The roles the outcome depends on, asked rather than assumed: the person
+    // the inner block names, another member of the outer group, an outsider.
+    const held = new Map();
+    for (const role of ["student", "teacher", "admin"]) held.set(role, await roles(await sharedSession(role)));
+    assert.ok(held.get("admin").has("teacher") && held.get("admin").has("ad min"), "the admin account is the person, in the group");
+    assert.ok(held.get("teacher").has("teacher") && !held.get("teacher").has("ad min"), "the teacher account is another member");
+    assert.ok(!held.get("student").has("teacher") && !held.get("student").has("admin"), "the student account is outside");
+
+    assert.deepEqual(await nestedShown("admin", { vt: 1, va: 1 }), {
+      outer: true,
+      person: true,
+      optional: true,
+      outerAfter: true,
+      pageEnd: true,
+    });
+    assert.deepEqual(await nestedShown("teacher", { vt: 1, va: 1 }), {
+      outer: true,
+      person: false,
+      optional: true,
+      outerAfter: true,
+      pageEnd: true,
+    });
+    assert.deepEqual(await nestedShown("teacher", { vt: 1, va: 0 }), {
+      outer: true,
+      person: false,
+      optional: false,
+      outerAfter: true,
+      pageEnd: true,
+    });
+    // The optional view on: the inner `#optional` alone would admit a student,
+    // the `teacher` block around it does not.
+    assert.deepEqual(await nestedShown("student", { va: 1 }), {
+      outer: false,
+      person: false,
+      optional: false,
+      outerAfter: false,
+      pageEnd: true,
+    });
+  });
+
   // ---- Config parameters come from the account alone (anonymous-publishing) ----
 
   /** Requests `reference` with the session's cookies, without following a redirect. */

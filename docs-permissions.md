@@ -105,12 +105,28 @@ Of course you can use full Obsidian-flavor-markdown within the directives.
 
 #### Where a block begins and ends
 The server and the Obsidian plugin read blocks by the same rules, so the block the plugin frames is the block the server hides or shows:
-* **Markers are whole lines.** A block opens on a line that starts with `@@@` (spaces or tabs in front are fine, as inside a list item) and names something. It closes on the next line that holds nothing but `@@@`.
+* **Markers are whole lines.** A block opens on a line that starts with `@@@` (spaces or tabs in front are fine, as inside a list item) and names something. It closes on a later line that holds nothing but `@@@`.
 * **`@@@` anywhere else is text.** In the middle of a sentence or in inline code, as in "the solutions are in the `` `@@@ #variant-private` `` blocks", it neither opens nor closes anything.
 * **Code blocks are code.** Marker lines inside a fenced code block (```` ``` ```` or `~~~`) are shown as written, so you can write syntax examples. A fence that is never closed protects nothing.
 * **A stray closing line is ignored.** A `@@@` line with no open block closes nothing and is not shown.
-* **An opening line inside a block opens nothing.** Blocks do not nest: the outer directive decides the whole block up to its closing line, and the inner directive line is not shown.
-* **An unclosed block hides to the end.** A block that is never closed runs to the end of the document and is hidden from everyone it does not address. The server logs `[Blocks] unclosed: <file>:<line>` for it, so check your closing lines.
+* **Blocks nest.** An opening line inside a block opens a block inside it, and a closing line closes the innermost open block, like brackets. A nested block is shown only to readers who would see every block around it, each level decided by its own directive: roles within one directive combine with OR, levels combine with AND. So a nested block can only narrow what its outer block shows, never widen it, whatever it names.
+* **An unclosed block hides to the end.** A block that is never closed runs to the end of the document and is hidden from everyone it does not address, at every level. Forgetting the closing line of an inner block is the easy mistake: the closing line that follows then closes the inner block, the outer one stays open, and everything after it is hidden from everyone the outer block does not address. The Obsidian plugin marks an open block with heavy yellow edges down to the end of the document while you write; the server logs `[Blocks] unclosed: <file>:<line>` for it, and the test suite fails on any unclosed block in `md/`.
+
+A note for one student inside a section for the class:
+
+```markdown
+@@@ 4bhif
+The class reads this.
+
+@@@ Rene Wildberger
+Only Rene Wildberger, as a member of 4BHIF, reads this.
+@@@
+
+The class reads this, too.
+@@@
+```
+
+A teacher outside 4BHIF sees nothing of it, even though the inner block would admit teachers if it stood alone: `@@@ teacher` nested in `@@@ 4bhif` means teachers of 4BHIF. In the same way, `@@@ #optional` nested in `@@@ #variant-private` is shown exactly when `@@@ #variant-private, #optional` would be.
 
 ### Time-bound visibility
 Every role inside a permission directive may optionally define a visibility window. Append a timestamp in square brackets directly after the role name:

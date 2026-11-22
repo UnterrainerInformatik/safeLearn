@@ -511,15 +511,46 @@ describe("inline blocks are read line by line (`permission-block-grammar`)", () 
     assert.equal(text(await render(markdown, teacher())), "Intro. Hidden one. Hidden two.");
   });
 
-  test("an opener inside an open block is never shown, and opens nothing", async () => {
-    const markdown = "@@@ teacher\nQuestion.\n\n@@@ #variant-private\nAnswer.\n@@@\n\nAfter.\n";
-    assert.equal(text(await render(markdown, student())), "After.");
-    assert.equal(text(await render(markdown, teacher())), "Question. Answer. After.");
+  test("an opener inside an open block opens a nested block, and no marker line is shown", async () => {
+    const markdown = "@@@ 3bhif\nblah\n\n@@@ Kla Ssen\nblubb\n@@@\n@@@\n\nAfter.\n";
+    assert.equal(text(await render(markdown, classMember())), "blah blubb After.", "the person named, in 3bhif");
+    const other = session({ student: true, "3bhif": true }, "And Ere");
+    assert.equal(text(await render(markdown, other)), "blah After.", "another member of 3bhif");
+    assert.equal(text(await render(markdown, student())), "After.", "outside 3bhif");
+  });
+
+  test("an inner role does not widen the block enclosing it", async () => {
+    const markdown = "@@@ 3bhif\nblah\n\n@@@ teacher\nnote\n@@@\n@@@\n\nAfter.\n";
+    assert.equal(text(await render(markdown, teacher())), "After.", "a teacher outside 3bhif");
+    assert.equal(text(await render(markdown, classMember())), "blah After.", "a member of 3bhif, no teacher");
+  });
+
+  test("a forgotten inner closing line leaves the outer block open to the end", async () => {
+    const markdown = "Intro.\n\n@@@ 3bhif\na\n\n@@@ teacher\nb\n@@@\n\nc\n";
+    assert.equal(text(await render(markdown, student())), "Intro.", "outside 3bhif: nothing after the opener");
+    assert.equal(text(await render(markdown, classMember())), "Intro. a c", "a member of 3bhif");
   });
 
   test("a stray closing line is not shown and does not shift the block after it", async () => {
     const markdown = "Intro.\n\n@@@\n\nText.\n\n@@@ #variant-private\nAnswer.\n@@@\n";
     assert.equal(text(await render(markdown, student())), "Intro. Text.");
+  });
+
+  test("a word only in a nested block finds nothing for a class member it does not name", async () => {
+    write("Nested.md", "Intro.\n\n@@@ 3bhif\nOuter text.\n\n@@@ Rene Wildberger\nVerschachtelungswort.\n@@@\n@@@\n");
+    try {
+      await scan();
+      assert.deepEqual((await searchCorpus(classMember(), "Verschachtelungswort")).results, []);
+      const found = (await searchCorpus(session({ "3bhif": true }, "Rene Wildberger"), "Verschachtelungswort")).results;
+      assert.deepEqual(
+        found.map((result) => result.name),
+        ["Nested"],
+        "the control: the person named finds it"
+      );
+    } finally {
+      rmSync(path.join(corpus, "Nested.md"));
+      await scan();
+    }
   });
 
   test("a word only in the incident's solutions finds nothing for a class member", async () => {

@@ -46,8 +46,8 @@ export function handoutResolves(corpusPath) {
 }
 
 /**
- * Whether the file holds an inline block whose directive names
- * `#variant-private` or `#optional`: the check behind the solution button
+ * Whether the file holds an inline block, at any nesting level, whose directive
+ * names `#variant-private` or `#optional`: the check behind the solution button
  * (design D3). Blocks are found by the one block grammar
  * (`permission-block-grammar`), so `` `@@@ #variant-private` ``
  * mentioned in running text or shown in a code block is no solution. The
