@@ -37,7 +37,7 @@
 ## 6. secureLectures content
 
 - [x] 6.1 Dry run of the tool on `/mnt/data/nextcloud/secureLectures`; expect 91 files, 140 `#exam` (138 marker lines + 2 running-text mentions), 82 `#practice`, 80 `#answer` (baseline of 2026-11-22; differences mean the content changed since)
-- [ ] 6.2 Run with `--write`, re-run dry to confirm zero old directive names; the remaining-occurrences list should hold only the prose `` `#answer` `` in `test-search-views.md`, fix that by hand
+- [x] 6.2 Run with `--write`, re-run dry to confirm zero old directive names; the remaining-occurrences list should hold only the prose `` `#answer` `` in `test-search-views.md`, fix that by hand
 - [ ] 6.3 After pushing safeLearn and merging into secureLectures, open a page with variants on secureLectures as teacher (both switch positions) and as student, and confirm the deploy run started for HEAD
 
 ## 7. Wrap-up
