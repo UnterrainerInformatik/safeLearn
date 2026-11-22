@@ -20,7 +20,7 @@
 - [x] 3.2 Rename markers and helper names in `test/directive-grammar.test.js`, `test/block-grammar.test.js`, `test/permission-context.test.js`, `test/exam-offline.test.js`, `test/attachments.test.js`, `test/anonymous.test.js`, `test/checks/search.js`, `test/checks/views.js`, `test/obsidian-syntax.test.js`, `test/coverage-map.json`, `tools/obsidian-screenshots.mjs`
 - [x] 3.3 Add tests for fail-closed: retired name for student/teacher with `ve`/admin, misspelled marker, unknown marker beside a role, unknown marker as whole-file directive, mixed case of a known marker, retired name on a solution page
 - [x] 3.4 Add the corpus check "no unknown view marker" (design D5, `content-verification`), including its two scenarios
-- [ ] 3.5 Run the affected checks, fix, then the full `npm test` once
+- [x] 3.5 Run the affected checks, fix, then the full `npm test` once
 
 ## 4. Docs
 
