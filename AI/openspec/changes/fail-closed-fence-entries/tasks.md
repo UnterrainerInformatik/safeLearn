@@ -29,4 +29,4 @@
 ## 5. Docs and rollout
 
 - [x] 5.1 `docs-permissions.md`: combining markers (AND, the teacher-only solution `#variant-private, #optional`), roles OR, what a broken or closed window does; `AI/architecture.md` observations
-- [ ] 5.2 Commit, push, merge into secureLectures and push; confirm the deploy run started for HEAD
+- [x] 5.2 Commit, push, merge into secureLectures and push; confirm the deploy run started for HEAD
