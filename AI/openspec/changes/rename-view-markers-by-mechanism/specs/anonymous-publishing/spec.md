@@ -33,7 +33,7 @@ Without an identity provider, the application SHALL NOT offer a login or logout,
 
 - **WHEN** a reader opens the menu of a rendered page
 - **THEN** it contains no logout control
-- **AND** with `teacher` among the reader roles it contains the teacher toggle, the variant switch and the optional-blocks checkbox
+- **AND** with `teacher` among the reader roles it contains the teacher toggle, the variant switch and the optional-blocks switch
 
 #### Scenario: A login path
 

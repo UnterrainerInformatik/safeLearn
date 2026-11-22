@@ -10,9 +10,9 @@
 - [x] 2.2 `permission-context.js`: handout flags become `{ variantPrivate, optional }`; document which of `ve`/`va` drives which marker
 - [x] 2.3 `app.js`, `exam/handout.js`, `exam/routes-handout.js`: set the renamed handout flags
 - [x] 2.4 `exam/handout.js` `hasSolution`: look for `#variant-private` or `#optional`; update its comment
-- [x] 2.5 `obsidian.js` reader menu: variant flipswitch (`variantFs`, teachers only) with labels `app.switch.variantPrivate`/`variantPublic`; optional checkbox (`optionalCb`, everyone) labelled `app.menu.showOptional`; update the comments mentioning `@@@ #exam` (design D4)
-- [x] 2.6 `obsidian-page.js`: rename `toggleViewExam`/`toggleViewAnswer` to `toggleViewVariant`/`toggleViewOptional`, adapt the element lookups and the checkbox's checked state
-- [x] 2.7 `i18n/de.json`, `i18n/en.json`: add `app.switch.variantPrivate`, `app.switch.variantPublic`, `app.menu.showOptional`; remove `app.switch.answers`, `noAnswers`, `showExam`, `showPractice`; same keys in both files
+- [x] 2.5 `obsidian.js` reader menu: variant flipswitch (`variantFs`, teachers only) with labels `app.switch.variantPrivate`/`variantPublic`; optional flipswitch (`optionalFs`, everyone) labelled `app.switch.optionalShown`/`optionalHidden`; update the comments mentioning `@@@ #exam` (design D4)
+- [x] 2.6 `obsidian-page.js`: rename `toggleViewExam`/`toggleViewAnswer` to `toggleViewVariant`/`toggleViewOptional`, adapt the element lookups and the switches' checked state
+- [x] 2.7 `i18n/de.json`, `i18n/en.json`: add `app.switch.variantPrivate`, `app.switch.variantPublic`, `app.switch.optionalShown`, `app.switch.optionalHidden`; remove `app.switch.answers`, `noAnswers`, `showExam`, `showPractice`; same keys in both files
 
 ## 3. Content and tests
 
@@ -38,7 +38,7 @@
 
 - [x] 6.1 Dry run of the tool on `/mnt/data/nextcloud/secureLectures`; expect 91 files, 140 `#exam` (138 marker lines + 2 running-text mentions), 82 `#practice`, 80 `#answer` (baseline of 2026-11-22; differences mean the content changed since)
 - [x] 6.2 Run with `--write`, re-run dry to confirm zero old directive names; the remaining-occurrences list should hold only the prose `` `#answer` `` in `test-search-views.md`, fix that by hand
-- [ ] 6.3 After pushing safeLearn and merging into secureLectures, open a page with variants on secureLectures as teacher (both switch positions) and as student, and confirm the deploy run started for HEAD
+- [x] 6.3 After pushing safeLearn and merging into secureLectures, open a page with variants on secureLectures as teacher (both switch positions) and as student, and confirm the deploy run started for HEAD
 
 ## 7. Wrap-up
 

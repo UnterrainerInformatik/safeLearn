@@ -158,7 +158,7 @@ A directive entry that starts with `#` is not a role but a **view marker**. Ther
 | --- | --- | --- |
 | `#variant-private` | One side of an either-or. | Only teachers and admins with the variant switch on (`ve`). **Never a student**, whatever they set. Hidden on a handout, shown on its solution page. |
 | `#variant-public` | The other side of that either-or. | Everyone who is not shown `#variant-private`. Every reader sees exactly one of the two. |
-| `#optional` | A block the reader can show or hide. | Every reader who ticks **show optional blocks** (`va`), a student just as a teacher. Hidden on a handout, shown on its solution page. |
+| `#optional` | A block the reader can show or hide. | Every reader who turns on the **optional blocks** switch (`va`), a student just as a teacher. Hidden on a handout, shown on its solution page. |
 
 So the question to ask while writing is not "is this an answer?" but "may a student ever switch this on?". A test's real solutions belong in `#variant-private`; `#optional` is for hints and worked answers the class may reveal.
 
@@ -185,7 +185,7 @@ You are employed at a company that wants to re-structure their legacy software.
 @@@
 ```
 
-In the reader menu, teachers get a switch between **private variant** and **public variant**; everyone gets the checkbox **show optional blocks**.
+In the reader menu, teachers get a switch between **private variant** and **public variant**; everyone gets the switch **optional blocks / no optional** for `#optional`.
 
 **An unknown view marker hides its block from everyone**, an admin included. That covers a typo such as `#variant-privat` and the retired names below: a block still marked `@@@ #exam` is shown to nobody until it is renamed. The Obsidian plugin marks such an entry as an error while you write, and the content suite checks `md/` for them.
 

@@ -1081,9 +1081,9 @@ function applyAttributes() {
   }
   // `va` drives the `#optional` blocks, `ve` the `#variant-private` /
   // `#variant-public` switch.
-  const optionalCb = document.getElementById("optionalCb");
-  if (optionalCb) {
-    optionalCb.checked = attributes.va === 1;
+  tscb = document.getElementById("optionalFs");
+  if (tscb) {
+    tscb.checked = attributes.va === 0;
   }
   tscb = document.getElementById("variantFs");
   if (tscb) {

@@ -4149,8 +4149,12 @@ async function getTopdownMenu(req) {
     <div style="padding: 0px; margin: 0px; margin-top: 10px; cursor: pointer;" onclick="toggleStartWithLastPage()">
       <input type="checkbox" id="startWithLastPageCheckbox">${t("app.menu.rememberLastPage")}</input>
     </div>
-    <div style="padding: 0px; margin: 0px; margin-top: 10px; cursor: pointer;" onclick="toggleViewOptional()">
-      <input type="checkbox" id="optionalCb">${t("app.menu.showOptional")}</input>
+    <div class="flipswitch menu" style="display: inline-block; top: 16px; margin-left: 3px;">
+      <input checked="" onchange="toggleViewOptional()" id="optionalFs" class="flipswitch-cb" name="flipswitch" type="checkbox">
+      <label for="optionalFs" class="flipswitch-label">
+          <div class="flipswitch-inner optional menu" data-off="${escapeHtmlAttribute(t("app.switch.optionalHidden"))}" data-on="${escapeHtmlAttribute(t("app.switch.optionalShown"))}"></div>
+          <div class="flipswitch-switch optional menu"></div>
+      </label>
     </div>
     ${
       (await hasSomeRoles(req, ["teacher"], true))

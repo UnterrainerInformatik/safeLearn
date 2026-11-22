@@ -37,11 +37,13 @@ Entries are already lower-cased by `normalizeRole` before the `switch`. The know
 
 ### D3: Internal names follow the markers
 
-The handout flags become `req[handoutViews] = { variantPrivate, optional }`; `toggleViewExam`/`toggleViewAnswer` become `toggleViewVariant`/`toggleViewOptional`, the element ids `examFs`/`answersFs` become `variantFs`/`optionalCb`. The preference keys `ve`/`va` keep their names (Keycloak attributes, stored per user) and get a comment saying which marker each drives. Keeping the old internal names would preserve exactly the confusion this change removes, for the next person reading `hasRoles`.
+The handout flags become `req[handoutViews] = { variantPrivate, optional }`; `toggleViewExam`/`toggleViewAnswer` become `toggleViewVariant`/`toggleViewOptional`, the element ids `examFs`/`answersFs` become `variantFs`/`optionalFs`. The preference keys `ve`/`va` keep their names (Keycloak attributes, stored per user) and get a comment saying which marker each drives. Keeping the old internal names would preserve exactly the confusion this change removes, for the next person reading `hasRoles`.
 
-### D4: Reader menu — a two-position switch and a checkbox
+### D4: Reader menu — two flipswitches
 
-The variant control stays a flipswitch, shown to teachers only, with the two positions labelled by audience: on = `app.switch.variantPrivate` ("private Variante" / "private variant"), off = `app.switch.variantPublic` ("öffentliche Variante" / "public variant"). The optional control becomes a checkbox in the style of "remember last page", labelled `app.menu.showOptional` ("Optionale Blöcke zeigen" / "show optional blocks"), shown to everyone as the answers switch is today. The keys `app.switch.answers`, `noAnswers`, `showExam`, `showPractice` are removed from both i18n files (BabelEdit format, same keys in each).
+The variant control stays a flipswitch, shown to teachers only, with the two positions labelled by audience: on = `app.switch.variantPrivate` ("private Variante" / "private variant"), off = `app.switch.variantPublic` ("öffentliche Variante" / "public variant"). The optional control stays a flipswitch too, shown to everyone as the answers switch was, labelled on = `app.switch.optionalShown` ("optionale Blöcke" / "optional blocks"), off = `app.switch.optionalHidden` ("keine optionalen" / "no optional"). The keys `app.switch.answers`, `noAnswers`, `showExam`, `showPractice` are removed from both i18n files (BabelEdit format, same keys in each).
+
+*Alternative:* a checkbox "show optional blocks" in the style of "remember last page". Implemented first and rejected on review (2026-11-22): next to the font and spacing controls it is too inconspicuous for students to find.
 
 ### D5: A corpus check for unknown markers
 

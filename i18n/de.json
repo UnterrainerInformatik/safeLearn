@@ -49,8 +49,7 @@
       "language": "Sprache",
       "lightDark": "hell/dunkel",
       "logout": "abmelden",
-      "rememberLastPage": "zuletzt besuchte Seite merken",
-      "showOptional": "Optionale Blöcke zeigen"
+      "rememberLastPage": "zuletzt besuchte Seite merken"
     },
     "page": {
       "properties": {
@@ -70,6 +69,8 @@
       "untitled": "(ohne Titel)"
     },
     "switch": {
+      "optionalHidden": "keine optionalen",
+      "optionalShown": "optionale Blöcke",
       "student": "Schüler",
       "teacher": "Lehrer",
       "variantPrivate": "private Variante",

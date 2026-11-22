@@ -13,7 +13,7 @@ The view markers `#exam`, `#practice` and `#answer` are named after their *conte
 - **BREAKING** A view marker the server does not know (an old name left behind, a typo such as `#variant-privat`) now hides the block from everyone instead of restricting nobody. Without this, every `#exam` that survives the migration would show the exam variant to every student. Fail-closed is the only safe default for a rename without aliases.
 - The corpus verification suite gains a check that no directive in `md/` names an unknown view marker.
 - A one-off migration tool rewrites the markers in a content directory (dry run by default), so the secureLectures content in the Nextcloud share (`/mnt/data/nextcloud/secureLectures`, 300 markers in 91 files) can be converted and the remaining mentions counted.
-- Reader menu: the variant switch keeps its two positions but is labelled by audience (private / public variant); the answer flipswitch becomes a checkbox "show optional blocks". The Keycloak attributes `ve`/`va` stay as they are.
+- Reader menu: the variant switch keeps its two positions but is labelled by audience (private / public variant); the answer flipswitch becomes the optional-blocks flipswitch. The Keycloak attributes `ve`/`va` stay as they are.
 - Obsidian plugin: highlighting and the "resolves to nothing" marking follow the new names and the new fail-closed meaning; a new plugin release follows.
 - The exam module's solution-button check looks for `#variant-private` or `#optional`.
 - Docs (`docs-permissions.md`, `docs-exam-module.md`, `docs-testing.md`), `AI/architecture.md`, the test corpus `md/test-*.md` and all tests move to the new names.

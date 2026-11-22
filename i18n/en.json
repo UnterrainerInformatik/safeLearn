@@ -49,8 +49,7 @@
       "language": "Language",
       "lightDark": "light/dark",
       "logout": "logout",
-      "rememberLastPage": "remember last visited page",
-      "showOptional": "show optional blocks"
+      "rememberLastPage": "remember last visited page"
     },
     "page": {
       "properties": {
@@ -70,6 +69,8 @@
       "untitled": "(untitled)"
     },
     "switch": {
+      "optionalHidden": "no optional",
+      "optionalShown": "optional blocks",
       "student": "student",
       "teacher": "teacher",
       "variantPrivate": "private variant",
