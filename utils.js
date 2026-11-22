@@ -51,10 +51,10 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
     const a = context.preferences;
     // The views a handout rendering fixes for this request alone (design D4 of
     // exam-offline-sittings, D1 of exam-handout-hides-exam-variant): rendered
-    // as a student whatever `vt` holds, the exam and the answer variant each
-    // per its flag, the practice variant as the exam's complement. A missing
-    // flag reads as hidden. Set by the server under a Symbol, never by
-    // anything the request carries.
+    // as a student whatever `vt` holds, the private variant and the optional
+    // blocks each per its flag, the public variant as the private one's
+    // complement. A missing flag reads as hidden. Set by the server under a
+    // Symbol, never by anything the request carries.
     const handout = req?.[handoutViews] ?? null;
     // The student-view downgrade, as a choice between two sets built before
     // either was read. It used to delete `teacher`, `teachers` and `admin` from
@@ -79,22 +79,32 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
       for (const v of clientViews) {
         const viewRole = v.substring(1);
         switch (viewRole) {
-          // The exam and the practice case are one rule and its complement, not
-          // two rules over the same preference: every session sees exactly one
-          // of the two variants. An edit to either condition has to be made at
-          // both, or a session ends up seeing neither version of the question.
-          case "exam":
-            // For security reasons hardcoded to only allow teachers and admins to view exam-questions.
+          // The private and the public variant are one rule and its complement,
+          // not two rules over the same preference: every session sees exactly
+          // one of the two. An edit to either condition has to be made at both,
+          // or a session ends up seeing neither version of the question.
+          // `ve` drives the variant switch, `va` the optional blocks.
+          case "variant-private":
+            // For security reasons hardcoded to only allow teachers and admins to view the private variant.
             // Under a handout rendering the module's flag decides both cases together; it is set
             // only for a teacher's solution page and attachment check, never for a participant.
-            clientAccess = handout !== null ? handout.exam === true : a.ve == 1 && (view.isAdmin || view.isTeacher);
+            clientAccess =
+              handout !== null ? handout.variantPrivate === true : a.ve == 1 && (view.isAdmin || view.isTeacher);
             break;
-          case "practice":
-            clientAccess = handout !== null ? handout.exam !== true : !(a.ve == 1 && (view.isAdmin || view.isTeacher));
+          case "variant-public":
+            clientAccess =
+              handout !== null ? handout.variantPrivate !== true : !(a.ve == 1 && (view.isAdmin || view.isTeacher));
             break;
-          case "answer":
-            clientAccess = handout !== null ? handout.answer === true : a.va == 1;
+          case "optional":
+            clientAccess = handout !== null ? handout.optional === true : a.va == 1;
             break;
+          default:
+            // An unknown view marker - a retired name such as `#exam`, or a typo
+            // such as `#variant-privat` - fails closed for every session, an
+            // admin included (rename-view-markers-by-mechanism D1). Letting it
+            // restrict nobody would turn every leftover `#exam` into the private
+            // variant shown to every student.
+            return false;
         }
       }
     }

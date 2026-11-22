@@ -184,7 +184,7 @@ async function markedFor(req) {
  * where every other view cuts them as comments; the value is then rendered and
  * sanitized with the rest of the file. Rejects when the file cannot be read.
  */
-async function renderHandout(corpusPath, req, { exam = false, answer = false, vars = {} } = {}) {
+async function renderHandout(corpusPath, req, { variantPrivate = false, optional = false, vars = {} } = {}) {
   await refreshAccessToken(req);
   const data = await fs.promises.readFile(path.join(__dirname, "md", corpusPath), "utf8");
   let d = splitFrontmatter(data, corpusPath).body;
@@ -192,7 +192,7 @@ async function renderHandout(corpusPath, req, { exam = false, answer = false, va
     d = d.split("\n").slice(1).join("\n");
   }
   d = fillVariables(d, vars ?? {});
-  req[handoutViews] = { exam: exam === true, answer: answer === true };
+  req[handoutViews] = { variantPrivate: variantPrivate === true, optional: optional === true };
   try {
     d = await preParse(d, req, { embedDefaults: true });
     const marked = await markedFor(req);

@@ -169,18 +169,18 @@ const directives = [
     why: "An empty token between two commas is dropped and costs its neighbours nothing.",
   },
   {
-    line: "@@@ #exam",
-    entries: [{ role: "#exam", timed: false }],
+    line: "@@@ #variant-private",
+    entries: [{ role: "#variant-private", timed: false }],
     why: "A view switch is an entry like any other here; only `hasRoles` treats the prefix differently.",
   },
   {
-    line: "@@@ #practice",
-    entries: [{ role: "#practice", timed: false }],
-    why: "The complement of #exam, resolved against the reader's own preference.",
+    line: "@@@ #variant-public",
+    entries: [{ role: "#variant-public", timed: false }],
+    why: "The complement of #variant-private, resolved against the reader's own preference.",
   },
   {
-    line: "@@@ #answer",
-    entries: [{ role: "#answer", timed: false }],
+    line: "@@@ #optional",
+    entries: [{ role: "#optional", timed: false }],
     why: "The third switch, resolved against the answers preference.",
   },
   {
@@ -188,12 +188,12 @@ const directives = [
     entries: [{ role: "#nonsense", timed: false }],
     why:
       "The prefix is recognized more broadly than the three names: `hasRoles` takes every `#` entry " +
-      "out of the role test and then resolves exactly three of them. This one restricts nobody and " +
-      "switches nothing.",
+      "out of the role test and then resolves exactly three of them. Any other one, this one and the " +
+      "retired #exam alike, hides its block from everyone.",
   },
   {
-    line: "@@@ #exam[2025-01-01T00:00:00]",
-    entries: [{ role: "#exam", timed: true }],
+    line: "@@@ #variant-private[2025-01-01T00:00:00]",
+    entries: [{ role: "#variant-private", timed: true }],
     why: "A switch may carry a window. The two conclusions are independent of one another.",
   },
   {
@@ -202,11 +202,11 @@ const directives = [
     why: "Without brackets there is no window to read. The whole text is a role, and it addresses nobody.",
   },
   {
-    line: "@@@ 4ahif, teacher[2025-01-01T00:00:00], #exam, ]kaputt, 5bhif[gestern]",
+    line: "@@@ 4ahif, teacher[2025-01-01T00:00:00], #variant-private, ]kaputt, 5bhif[gestern]",
     entries: [
       { role: "4ahif", timed: false },
       { role: "teacher", timed: true },
-      { role: "#exam", timed: false },
+      { role: "#variant-private", timed: false },
       { role: "5bhif", timed: false },
     ],
     why:
@@ -330,7 +330,7 @@ test("the plugin reaches the server's conclusion about every entry", async () =>
 
 test("the plugin tells a view switch from an address the way hasRoles does", async () => {
   const parse = await pluginGrammar();
-  const resolved = ["#exam", "#practice", "#answer"];
+  const resolved = ["#variant-private", "#variant-public", "#optional"];
 
   for (const { line, why } of directives) {
     const kept = pluginEntries(parse, line).filter((entry) => entry.readable);
@@ -411,11 +411,11 @@ test("the table covers every conclusion the grammar has to reach", () => {
     "a token the server discards whole": directives.some(
       (row) => row.entries.length < row.line.slice(3).split(",").length
     ),
-    "each of the three view switches": ["#exam", "#practice", "#answer"].every((name) =>
+    "each of the three view switches": ["#variant-private", "#variant-public", "#optional"].every((name) =>
       kept.some((e) => e.role === name)
     ),
     "a switch that is none of the three": kept.some(
-      (e) => e.role.startsWith("#") && !["#exam", "#practice", "#answer"].includes(e.role)
+      (e) => e.role.startsWith("#") && !["#variant-private", "#variant-public", "#optional"].includes(e.role)
     ),
     "a directive with nothing readable in it": directives.some((row) => row.entries.length === 0),
   };

@@ -265,14 +265,14 @@ describe("search", () => {
    * does, but whether flipping it can hand a session something the roles never
    * granted it.
    *
-   * `#exam` is the one that must not move. `utils.js` gates it on teacher or
+   * `#variant-private` is the one that must not move. `utils.js` gates it on teacher or
    * admin and reads that gate after the student-view downgrade, so neither a
    * student setting `ve` nor a teacher who has downgraded themselves may reach
-   * it. `#practice` is its literal complement, which is why the pair is asserted
+   * it. `#variant-public` is its literal complement, which is why the pair is asserted
    * together: every session has to see exactly one of the two, or a question
    * exists that somebody gets neither variant of.
    *
-   * `#answer` is deliberately the other kind - a view with no role in its rule
+   * `#optional` is deliberately the other kind - a view with no role in its rule
    * at all. The last check states that on purpose, so that nobody reads the four
    * channels above and concludes the search withholds something the rule never
    * withheld.
@@ -322,7 +322,7 @@ describe("search", () => {
     assert.equal(
       exam.found,
       false,
-      "a student that set ve=1 was told about KLAUSURANSICHT, which stands in a `@@@ #exam` block. " +
+      "a student that set ve=1 was told about KLAUSURANSICHT, which stands in a `@@@ #variant-private` block. " +
         "The exam gate is hardcoded to teachers and admins, so the reader's own switch must not move it."
     );
     assert.equal(
@@ -396,7 +396,7 @@ describe("search", () => {
   });
 
   test("the answer view is a view and not a restriction, for both roles alike", async () => {
-    // Stated rather than assumed. `#answer` resolves to `va == 1` with no role
+    // Stated rather than assumed. `#optional` resolves to `va == 1` with no role
     // in the rule, so a student that asks for answers gets them - on the page
     // and therefore in the search. A check that expected otherwise would be
     // asserting a restriction the application never claimed to apply.
@@ -418,7 +418,7 @@ describe("search", () => {
       assert.equal(
         asked.onPage,
         true,
-        `the ${role} session asked for answers and was not shown one. \`#answer\` is \`va == 1\` and ` +
+        `the ${role} session asked for answers and was not shown one. \`#optional\` is \`va == 1\` and ` +
           `names no role, so both sessions see it.`
       );
       assert.equal(

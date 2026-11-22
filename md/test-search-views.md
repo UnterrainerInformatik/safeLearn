@@ -6,24 +6,24 @@ for an answer to come back.
 
 This paragraph is visible to every session and names ANSICHTOFFEN.
 
-## The exam variant and its complement
-The `ve` preference is one a reader sets for themselves, and the exam half of
+## The private variant and its complement
+The `ve` preference is one a reader sets for themselves, and the private half of
 the pair is not theirs to open: it is granted to teachers and admins and to
 nobody else, however the switch stands. The sentence introducing the pair stays
 visible either way, so a match is one of the two blocks and nothing else:
-@@@ #exam
+@@@ #variant-private
 >Only the exam view reads KLAUSURANSICHT.
 @@@
-@@@ #practice
+@@@ #variant-public
 >Only the practice view reads UEBUNGSANSICHT.
 @@@
 
-## The answer, which is a view and not a restriction
-`#answer` asks no question about roles - `va` alone decides it, for a student
+## The optional block, which is a view and not a restriction
+`#optional` asks no question about roles - `va` alone decides it, for a student
 exactly as for a teacher. The block is here so that a check states that on
 purpose rather than leaving the next reader to assume the search enforces
 something the rule never said:
-@@@ #answer
+@@@ #optional
 >A session that asked for answers reads LOESUNGSANSICHT.
 @@@
 

@@ -1079,11 +1079,13 @@ function applyAttributes() {
   if (tscb) {
     tscb.checked = attributes.vt === 0;
   }
-  tscb = document.getElementById("answersFs");
-  if (tscb) {
-    tscb.checked = attributes.va === 0;
+  // `va` drives the `#optional` blocks, `ve` the `#variant-private` /
+  // `#variant-public` switch.
+  const optionalCb = document.getElementById("optionalCb");
+  if (optionalCb) {
+    optionalCb.checked = attributes.va === 1;
   }
-  tscb = document.getElementById("examFs");
+  tscb = document.getElementById("variantFs");
   if (tscb) {
     tscb.checked = attributes.ve === 0;
   }
@@ -1159,7 +1161,7 @@ function toggleViewTeacher() {
     }, 1000);
   });
 }
-function toggleViewAnswer() {
+function toggleViewOptional() {
   let v = attributes.va === 0 ? 1 : 0;
   setParam("va", v).then(() => {
     setTimeout(() => {
@@ -1167,7 +1169,7 @@ function toggleViewAnswer() {
     }, 1000);
   });
 }
-function toggleViewExam() {
+function toggleViewVariant() {
   let v = attributes.ve === 0 ? 1 : 0;
   setParam("ve", v).then(() => {
     setTimeout(() => {

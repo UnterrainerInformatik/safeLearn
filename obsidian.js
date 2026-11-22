@@ -439,7 +439,7 @@ function hasTimedWindow(entry) {
 // `test/block-grammar.test.js` holds the two to one table. It used to be a
 // regular expression that ended a block at the next `@@@` anywhere - in a
 // sentence, in inline code, in a code block - and a teacher note mentioning
-// `` `@@@ #exam` `` paired every later block one step off, which showed a class
+// `` `@@@ #variant-private` `` paired every later block one step off, which showed a class
 // every model solution of a test. A line scanner states the rules one at a time.
 
 /** An opening marker: `@@@` at the start of a line naming something. */
@@ -466,7 +466,7 @@ function closesFence(text, fence) {
 /**
  * Which lines (by index) stand inside a closed fenced code block, fence lines
  * included. Fences are paired first, and a fence that is never closed protects
- * nothing: CommonMark would let it run to the end, and every `@@@ #exam` below
+ * nothing: CommonMark would let it run to the end, and every `@@@ #variant-private` below
  * it would become code text shown to everyone. The plugin pairs fences by the
  * same rule, so it never reads a marker as code that the server acts on.
  */
@@ -4149,20 +4149,16 @@ async function getTopdownMenu(req) {
     <div style="padding: 0px; margin: 0px; margin-top: 10px; cursor: pointer;" onclick="toggleStartWithLastPage()">
       <input type="checkbox" id="startWithLastPageCheckbox">${t("app.menu.rememberLastPage")}</input>
     </div>
-    <div class="flipswitch menu" style="display: inline-block; top: 16px; margin-left: 3px;">
-      <input checked="" onchange="toggleViewAnswer()" id="answersFs" class="flipswitch-cb" name="flipswitch" type="checkbox">
-      <label for="answersFs" class="flipswitch-label">
-          <div class="flipswitch-inner answers menu" data-off="${escapeHtmlAttribute(t("app.switch.noAnswers"))}" data-on="${escapeHtmlAttribute(t("app.switch.answers"))}"></div>
-          <div class="flipswitch-switch answers menu"></div>
-      </label>
+    <div style="padding: 0px; margin: 0px; margin-top: 10px; cursor: pointer;" onclick="toggleViewOptional()">
+      <input type="checkbox" id="optionalCb">${t("app.menu.showOptional")}</input>
     </div>
     ${
       (await hasSomeRoles(req, ["teacher"], true))
         ? `<div class="flipswitch menu" style="display: inline-block; top: 16px; margin-top: 12px; margin-left: 3px;">
-        <input checked="" onchange="toggleViewExam()" id="examFs" class="flipswitch-cb" name="flipswitch" type="checkbox">
-        <label for="examFs" class="flipswitch-label">
-            <div class="flipswitch-inner exam menu" data-off="${escapeHtmlAttribute(t("app.switch.showPractice"))}" data-on="${escapeHtmlAttribute(t("app.switch.showExam"))}"></div>
-            <div class="flipswitch-switch exam menu"></div>
+        <input checked="" onchange="toggleViewVariant()" id="variantFs" class="flipswitch-cb" name="flipswitch" type="checkbox">
+        <label for="variantFs" class="flipswitch-label">
+            <div class="flipswitch-inner variant menu" data-off="${escapeHtmlAttribute(t("app.switch.variantPublic"))}" data-on="${escapeHtmlAttribute(t("app.switch.variantPrivate"))}"></div>
+            <div class="flipswitch-switch variant menu"></div>
         </label>
     </div>`
         : ""

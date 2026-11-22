@@ -26,7 +26,7 @@ import { afterEach, describe, mock, test } from "node:test";
 import { getPermissionContext } from "../permission-context.js";
 import { setUserAttribute } from "../middlewares/keycloak-middleware.js";
 import { hasSomeRoles, identityOf } from "../utils.js";
-import { resolveFileVisibility } from "../obsidian.js";
+import { parseFirstLineForPermissions, resolveFileVisibility } from "../obsidian.js";
 
 const originalFetch = global.fetch;
 const originalConsoleError = console.error;
@@ -235,8 +235,8 @@ describe("a lookup that fails", () => {
         false,
         "the teacher view reads as off, so a check allowing the override is decided as a student"
       );
-      assert.equal(await hasSomeRoles(req, ["#answer"]), false, "answers stay hidden");
-      assert.equal(await hasSomeRoles(req, ["#practice"]), true, "and the practice variant is shown");
+      assert.equal(await hasSomeRoles(req, ["#optional"]), false, "answers stay hidden");
+      assert.equal(await hasSomeRoles(req, ["#variant-public"]), true, "and the practice variant is shown");
 
       // Every check of this request sees what the first one settled on.
       for (let i = 0; i < 10; i++) {
@@ -398,5 +398,61 @@ describe("two writes of one account do not undo each other", () => {
     global.fetch = working;
     assert.equal(await setUserAttribute(sessionOf("writer-failing"), "lastVisitedUrl", "/page"), true);
     assert.equal(JSON.parse(store.attributes.config).vt, 0, "the refused config is not written along");
+  });
+});
+
+// An entry carrying the `#` prefix is a view marker, and exactly three are known
+// (rename-view-markers-by-mechanism D1, `role-resolution`). Every other one -
+// a retired name, a typo - is refused to every session, an admin included, so a
+// marker the rename left behind hides its block instead of showing the private
+// variant to every student.
+describe("an unknown view marker fails closed", () => {
+  const adminSession = () => session({ admin: true }, "Ad Min");
+
+  test("a retired name is refused to a student, a teacher with the variant view on and an admin", async () => {
+    stubAccount({ vt: 1, ve: 1, va: 1 });
+    for (const [who, make] of [
+      ["student", () => session({ "4ahif": true })],
+      ["teacher", teacherSession],
+      ["admin", adminSession],
+    ]) {
+      for (const retired of ["#exam", "#practice", "#answer"]) {
+        assert.equal(await hasSomeRoles(make(), [retired]), false, `${who} must not see a ${retired} block`);
+        assert.equal(await hasSomeRoles(make(), [retired], false, true), false, `${who}, override allowed, ${retired}`);
+      }
+    }
+    // The known names under the same preferences, so the refusal above is the name's doing.
+    assert.equal(await hasSomeRoles(teacherSession(), ["#variant-private"]), true);
+    assert.equal(await hasSomeRoles(adminSession(), ["#optional"]), true);
+  });
+
+  test("a misspelled marker is refused", async () => {
+    stubAccount({ vt: 1, ve: 1, va: 1 });
+    assert.equal(await hasSomeRoles(session({ "4ahif": true }), ["#variant-privat"]), false);
+    assert.equal(await hasSomeRoles(teacherSession(), ["#variant-privat"]), false);
+  });
+
+  test("an unknown marker beside a role is refused to a member of that role", async () => {
+    stubAccount({ vt: 1, va: 1 });
+    const member = () => session({ "4ahif": true });
+    assert.equal(await hasSomeRoles(member(), ["4ahif"]), true, "the role alone grants it");
+    assert.equal(await hasSomeRoles(member(), ["4ahif", "#answer"]), false);
+    assert.equal(await hasSomeRoles(member(), ["#answer", "4ahif"]), false, "in either order");
+    assert.equal(await hasSomeRoles(member(), ["4ahif", "#optional", "#bogus"]), false, "beside a known marker too");
+  });
+
+  test("an unknown marker as the whole-file directive hides the file from everyone", async () => {
+    stubAccount({ vt: 1, ve: 1, va: 1 });
+    const permissions = parseFirstLineForPermissions("@@@ #practice");
+    for (const make of [() => session({ "4ahif": true }), teacherSession, adminSession]) {
+      assert.deepEqual(await resolveFileVisibility(make(), permissions), { visible: false, reason: "role" });
+    }
+  });
+
+  test("a known marker is known in any case", async () => {
+    stubAccount({ vt: 1, ve: 1 });
+    const [entry] = parseFirstLineForPermissions("@@@ #Variant-Private");
+    assert.equal(await hasSomeRoles(teacherSession(), [entry.role]), true);
+    assert.equal(await hasSomeRoles(teacherSession(), ["#Variant-Private"]), true, "also when handed unparsed");
   });
 });

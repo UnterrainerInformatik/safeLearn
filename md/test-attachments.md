@@ -28,7 +28,7 @@ Embedded here, inside a `4bhif` block below, and on a page only teachers may ope
 ![[test-attachment-window.png]]
 @@@
 
-@@@ #exam
+@@@ #variant-private
 ## Exam variant
 
 ![[test-attachment-exam.png]]

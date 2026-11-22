@@ -6,7 +6,7 @@
  * same block for the teacher who wrote it. The plugin is only worth anything if
  * the two agree, and they once did not: the server ended a block at the next
  * `@@@` anywhere in the text, the plugin at the next line holding nothing else,
- * and a teacher note mentioning `` `@@@ #exam` `` in a sentence showed a class
+ * and a teacher note mentioning `` `@@@ #variant-private` `` in a sentence showed a class
  * every model solution of a test. So the table below is not checked against a
  * reading of either implementation. Each row states the block boundaries of one
  * document, as line ranges, and both the server's `resolveInlineBlocks` and the
@@ -34,7 +34,7 @@ const doc = (...lines) => lines.join("\n");
 
 /**
  * The incident document: a test gated to teachers and one class, a teacher note
- * that names the `@@@ #exam` blocks in running text, and six questions each
+ * that names the `@@@ #variant-private` blocks in running text, and six questions each
  * followed by its solution block.
  */
 function incident() {
@@ -43,12 +43,12 @@ function incident() {
     "# Test 1",
     "",
     "@@@ teacher",
-    "Die Musterlösung steht in den `@@@ #exam`-Blöcken.",
+    "Die Musterlösung steht in den `@@@ #variant-private`-Blöcken.",
     "@@@",
   ];
   const blocks = [{ from: 4, to: 6, closed: true }];
   for (let n = 1; n <= 6; n++) {
-    lines.push("", `## Aufgabe ${n}`, `Frage ${n}?`, "@@@ #exam", `Lösung ${n}`, "@@@");
+    lines.push("", `## Aufgabe ${n}`, `Frage ${n}?`, "@@@ #variant-private", `Lösung ${n}`, "@@@");
     const opener = lines.length - 2;
     blocks.push({ from: opener, to: opener + 2, closed: true });
   }
@@ -61,7 +61,7 @@ const rows = [
     document: doc(
       "Intro.",
       "@@@ teacher",
-      "Die Musterlösung steht in den `@@@ #exam`-Blöcken.",
+      "Die Musterlösung steht in den `@@@ #variant-private`-Blöcken.",
       "@@@",
       "After."
     ),
@@ -74,7 +74,7 @@ const rows = [
   },
   {
     why: "a line beginning with inline code that holds `@@@` is no marker",
-    document: doc("Intro.", "`@@@ #exam` marks a solution.", "`@@@`", "After."),
+    document: doc("Intro.", "`@@@ #variant-private` marks a solution.", "`@@@`", "After."),
     blocks: [],
   },
   {
@@ -94,22 +94,22 @@ const rows = [
   },
   {
     why: "a fence inside a block hides its markers from the block, too",
-    document: doc("Intro.", "@@@ #exam", "Solution:", fence, "@@@ teacher", "@@@", fence, "More.", "@@@", "After."),
+    document: doc("Intro.", "@@@ #variant-private", "Solution:", fence, "@@@ teacher", "@@@", fence, "More.", "@@@", "After."),
     blocks: [{ from: 2, to: 9, closed: true }],
   },
   {
     why: "an unclosed fence protects nothing, so the block after it is a block",
-    document: doc("Intro.", fence, "never closed", "@@@ #exam", "sol", "@@@", "After."),
+    document: doc("Intro.", fence, "never closed", "@@@ #variant-private", "sol", "@@@", "After."),
     blocks: [{ from: 4, to: 6, closed: true }],
   },
   {
     why: "a stray closing line closes nothing and does not shift the block after it",
-    document: doc("Intro.", "@@@", "Text.", "@@@ #exam", "sol", "@@@"),
+    document: doc("Intro.", "@@@", "Text.", "@@@ #variant-private", "sol", "@@@"),
     blocks: [{ from: 4, to: 6, closed: true }],
   },
   {
     why: "an opener inside an open block opens nothing; the blocks after it stay where they are",
-    document: doc("Intro.", "@@@ 4ahif", "Q", "@@@ #exam", "sol", "@@@", "After.", "@@@ teacher", "t", "@@@"),
+    document: doc("Intro.", "@@@ 4ahif", "Q", "@@@ #variant-private", "sol", "@@@", "After.", "@@@ teacher", "t", "@@@"),
     blocks: [
       { from: 2, to: 6, closed: true },
       { from: 8, to: 10, closed: true },
@@ -127,7 +127,7 @@ const rows = [
   },
   {
     why: "indented markers in a list item open and close a block, spaces or a tab",
-    document: doc("- item", "  @@@ #exam", "  sol", "  @@@", "- next", "\t@@@ teacher", "\tt", "\t@@@  "),
+    document: doc("- item", "  @@@ #variant-private", "  sol", "  @@@", "- next", "\t@@@ teacher", "\tt", "\t@@@  "),
     blocks: [
       { from: 2, to: 4, closed: true },
       { from: 6, to: 8, closed: true },
@@ -135,16 +135,16 @@ const rows = [
   },
   {
     why: "CRLF line endings read as LF ones",
-    document: ["Intro.", "@@@ teacher", "Die Musterlösung steht in den `@@@ #exam`-Blöcken.", "@@@", "After."].join("\r\n"),
+    document: ["Intro.", "@@@ teacher", "Die Musterlösung steht in den `@@@ #variant-private`-Blöcken.", "@@@", "After."].join("\r\n"),
     blocks: [{ from: 2, to: 4, closed: true }],
   },
   {
     why: "a first line beginning with `@@@` is the whole-file directive and no block",
-    document: doc("@@@ 4ahif", "@@@ #exam", "sol", "@@@", "After."),
+    document: doc("@@@ 4ahif", "@@@ #variant-private", "sol", "@@@", "After."),
     blocks: [{ from: 2, to: 4, closed: true }],
   },
   {
-    why: "the incident: six solutions after a teacher note naming `@@@ #exam` in running text",
+    why: "the incident: six solutions after a teacher note naming `@@@ #variant-private` in running text",
     ...incident(),
   },
 ];

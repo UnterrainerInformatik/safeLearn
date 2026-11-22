@@ -120,10 +120,10 @@ before(async () => {
       "@@@ teacher, 4bhif",
       "# Test",
       "@@@ teacher",
-      "Die Musterlösung steht in den `@@@ #exam`-Blöcken.",
+      "Die Musterlösung steht in den `@@@ #variant-private`-Blöcken.",
       "@@@",
       "Frage 1?",
-      "@@@ #exam",
+      "@@@ #variant-private",
       "![[solution.png]]",
       "@@@",
       "",
@@ -150,7 +150,7 @@ before(async () => {
       "@@@ teacher[2025-01-01T00:00:00 to 2025-01-02T00:00:00]",
       "![[window.png]]",
       "@@@",
-      "@@@ #exam",
+      "@@@ #variant-private",
       "![[exam.png]]",
       "@@@",
       "",
@@ -420,7 +420,7 @@ describe("who is served an attachment", () => {
     assert.equal(await mayServeAttachment(student(), "assets/exam.png"), false);
   });
 
-  test("an image only in a solution block stays hidden when running text names `@@@ #exam`", async () => {
+  test("an image only in a solution block stays hidden when running text names `@@@ #variant-private`", async () => {
     preferences({ vt: 1, ve: 1 });
     assert.equal(await mayServeAttachment(classMember(), "assets/solution.png"), false);
     assert.equal(await mayServeAttachment(teacher(), "assets/solution.png"), true);

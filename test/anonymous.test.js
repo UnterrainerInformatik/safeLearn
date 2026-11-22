@@ -242,7 +242,7 @@ describe("without an identity provider, with teacher as the reader role", () => 
     let { text } = await render(reader, examPage);
     assert.ok(text.includes(practiceVariant) && !text.includes(examVariant), "exam view off: practice only");
     const reloaded = reader.page.waitForNavigation({ waitUntil: "domcontentloaded" });
-    await reader.page.evaluate(() => toggleViewExam());
+    await reader.page.evaluate(() => toggleViewVariant());
     await reloaded;
     ({ text } = await render(reader, examPage));
     assert.ok(text.includes(examVariant) && !text.includes(practiceVariant), "exam view on: exam only");

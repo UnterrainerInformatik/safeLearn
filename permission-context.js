@@ -283,9 +283,11 @@ async function buildPermissionContext(req) {
 /**
  * The key of the views the exam module's handout rendering fixes for one
  * request (`exam-handout`, exam-offline-sittings design D4): `req[handoutViews]
- * = { exam, answer }`, each true to show that variant; a missing field reads
- * as hidden, and the practice variant is shown exactly when the exam variant
- * is not. A Symbol, so no body, query, header or cookie parser can
+ * = { variantPrivate, optional }`, each true to show what it names; a missing
+ * field reads as hidden, and the public variant is shown exactly when the
+ * private variant is not. On an ordinary page the same two decisions come from
+ * the stored preferences: `ve` drives `#variant-private`/`#variant-public`,
+ * `va` drives `#optional`. A Symbol, so no body, query, header or cookie parser can
  * produce the property; only server code holding this export can set it, and
  * the module sets it only after the database has authorized the request, for
  * the duration of the render. `hasRoles` is its one reader.

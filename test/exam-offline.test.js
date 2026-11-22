@@ -96,14 +96,14 @@ const handoutA = [
   "Task text for everyone.",
   "![[diagram.png]]",
   "[[starter.zip]]",
-  "@@@ #exam",
+  "@@@ #variant-private",
   "EXAM-VARIANT",
   "![[exam-only.png]]",
   "@@@",
-  "@@@ #practice",
+  "@@@ #variant-public",
   "PRACTICE-VARIANT",
   "@@@",
-  "@@@ #answer",
+  "@@@ #optional",
   "ANSWER-TEXT",
   "![[answer-only.png]]",
   "@@@",
@@ -128,9 +128,10 @@ before(async () => {
   write("POS/Var-A.md", varA);
   write("POS/Var-B.md", "@@@ teacher\nPIN: %%var FRANKLYN_PIN%%\n\nAbgabe: %%var SUBMISSION_LINK_B%% `%%var CODE%%`\n");
   write("POS/Var-Auto.md", "@@@ teacher\n#### Test - %%var CLASS%% - %%var DATE%%\n%%var lower%% %% var: PIN %%\n");
-  write("POS/ExamOnly.md", "@@@ teacher\n# Solutions in exam blocks\nTask.\n@@@ #exam\nSolution.\n@@@\n");
-  write("POS/MentionOnly.md", "@@@ teacher\n# Notes\nDie Musterlösung steht in den `@@@ #exam`-Blöcken.\n\n```\n@@@ #answer\nx\n@@@\n```\n");
-  write("POS/AnswerOnly.md", "@@@ teacher\n# Solutions in answer blocks\nTask.\n@@@ 4bhif, #answer\nSolution.\n@@@\n");
+  write("POS/ExamOnly.md", "@@@ teacher\n# Solutions in exam blocks\nTask.\n@@@ #variant-private\nSolution.\n@@@\n");
+  write("POS/MentionOnly.md", "@@@ teacher\n# Notes\nDie Musterlösung steht in den `@@@ #variant-private`-Blöcken.\n\n```\n@@@ #optional\nx\n@@@\n```\n");
+  write("POS/AnswerOnly.md", "@@@ teacher\n# Solutions in answer blocks\nTask.\n@@@ 4bhif, #optional\nSolution.\n@@@\n");
+  write("POS/Retired.md", "@@@ teacher\n# Solutions under a retired name\nTask.\n@@@ #exam\nRETIRED-SOLUTION\n@@@\n");
   await scan();
 });
 
@@ -550,7 +551,7 @@ describe("a handout", () => {
         (await getPermissionContext(req)).applyWrittenAttribute("config", JSON.stringify(preferences));
         assert.match(await preParse(markdown, req), /ANSWER-TEXT/, "without the override the stored answer view shows the answers");
       }
-      req[handoutViews] = { exam: false, answer: false };
+      req[handoutViews] = { variantPrivate: false, optional: false };
       return preParse(markdown, req, { embedDefaults: true });
     };
     for (const preferences of [null, { ve: 1, va: 1 }]) {
@@ -562,11 +563,11 @@ describe("a handout", () => {
     // The preview: a teacher with both views on is shown what the participant is.
     const preview = teacherReq();
     (await getPermissionContext(preview)).applyWrittenAttribute("config", JSON.stringify({ ve: 1, va: 1, vt: 1 }));
-    preview[handoutViews] = { exam: false, answer: false };
+    preview[handoutViews] = { variantPrivate: false, optional: false };
     assert.equal(await preParse(markdown, preview, { embedDefaults: true }), await participant(null));
 
     const deck = teacherReq();
-    deck[handoutViews] = { exam: true, answer: true };
+    deck[handoutViews] = { variantPrivate: true, optional: true };
     const solution = await preParse(markdown, deck, { embedDefaults: true });
     assert.match(solution, /EXAM-VARIANT/);
     assert.match(solution, /ANSWER-TEXT/);
@@ -578,19 +579,32 @@ describe("a handout", () => {
     const req = teacherReq();
     (await getPermissionContext(req)).applyWrittenAttribute("config", JSON.stringify({ ve: 1, vt: 1 }));
     assert.match(await preParse(markdown, req), /EXAM-VARIANT/, "without the override this teacher sees the exam variant");
-    req[handoutViews] = { answer: true };
+    req[handoutViews] = { optional: true };
     const shown = await preParse(markdown, req, { embedDefaults: true });
     assert.match(shown, /PRACTICE-VARIANT/);
     assert.doesNotMatch(shown, /EXAM-VARIANT/);
   });
 
-  test("offers a solution for #exam or #answer blocks, and none for neither", () => {
+  test("offers a solution for #variant-private or #optional blocks, and none for neither", () => {
     assert.equal(hasSolution("POS/LT1-A.md"), true, "both");
-    assert.equal(hasSolution("POS/ExamOnly.md"), true, "only #exam blocks");
-    assert.equal(hasSolution("POS/AnswerOnly.md"), true, "only #answer blocks");
+    assert.equal(hasSolution("POS/ExamOnly.md"), true, "only #variant-private blocks");
+    assert.equal(hasSolution("POS/AnswerOnly.md"), true, "only #optional blocks");
     assert.equal(hasSolution("POS/LT1-B.md"), false, "neither");
     assert.equal(hasSolution("POS/MentionOnly.md"), false, "named only in running text and in code");
     assert.equal(hasSolution("POS/Missing.md"), false, "does not resolve");
+  });
+
+  test("a solution page shows nothing of a block under a retired name, and offers no button for it", async () => {
+    // rename-view-markers-by-mechanism D1: `#exam` is an unknown marker now, so
+    // it fails closed even where the module fixes every view to shown.
+    assert.equal(hasSolution("POS/Retired.md"), false, "a retired name is no solution");
+    const markdown = "Task.\n@@@ #exam\nRETIRED-SOLUTION\n@@@\n@@@ #answer\nRETIRED-ANSWER\n@@@\n";
+    const deck = teacherReq();
+    (await getPermissionContext(deck)).applyWrittenAttribute("config", JSON.stringify({ ve: 1, va: 1, vt: 1 }));
+    deck[handoutViews] = { variantPrivate: true, optional: true };
+    const solution = await preParse(markdown, deck, { embedDefaults: true });
+    assert.match(solution, /Task\./);
+    assert.doesNotMatch(solution, /RETIRED-SOLUTION|RETIRED-ANSWER/);
   });
 
   test("its views are not reachable by query, header or preference, and do not leak to another page", async () => {
@@ -598,8 +612,8 @@ describe("a handout", () => {
     const forged = studentReq("anna");
     forged.query = { handoutViews: "1", ve: "1", answer: "1" };
     forged.headers = { "x-handout-views": "1" };
-    forged.body = { handoutViews: { exam: true, answer: true } };
-    forged.handoutViews = { exam: true, answer: true };
+    forged.body = { handoutViews: { variantPrivate: true, optional: true } };
+    forged.handoutViews = { variantPrivate: true, optional: true };
     const page = await preParse(markdown, forged);
     assert.match(page, /PRACTICE-VARIANT/);
     assert.doesNotMatch(page, /EXAM-VARIANT|ANSWER-TEXT/);
@@ -615,7 +629,7 @@ describe("a handout", () => {
   test("a variable's value is rendered and sanitized with the rest of the file", async () => {
     // The steps of `renderHandout` after the directive: fill, pre-parse, Markdown, sanitizer.
     const req = studentReq("anna");
-    req[handoutViews] = { exam: false, answer: false };
+    req[handoutViews] = { variantPrivate: false, optional: false };
     const markdown = "Abgabe: %%var LINK%%\n\nPIN: %%var PIN%% %%note%%\n\nRaum: %%var ROOM%%\n";
     const filled = fillVariables(markdown, { LINK: "https://example.org", PIN: "<script>alert(1)</script>**4711**" });
     const html = sanitizeHtml(await new Marked({ gfm: true }).parse(await preParse(filled, req, { embedDefaults: true })));

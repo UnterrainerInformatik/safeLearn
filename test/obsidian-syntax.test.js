@@ -107,13 +107,13 @@ const incidentBody = [
   "# Test 1",
   "",
   "@@@ teacher",
-  "Die Musterlösung steht in den `@@@ #exam`-Blöcken.",
+  "Die Musterlösung steht in den `@@@ #variant-private`-Blöcken.",
   "@@@",
   ...[1, 2, 3, 4, 5, 6].flatMap((n) => [
     "",
     `## Aufgabe ${n}`,
     `Frage ${n} zur Vererbung?`,
-    "@@@ #exam",
+    "@@@ #variant-private",
     `Lösung ${n}: Kapselung.`,
     "@@@",
   ]),
@@ -491,7 +491,7 @@ describe("inline blocks are read line by line (`permission-block-grammar`)", () 
   test("a class member sees every question of the incident test and no solution", async () => {
     const shown = text(await render(incidentBody, classMember()));
     for (let n = 1; n <= 6; n++) assert.match(shown, new RegExp(`Frage ${n} zur Vererbung\\?`));
-    assert.doesNotMatch(shown, /Lösung|Kapselung|Musterlösung|#exam|@@@/);
+    assert.doesNotMatch(shown, /Lösung|Kapselung|Musterlösung|#variant-private|@@@/);
   });
 
   test("a syntax example in a fence shows as code to everyone", async () => {
@@ -512,13 +512,13 @@ describe("inline blocks are read line by line (`permission-block-grammar`)", () 
   });
 
   test("an opener inside an open block is never shown, and opens nothing", async () => {
-    const markdown = "@@@ teacher\nQuestion.\n\n@@@ #exam\nAnswer.\n@@@\n\nAfter.\n";
+    const markdown = "@@@ teacher\nQuestion.\n\n@@@ #variant-private\nAnswer.\n@@@\n\nAfter.\n";
     assert.equal(text(await render(markdown, student())), "After.");
     assert.equal(text(await render(markdown, teacher())), "Question. Answer. After.");
   });
 
   test("a stray closing line is not shown and does not shift the block after it", async () => {
-    const markdown = "Intro.\n\n@@@\n\nText.\n\n@@@ #exam\nAnswer.\n@@@\n";
+    const markdown = "Intro.\n\n@@@\n\nText.\n\n@@@ #variant-private\nAnswer.\n@@@\n";
     assert.equal(text(await render(markdown, student())), "Intro. Text.");
   });
 

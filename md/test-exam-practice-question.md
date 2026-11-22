@@ -1,6 +1,6 @@
 # Question 23
 ## Introduction
-@@@ #exam
+@@@ #variant-private
 ## Exam-question: Webservices, REST, SQL-Databases
 
 ```plantuml
@@ -11,7 +11,7 @@ class exam
 ```
 You are employed at a company that wants to re-structure their legacy software.
 @@@
-@@@ #practice
+@@@ #variant-public
 ## Practice-question: Webservices, REST, SQL-Databases
 
 ```plantuml
@@ -32,7 +32,7 @@ class question
 - What development tools will you be using?
 - Make a plan.
 - Explain the steps to get to a finished new product.
-@@@ #answer
+@@@ #optional
 ## Answer
 ```plantuml
 class answer

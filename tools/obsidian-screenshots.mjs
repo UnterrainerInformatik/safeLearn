@@ -179,7 +179,7 @@ const documents = {
     "The exam paper. 4BHIF permanently, 5BHIF during the slot.",
     "@@@",
     "",
-    "@@@ #exam, #answer",
+    "@@@ #variant-private, #optional",
     "The worked answer, in the exam and the answer variant.",
     "@@@",
     "",

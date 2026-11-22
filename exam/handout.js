@@ -46,9 +46,10 @@ export function handoutResolves(corpusPath) {
 }
 
 /**
- * Whether the file holds an inline block whose directive names `#exam` or
- * `#answer`: the check behind the solution button (design D3). Blocks are found
- * by the one block grammar (`permission-block-grammar`), so `` `@@@ #exam` ``
+ * Whether the file holds an inline block whose directive names
+ * `#variant-private` or `#optional`: the check behind the solution button
+ * (design D3). Blocks are found by the one block grammar
+ * (`permission-block-grammar`), so `` `@@@ #variant-private` ``
  * mentioned in running text or shown in a code block is no solution. The
  * whole-file directive is set aside, as the handout rendering sets it aside.
  */
@@ -65,7 +66,7 @@ export function hasSolution(corpusPath) {
   const { blocks } = resolveInlineBlocks(stripComments(body), {
     fileDirective: parseFirstLineForPermissions(firstLine) !== null,
   });
-  return blocks.some(({ entries }) => entries.some(({ role }) => role === "#exam" || role === "#answer"));
+  return blocks.some(({ entries }) => entries.some(({ role }) => role === "#variant-private" || role === "#optional"));
 }
 
 /**
@@ -185,15 +186,15 @@ function everyHandoutPath(db) {
  * The attachment gate's question to the module (design D7): whether a handout
  * open to this session references `attachment` in a place it may see, under
  * the views the handout rendering fixes. A participant's are the handouts
- * `servableHandout` would answer them right now, without the exam and answer
- * variants; a teacher's are every handout of a test, with both, as the
+ * `servableHandout` would answer them right now, without the private variant
+ * and the optional blocks; a teacher's are every handout of a test, with both, as the
  * solution pages show them. Nothing is kept: the next request asks again.
  */
 export async function handoutAttachmentCheck(db, req, attachment, { username, teacher }) {
   if (typeof username !== "string") return false;
   const paths = teacher ? everyHandoutPath(db) : servableHandoutPaths(db, username);
   if (paths.length === 0) return false;
-  req[handoutViews] = { exam: teacher, answer: teacher };
+  req[handoutViews] = { variantPrivate: teacher, optional: teacher };
   try {
     // One after the other: the views sit on the request they decide.
     for (const corpusPath of paths) {

@@ -28,19 +28,19 @@ Anyone who has even one of these roles assigned will be able to view the documen
 
 ### Attachments
 Images, PDFs and every other file a page embeds or links (`![[name]]`, `[[name]]`, `![](path)`, `[text](path)`, a raw `<img src>`) follow the places they are used in. There is no directive for an attachment itself.
-* An attachment is as visible as its **most visible** reference. One that sits on a teacher page, in a `@@@ 4bhif` block and on an unrestricted page is served to everyone; one that sits only on the teacher page is served to teachers only. A reference counts where the reader may see it right now: inside a closed time window, in the exam variant without the exam view, or in a teacher block while a teacher is in the student view, it counts for nobody.
+* An attachment is as visible as its **most visible** reference. One that sits on a teacher page, in a `@@@ 4bhif` block and on an unrestricted page is served to everyone; one that sits only on the teacher page is served to teachers only. A reference counts where the reader may see it right now: inside a closed time window, in the private variant without the variant view on, or in a teacher block while a teacher is in the student view, it counts for nobody.
 * An attachment **no page references is not served** to anyone, even though the file sits under `md/`. The server logs these files after every scan, one line `[Attachments] unreferenced: <path>` each and one line with their count, so they can be removed from the repository. A teacher finds the same list on the page **Unreferenced attachments**, opened from the settings menu's **Administration** section: grouped by folder, with the time of the scan, and a **Copy paths** button that puts the paths on the clipboard one per line, ready for `git rm`. The page shows names only; it serves none of the files. Students and teachers in student view get neither the section nor the page, and an instance running with `AUTH=none` has neither. To keep such a file reachable, reference it on a page with the restriction it should have.
 * An embed or wiki link whose file name exists in several folders and that does not give the folder (`![[diagram.png]]` with two `diagram.png`) renders as nothing and makes neither file reachable. Write the path, `![[folder/diagram.png]]`.
 * A refused attachment is answered exactly like a file that does not exist.
 * Tightening the restriction around a reference takes effect at once where the server rescans on change (`NEXT_AUTOSCAN`, as the WYSIWYG container has it). Without autoscan, a reader who opened the page before the edit may keep loading the attachment for **up to 10 minutes**.
 
 ### Exam handouts: the one exception
-The exam module's offline tests can show a corpus file as a **handout** ([Offline Tests](docs-exam-module.md#offline-tests)). That is the only place where a file is shown to someone its whole-file directive does not admit. It shows a student nothing an ordinary page would hide from them in the exam or answer view:
+The exam module's offline tests can show a corpus file as a **handout** ([Offline Tests](docs-exam-module.md#offline-tests)). That is the only place where a file is shown to someone its whole-file directive does not admit. It shows a student nothing an ordinary page would show them only in the private-variant or optional view:
 * Only the module's own handout page does it, and only for a participant of an open, started sitting who is marked present, for the file of their group - decided from the module's database at every request. Everyone else, and the same student before the start or after the window, gets what a path with nothing behind it gets.
-* The page renders the file as for a student, whatever the reader's own view switches say: the first-line directive is set aside, `#practice` is shown, `#exam` and `#answer` hidden - so a test whose solutions sit in `#exam` or `#answer` blocks can be used as a handout as it is. A teacher's preview shows the same. Only the teacher's solution page shows `#exam` and `#answer` (and hides `#practice`). Inline blocks for roles - `@@@ teacher`, another class, another person - are decided exactly as on any page.
+* The page renders the file as for a student, whatever the reader's own view switches say: the first-line directive is set aside, `#variant-public` is shown, `#variant-private` and `#optional` hidden - so a test whose solutions sit in `#variant-private` blocks can be used as a handout as it is. A teacher's preview shows the same. Only the teacher's solution page shows `#variant-private` and `#optional` (and hides `#variant-public`). Inline blocks for roles - `@@@ teacher`, another class, another person - are decided exactly as on any page.
 * These views are set by the server for that one rendering. No preference, cookie, header or query parameter produces them, and the same session's other pages keep following the reader's own switches.
 * The file stays hidden everywhere else: the navigation tree, the search and its own URL still follow its directive.
-* Its attachments count as visible for that student while, and only while, the handout is shown to them (see [Attachments](#attachments)); a file referenced only inside an `#exam` or `#answer` block does not count for a participant. A teacher's solution page counts for the teacher, exam and answer blocks included.
+* Its attachments count as visible for that student while, and only while, the handout is shown to them (see [Attachments](#attachments)); a file referenced only inside a `#variant-private` or `#optional` block does not count for a participant. A teacher's solution page counts for the teacher, private-variant and optional blocks included.
 
 ### Addressing students
 **Being a student is not a role. It is the absence of the other two.** A student is a user who is neither `admin` nor `teacher`, and that is the normal case — the overwhelming majority of all users.
@@ -106,7 +106,7 @@ Of course you can use full Obsidian-flavor-markdown within the directives.
 #### Where a block begins and ends
 The server and the Obsidian plugin read blocks by the same rules, so the block the plugin frames is the block the server hides or shows:
 * **Markers are whole lines.** A block opens on a line that starts with `@@@` (spaces or tabs in front are fine, as inside a list item) and names something. It closes on the next line that holds nothing but `@@@`.
-* **`@@@` anywhere else is text.** In the middle of a sentence or in inline code, as in "the solutions are in the `` `@@@ #exam` `` blocks", it neither opens nor closes anything.
+* **`@@@` anywhere else is text.** In the middle of a sentence or in inline code, as in "the solutions are in the `` `@@@ #variant-private` `` blocks", it neither opens nor closes anything.
 * **Code blocks are code.** Marker lines inside a fenced code block (```` ``` ```` or `~~~`) are shown as written, so you can write syntax examples. A fence that is never closed protects nothing.
 * **A stray closing line is ignored.** A `@@@` line with no open block closes nothing and is not shown.
 * **An opening line inside a block opens nothing.** Blocks do not nest: the outer directive decides the whole block up to its closing line, and the inner directive line is not shown.
@@ -147,20 +147,29 @@ Teachers may open this during the exam slot, and nobody at any other time.
 When every window in a whole-file directive is shut, no role is active — so the file is hidden from everyone, including the roles it names and from `admin`, which does not short-circuit a closed window. A reader who asks for it anyway is told **This content is not visible right now.**, rather than the **You do not have the required permissions to view this content.** they get for a directive naming roles they simply do not hold. The two messages are deliberately different: the first says come back later, the second says ask someone else. The file is left out of the navigation tree in both cases.
 
 ### Where the view switches are kept
-The teacher view, the exam view and the answer view decide what a reader is shown, so where they are read from matters. With sign-in they are read from the reader's Keycloak account and from nothing else: a cookie, a header or a query parameter such as `?ve=1` is ignored. Without sign-in (`AUTH=none`) they are kept in the reader's browser, in the cookie `safelearn_config`, and they can only narrow what the reader's roles allow — the exam view still needs `teacher` among the reader roles. A preference block that does not parse is read as the defaults, which hide rather than show.
+The teacher view, the variant view and the optional view decide what a reader is shown, so where they are read from matters. With sign-in they are read from the reader's Keycloak account and from nothing else: a cookie, a header or a query parameter such as `?ve=1` is ignored. Without sign-in (`AUTH=none`) they are kept in the reader's browser, in the cookie `safelearn_config`, and they can only narrow what the reader's roles allow — the private variant still needs `teacher` among the reader roles. A preference block that does not parse is read as the defaults, which hide rather than show.
 
 Parameters that only choose how one page is presented — `?reveal`, `?document`, print, a heading to scroll to — never change what a reader may see. Every presentation of a page carries the same permitted content, and these parameters stay in the URL, so a presentation link can be bookmarked and shared.
 
 ### File-Content Views
-There are two views.
+A directive entry that starts with `#` is not a role but a **view marker**. There are exactly three, and each name says first *how* it works and then *for whom*:
+
+| Marker | Mechanism | Who sees it |
+| --- | --- | --- |
+| `#variant-private` | One side of an either-or. | Only teachers and admins with the variant switch on (`ve`). **Never a student**, whatever they set. Hidden on a handout, shown on its solution page. |
+| `#variant-public` | The other side of that either-or. | Everyone who is not shown `#variant-private`. Every reader sees exactly one of the two. |
+| `#optional` | A block the reader can show or hide. | Every reader who ticks **show optional blocks** (`va`), a student just as a teacher. Hidden on a handout, shown on its solution page. |
+
+So the question to ask while writing is not "is this an answer?" but "may a student ever switch this on?". A test's real solutions belong in `#variant-private`; `#optional` is for hints and worked answers the class may reveal.
+
 ```markdown
 # Question 23
 
 ## Introduction
-@@@ #practice
+@@@ #variant-public
 You are a student making an internship at a big company that wants to re-write the legacy software.
 @@@
-@@@ #exam
+@@@ #variant-private
 You are employed at a company that wants to re-structure their legacy software.
 @@@
 
@@ -168,10 +177,24 @@ You are employed at a company that wants to re-structure their legacy software.
 * What development tools will you be using?
 * Make a plan.
 * Explain the steps to get to a finished new product.
-@@@ #answer
+@@@ #optional
 ## Answer
 * Java and Javascript.
 * Just do it.
 * Do it. See, you're done.
 @@@
 ```
+
+In the reader menu, teachers get a switch between **private variant** and **public variant**; everyone gets the checkbox **show optional blocks**.
+
+**An unknown view marker hides its block from everyone**, an admin included. That covers a typo such as `#variant-privat` and the retired names below: a block still marked `@@@ #exam` is shown to nobody until it is renamed. The Obsidian plugin marks such an entry as an error while you write, and the content suite checks `md/` for them.
+
+The markers were renamed on 2026-11-22, without aliases:
+
+| Old (retired) | New |
+| --- | --- |
+| `#exam` | `#variant-private` |
+| `#practice` | `#variant-public` |
+| `#answer` | `#optional` |
+
+`node tools/rename-view-markers.mjs <dir>` counts the old names in a content directory (dry run); with `--write` it rewrites them wherever they follow `@@@` on their line, and then lists every old name left over (tags, prose) to be judged by hand. A bare `#exam` with no `@@@` before it is an Obsidian tag and is left alone.

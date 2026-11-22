@@ -1,7 +1,7 @@
 @@@ teacher
 # Handout fixture A
 
-The handout of an offline test (`exam-handout`). The file itself is for teachers only; the exam module shows it to the present participants of an open sitting, as a student, with the practice variant and without the exam and answer variants.
+The handout of an offline test (`exam-handout`). The file itself is for teachers only; the exam module shows it to the present participants of an open sitting, as a student, with the public variant and without the private variant and the optional blocks.
 
 HANDOUT-A-TASK: write a program that prints the diagram's numbers.
 
@@ -9,15 +9,15 @@ HANDOUT-A-TASK: write a program that prints the diagram's numbers.
 
 The starter project: [[test-handout-starter.zip]]
 
-@@@ #exam
+@@@ #variant-private
 HANDOUT-EXAM-VARIANT: the values for the test.
 @@@
 
-@@@ #practice
+@@@ #variant-public
 HANDOUT-PRACTICE-VARIANT: the values for practice.
 @@@
 
-@@@ #answer
+@@@ #optional
 HANDOUT-ANSWER: the expected output is 1 2 3.
 @@@
 

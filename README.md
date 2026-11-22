@@ -115,7 +115,7 @@ So there are some intricacies you should be aware of when working with it and se
 ### Using It
 * [Installation](docs-installation.md) — the three tiers, what each needs, and how to install it.
 * [Obsidian Language Extensions](docs-obsidian.md) — the Obsidian-specific syntax SafeLearn understands: callouts, properties, comments, footnotes, math, heading and block links, note embeds, fragments, columns, diagrams.
-* [Permissions](docs-permissions.md) — who may read whole files or parts of them, roles, time windows and the exam/practice/answer views.
+* [Permissions](docs-permissions.md) — who may read whole files or parts of them, roles, time windows and the view markers `#variant-private`, `#variant-public` and `#optional`.
 * [Local WYSIWYG Container](docs-wysiwyg.md) — a container on your own machine that shows every change the moment you save it.
 * [Exam Module](docs-exam-module.md) — tier 3: the switch, where the data lives, backups, classes, the gradebook, the question pool, online tests, and how a page places one of its elements.
 * [Search Function](docs-search.md) — how the search field answers a query, why a stale index cannot leak anything, and the keys the result list answers to.

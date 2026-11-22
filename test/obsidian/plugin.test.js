@@ -275,7 +275,7 @@ function chipsOf(shown) {
  * check can state, rather than four separate absences.
  *
  * And one marking is not one element. The editor cuts a decoration wherever its
- * own highlighting starts a token, so `#exam` arrives as `#` and `exam` and
+ * own highlighting starts a token, so `#optional` arrives as `#` and `optional` and
  * `4bhif[gestern]` as four pieces - each carrying the whole marking, each a span
  * of its own. Pieces that touch and say the same thing are one marking, and a
  * check that could not put them back together would be asserting about
@@ -315,7 +315,7 @@ function entryKindsOf(found) {
  * written out where they are asserted, because a marking that covers the right
  * text at the wrong place is exactly the defect this harness exists to catch.
  */
-const MIXED_DIRECTIVE = "@@@ 4bhif, teacher[2025-11-28T08:00:00], #exam, ]kaputt, 5bhif[gestern]";
+const MIXED_DIRECTIVE = "@@@ 4bhif, teacher[2025-11-28T08:00:00], #variant-private, ]kaputt, 5bhif[gestern]";
 
 before(async () => {
   await start();
@@ -379,7 +379,7 @@ describe("the tags the corpus carries", () => {
       const found = await markers(container);
       assert.ok(
         found.some((m) => m.marker === "permission-block"),
-        `No permission-block marker on ${PSEUDO_ROLES}, which opens with @@@ #exam.`
+        `No permission-block marker on ${PSEUDO_ROLES}, which opens with @@@ #variant-private.`
       );
     }));
 
@@ -854,7 +854,7 @@ describe("a tag the plugin cannot resolve costs only itself", () => {
           "@@@",
           "```",
           "",
-          "@@@ #exam",
+          "@@@ #variant-private",
           "~~~",
           "@@@",
           "~~~",
@@ -921,8 +921,8 @@ describe("a permission directive is marked as the list of entries it is", () => 
         [
           'L2C4:"4bhif" entry',
           'L2C11:"teacher[2025-11-28T08:00:00]" entry,timed',
-          'L2C41:"#exam" entry,switch',
-          'L2C57:"5bhif[gestern]" broken,entry',
+          'L2C41:"#variant-private" entry,switch',
+          'L2C68:"5bhif[gestern]" broken,entry',
         ],
         "The renderer splits the text after @@@ on commas and reads each token on its own, so a " +
           "directive naming four things is four markings and not one. Each says what is true of that " +
@@ -1061,22 +1061,37 @@ describe("a view switch is distinguishable from an address", () => {
   test("a switch, a switch that resolves to nothing, and a class are three different markings", async () =>
     watched("view-switches", async () => {
       const name = "constructed-view-switches.md";
-      await writeDocument(name, ["Intro.", "@@@ #exam, #nonsense, 4bhif", "Gated.", "@@@"].join("\n"));
+      await writeDocument(name, ["Intro.", "@@@ #variant-private, #nonsense, 4bhif", "Gated.", "@@@"].join("\n"));
       const container = await open(name, views.livePreview);
       await moveCursorInto("#nonsense");
 
       assert.deepEqual(
         entriesOf(await markers(container)),
         [
-          'L2C4:"#exam" entry,switch',
-          'L2C11:"#nonsense" entry,switch,unresolved',
-          'L2C22:"4bhif" entry',
+          'L2C4:"#variant-private" entry,switch',
+          'L2C22:"#nonsense" entry,switch,unresolved',
+          'L2C33:"4bhif" entry',
         ],
-        "`#exam` selects between variants of the document and is resolved against the reader's own " +
+        "`#variant-private` selects between variants of the document and is resolved against the reader's own " +
           "preferences, not against who they are - marking it like the class beside it would say the " +
           "document restricts an audience where it selects a variant. `hasRoles` recognizes the " +
           "prefix more broadly than the three names it resolves, so `#nonsense` is taken out of the " +
-          "role test and then decides nothing at all, which is a third thing to be."
+          "role test and then hides its block from everyone, which is an error and a third thing to be."
+      );
+    }));
+
+  test("a retired name is marked as the error, not as a working switch", async () =>
+    watched("view-switches-retired", async () => {
+      const name = "constructed-view-switches-retired.md";
+      await writeDocument(name, ["Intro.", "@@@ #exam, 4bhif", "Gated.", "@@@"].join("\n"));
+      const container = await open(name, views.livePreview);
+      await moveCursorInto("#exam");
+
+      assert.deepEqual(
+        entriesOf(await markers(container)),
+        ['L2C4:"#exam" entry,switch,unresolved', 'L2C11:"4bhif" entry'],
+        "`#exam` was renamed to `#variant-private` without an alias. The server now hides a block naming it " +
+          "from everyone, so the plugin has to say so while the author writes, not as missing content later."
       );
     }));
 });
@@ -1136,7 +1151,7 @@ describe("the set of decorations is always well-formed", () => {
         [
           "@@@ teacher, 4bhif[gestern]",
           "",
-          "@@@ 4bhif, #answer",
+          "@@@ 4bhif, #optional",
           "##fragment",
           "Gated text.",
           "@@@",
@@ -1169,7 +1184,7 @@ describe("the set of decorations is always well-formed", () => {
           'L1C4:"teacher" entry',
           'L1C13:"4bhif[gestern]" broken,entry',
           'L3C4:"4bhif" entry',
-          'L3C11:"#answer" entry,switch',
+          'L3C11:"#optional" entry,switch',
         ],
         "Both directives that name something readable have their entries marked, on the line that " +
           "gates the file and on the line that opens a block alike."
@@ -1337,7 +1352,7 @@ describe("a directive line is shown as the heading of the block it opens", () =>
         [
           '"4bhif" entry',
           '"teacher[2025-11-28T08:00:00]" timed',
-          '"#exam" switch',
+          '"#variant-private" switch',
           '"]kaputt" discarded',
           '"5bhif[gestern]" broken',
         ],
@@ -1827,7 +1842,7 @@ describe("the reading view", () => {
           "",
           "Opening text.",
           "",
-          "@@@ 4bhif, #answer",
+          "@@@ 4bhif, #optional",
           "Gated text. ##fragment",
           "@@@",
           "",
@@ -1980,14 +1995,14 @@ describe("the reading view", () => {
       const name = "constructed-reading-block.md";
       await writeDocument(
         name,
-        ["@@@ teacher", "", "Intro.", "", "@@@ 4bhif, #answer", "Gated text.", "@@@", "", "After."].join("\n")
+        ["@@@ teacher", "", "Intro.", "", "@@@ 4bhif, #optional", "Gated text.", "@@@", "", "After."].join("\n")
       );
       const container = await open(name, views.reading);
       await reveal(container, "After.");
 
       assert.deepEqual(
         chipsOf(await headings(container)),
-        ['"teacher" entry', '"4bhif" entry', '"#answer" switch'],
+        ['"teacher" entry', '"4bhif" entry', '"#optional" switch'],
         "Both directives are shown as the heading of what they gate - the one that governs the " +
           "file and the one that opens a block alike."
       );

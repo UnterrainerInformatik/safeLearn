@@ -1,5 +1,5 @@
 /**
- * The `#exam`, `#practice` and `#answer` pseudo-roles.
+ * The `#variant-private`, `#variant-public` and `#optional` pseudo-roles.
  *
  * Reads `md/test-exam-practice-question.md`. All three are resolved from stored
  * preferences — `ve` and `va` — and the exam variant additionally from the

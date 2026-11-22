@@ -49,7 +49,8 @@
       "language": "Sprache",
       "lightDark": "hell/dunkel",
       "logout": "abmelden",
-      "rememberLastPage": "zuletzt besuchte Seite merken"
+      "rememberLastPage": "zuletzt besuchte Seite merken",
+      "showOptional": "Optionale Blöcke zeigen"
     },
     "page": {
       "properties": {
@@ -69,12 +70,10 @@
       "untitled": "(ohne Titel)"
     },
     "switch": {
-      "answers": "Antworten",
-      "noAnswers": "keine Antworten",
-      "showExam": "Prüfung zeigen",
-      "showPractice": "Übung zeigen",
       "student": "Schüler",
-      "teacher": "Lehrer"
+      "teacher": "Lehrer",
+      "variantPrivate": "private Variante",
+      "variantPublic": "öffentliche Variante"
     },
     "topbar": {
       "examModule": "Prüfungsmodul",
