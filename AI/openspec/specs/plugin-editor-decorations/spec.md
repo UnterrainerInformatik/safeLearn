@@ -181,9 +181,9 @@ The server parses a window and, failing, keeps the entry with no window at all â
 
 ### Requirement: A view switch is distinguishable from an address
 
-`#exam`, `#practice` and `#answer` are not roles. They are resolved against the reader's own stored preferences rather than against who the reader is, and they select between variants of a document instead of addressing anyone. The plugin SHALL mark them distinguishably from entries that name a role or a person, so that a directive selecting a variant is not read as one restricting an audience.
+`#variant-private`, `#variant-public` and `#optional` are not roles. They are resolved against the reader's own stored preferences rather than against who the reader is, and they select between variants of a document instead of addressing anyone. The plugin SHALL mark them distinguishably from entries that name a role or a person, so that a directive selecting a variant is not read as one restricting an audience.
 
-The server recognizes the prefix more broadly than it recognizes the three names: an entry carrying it is taken out of the role test whatever follows, and only these three then decide anything. An entry that carries the prefix but none of the three names therefore restricts nobody and switches nothing, and the plugin SHALL mark it as the switch that resolves to nothing rather than as either a working switch or an address.
+The server recognizes the prefix more broadly than it recognizes the three names: an entry carrying it is taken out of the role test whatever follows, and an entry that carries the prefix but none of the three names hides its block from every reader (`role-resolution`). The old names `#exam`, `#practice` and `#answer` are among those unknown names. The plugin SHALL mark such an entry as an error that hides the block from everyone, distinguishable from both a working switch and an address, so that the author sees it while writing rather than as missing content after publishing.
 
 #### Scenario: A directive names a view switch
 
@@ -198,7 +198,12 @@ The server recognizes the prefix more broadly than it recognizes the three names
 #### Scenario: A switch names something the server does not resolve
 
 - **WHEN** an entry carries the switch prefix followed by a name that is none of the three
-- **THEN** it is marked as resolving to nothing, and is not marked as an address the server tests anyone against
+- **THEN** it is marked as an error that hides the block from everyone, and is not marked as an address the server tests anyone against
+
+#### Scenario: A retired name
+
+- **WHEN** a directive names `#exam`
+- **THEN** it is marked as that error, not as a working switch
 
 ### Requirement: The editor does not modify rendered output
 
@@ -380,10 +385,10 @@ The plugin SHALL find permission blocks by the grammar of `permission-block-gram
 
 #### Scenario: A closing marker inside code within a block
 
-- **WHEN** a `@@@ #exam` block contains a closed fence holding the line `@@@`, and the block closes on a `@@@` line after the fence
+- **WHEN** a `@@@ #variant-private` block contains a closed fence holding the line `@@@`, and the block closes on a `@@@` line after the fence
 - **THEN** the frame of the block runs to that later line
 
 #### Scenario: An unclosed fence
 
-- **WHEN** a fence is opened and never closed, and a `@@@ #exam` block follows below it
-- **THEN** the plugin marks the `@@@ #exam` block as a block
+- **WHEN** a fence is opened and never closed, and a `@@@ #variant-private` block follows below it
+- **THEN** the plugin marks the `@@@ #variant-private` block as a block

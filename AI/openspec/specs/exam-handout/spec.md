@@ -46,7 +46,7 @@ The test's page and the sitting's page SHALL show each handout's path, and SHALL
 
 ### Requirement: A handout is shown to a present participant during the window, as a student
 
-While a sitting is open, a participant marked present SHALL be served the handout of their group (with one handout, that handout) as a page of the module. The page SHALL be rendered from the file's current content for that participant as a student: the file's own whole-file directive SHALL be set aside, every inline block SHALL be decided by the participant's roles as on any page, the practice variant SHALL be shown, and the exam and answer variants SHALL be hidden, whatever the participant's stored preferences. The handout SHALL therefore show nothing of the file that an ordinary page shows a student only in the exam or answer view. A teacher's preview of a handout SHALL show the same content a participant is shown. The handout SHALL NOT be served to anyone else: not to an absent participant, not to a participant of the other group, not to a non-participant, and not before the start or after the window. A refusal SHALL NOT reveal the file's path or content. The file SHALL remain hidden in the navigation tree, in search, and on its own corpus URL, exactly as its directive decides.
+While a sitting is open, a participant marked present SHALL be served the handout of their group (with one handout, that handout) as a page of the module. The page SHALL be rendered from the file's current content for that participant as a student: the file's own whole-file directive SHALL be set aside, every inline block SHALL be decided by the participant's roles as on any page, the public variant SHALL be shown, and the exam and optional blockss SHALL be hidden, whatever the participant's stored preferences. The handout SHALL therefore show nothing of the file that an ordinary page shows a student only in the private-variant or optional view. A teacher's preview of a handout SHALL show the same content a participant is shown. The handout SHALL NOT be served to anyone else: not to an absent participant, not to a participant of the other group, not to a non-participant, and not before the start or after the window. A refusal SHALL NOT reveal the file's path or content. The file SHALL remain hidden in the navigation tree, in search, and on its own corpus URL, exactly as its directive decides.
 
 #### Scenario: A handout restricted to teachers
 
@@ -55,17 +55,17 @@ While a sitting is open, a participant marked present SHALL be served the handou
 
 #### Scenario: Exam and practice variants
 
-- **WHEN** the handout contains a `@@@ #exam` block, a `@@@ #practice` block and a `@@@ #answer` block, and a participant whose stored exam and answer preferences are both on opens it
-- **THEN** the page shows the practice block, and neither the exam block nor the answer block
+- **WHEN** the handout contains a `@@@ #variant-private` block, a `@@@ #variant-public` block and a `@@@ #optional` block, and a participant whose stored variant and optional preferences are both on opens it
+- **THEN** the page shows the practice block, and neither the exam block nor the optional block
 
 #### Scenario: Solutions kept in exam blocks
 
-- **WHEN** a test file holds the assignment as plain text and each task's solution in a `@@@ #exam` block, and a present participant opens it as their handout
+- **WHEN** a test file holds the assignment as plain text and each task's solution in a `@@@ #variant-private` block, and a present participant opens it as their handout
 - **THEN** the page shows the assignment and none of the solutions
 
 #### Scenario: The teacher's preview
 
-- **WHEN** a teacher with the exam and answer views on opens the preview of that handout
+- **WHEN** a teacher with the private-variant and optional views on opens the preview of that handout
 - **THEN** the preview shows the assignment and none of the solutions, as the participant is shown
 
 #### Scenario: The corpus URL during the window
@@ -90,7 +90,7 @@ While a sitting is open, a participant marked present SHALL be served the handou
 
 ### Requirement: A handout's attachments are served while it is
 
-An attachment the served handout references SHALL be served to that participant while the handout is served to them, and SHALL stop being served the moment the window closes, the sitting ends, the participant is marked absent or is moved to the other group. Only references in parts of the handout the participant is shown SHALL count: an attachment referenced only inside a block the handout hides from them, an exam or answer block among them, SHALL NOT become servable through it. Attachments the handout does not reference SHALL NOT become servable through it.
+An attachment the served handout references SHALL be served to that participant while the handout is served to them, and SHALL stop being served the moment the window closes, the sitting ends, the participant is marked absent or is moved to the other group. Only references in parts of the handout the participant is shown SHALL count: an attachment referenced only inside a block the handout hides from them, an private-variant or optional block among them, SHALL NOT become servable through it. Attachments the handout does not reference SHALL NOT become servable through it.
 
 #### Scenario: An image and a starter archive
 
@@ -99,7 +99,7 @@ An attachment the served handout references SHALL be served to that participant 
 
 #### Scenario: An image inside a solution
 
-- **WHEN** the handout embeds `solution.png` only inside a `@@@ #exam` block, and a present participant requests `solution.png` during the window
+- **WHEN** the handout embeds `solution.png` only inside a `@@@ #variant-private` block, and a present participant requests `solution.png` during the window
 - **THEN** it is not served
 
 #### Scenario: The window closes
@@ -109,16 +109,16 @@ An attachment the served handout references SHALL be served to that participant 
 
 ### Requirement: A teacher opens a handout's solution as a page
 
-For each handout that contains at least one `#exam` or `#answer` block, the test's page SHALL offer the teacher a button that opens the handout's solution as a page of the module, not as a presentation, since a handout is running text: rendered as for a participant, but with the exam variant and the answer variant shown and the practice variant hidden. The page SHALL show no student's name and no result. It SHALL be available at any time, during and after the window. The page and every request it makes SHALL be refused to any session that does not act as a teacher, including a teacher in student view. A handout with neither an `#exam` nor an `#answer` block SHALL offer no solution button.
+For each handout that contains at least one `#variant-private` or `#optional` block, the test's page SHALL offer the teacher a button that opens the handout's solution as a page of the module, not as a presentation, since a handout is running text: rendered as for a participant, but with the private variant and the optional blocks shown and the public variant hidden. The page SHALL show no student's name and no result. It SHALL be available at any time, during and after the window. The page and every request it makes SHALL be refused to any session that does not act as a teacher, including a teacher in student view. A handout with neither an `#variant-private` nor an `#optional` block SHALL offer no solution button.
 
 #### Scenario: Discussing the test in the next lesson
 
 - **WHEN** a teacher presses the solution button of handout A
-- **THEN** a page of handout A opens, not a presentation, with its exam blocks and its answer blocks shown, and its practice variant and its `@@@ teacher` blocks hidden
+- **THEN** a page of handout A opens, not a presentation, with its private-variant blocks and its optional blocks shown, and its public variant and its `@@@ teacher` blocks hidden
 
 #### Scenario: Solutions only in exam blocks
 
-- **WHEN** a handout holds its solutions in `@@@ #exam` blocks and has no `#answer` block
+- **WHEN** a handout holds its solutions in `@@@ #variant-private` blocks and has no `#optional` block
 - **THEN** the test's page offers the solution button for it, and the solution page shows those solutions
 
 #### Scenario: A student opens the solution URL
@@ -128,7 +128,7 @@ For each handout that contains at least one `#exam` or `#answer` block, the test
 
 #### Scenario: No answers in the file
 
-- **WHEN** a handout contains neither an `#exam` nor an `#answer` block
+- **WHEN** a handout contains neither an `#variant-private` nor an `#optional` block
 - **THEN** the test's page offers no solution button for it
 
 ### Requirement: A handout's variables are filled from its test

@@ -42,4 +42,4 @@
 
 ## 7. Wrap-up
 
-- [ ] 7.1 Remove the entry "View-Marker nach Mechanismus benennen" from `AI/open-proposals.md` when archiving; leave the related "Fences verschachteln oder kombinieren" entry in place
+- [x] 7.1 Remove the entry "View-Marker nach Mechanismus benennen" from `AI/open-proposals.md` when archiving; leave the related "Fences verschachteln oder kombinieren" entry in place
