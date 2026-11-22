@@ -216,7 +216,7 @@ function buildRoleViews(req) {
 
 async function buildPermissionContext(req) {
   // One clock reading for the request. Both callers of
-  // `getActivePermissionRoles` used to take their own, so a window closing
+  // `resolveDirectiveEntries` (once `getActivePermissionRoles`) used to take their own, so a window closing
   // between the navigation tree and the body of the page it links to left the
   // two disagreeing about the same file.
   const referenceDate = new Date();

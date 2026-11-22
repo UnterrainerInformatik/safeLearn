@@ -133,6 +133,8 @@ You can also create open-ended windows (`[2025-12-01T08:00:00]`) or hide content
 
 Timestamps follow ISO 8601 (`YYYY-MM-DDTHH:mm:ss`). Values without an explicit timezone are interpreted in the server's local timezone; append `Z` or an offset if you need UTC or a specific zone.
 
+**A window the server cannot read closes its entry for good.** That covers a typo such as `4bhif[gestern]`, a time without seconds (`[2025-11-28T08:00]`), a window of which only one end can be read (`[2026-11-01T08:00:00 to nächste Woche]`) and an entry that cannot be read at all, such as `4ahif[]`. Such an entry admits nobody, at any time; it never falls back to "no window" and never keeps just the readable end. The other entries of the directive are unaffected, so in `@@@ teacher, 4bhif[gestern]` teachers still read the block and 4BHIF never does. The Obsidian plugin marks such a window while you write, and the server logs `[Permissions] unreadable window: <file>:<line> <entry>` at every scan.
+
 The server continuously watches these windows. When a block or a whole file becomes visible or hidden, all subscribed clients receive a Server-Sent Events reload signal so the UI stays in sync automatically.
 
 A window on a first-line directive restricts the whole file the same way:
@@ -143,6 +145,8 @@ A window on a first-line directive restricts the whole file the same way:
 # Some Document
 Teachers may open this during the exam slot, and nobody at any other time.
 ```
+
+**Roles stay roles when their windows close.** A block whose directive names roles or persons is shown only through one of those entries that is open right now. When all of them are closed - shut windows, unreadable ones - the block is hidden from everyone, an admin included, whatever view markers stand beside them: `@@@ 4ahif[to 2026-09-30T18:00:00], #optional` is not shown to everyone with optional blocks on once September is over. The admin short-circuit replaces only the role test, and only while a written role is open.
 
 When every window in a whole-file directive is shut, no role is active — so the file is hidden from everyone, including the roles it names and from `admin`, which does not short-circuit a closed window. A reader who asks for it anyway is told **This content is not visible right now.**, rather than the **You do not have the required permissions to view this content.** they get for a directive naming roles they simply do not hold. The two messages are deliberately different: the first says come back later, the second says ask someone else. The file is left out of the navigation tree in both cases.
 
@@ -186,6 +190,22 @@ You are employed at a company that wants to re-structure their legacy software.
 ```
 
 In the reader menu, teachers get a switch between **private variant** and **public variant**; everyone gets the switch **optional blocks / no optional** for `#optional`.
+
+#### Combining markers and roles
+
+Entries are separated by commas, view markers included. The roles and persons of one directive are combined with **OR** - holding any one of them is enough. The view markers are combined with **AND**, with each other and with the roles - every one of them has to hold, in whichever order they are written:
+
+```markdown
+@@@ #variant-private, #optional
+The solution, revealable by a teacher with the private variant on - never by a student.
+@@@
+
+@@@ 4bhif, 5bhif, #optional
+A hint for the two classes, shown when they turn optional blocks on.
+@@@
+```
+
+Without the comma, `#variant-private #optional` is one marker of an unknown name and hides its block from everyone. Since every reader sees exactly one of the two variants, `@@@ #variant-private, #variant-public` is shown to nobody - the plugin marks it as an error. A marker carrying a window works as the plain marker while the window is open; while it is shut, or if it cannot be read, nobody satisfies the marker and the block is hidden.
 
 **An unknown view marker hides its block from everyone**, an admin included. That covers a typo such as `#variant-privat` and the retired names below: a block still marked `@@@ #exam` is shown to nobody until it is renamed. The Obsidian plugin marks such an entry as an error while you write, and the content suite checks `md/` for them.
 

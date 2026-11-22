@@ -159,6 +159,64 @@ describe("views", () => {
     }
   });
 
+  // ---- Combined markers and closed entries (fail-closed-fence-entries) ----
+
+  const combinedPage = "/md/test-combined-markers.md";
+  const combined = {
+    solution: "COMBINED-SOLUTION",
+    bothVariants: "BOTH-VARIANTS",
+    closedClass: "CLOSED-CLASS-WINDOW",
+    openTeacher: "OPEN-TEACHER-ROLE",
+    unreadable: "UNREADABLE-WINDOW",
+  };
+
+  /** Which of the combined page's blocks `role` is shown under `values`. */
+  async function combinedShown(role, values) {
+    const session = sessions.get(role);
+    await setPreferences(session, values);
+    const { text } = await render(session, combinedPage);
+    assert.ok(text.includes("Combined markers and closed entries"), `${combinedPage} did not render for ${role}`);
+    return Object.fromEntries(Object.entries(combined).map(([key, marker]) => [key, text.includes(marker)]));
+  }
+
+  test("a teacher sees the revealable solution only with both of its markers on", async () => {
+    assert.deepEqual(await combinedShown("teacher", { vt: 1, ve: 1, va: 1 }), {
+      solution: true,
+      bothVariants: false,
+      closedClass: false,
+      openTeacher: true,
+      unreadable: false,
+    });
+    assert.deepEqual(await combinedShown("teacher", { vt: 1, ve: 1, va: 0 }), {
+      solution: false,
+      bothVariants: false,
+      closedClass: false,
+      openTeacher: false,
+      unreadable: false,
+    });
+    assert.deepEqual(await combinedShown("teacher", { vt: 1, ve: 0, va: 1 }), {
+      solution: false,
+      bothVariants: false,
+      closedClass: false,
+      openTeacher: true,
+      unreadable: false,
+    });
+  });
+
+  test("a student sees none of the combined or closed blocks, whatever its views", async () => {
+    for (const values of [
+      { ve: 1, va: 1 },
+      { ve: 0, va: 1 },
+      { ve: 0, va: 0 },
+    ]) {
+      assert.deepEqual(
+        await combinedShown("student", values),
+        { solution: false, bothVariants: false, closedClass: false, openTeacher: false, unreadable: false },
+        JSON.stringify(values)
+      );
+    }
+  });
+
   // ---- Config parameters come from the account alone (anonymous-publishing) ----
 
   /** Requests `reference` with the session's cookies, without following a redirect. */

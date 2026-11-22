@@ -26,7 +26,8 @@ import { afterEach, describe, mock, test } from "node:test";
 import { getPermissionContext } from "../permission-context.js";
 import { setUserAttribute } from "../middlewares/keycloak-middleware.js";
 import { hasSomeRoles, identityOf } from "../utils.js";
-import { parseFirstLineForPermissions, resolveFileVisibility } from "../obsidian.js";
+import { filterForbiddenSegments, parseFirstLineForPermissions, resolveFileVisibility } from "../obsidian.js";
+import { handoutViews } from "../permission-context.js";
 
 const originalFetch = global.fetch;
 const originalConsoleError = console.error;
@@ -454,5 +455,170 @@ describe("an unknown view marker fails closed", () => {
     const [entry] = parseFirstLineForPermissions("@@@ #Variant-Private");
     assert.equal(await hasSomeRoles(teacherSession(), [entry.role]), true);
     assert.equal(await hasSomeRoles(teacherSession(), ["#Variant-Private"]), true, "also when handed unparsed");
+  });
+});
+
+// A directive never shows a block to more readers than its author wrote
+// (fail-closed-fence-entries, `role-resolution`): view markers combine with
+// AND, written roles that are all closed are not replaced by the markers beside
+// them, and an entry whose window cannot be read is closed for good.
+describe("a directive only narrows", () => {
+  const adminSession = () => session({ admin: true }, "Ad Min");
+  const student = (groups = { "4ahif": true }) => session(groups);
+
+  /** Whether `directive`'s block shows its body to `req`. */
+  async function shows(req, directive) {
+    const md = `before\n${directive}\nSECRET\n@@@\nafter\n`;
+    const text = (await filterForbiddenSegments(md, req)).map((segment) => segment.text).join("");
+    assert.ok(text.includes("before") && text.includes("after"), "the text around the block always stays");
+    return text.includes("SECRET");
+  }
+
+  /** The clock at `iso`, local time, for the rest of the test. */
+  const at = (iso) => {
+    mock.timers.reset();
+    mock.timers.enable({ apis: ["Date"], now: new Date(iso).getTime() });
+  };
+
+  test("a teacher-only revealable solution needs both of its markers", async () => {
+    const directive = "@@@ #variant-private, #optional";
+    stubAccount({ vt: 1, ve: 1, va: 1 });
+    assert.equal(await shows(teacherSession(), directive), true, "teacher, variant on, optional on");
+    stubAccount({ vt: 1, ve: 1, va: 0 });
+    assert.equal(await shows(teacherSession(), directive), false, "teacher, variant on, optional off");
+    stubAccount({ vt: 1, ve: 1, va: 1 });
+    assert.equal(await shows(student(), directive), false, "student, optional on");
+  });
+
+  test("the order of the markers does not matter", async () => {
+    for (const preferences of [
+      { vt: 1, ve: 1, va: 1 },
+      { vt: 1, ve: 1, va: 0 },
+      { vt: 1, ve: 0, va: 1 },
+      { vt: 0, ve: 1, va: 1 },
+    ]) {
+      stubAccount(preferences);
+      for (const make of [teacherSession, student, adminSession]) {
+        assert.equal(
+          await shows(make(), "@@@ #optional, #variant-private"),
+          await shows(make(), "@@@ #variant-private, #optional"),
+          JSON.stringify(preferences)
+        );
+      }
+    }
+  });
+
+  test("both variants at once are shown to nobody", async () => {
+    const directive = "@@@ #variant-private, #variant-public";
+    for (const [preferences, make] of [
+      [{ vt: 1, ve: 1, va: 1 }, student],
+      [{ vt: 1, ve: 1, va: 1 }, teacherSession],
+      [{ vt: 1, ve: 0, va: 1 }, teacherSession],
+      [{ vt: 1, ve: 1, va: 1 }, adminSession],
+      [{ vt: 1, ve: 0, va: 1 }, adminSession],
+    ]) {
+      stubAccount(preferences);
+      assert.equal(await shows(make(), directive), false, JSON.stringify(preferences));
+    }
+    for (const flags of [
+      { variantPrivate: true, optional: true },
+      { variantPrivate: false, optional: true },
+      { variantPrivate: false, optional: false },
+    ]) {
+      const req = teacherSession();
+      req[handoutViews] = flags;
+      assert.equal(await shows(req, directive), false, `handout ${JSON.stringify(flags)}`);
+    }
+  });
+
+  test("combined markers on a handout: hidden from the participant, shown on the solution", async () => {
+    stubAccount({ vt: 1, ve: 1, va: 1 });
+    const participant = student();
+    participant[handoutViews] = { variantPrivate: false, optional: false };
+    assert.equal(await shows(participant, "@@@ #variant-private, #optional"), false);
+    const solution = teacherSession();
+    solution[handoutViews] = { variantPrivate: true, optional: true };
+    assert.equal(await shows(solution, "@@@ #variant-private, #optional"), true);
+  });
+
+  test("a closed class window is not replaced by the marker beside it", async () => {
+    at("2026-10-05T10:00:00");
+    stubAccount({ vt: 1, va: 1 });
+    const directive = "@@@ 4ahif[2026-09-01T08:00:00 to 2026-09-30T18:00:00], #optional";
+    assert.equal(await shows(student({ "5bhif": true }), directive), false, "outside 4ahif");
+    assert.equal(await shows(student(), directive), false, "inside 4ahif, the window is shut");
+    // The control: before the window closes, the class reads it and the outsider does not.
+    at("2026-09-10T10:00:00");
+    assert.equal(await shows(student(), directive), true);
+    assert.equal(await shows(student({ "5bhif": true }), directive), false);
+  });
+
+  test("one of two roles still open admits through it, the marker still applies", async () => {
+    at("2026-10-05T10:00:00");
+    const directive = "@@@ teacher, 4ahif[to 2026-09-30T18:00:00], #optional";
+    stubAccount({ vt: 1, va: 1 });
+    assert.equal(await shows(teacherSession(), directive), true);
+    assert.equal(await shows(student(), directive), false, "the class window is shut");
+    stubAccount({ vt: 1, va: 0 });
+    assert.equal(await shows(teacherSession(), directive), false, "the marker still has to hold");
+  });
+
+  test("an admin is refused a directive whose written roles are all closed", async () => {
+    at("2026-10-05T10:00:00");
+    stubAccount({ vt: 1, ve: 1, va: 1 });
+    assert.equal(await shows(adminSession(), "@@@ 4ahif[to 2026-09-30T18:00:00], #optional"), false);
+    assert.equal(await shows(adminSession(), "@@@ 4ahif[to 2026-09-30T18:00:00]"), false);
+    assert.equal(await shows(adminSession(), "@@@ 4ahif, #optional"), true, "the control: an open role");
+  });
+
+  test("a misspelled window closes its own entry, not the others", async () => {
+    stubAccount({ vt: 1, va: 1 });
+    const directive = "@@@ Gerald Unterrainer, , 4bhif [falsche syntax], teacher";
+    assert.equal(await shows(student({ "4bhif": true }), directive), false, "the member of 4bhif");
+    assert.equal(await shows(teacherSession(), directive), true, "a teacher");
+    assert.equal(await shows(session({ "5chif": true }, "Gerald Unterrainer"), directive), true, "the person named");
+  });
+
+  test("half a window is no window, on any date", async () => {
+    stubAccount({ vt: 1, va: 1 });
+    const directive = "@@@ 4bhif[2026-11-01T08:00:00 to nächste Woche]";
+    for (const when of ["2026-10-01T10:00:00", "2026-11-05T10:00:00", "2030-01-01T10:00:00"]) {
+      at(when);
+      assert.equal(await shows(student({ "4bhif": true }), directive), false, when);
+    }
+  });
+
+  test("an entry that cannot be read at all still counts as a closed role", async () => {
+    stubAccount({ vt: 1, ve: 1, va: 1 });
+    for (const make of [student, teacherSession, adminSession]) {
+      assert.equal(await shows(make(), "@@@ 4ahif [], #optional"), false);
+      assert.equal(await shows(make(), "@@@ ]kaputt, #optional"), false);
+    }
+  });
+
+  test("a file whose every window is unreadable is refused to everyone", async () => {
+    stubAccount({ vt: 1, ve: 1, va: 1 });
+    const permissions = parseFirstLineForPermissions("@@@ teacher[morgen]");
+    for (const make of [student, teacherSession, adminSession]) {
+      assert.deepEqual(await resolveFileVisibility(make(), permissions), { visible: false, reason: "outside-window" });
+    }
+  });
+
+  test("a whole-file directive with all roles closed is not decided by its marker", async () => {
+    at("2026-10-05T10:00:00");
+    stubAccount({ vt: 1, ve: 1, va: 1 });
+    const permissions = parseFirstLineForPermissions("@@@ 4ahif[to 2026-09-30T18:00:00], #optional");
+    for (const make of [student, teacherSession, adminSession]) {
+      assert.deepEqual(await resolveFileVisibility(make(), permissions), { visible: false, reason: "outside-window" });
+    }
+  });
+
+  test("a closed window on a view marker hides the block", async () => {
+    at("2026-10-05T10:00:00");
+    stubAccount({ vt: 1, va: 1 });
+    assert.equal(await shows(teacherSession(), "@@@ teacher, #optional[to 2026-09-30T18:00:00]"), false);
+    assert.equal(await shows(adminSession(), "@@@ #optional[to 2026-09-30T18:00:00]"), false);
+    at("2026-09-10T10:00:00");
+    assert.equal(await shows(teacherSession(), "@@@ teacher, #optional[to 2026-09-30T18:00:00]"), true, "while open, the plain marker");
   });
 });

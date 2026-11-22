@@ -13,7 +13,7 @@
 import fs from "node:fs";
 
 import {
-  getActivePermissionRoles,
+  resolveDirectiveEntries,
   handoutReferencesVisibly,
   handoutVariables,
   mdFilesDir,
@@ -122,7 +122,7 @@ export function handoutsOf(test) {
 function readableByClass(permissions, className) {
   if (permissions === null || permissions === undefined) return true;
   const readers = new Set([normalizeRole(className), "student", "students"]);
-  return getActivePermissionRoles(permissions).some((role) => readers.has(normalizeRole(role)));
+  return resolveDirectiveEntries(permissions).active.some((role) => readers.has(normalizeRole(role)));
 }
 
 /**

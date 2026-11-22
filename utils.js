@@ -17,9 +17,14 @@ export function identityOf(req) {
 
 /**
  * hasSomeRoles(req, ["teacher", "student", "admin", "gluppy"])
+ *
+ * `wroteRoles` says that the directive these roles were taken from named a
+ * role or person, whether or not it is still open (fail-closed-fence-entries
+ * D2). With it, a list holding view markers only is refused: the directive's
+ * written roles are all closed, and its markers must not decide in their place.
  */
-export async function hasSomeRoles(req, clientRoles, allowOverride = false) {
-  return hasRoles(req, clientRoles, false, allowOverride);
+export async function hasSomeRoles(req, clientRoles, allowOverride = false, { wroteRoles = false } = {}) {
+  return hasRoles(req, clientRoles, false, allowOverride, wroteRoles);
 }
 
 /**
@@ -32,7 +37,7 @@ export async function hasSomeRoles(req, clientRoles, allowOverride = false) {
  * and forty round-trips to the identity provider, each with a clock and a
  * preference block of its own.
  */
-async function hasRoles(req, clientRoles, all, allowOverride) {
+async function hasRoles(req, clientRoles, all, allowOverride, wroteRoles = false) {
   try {
     //console.log("Checking roles", clientRoles, "all", all, "allowOverride", allowOverride);
     // The roles to check are empty. So we return true.
@@ -42,11 +47,17 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
           .filter((role) => role.length > 0)
       : [];
 
+    // Roles were written and none of them is open: nobody is admitted, an admin
+    // included, whatever view markers stand beside them. Checked before
+    // anything else, the admin short-circuit and the empty list among it.
+    if (wroteRoles && !normalizedClientRoles.some((role) => !role.startsWith("#"))) {
+      return false;
+    }
+
     if (normalizedClientRoles.length === 0) {
       return true;
     }
 
-    let clientAccess = null;
     const context = await getPermissionContext(req);
     const a = context.preferences;
     // The views a handout rendering fixes for this request alone (design D4 of
@@ -62,56 +73,61 @@ async function hasRoles(req, clientRoles, all, allowOverride) {
     // make the answer to a directive depend on which directive came before it.
     const view = handout !== null || (allowOverride && a.vt == 0) ? context.studentView : context.full;
 
-    let clientViews = normalizedClientRoles.filter((role) => role.startsWith("#"));
+    const clientViews = normalizedClientRoles.filter((role) => role.startsWith("#"));
     normalizedClientRoles = normalizedClientRoles.filter((role) => !role.startsWith("#"));
-    if (view.isAdmin) {
-      clientAccess = true;
-    } else {
-      if (normalizedClientRoles.length > 0) {
-        if (all) {
-          clientAccess = normalizedClientRoles.every((role) => view.roles.has(role));
-        } else {
-          clientAccess = normalizedClientRoles.some((role) => view.roles.has(role));
-        }
+
+    // The roles and persons are one OR among themselves, and an admin passes
+    // that test whatever it names. Without any, the markers alone decide.
+    let clientAccess = true;
+    if (normalizedClientRoles.length > 0 && !view.isAdmin) {
+      clientAccess = all
+        ? normalizedClientRoles.every((role) => view.roles.has(role))
+        : normalizedClientRoles.some((role) => view.roles.has(role));
+    }
+    if (!clientAccess) {
+      return false;
+    }
+
+    // Every view marker has to hold, the admin's included, and in whichever
+    // order they are written (fail-closed-fence-entries D3): each one narrows
+    // what the others leave. They used to overwrite one another, so the last
+    // marker of `#variant-private #optional` decided alone.
+    for (const v of clientViews) {
+      const viewRole = v.substring(1);
+      let holds;
+      switch (viewRole) {
+        // The private and the public variant are one rule and its complement,
+        // not two rules over the same preference: every session sees exactly
+        // one of the two, so a directive naming both shows its block to nobody.
+        // An edit to either condition has to be made at both, or a session ends
+        // up seeing neither version of the question.
+        // `ve` drives the variant switch, `va` the optional blocks.
+        case "variant-private":
+          // For security reasons hardcoded to only allow teachers and admins to view the private variant.
+          // Under a handout rendering the module's flag decides both cases together; it is set
+          // only for a teacher's solution page and attachment check, never for a participant.
+          holds = handout !== null ? handout.variantPrivate === true : a.ve == 1 && (view.isAdmin || view.isTeacher);
+          break;
+        case "variant-public":
+          holds = handout !== null ? handout.variantPrivate !== true : !(a.ve == 1 && (view.isAdmin || view.isTeacher));
+          break;
+        case "optional":
+          holds = handout !== null ? handout.optional === true : a.va == 1;
+          break;
+        default:
+          // An unknown view marker - a retired name such as `#exam`, a typo
+          // such as `#variant-privat`, or a marker whose window is closed or
+          // unreadable - fails closed for every session, an admin included
+          // (rename-view-markers-by-mechanism D1). Letting it restrict nobody
+          // would turn every leftover `#exam` into the private variant shown
+          // to every student.
+          return false;
+      }
+      if (!holds) {
+        return false;
       }
     }
-    if (clientAccess === null || clientAccess) {
-      for (const v of clientViews) {
-        const viewRole = v.substring(1);
-        switch (viewRole) {
-          // The private and the public variant are one rule and its complement,
-          // not two rules over the same preference: every session sees exactly
-          // one of the two. An edit to either condition has to be made at both,
-          // or a session ends up seeing neither version of the question.
-          // `ve` drives the variant switch, `va` the optional blocks.
-          case "variant-private":
-            // For security reasons hardcoded to only allow teachers and admins to view the private variant.
-            // Under a handout rendering the module's flag decides both cases together; it is set
-            // only for a teacher's solution page and attachment check, never for a participant.
-            clientAccess =
-              handout !== null ? handout.variantPrivate === true : a.ve == 1 && (view.isAdmin || view.isTeacher);
-            break;
-          case "variant-public":
-            clientAccess =
-              handout !== null ? handout.variantPrivate !== true : !(a.ve == 1 && (view.isAdmin || view.isTeacher));
-            break;
-          case "optional":
-            clientAccess = handout !== null ? handout.optional === true : a.va == 1;
-            break;
-          default:
-            // An unknown view marker - a retired name such as `#exam`, or a typo
-            // such as `#variant-privat` - fails closed for every session, an
-            // admin included (rename-view-markers-by-mechanism D1). Letting it
-            // restrict nobody would turn every leftover `#exam` into the private
-            // variant shown to every student.
-            return false;
-        }
-      }
-    }
-    if (clientAccess === null) {
-      clientAccess = false;
-    }
-    return clientAccess;
+    return true;
   } catch (error) {
     console.error(`Error checking client roles: ${error}`);
     // Refuse rather than leave the decision open: the success path already

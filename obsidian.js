@@ -186,37 +186,65 @@ function parseLocalDateTime(value) {
   return Number.isNaN(localDate.getTime()) ? null : localDate;
 }
 
+/**
+ * The window of an entry the server could not read, in whole or in any part
+ * (fail-closed-fence-entries D1). An entry carrying it is closed at every
+ * moment: it admits nobody, and a view marker carrying it can never be
+ * satisfied. It used to be read as no window at all, which made a misspelled
+ * fortnight permanent; and a window with one readable end kept that end alone,
+ * which made it open-ended.
+ */
+export const INVALID_WINDOW = Object.freeze({ invalid: true });
+
+/**
+ * The bracketed part of an entry as `{ start, end }` in milliseconds, either
+ * of them null for an open end; null only when no window was written; and
+ * `INVALID_WINDOW` when one was written that cannot be read as a time, in
+ * whole or in any part.
+ */
 function parsePermissionWindow(rawWindow) {
-  if (!rawWindow || typeof rawWindow !== "string") {
+  if (rawWindow === undefined || rawWindow === null) {
     return null;
+  }
+  if (typeof rawWindow !== "string") {
+    return INVALID_WINDOW;
   }
   const windowText = rawWindow.trim();
   if (!windowText) {
-    return null;
+    return INVALID_WINDOW;
   }
   if (/^to\s+/i.test(windowText)) {
     const endOnly = parseLocalDateTime(windowText.replace(/^to\s+/i, ""));
-    if (!endOnly) return null;
+    if (!endOnly) return INVALID_WINDOW;
     return { start: null, end: endOnly.getTime() };
   }
   const parts = windowText.split(/\s+to\s+/i);
-  let start = null;
-  let end = null;
+  const start = parseLocalDateTime(parts[0]);
+  if (!start) {
+    return INVALID_WINDOW;
+  }
   if (parts.length === 1) {
-    start = parseLocalDateTime(parts[0]);
-  } else if (parts.length >= 2) {
-    start = parseLocalDateTime(parts[0]);
-    end = parseLocalDateTime(parts.slice(1).join(" to "));
+    return { start: start.getTime(), end: null };
   }
-  if (!start && !end) {
-    return null;
+  const end = parseLocalDateTime(parts.slice(1).join(" to "));
+  if (!end) {
+    return INVALID_WINDOW;
   }
-  return {
-    start: start ? start.getTime() : null,
-    end: end ? end.getTime() : null,
-  };
+  return { start: start.getTime(), end: end.getTime() };
 }
 
+/**
+ * One comma-separated token of a directive as `{ role, window }`, or null for
+ * an empty token, which names nobody.
+ *
+ * A non-empty token is never dropped (fail-closed-fence-entries D1). One that
+ * does not match the entry pattern - an empty or unbalanced bracket, text after
+ * the window - is kept as a closed entry, naming the text in front of its first
+ * bracket: a written role that admits nobody, or a view marker that cannot be
+ * satisfied. Dropping it is what let a view marker beside it decide the block
+ * alone. Such an entry, and one whose window cannot be read, also carries the
+ * token as written in `text`, for the log line that names it.
+ */
 function parsePermissionEntry(token) {
   if (typeof token !== "string") {
     return null;
@@ -226,18 +254,16 @@ function parsePermissionEntry(token) {
     return null;
   }
   const match = trimmed.match(/^(?<role>[^\[\]]+?)(?:\s*\[(?<window>.+)\])?$/);
-  if (!match || !match.groups?.role) {
-    return null;
-  }
-  const role = match.groups.role.trim().toLowerCase();
-  if (!role) {
-    return null;
+  const role = match?.groups?.role?.trim().toLowerCase() ?? "";
+  if (!match || !role) {
+    return {
+      role: trimmed.split(/[\[\]]/)[0].trim().toLowerCase(),
+      window: INVALID_WINDOW,
+      text: trimmed,
+    };
   }
   const window = parsePermissionWindow(match.groups.window);
-  return {
-    role,
-    window,
-  };
+  return window === INVALID_WINDOW ? { role, window, text: trimmed } : { role, window };
 }
 
 function parsePermissionEntries(raw) {
@@ -367,6 +393,9 @@ function isPermissionEntryActive(entry, referenceTime = Date.now()) {
   if (!entry.window) {
     return true;
   }
+  if (entry.window.invalid) {
+    return false;
+  }
   const { start, end } = entry.window;
   if (start && referenceTime < start) {
     return false;
@@ -377,14 +406,62 @@ function isPermissionEntryActive(entry, referenceTime = Date.now()) {
   return true;
 }
 
-export function getActivePermissionRoles(permissions, referenceDate = new Date()) {
+/**
+ * A view marker no session satisfies. A view marker whose entry is closed or
+ * unreadable is handed to `hasRoles` as this, so the requirement it states
+ * cannot vanish together with its window: `hasRoles` resolves it as an unknown
+ * marker, which refuses the block to every session, an admin included.
+ */
+const UNSATISFIABLE_MARKER = "#!closed";
+
+/**
+ * What a directive's entries come to at `referenceDate`
+ * (fail-closed-fence-entries D2): `active`, the roles and view markers to hand
+ * to `hasSomeRoles`, and `wroteRoles`, whether the directive names any role or
+ * person at all, open or not.
+ *
+ * Both are needed because filtering alone loses the difference between a
+ * directive that names no role and one whose roles are all closed. The first is
+ * decided by its view markers; the second admits nobody, and used to be decided
+ * by its view markers alone - `@@@ 4ahif[closed] #optional` shown to everyone
+ * with optional blocks on. A closed view marker is kept as
+ * `UNSATISFIABLE_MARKER` for the same reason.
+ */
+export function resolveDirectiveEntries(permissions, referenceDate = new Date()) {
   if (!Array.isArray(permissions) || permissions.length === 0) {
-    return [];
+    return { active: [], wroteRoles: false };
   }
   const referenceTime = referenceDate instanceof Date ? referenceDate.getTime() : referenceDate;
-  return permissions
-    .filter((entry) => isPermissionEntryActive(entry, referenceTime))
-    .map((entry) => entry.role);
+  const active = [];
+  let wroteRoles = false;
+  for (const entry of permissions) {
+    const marker = entry.role.startsWith("#");
+    if (!marker) wroteRoles = true;
+    if (isPermissionEntryActive(entry, referenceTime)) {
+      active.push(entry.role);
+    } else if (marker) {
+      active.push(UNSATISFIABLE_MARKER);
+    }
+  }
+  return { active, wroteRoles };
+}
+
+/**
+ * Whether a directive's entries admit this session at `referenceDate`. Every
+ * reader of a directive decides through here or through
+ * `resolveFileVisibility`, which shares its first step.
+ */
+async function directiveAdmits(req, entries, referenceDate) {
+  const { active, wroteRoles } = resolveDirectiveEntries(entries, referenceDate);
+  if (active.length === 0) {
+    return false;
+  }
+  return hasSomeRoles(req, active, true, { wroteRoles });
+}
+
+/** Whether no entry naming a role or person is open, though one was written. */
+function writtenRolesAllClosed({ active, wroteRoles }) {
+  return wroteRoles && !active.some((role) => !role.startsWith("#"));
 }
 
 /**
@@ -418,17 +495,19 @@ export async function resolveFileVisibility(req, permissions) {
   // that closes between the two would otherwise leave them disagreeing about
   // the same file.
   const { referenceDate } = await getPermissionContext(req);
-  const activeRoles = getActivePermissionRoles(permissions, referenceDate);
-  if (activeRoles.length === 0) {
+  const resolved = resolveDirectiveEntries(permissions, referenceDate);
+  if (resolved.active.length === 0 || writtenRolesAllClosed(resolved)) {
     return { visible: false, reason: "outside-window" };
   }
-  if (await hasSomeRoles(req, activeRoles, true)) {
+  if (await hasSomeRoles(req, resolved.active, true, { wroteRoles: resolved.wroteRoles })) {
     return { visible: true };
   }
   return { visible: false, reason: "role" };
 }
 
 function hasTimedWindow(entry) {
+  // An unreadable window never opens, so nothing is announced for it (D4).
+  if (entry?.window?.invalid) return false;
   return Boolean(entry?.window && (entry.window.start || entry.window.end));
 }
 
@@ -729,6 +808,8 @@ async function readCorpusFile(filePath) {
         : body.slice(0, newline + 1) + stripComments(body.slice(newline + 1));
   return {
     permissions,
+    // The file's line its directive is written on, for the log lines naming it.
+    directiveLine: 1 + bodyLineOffset,
     text,
     // The property values, for `candidatePaths` to propose the file by.
     propertyText: propertyValuesText(properties),
@@ -1128,8 +1209,8 @@ export async function scanFiles(prefix, dir, resetFonts = false, root = dir) {
       const carried = carriedEntries.get(relFullPath);
       const derived =
         carried && carried.mtime === mtime ? carried : await readCorpusFile(absPath);
-      const { permissions, text, propertyText, blocks, references } = derived;
-      currentEntries.set(relFullPath, { mtime, permissions, text, propertyText, blocks, references });
+      const { permissions, directiveLine, text, propertyText, blocks, references } = derived;
+      currentEntries.set(relFullPath, { mtime, permissions, directiveLine, text, propertyText, blocks, references });
       return {
         [file]: {
           path: file,
@@ -1185,6 +1266,7 @@ export async function scanFiles(prefix, dir, resetFonts = false, root = dir) {
   // last one is found without opening the page that embeds it.
   rebuildAttachmentIndex(currentEntries);
   logUnclosedBlocks(currentEntries);
+  logUnreadableWindows(currentEntries);
   grantEpoch += 1;
 
   return { added, removed, modified };
@@ -1393,11 +1475,7 @@ export async function filterForbiddenSegments(md, req) {
         if (entries.length === 0) {
           return false;
         }
-        const activeRoles = getActivePermissionRoles(entries, referenceDate);
-        if (activeRoles.length === 0) {
-          return false;
-        }
-        return hasSomeRoles(req, activeRoles, true);
+        return directiveAdmits(req, entries, referenceDate);
       })
     );
   }
@@ -3420,6 +3498,27 @@ function logUnclosedBlocks(indexEntries) {
     for (const block of entry.blocks) {
       if (block.closed === false) {
         console.log(`[Blocks] unclosed: ${fullPath.slice(dirPrefix.length)}:${block.line}`);
+      }
+    }
+  }
+}
+
+/**
+ * Names every directive entry whose window the server cannot read
+ * (fail-closed-fence-entries D4). Such an entry is closed for good, so what its
+ * author meant to show for a while is never shown - visible on an instance
+ * outside the suite only through this line. Once per entry and scan, beside
+ * `[Blocks] unclosed`.
+ */
+function logUnreadableWindows(indexEntries) {
+  for (const [fullPath, entry] of indexEntries) {
+    const file = fullPath.slice(dirPrefix.length);
+    const sources = [[entry.directiveLine ?? 1, entry.permissions ?? []], ...entry.blocks.map((block) => [block.line, block.entries])];
+    for (const [line, entries] of sources) {
+      for (const permission of entries) {
+        if (permission.window?.invalid) {
+          console.log(`[Permissions] unreadable window: ${file}:${line} ${permission.text}`);
+        }
       }
     }
   }

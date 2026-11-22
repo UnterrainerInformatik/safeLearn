@@ -31,80 +31,82 @@ import { pluginFunction, pluginModule } from "./obsidian/harness.js";
 /**
  * Directive lines and the entries the server keeps for each, in order.
  *
- * `timed` is whether the server keeps a *window* for that entry - not whether
- * the window is open at the moment, which nothing here depends on. An entry the
- * server drops entirely does not appear at all, which is the whole of what
- * "unreadable" means: `parsePermissionEntries` filters it out and the role it
- * named addresses nobody.
+ * `window` is what the server makes of the entry's window: `none` when none was
+ * written, `timed` when it keeps one, and `closed` when the entry is closed at
+ * every moment - a window it cannot read, in whole or in any part, or a token
+ * it cannot read as an entry at all (fail-closed-fence-entries D1). Not whether
+ * a kept window is open at the moment, which nothing here depends on. Only an
+ * empty token is dropped; every other one stays, and a closed one admits nobody.
  */
 const directives = [
   {
     line: "@@@ 4ahif",
-    entries: [{ role: "4ahif", timed: false }],
+    entries: [{ role: "4ahif", window: "none" }],
     why: "A plain role. No window, so the entry is permanently active.",
   },
   {
     line: "@@@ Max Mustermann",
-    entries: [{ role: "max mustermann", timed: false }],
+    entries: [{ role: "max mustermann", window: "none" }],
     why: "A role may contain spaces - being addressed by display name is a documented feature - and is lowercased.",
   },
   {
     line: "@@@ TEACHER",
-    entries: [{ role: "teacher", timed: false }],
+    entries: [{ role: "teacher", window: "none" }],
     why: "`parsePermissionEntry` lowercases the role, so the spelling in the document does not matter.",
   },
   {
     line: "@@@ 4ahif[2025-11-28T08:00:00]",
-    entries: [{ role: "4ahif", timed: true }],
+    entries: [{ role: "4ahif", window: "timed" }],
     why: "A window with one timestamp is a start: the block appears at that moment and stays.",
   },
   {
     line: "@@@ 4ahif [2025-11-28T08:00:00]",
-    entries: [{ role: "4ahif", timed: true }],
+    entries: [{ role: "4ahif", window: "timed" }],
     why: "The pattern allows whitespace between the role and the bracket, and the role is trimmed.",
   },
   {
     line: "@@@ 4ahif[to 2025-11-28T08:00:00]",
-    entries: [{ role: "4ahif", timed: true }],
+    entries: [{ role: "4ahif", window: "timed" }],
     why: "`to X` is an end alone: active until that moment.",
   },
   {
     line: "@@@ 4ahif[2025-11-28T08:00:00 to 2025-12-01T10:00:00]",
-    entries: [{ role: "4ahif", timed: true }],
+    entries: [{ role: "4ahif", window: "timed" }],
     why: "`X to Y` is both ends. The separator needs whitespace on both sides.",
   },
   {
     line: "@@@ 4ahif[2025-11-28T08:00:00+01:00]",
-    entries: [{ role: "4ahif", timed: true }],
+    entries: [{ role: "4ahif", window: "timed" }],
     why: "A timezone suffix takes `parseLocalDateTime` down its other branch, straight to the Date constructor.",
   },
   {
     line: "@@@ 4ahif[2025-11-28T08:00:00Z]",
-    entries: [{ role: "4ahif", timed: true }],
+    entries: [{ role: "4ahif", window: "timed" }],
     why: "`Z` is the other timezone spelling the suffix test accepts.",
   },
   {
     line: "@@@ 4ahif[2025-11-28]",
-    entries: [{ role: "4ahif", timed: true }],
+    entries: [{ role: "4ahif", window: "timed" }],
     why: "A date with no time at all is accepted; the time defaults to midnight.",
   },
   {
     line: "@@@ 4ahif[2025-11-28T08:00]",
-    entries: [{ role: "4ahif", timed: false }],
+    entries: [{ role: "4ahif", window: "closed" }],
     why:
       "The trap this table exists for. A time without seconds leaves `second` undefined rather than " +
       "zero - the guard tests `Number.isNaN(undefined)`, which is false - and the Date constructor " +
-      "turns that into an invalid date. The most natural spelling of a window is the one the server " +
-      "discards, and it discards it silently: the entry survives with no window and is permanently active.",
+      "turns that into an invalid date. The most natural spelling of a window is one the server " +
+      "cannot read, and the entry is closed for good: what the author meant to show for a while is " +
+      "never shown.",
   },
   {
     line: "@@@ 4ahif[2025-11-28 08]",
-    entries: [{ role: "4ahif", timed: false }],
+    entries: [{ role: "4ahif", window: "closed" }],
     why: "The same defect one step further: an hour alone leaves both minute and second undefined.",
   },
   {
     line: "@@@ 4ahif[2025-11-28 ab:cd:ef]",
-    entries: [{ role: "4ahif", timed: true }],
+    entries: [{ role: "4ahif", window: "timed" }],
     why:
       "And the same defect in the other direction: a time segment that is not a number leaves the " +
       "default of zero standing, so this is a valid window at midnight. Missing is fatal, nonsense " +
@@ -112,7 +114,7 @@ const directives = [
   },
   {
     line: "@@@ 4ahif[2025-13-45]",
-    entries: [{ role: "4ahif", timed: true }],
+    entries: [{ role: "4ahif", window: "timed" }],
     why:
       "Accepted, although there is no thirteenth month. The Date constructor rolls the overflow over " +
       "into the following year, and nothing checks the range - so this is a window, and it is not the " +
@@ -120,7 +122,7 @@ const directives = [
   },
   {
     line: "@@@ 4ahif[2025]",
-    entries: [{ role: "4ahif", timed: false }],
+    entries: [{ role: "4ahif", window: "closed" }],
     why:
       "Rejected, but not by a range check: the year alone leaves month undefined, `month - 1` is NaN, " +
       "and the date is invalid. A mirror that reasons about what a date *means* gets this pair wrong " +
@@ -128,98 +130,139 @@ const directives = [
   },
   {
     line: "@@@ 4ahif[gestern]",
-    entries: [{ role: "4ahif", timed: false }],
+    entries: [{ role: "4ahif", window: "closed" }],
     why:
-      "A window that is not a time at all. The entry keeps its role and loses the restriction, which " +
-      "is the case the editor exists to show: the author grants permanently what they meant to bound.",
+      "A window that is not a time at all. The entry keeps its role and is closed: it used to lose " +
+      "the restriction instead, granting permanently what the author meant to bound.",
+  },
+  {
+    line: "@@@ 4bhif[2026-11-01T08:00:00 to nächste Woche]",
+    entries: [{ role: "4bhif", window: "closed" }],
+    why: "Half a window is no window. Keeping the readable start alone would make it open-ended.",
+  },
+  {
+    line: "@@@ 4bhif[gestern to 2026-11-01T08:00:00]",
+    entries: [{ role: "4bhif", window: "closed" }],
+    why: "The other half: an unreadable start with a readable end is closed as well.",
+  },
+  {
+    line: "@@@ 4bhif[to nächste Woche]",
+    entries: [{ role: "4bhif", window: "closed" }],
+    why: "An end alone that cannot be read.",
   },
   {
     line: "@@@ 4ahif[]",
-    entries: [],
+    entries: [{ role: "4ahif", window: "closed" }],
     why:
-      "Empty brackets are not an empty window - the window group needs a character - so the role part " +
-      "would have to contain the brackets, and it may not. The whole entry is discarded.",
+      "Empty brackets are not an empty window - the window group needs a character - so the token " +
+      "does not read as an entry. It is kept as a closed entry naming the text in front of the bracket.",
   },
   {
     line: "@@@ 4ahif]",
-    entries: [],
-    why: "A bracket in the role part makes the token unreadable. It does not make a window.",
+    entries: [{ role: "4ahif", window: "closed" }],
+    why: "A bracket in the role part makes the token unreadable. It does not make a window, and it does not vanish.",
   },
   {
     line: "@@@ 4ahif[2025-11-28T08:00:00] extra",
-    entries: [],
-    why: "The closing bracket has to end the token. Text after it costs the entry, window and role alike.",
+    entries: [{ role: "4ahif", window: "closed" }],
+    why: "The closing bracket has to end the token. Text after it closes the entry, window and role alike.",
   },
   {
     line: "@@@ a[b][c]",
-    entries: [{ role: "a", timed: false }],
-    why: "The window group is greedy and takes `b][c`, which is no time - so the role stands, unbounded.",
+    entries: [{ role: "a", window: "closed" }],
+    why: "The window group is greedy and takes `b][c`, which is no time - so the entry is closed.",
   },
   {
     line: "@@@ [2025-11-28T08:00:00]",
-    entries: [],
-    why: "A window with no role in front of it addresses nobody and is discarded whole.",
+    entries: [{ role: "", window: "closed" }],
+    why: "A window with no role in front of it names nobody. It is still a written role, and a closed one.",
+  },
+  {
+    line: "@@@ #optional[",
+    entries: [{ role: "#optional", window: "closed" }],
+    why: "An unreadable token beginning with the prefix is a closed switch, which no reader ever satisfies.",
   },
   {
     line: "@@@ 4ahif,,5bhif",
     entries: [
-      { role: "4ahif", timed: false },
-      { role: "5bhif", timed: false },
+      { role: "4ahif", window: "none" },
+      { role: "5bhif", window: "none" },
     ],
     why: "An empty token between two commas is dropped and costs its neighbours nothing.",
   },
   {
     line: "@@@ #variant-private",
-    entries: [{ role: "#variant-private", timed: false }],
+    entries: [{ role: "#variant-private", window: "none" }],
     why: "A view switch is an entry like any other here; only `hasRoles` treats the prefix differently.",
   },
   {
     line: "@@@ #variant-public",
-    entries: [{ role: "#variant-public", timed: false }],
+    entries: [{ role: "#variant-public", window: "none" }],
     why: "The complement of #variant-private, resolved against the reader's own preference.",
   },
   {
     line: "@@@ #optional",
-    entries: [{ role: "#optional", timed: false }],
+    entries: [{ role: "#optional", window: "none" }],
     why: "The third switch, resolved against the answers preference.",
   },
   {
     line: "@@@ #nonsense",
-    entries: [{ role: "#nonsense", timed: false }],
+    entries: [{ role: "#nonsense", window: "none" }],
     why:
       "The prefix is recognized more broadly than the three names: `hasRoles` takes every `#` entry " +
       "out of the role test and then resolves exactly three of them. Any other one, this one and the " +
       "retired #exam alike, hides its block from everyone.",
   },
   {
+    line: "@@@ #variant-private #optional",
+    entries: [{ role: "#variant-private #optional", window: "none" }],
+    why:
+      "Entries are separated by commas, switches included. Without the comma this is one switch of " +
+      "an unknown name, and it hides its block from everyone.",
+  },
+  {
+    line: "@@@ #variant-private, #optional",
+    entries: [
+      { role: "#variant-private", window: "none" },
+      { role: "#optional", window: "none" },
+    ],
+    why: "Two switches, combined with AND by `hasRoles`: the teacher-only revealable solution.",
+  },
+  {
     line: "@@@ #variant-private[2025-01-01T00:00:00]",
-    entries: [{ role: "#variant-private", timed: true }],
-    why: "A switch may carry a window. The two conclusions are independent of one another.",
+    entries: [{ role: "#variant-private", window: "timed" }],
+    why: "A switch may carry a window. While it is shut, the switch cannot be satisfied.",
   },
   {
     line: "@@@ to 2025-01-01T00:00:00",
-    entries: [{ role: "to 2025-01-01t00:00:00", timed: false }],
+    entries: [{ role: "to 2025-01-01t00:00:00", window: "none" }],
     why: "Without brackets there is no window to read. The whole text is a role, and it addresses nobody.",
   },
   {
     line: "@@@ 4ahif, teacher[2025-01-01T00:00:00], #variant-private, ]kaputt, 5bhif[gestern]",
     entries: [
-      { role: "4ahif", timed: false },
-      { role: "teacher", timed: true },
-      { role: "#variant-private", timed: false },
-      { role: "5bhif", timed: false },
+      { role: "4ahif", window: "none" },
+      { role: "teacher", window: "timed" },
+      { role: "#variant-private", window: "none" },
+      { role: "", window: "closed" },
+      { role: "5bhif", window: "closed" },
     ],
     why:
-      "One directive holding every kind at once. The unreadable fourth token costs the four around " +
-      "it nothing - which is what the plugin's marking has to show as well.",
+      "One directive holding every kind at once. The unreadable fourth token and the broken window " +
+      "of the fifth close themselves and nothing else - which is what the plugin's marking has to " +
+      "show as well.",
   },
   {
     line: "@@@ ]a, b[, [c]",
-    entries: [],
+    entries: [
+      { role: "", window: "closed" },
+      { role: "b", window: "closed" },
+      { role: "", window: "closed" },
+    ],
     why:
-      "A directive with nothing readable in it. `removeForbiddenContent` replaces such a block with " +
-      "the empty string, so it is withheld from every reader including an admin - the harshest thing " +
-      "a directive can do, and the least visible.",
+      "A directive with nothing open in it. `removeForbiddenContent` replaces such a block with the " +
+      "empty string, so it is withheld from every reader including an admin - the harshest thing a " +
+      "directive can do, and the least visible.",
   },
   {
     line: "@@@",
@@ -234,7 +277,10 @@ const directives = [
 function serverEntries(line) {
   const parsed = parseFirstLineForPermissions(line);
   assert.notEqual(parsed, null, `${JSON.stringify(line)} is not a directive line to the server at all.`);
-  return parsed.map((entry) => ({ role: entry.role, timed: entry.window !== null }));
+  return parsed.map((entry) => ({
+    role: entry.role,
+    window: entry.window === null ? "none" : entry.window.invalid ? "closed" : "timed",
+  }));
 }
 
 test("the server reads every directive of the table the way the table says", () => {
@@ -293,6 +339,7 @@ function pluginEntries(parse, line) {
   const entries = parse(line);
   assert.notEqual(entries, null, `${JSON.stringify(line)} is not a directive line to the plugin at all.`);
   return Array.from(entries, (entry) => ({
+    text: entry.text,
     index: entry.index,
     length: entry.length,
     role: entry.role === null ? null : { index: entry.role.index, length: entry.role.length, text: entry.role.text },
@@ -303,18 +350,28 @@ function pluginEntries(parse, line) {
     readable: entry.readable,
     timed: entry.timed,
     brokenWindow: entry.brokenWindow,
+    closed: entry.closed,
     viewSwitch: entry.viewSwitch,
     resolvedSwitch: entry.resolvedSwitch,
+    conflictingSwitch: entry.conflictingSwitch,
   }));
+}
+
+/** The entries the plugin says the server keeps, in the table's own form. */
+function pluginKept(parse, line) {
+  return pluginEntries(parse, line)
+    .filter((entry) => entry.text !== "")
+    .map((entry) => ({
+      role: entry.role?.text ?? null,
+      window: entry.closed ? "closed" : entry.timed ? "timed" : "none",
+    }));
 }
 
 test("the plugin reaches the server's conclusion about every entry", async () => {
   const parse = await pluginGrammar();
 
   for (const { line, entries, why } of directives) {
-    const kept = pluginEntries(parse, line)
-      .filter((entry) => entry.readable)
-      .map((entry) => ({ role: entry.role.text, timed: entry.timed }));
+    const kept = pluginKept(parse, line);
 
     assert.deepEqual(
       kept,
@@ -333,7 +390,7 @@ test("the plugin tells a view switch from an address the way hasRoles does", asy
   const resolved = ["#variant-private", "#variant-public", "#optional"];
 
   for (const { line, why } of directives) {
-    const kept = pluginEntries(parse, line).filter((entry) => entry.readable);
+    const kept = pluginEntries(parse, line).filter((entry) => entry.text !== "");
     const server = serverEntries(line);
 
     assert.deepEqual(
@@ -393,7 +450,7 @@ test("every entry the plugin reports covers the text it is about", async () => {
         entry.window !== null && !entry.timed,
         `${JSON.stringify(line)} - an entry is broken exactly when a window was written and the ` +
           `server will not keep it. That is the case the editor exists to show, because the entry ` +
-          `survives it unbounded and nothing else anywhere reports it.`
+          `is closed for good by it and nothing else but a server log line reports it.`
       );
     }
   }
@@ -401,23 +458,24 @@ test("every entry the plugin reports covers the text it is about", async () => {
 
 test("the table covers every conclusion the grammar has to reach", () => {
   const kept = directives.flatMap((row) => row.entries);
+  const known = ["#variant-private", "#variant-public", "#optional"];
   const reached = {
-    "a plain role": kept.some((e) => !e.timed && !e.role.startsWith("#")),
+    "a plain role": kept.some((e) => e.window === "none" && !e.role.startsWith("#")),
     "a role with spaces": kept.some((e) => e.role.includes(" ")),
-    "a window the server keeps": kept.some((e) => e.timed),
-    "a window the server discards": directives.some((row) =>
-      row.entries.some((e) => !e.timed) && /\[[^\]]/.test(row.line)
+    "a window the server keeps": kept.some((e) => e.window === "timed"),
+    "a window the server cannot read": directives.some((row) =>
+      row.entries.some((e) => e.window === "closed") && /\[[^\]]+\]$/.test(row.line)
     ),
-    "a token the server discards whole": directives.some(
-      (row) => row.entries.length < row.line.slice(3).split(",").length
+    "half a window": directives.some((row) => / to /.test(row.line) && row.entries.some((e) => e.window === "closed")),
+    "a token that does not read as an entry": kept.some((e) => e.role === ""),
+    "an empty token, dropped": directives.some((row) => row.line.includes(",,")),
+    "each of the three view switches": known.every((name) => kept.some((e) => e.role === name)),
+    "a switch that is none of the three": kept.some((e) => e.role.startsWith("#") && !known.includes(e.role)),
+    "two switches in one directive": directives.some((row) => row.entries.filter((e) => known.includes(e.role)).length > 1),
+    "a directive with nothing open in it": directives.some(
+      (row) => row.entries.length > 0 && row.entries.every((e) => e.window === "closed")
     ),
-    "each of the three view switches": ["#variant-private", "#variant-public", "#optional"].every((name) =>
-      kept.some((e) => e.role === name)
-    ),
-    "a switch that is none of the three": kept.some(
-      (e) => e.role.startsWith("#") && !["#variant-private", "#variant-public", "#optional"].includes(e.role)
-    ),
-    "a directive with nothing readable in it": directives.some((row) => row.entries.length === 0),
+    "a directive with nothing in it": directives.some((row) => row.entries.length === 0),
   };
 
   assert.deepEqual(
@@ -427,5 +485,57 @@ test("the table covers every conclusion the grammar has to reach", () => {
     [],
     "The table lost a case it was written to carry. Each of these is a conclusion the plugin's " +
       "grammar has to reach, and a row that stops covering one takes the check for it with it."
+  );
+});
+
+/**
+ * What the plugin marks on a whole directive, against what the server does with
+ * it: a directive withheld from every reader, and the two variants named
+ * together (`plugin-editor-decorations`).
+ */
+test("the plugin marks a directive withheld exactly where the server refuses everyone", async () => {
+  const module = await pluginModule();
+  const parse = pluginFunction(module, "parseDirectiveEntries");
+  const withholds = pluginFunction(module, "withholdsFromEveryone");
+  const cases = [
+    ["@@@ 4ahif", false],
+    ["@@@ ]a, b[, [c]", true],
+    ["@@@ teacher[morgen]", true],
+    ["@@@ 4ahif[gestern], #optional", true],
+    ["@@@ 4ahif [], #optional", true],
+    ["@@@ teacher, 4ahif[gestern], #optional", false],
+    ["@@@ #optional", false],
+    ["@@@", true],
+  ];
+  for (const [line, expected] of cases) {
+    assert.equal(
+      withholds(parse(line)),
+      expected,
+      `${JSON.stringify(line)} - the server refuses a directive to everyone when every entry is ` +
+        `closed, or when it names roles and all of them are closed; the switches beside them do ` +
+        `not decide in their place.`
+    );
+  }
+});
+
+test("the plugin marks both variants in one directive, and only then", async () => {
+  const parse = await pluginGrammar();
+  for (const line of ["@@@ #variant-public, 4ahif, #variant-private", "@@@ #variant-private, #variant-public"]) {
+    const switches = pluginEntries(parse, line).filter((entry) => entry.viewSwitch);
+    assert.deepEqual(
+      switches.map((entry) => [entry.role.text, entry.resolvedSwitch, entry.conflictingSwitch]),
+      [...switches].map((entry) => [entry.role.text, true, true]),
+      `${JSON.stringify(line)} - the server combines switches with AND and the two variants are ` +
+        `complements, so the block is hidden from everyone; both are marked as the error.`
+    );
+  }
+  const solution = pluginEntries(parse, "@@@ #variant-private, #optional");
+  assert.deepEqual(
+    solution.map((entry) => [entry.role.text, entry.resolvedSwitch, entry.conflictingSwitch]),
+    [
+      ["#variant-private", true, false],
+      ["#optional", true, false],
+    ],
+    "A variant combined with the optional switch is two working switches."
   );
 });
