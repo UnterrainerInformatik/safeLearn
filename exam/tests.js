@@ -485,11 +485,29 @@ export function getTest(db, id) {
       yearName: course.year.name,
       yearClosed: course.year.closed,
     },
+    // The test's column in its course's sheet, by the sheet's key, or null
+    // while it has none (`test-evaluation`, design D2).
+    column: sheetColumn(db, row, course),
     started: started > 0,
     attempts: { started, submitted },
     questions: testQuestions(db, id),
     sittings: testSittings(db, id),
   };
+}
+
+/**
+ * A test's column in its course's sheet, by the key the sheet gives it: an
+ * online test's `test-<id>` once it has a sitting, an offline test's manual
+ * column id. Null while there is none, and while the column's category is not
+ * in use (weighted 0 %), since the sheet then hides it.
+ */
+function sheetColumn(db, row, course) {
+  if (row.kind === "offline") {
+    const column = row.assessment_id === null || row.assessment_id === undefined ? null : db.prepare("SELECT kind FROM assessment WHERE id = ?").get(row.assessment_id);
+    return column && course.categoriesInUse.includes(entryCategory[column.kind]) ? row.assessment_id : null;
+  }
+  const sat = db.prepare("SELECT 1 FROM sitting WHERE test_id = ? LIMIT 1").get(row.id);
+  return sat && course.categoriesInUse.includes("onlineTests") ? `test-${row.id}` : null;
 }
 
 /**

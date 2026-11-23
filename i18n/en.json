@@ -1125,6 +1125,23 @@
       "variablesHeading": "Variables",
       "variablesMissing": "Variables without a value:",
       "variablesNote": "A handout marks what changes from test to test with %%var NAME%%, a name in capital letters. Each name gets one value here, shared by both handouts, and can be corrected at any time, during the window too: students see the new value on reload. A name without a value blocks the start."
+    },
+    "evaluation": {
+      "averageGrade": "Average grade",
+      "averagePercent": "Average percentage",
+      "close": "Close",
+      "count": "Number",
+      "dialog": "Evaluation",
+      "distribution": "Grade distribution",
+      "grade": "Grade",
+      "loading": "Loading the evaluation…",
+      "missing": "Without a result",
+      "noResults": "No results yet.",
+      "open": "Evaluation",
+      "openFor": "Evaluation of {name}",
+      "results": "Results",
+      "share": "Share",
+      "title": "Evaluation: {name}"
     }
   }
 }

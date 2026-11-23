@@ -37,7 +37,7 @@ A result's grade SHALL be the grade the sheet shows for it: the grading scale ap
 
 #### Scenario: A test out of 24
 
-- **WHEN** the scale is 88/75/63/50, the manual-test column `1st test` is out of 24, and four students have the results 24, 18, 15 and 10
+- **WHEN** the scale is 88/75/63/50, the manual-test column `1st test` is out of 24, and four students have the results 22, 18, 16 and 11
 - **THEN** the distribution reads one 1, one 2, one 3, none 4 and one 5
 - **AND** the average grade is 2,8 and the average percentage 70 %
 

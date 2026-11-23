@@ -859,6 +859,7 @@ describe("the gradebook", () => {
       ["GET", "/exam/api/scale"],
       ["PUT", "/exam/api/scale", { thresholds: { 1: 10, 2: 8, 3: 6, 4: 4 } }],
       ["GET", "/exam/api/course-lookup?class=9xgb&subject=GB"],
+      ["GET", `/exam/api/courses/${course.id}/columns/${test1.id}/evaluation`],
     ];
     const pages = [`/exam/courses/${course.id}/gradebook`, `/exam/courses/${course.id}/students/${other}`, "/exam/scale"];
     const probe = async (session) => {
@@ -890,6 +891,10 @@ describe("the gradebook", () => {
     assert.deepEqual(after.json.entries.map((e) => [e.name, e.points]), [["1st test", 6]], "nothing a refused request asked for happened");
     assert.equal(after.json.semesters.ws.override, null);
     assert.equal((await fetchAs(teacher, "/exam/api/scale")).json[0].minPercent, 88);
+    const evaluation = await fetchAs(teacher, `/exam/api/courses/${course.id}/columns/${test1.id}/evaluation`);
+    assert.equal(evaluation.status, 200, "a teacher gets the evaluation the student was refused");
+    assert.equal(evaluation.json.column.name, "1st test");
+    assert.ok(evaluation.json.results >= 1, `the evaluation counts ${evaluation.json.results} results`);
   });
 
   test("the page's elements: the results for everyone, the gradebook for a teacher only", async () => {
@@ -2980,10 +2985,10 @@ describe("online tests: writing", () => {
     assert.deepEqual(cell, { text: "2/2", fields: 0, notes: 1 }, "shown, nothing to type into but a note field");
     const head = await teacher.page.$eval(`th[data-column="${column.id}"]`, (th) => ({
       link: th.querySelector("a")?.getAttribute("href"),
-      linked: [...th.children].map((child) => child.localName).join() === "a" && Boolean(th.querySelector("a > .sl-exam-column-day")),
-      edit: Boolean(th.querySelector("button")),
+      linked: [...th.children].map((child) => child.className || child.localName).join() === "a,sl-exam-column-evaluation" && Boolean(th.querySelector("a > .sl-exam-column-day")),
+      edit: Boolean(th.querySelector("button.sl-exam-column-edit")),
     }));
-    assert.deepEqual(head, { link: `/exam/tests/${written.id}`, linked: true, edit: false }, "its date links to the test, and nothing in it opens a dialog");
+    assert.deepEqual(head, { link: `/exam/tests/${written.id}`, linked: true, edit: false }, "its date links to the test, its evaluation button sits beside the link, and nothing in it opens a dialog");
 
     // The arrow keys pass over the online columns: they are the sheet's first,
     // so left from the first manual field stays there, and right goes on.
@@ -3035,6 +3040,186 @@ describe("online tests: writing", () => {
       assert.deepEqual(shown, { name: quiz, label: `Open the test ${quiz}`, transform: "none" });
     } finally {
       await fetchAs(teacher, `/exam/api/tests/${written.id}`, { method: "PUT", body: { name: "Writing" } });
+    }
+  });
+
+  test("a test's evaluation opens as a popup from the sheet's header and from the test's page, with the same numbers", async () => {
+    const page = teacher.page;
+    const tests = (await fetchAs(teacher, `/exam/api/tests?course=${course.id}`)).json.groups[0].tests;
+    const written = tests.find((t) => t.name === "Writing");
+    const online = `test-${written.id}`;
+    const username = student.username.toLowerCase();
+    const startsOn = (await fetchAs(teacher, "/exam/api/years")).json.current.startsOn;
+    const created = [];
+    const add = async (body) => {
+      const answer = await fetchAs(teacher, `/exam/api/courses/${course.id}/assessments`, { method: "POST", body: { date: startsOn, ...body } });
+      assert.equal(answer.status, 200, JSON.stringify(answer.json));
+      created.push(answer.json.id);
+      return answer.json;
+    };
+    /** The open popup's numbers: the count per grade and the summary's lines, once it has loaded. */
+    const shown = async () => {
+      await page.waitForSelector("dialog.sl-exam-evaluation[open][data-ready]", { timeout: 10000 });
+      return page.evaluate(() => {
+        const dialog = document.querySelector("dialog.sl-exam-evaluation[open]");
+        return {
+          dialogs: document.querySelectorAll("dialog[open]").length,
+          distribution: [...dialog.querySelectorAll("tbody tr")].map((tr) => [tr.dataset.grade, tr.querySelector(".sl-exam-evaluation-count").textContent, tr.querySelector(".sl-exam-evaluation-bar").dataset.tone ?? null]),
+          summary: Object.fromEntries([...dialog.querySelectorAll("dd[data-summary]")].map((dd) => [dd.dataset.summary, dd.textContent])),
+        };
+      });
+    };
+    const closed = () => page.waitForFunction(() => !document.querySelector("dialog[open]"), { timeout: 5000 });
+    const setDark = (dark) =>
+      page.evaluate((on) => {
+        for (const element of document.querySelectorAll("body, #markdown-content")) element.classList.toggle("dark-mode", on);
+      }, dark);
+    try {
+      // A paper test of 24 with two results, a participation round, and paper tests up to nine columns.
+      const paper = await add({ kind: "test", name: "Evaluation check", maxPoints: 24 });
+      assert.equal((await fetchAs(teacher, `/exam/api/assessments/${paper.id}/results/${username}`, { method: "PUT", body: { points: 22 } })).status, 200);
+      assert.equal((await fetchAs(teacher, `/exam/api/assessments/${paper.id}/results/gb-other-student`, { method: "PUT", body: { points: 11 } })).status, 200);
+      const round = await add({ kind: "plusminus" });
+      const columns = (await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=ws`)).json.columns.length;
+      for (let n = columns; n < 9; n++) await add({ kind: "test", name: `Width ${n}`, maxPoints: 10 });
+
+      const api = (await fetchAs(teacher, `/exam/api/courses/${course.id}/columns/${paper.id}/evaluation`)).json;
+      assert.deepEqual([api.distribution, api.results], [{ 1: 1, 2: 0, 3: 0, 4: 0, 5: 1 }, 2]);
+
+      await openPage(page, `/exam/courses/${course.id}/gradebook?semester=ws`, `th[data-column="${paper.id}"] .sl-exam-column-evaluation`);
+      const heads = await page.evaluate((roundId) => ({
+        round: Boolean(document.querySelector(`th[data-column="${roundId}"] .sl-exam-column-evaluation`)),
+        label: document.querySelector("th .sl-exam-column-evaluation")?.getAttribute("aria-label"),
+      }), String(round.id));
+      assert.equal(heads.round, false, "a participation column has no evaluation button");
+      assert.match(heads.label, /^Evaluation of /, "the button is named by its column");
+
+      // The evaluation buttons make the header of a sheet of nine and more columns no wider.
+      const widths = await page.evaluate(() => {
+        const table = document.querySelector(".sl-exam-sheet");
+        const before = table.getBoundingClientRect().width;
+        const buttons = [...table.querySelectorAll(".sl-exam-column-evaluation")];
+        const places = buttons.map((button) => [button.parentElement, button.nextSibling]);
+        buttons.forEach((button) => button.remove());
+        const without = table.getBoundingClientRect().width;
+        places.forEach(([parent, next], index) => parent.insertBefore(buttons[index], next));
+        return { before, without, columns: table.querySelectorAll("thead th[data-column]").length, buttons: buttons.length };
+      });
+      assert.ok(widths.columns >= 9 && widths.buttons >= 2, `columns ${widths.columns}, buttons ${widths.buttons}`);
+      assert.ok(widths.before - widths.without <= 4, `the header grew by ${widths.before - widths.without}px`);
+
+      // From the sheet: the evaluation, not the column's dialog; Escape leaves the sheet as it was.
+      const before = await page.evaluate(() => {
+        const scroller = document.querySelector(".sl-exam-scroll");
+        scroller.scrollLeft = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
+        return { scroll: scroller.scrollLeft, url: location.href };
+      });
+      await click(page, `th[data-column="${paper.id}"] .sl-exam-column-evaluation`);
+      const fromSheet = await shown();
+      // The averages in the reader's format, as the page writes them: 3.0 / 3,0 and 69% / 69 %.
+      const formatted = await page.evaluate(() => {
+        const locale = document.documentElement.dataset.slLocale || document.documentElement.lang;
+        return {
+          averageGrade: new Intl.NumberFormat(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(3),
+          averageFraction: new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 0 }).format(33 / 48),
+        };
+      });
+      assert.deepEqual(
+        fromSheet,
+        {
+          dialogs: 1,
+          distribution: [["1", "1", "good"], ["2", "0", "good"], ["3", "0", null], ["4", "0", null], ["5", "1", "bad"]],
+          summary: { ...formatted, results: "2", missing: fromSheet.summary.missing },
+        },
+        "the paper test's grades, (22 + 11) / 48 and the average grade of a 1 and a 5"
+      );
+      assert.equal(Number(fromSheet.summary.missing), api.missing);
+      await page.keyboard.press("Escape");
+      await closed();
+      const after = await page.evaluate(() => ({ scroll: document.querySelector(".sl-exam-scroll").scrollLeft, url: location.href, dialogs: document.querySelectorAll("dialog").length }));
+      assert.deepEqual(after, { ...before, dialogs: 0 }, "the same semester at the same scroll position, the popup gone");
+
+      // A click on the shaded page closes it too; the header's own button still opens the column's dialog.
+      await click(page, `th[data-column="${paper.id}"] .sl-exam-column-evaluation`);
+      await shown();
+      await page.mouse.click(3, 3);
+      await closed();
+      await click(page, `th[data-column="${paper.id}"] button.sl-exam-column-edit`);
+      await page.waitForSelector("dialog[open] .sl-exam-column-close", { timeout: 5000 });
+      assert.equal(await page.$("dialog.sl-exam-evaluation"), null, "the header's button opens the column's dialog, not the evaluation");
+      await click(page, "dialog[open] .sl-exam-column-close");
+      await closed();
+
+      // Light and dark mode: legible text, the green and red bars standing out; dark mode dark, neutral bars too.
+      const looks = () => page.evaluate(() => {
+        const luminance = (colour) => {
+          const [r, g, b] = colour.match(/[\d.]+/g).slice(0, 3).map((v) => {
+            const c = Number(v) / 255;
+            return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+          });
+          return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        };
+        const contrast = (a, b) => {
+          const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+          return (hi + 0.05) / (lo + 0.05);
+        };
+        const dialog = document.querySelector("dialog.sl-exam-evaluation[open]");
+        const background = getComputedStyle(dialog).backgroundColor;
+        const bar = (grade) => getComputedStyle(dialog.querySelector(`tr[data-grade="${grade}"] .sl-exam-evaluation-bar`)).backgroundColor;
+        return {
+          background: luminance(background),
+          text: contrast(getComputedStyle(dialog.querySelector("dd")).color, background),
+          neutral: luminance(bar(3)),
+          good: contrast(bar(1), background),
+          bad: contrast(bar(5), background),
+        };
+      });
+      await click(page, `th[data-column="${paper.id}"] .sl-exam-column-evaluation`);
+      await shown();
+      const light = await looks();
+      assert.ok(light.background > 0.8 && light.text >= 4.5, `the light popup is legible: ${JSON.stringify(light)}`);
+      assert.ok(light.good >= 3 && light.bad >= 3, `the green and red bars stand out in light mode: ${light.good}, ${light.bad}`);
+      await click(page, "dialog.sl-exam-evaluation[open] .sl-exam-evaluation-close");
+      await closed();
+      await setDark(true);
+      await click(page, `th[data-column="${paper.id}"] .sl-exam-column-evaluation`);
+      await shown();
+      const dark = await looks();
+      assert.ok(dark.background < 0.05, `the popup's background is dark: ${dark.background}`);
+      assert.ok(dark.text >= 4.5, `its text is legible: ${dark.text}`);
+      assert.ok(dark.neutral < 0.25, `a neutral bar is a dark-mode grey: ${dark.neutral}`);
+      assert.ok(dark.good >= 3 && dark.bad >= 3, `the green and red bars stand out: ${dark.good}, ${dark.bad}`);
+      await click(page, "dialog.sl-exam-evaluation[open] .sl-exam-evaluation-close");
+      await closed();
+      await setDark(false);
+
+      // The online test: from its header, then from its page, the same numbers.
+      await click(page, `th[data-column="${online}"] .sl-exam-column-evaluation`);
+      const onlineFromSheet = await shown();
+      assert.equal(page.url(), before.url, "the page stays on the sheet");
+      await page.keyboard.press("Escape");
+      await closed();
+      await openPage(page, `/exam/tests/${written.id}`, ".sl-exam-test-actions .sl-exam-test-evaluation");
+      await click(page, ".sl-exam-test-evaluation");
+      const onlineFromPage = await shown();
+      assert.deepEqual(onlineFromPage, onlineFromSheet, "the test's page and the sheet show the same evaluation");
+      assert.equal(onlineFromPage.summary.results, "1", "the one submitted attempt");
+      await page.keyboard.press("Escape");
+      await closed();
+
+      // A test without a sitting has no column and offers no evaluation.
+      const assembled = await fetchAs(teacher, `/exam/api/courses/${course.id}/tests`, { method: "POST", body: { name: "Only assembled", questionIds: questions.map((q) => q.id) } });
+      assert.equal(assembled.status, 200, JSON.stringify(assembled.json));
+      try {
+        assert.equal((await fetchAs(teacher, `/exam/api/tests/${assembled.json.id}`)).json.column, null);
+        await openPage(page, `/exam/tests/${assembled.json.id}`, ".sl-exam-test-actions");
+        assert.equal(await page.$(".sl-exam-test-evaluation"), null, "no evaluation before the first sitting");
+      } finally {
+        await fetchAs(teacher, `/exam/api/tests/${assembled.json.id}`, { method: "DELETE" });
+      }
+    } finally {
+      await setDark(false).catch(() => {});
+      for (const id of created) await fetchAs(teacher, `/exam/api/assessments/${id}`, { method: "DELETE" });
     }
   });
 
@@ -4271,6 +4456,19 @@ describe("offline tests and their handouts", () => {
     assert.deepEqual(shown.previews, [`/exam/tests/${offline.id}/handouts/A/preview`, `/exam/tests/${offline.id}/handouts/B/preview`]);
     assert.deepEqual(shown.solutions, [`/exam/tests/${offline.id}/handouts/A/solution`], "a solution only for the handout with exam or answer blocks");
     assert.equal(shown.questions, false, "no questions");
+
+    // Its column is there from the start, so the page offers its evaluation (`test-evaluation`).
+    assert.equal(typeof (await fetchAs(teacher, `/exam/api/tests/${offline.id}`)).json.column, "number");
+    await click(page, ".sl-exam-test-actions .sl-exam-test-evaluation");
+    await page.waitForSelector("dialog.sl-exam-evaluation[open][data-ready]", { timeout: 10000 });
+    const evaluation = await page.$eval("dialog.sl-exam-evaluation[open]", (dialog) => ({
+      title: dialog.querySelector(".sl-exam-evaluation-title").textContent,
+      results: dialog.querySelector('dd[data-summary="results"]').textContent,
+      averages: dialog.querySelectorAll('dd[data-summary^="average"]').length,
+    }));
+    assert.deepEqual(evaluation, { title: "Evaluation: POS Langtest 1", results: "0", averages: 0 }, "no result yet, so no averages");
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.querySelector("dialog[open]"), { timeout: 5000 });
 
     const list = (await fetchAs(teacher, `/exam/api/tests?course=${course.id}`)).json.groups[0].tests;
     assert.deepEqual(list.map((t) => [t.name, t.kind]), [["POS Langtest 1", "offline"]]);
@@ -6717,7 +6915,7 @@ describe("the module's actions", () => {
           head: [...document.querySelectorAll(".sl-exam-test-actions .sl-exam-action")].map((el) => el.className.match(/sl-exam-test-\w+/)[0]),
         };
       });
-      assert.deepEqual(order, { beforeQuestions: true, besideRename: true, head: ["sl-exam-test-preview", "sl-exam-test-solution", "sl-exam-test-add"] });
+      assert.deepEqual(order, { beforeQuestions: true, besideRename: true, head: ["sl-exam-test-preview", "sl-exam-test-solution", "sl-exam-test-add", "sl-exam-test-evaluation"] }, "with a sitting the test has a column, so its evaluation is among the actions");
 
       // A window shorter than the attempt is refused; the reason stands at the sitting.
       const li = `li[data-sitting="${sitting.id}"]`;

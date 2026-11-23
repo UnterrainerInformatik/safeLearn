@@ -2924,3 +2924,143 @@ sl-date-input .sl-date-input-grid button.is-disabled {
   font-size: 0.8em;
   color: var(--sl-exam-group-b-fg);
 }
+
+/* A test's evaluation for its class (`test-evaluation`): a popup with the
+   grade distribution as bars in the grade colours of the rows (`data-tone`),
+   each count written beside its bar, and the averages below. The body fills
+   the dialog, so a click on the dialog itself is one on its backdrop. The
+   dialog's dark mode is `.sl-exam-dialog`'s; the bars take the dark tone
+   colours there, and a neutral bar the page's muted grey. */
+.sl-exam-dialog.sl-exam-evaluation {
+  padding: 0;
+  width: min(26em, calc(100vw - 32px));
+}
+
+.sl-exam-evaluation-body {
+  padding: 16px 20px;
+}
+
+.sl-exam-evaluation-title {
+  margin: 0 0 2px;
+  font-size: 1.15em;
+}
+
+.sl-exam-evaluation-meta {
+  margin: 0 0 12px;
+  opacity: 0.8;
+}
+
+.sl-exam-evaluation-bars {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.sl-exam-evaluation-bars caption {
+  text-align: left;
+  font-weight: 600;
+  padding-bottom: 4px;
+}
+
+.sl-exam-evaluation-bars th,
+.sl-exam-evaluation-bars td {
+  padding: 3px 4px;
+  border: none;
+  background: none;
+}
+
+.sl-exam-evaluation-bars thead th {
+  font-weight: normal;
+  font-size: 0.85em;
+  opacity: 0.8;
+  text-align: left;
+}
+
+.sl-exam-evaluation-bars tbody th {
+  width: 2em;
+  text-align: center;
+}
+
+.sl-exam-evaluation-track {
+  width: 100%;
+}
+
+.sl-exam-evaluation-bar {
+  display: block;
+  height: 1.1em;
+  min-width: 2px;
+  border-radius: 2px;
+  background-color: #b4bcc6;
+}
+
+.sl-exam-evaluation-bar[data-tone] {
+  background-color: var(--sl-exam-tone);
+}
+
+.sl-exam-evaluation-count {
+  min-width: 2.5em;
+  text-align: right;
+}
+
+.sl-exam-evaluation-empty {
+  margin: 8px 0 0;
+}
+
+.sl-exam-evaluation-summary {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  margin: 12px 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.sl-exam-evaluation-summary dt {
+  font-weight: normal;
+}
+
+.sl-exam-evaluation-summary dd {
+  margin: 0;
+  text-align: right;
+  font-weight: 600;
+}
+
+.sl-exam-evaluation-actions {
+  margin: 16px 0 0;
+  text-align: right;
+}
+
+#markdown-content.dark-mode .sl-exam-evaluation-bar {
+  background-color: #6b7480;
+}
+
+#markdown-content.dark-mode .sl-exam-evaluation-bar[data-tone] {
+  background-color: var(--sl-exam-tone);
+}
+
+/* The header's evaluation button: one small glyph beside the header's button
+   or link, never inside it. It sits in the cell's bottom-right corner, beside
+   the maximum, and above the `::after` with which the header's button or link
+   covers the cell, so it is chosen on its own and the header grows no wider. */
+#markdown-content .sl-exam-sheet th.sl-exam-column-head:has(> .sl-exam-column-evaluation) {
+  position: relative;
+}
+
+.sl-exam-column-evaluation {
+  position: absolute;
+  right: 1px;
+  bottom: 2px;
+  z-index: 1;
+  padding: 0 2px;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.sl-exam-column-evaluation:hover,
+.sl-exam-column-evaluation:focus-visible {
+  opacity: 1;
+}

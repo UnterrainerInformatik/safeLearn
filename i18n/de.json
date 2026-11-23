@@ -1125,6 +1125,23 @@
       "variablesHeading": "Variablen",
       "variablesMissing": "Variablen ohne Wert:",
       "variablesNote": "Eine Angabe markiert, was sich von Test zu Test ändert, mit %%var NAME%%, einem Namen in Großbuchstaben. Jeder Name bekommt hier einen Wert, gemeinsam für beide Angaben, und lässt sich jederzeit korrigieren, auch während des Fensters: Schüler:innen sehen den neuen Wert beim Neuladen. Ein Name ohne Wert sperrt den Start."
+    },
+    "evaluation": {
+      "averageGrade": "Notenschnitt",
+      "averagePercent": "Durchschnitt in Prozent",
+      "close": "Schließen",
+      "count": "Anzahl",
+      "dialog": "Auswertung",
+      "distribution": "Notenverteilung",
+      "grade": "Note",
+      "loading": "Auswertung wird geladen…",
+      "missing": "Ohne Ergebnis",
+      "noResults": "Noch keine Ergebnisse.",
+      "open": "Auswertung",
+      "openFor": "Auswertung von {name}",
+      "results": "Ergebnisse",
+      "share": "Anteil",
+      "title": "Auswertung: {name}"
     }
   }
 }

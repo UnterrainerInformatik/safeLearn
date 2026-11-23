@@ -1010,6 +1010,43 @@ export function courseOverview(db, courseId, semester) {
   };
 }
 
+/** The categories whose columns have an evaluation (`test-evaluation`). */
+const evaluatedCategories = Object.freeze(["onlineTests", "manualTests", "shortTests"]);
+
+/**
+ * One test column's evaluation for its course (`test-evaluation`, design D1):
+ * the column's name, date and category, how many results have each grade
+ * from 1 to 5, how many students have a result and how many on the roster
+ * (not left) have none, and the unrounded mean grade and fraction - null
+ * without a result. `columnKey` is the sheet's key: a manual column's id or
+ * `test-<id>` for an online test. The results are the sheet's, from
+ * `courseEntries`: only submitted attempts, a factor A:B applied. A column
+ * not on the sheet, or of a category without an evaluation, is refused.
+ */
+export function evaluateColumn(db, courseId, columnKey) {
+  const course = getCourse(db, courseId);
+  const key = String(columnKey ?? "");
+  const column = courseColumns(db, courseId).find((candidate) => String(candidate.id) === key);
+  if (!column || !evaluatedCategories.includes(column.category)) throw new NotFoundError("exam.errors.gradebook.noColumn", { id: key });
+  const roster = rosterOf(db, course.classId);
+  const onRoster = new Set(roster.map((student) => student.username));
+  const entries = courseEntries(db, course, readScale(db)).filter((entry) => String(entry.columnId) === key && onRoster.has(entry.username));
+  const graded = entries.filter((entry) => entry.grade !== null);
+  const distribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+  for (const entry of graded) distribution[entry.grade] += 1;
+  const withResult = new Set(entries.map((entry) => entry.username));
+  const mean = (values) => (values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0) / values.length);
+  const fractions = entries.map((entry) => entry.value).filter(isNumber);
+  return {
+    column: { key, name: column.name, date: column.date, category: column.category },
+    distribution,
+    results: entries.length,
+    missing: roster.filter((student) => !student.leftAt && !withResult.has(student.username)).length,
+    averageGrade: mean(graded.map((entry) => entry.grade)),
+    averageFraction: mean(fractions),
+  };
+}
+
 /**
  * One student's record in a course, for teachers: every result, both
  * semesters, and the students before and after them in the sheet (null at

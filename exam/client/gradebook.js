@@ -16,6 +16,7 @@
 import { parseNumber as parseTyped } from "../../i18n/format.js";
 import { viennaLocal } from "./periods.js";
 import { gradeTone, setTone } from "./row-tone.js";
+import { evaluationButton } from "./evaluation.js";
 import { act, candidateNote, directoryNotice, displayClass, displayPerson, messageLine, personName } from "./classes.js";
 import { confirmButton, defineExamElement, ExamElement, examApi, format, h, linkButton, markRows, readOnlyFor, saveOnChange, stickyColumns, t } from "./frame.js";
 
@@ -36,6 +37,9 @@ const categoryLabels = {
  * The kind a category's `+` adds a column of; in projects, a project. Online
  * tests have no `+`: their columns are the tests.
  */
+/** The categories whose columns have an evaluation (`test-evaluation`). */
+const evaluatedCategories = ["onlineTests", "manualTests", "shortTests"];
+
 const addableKinds = { manualTests: "test", shortTests: "shorttest", presentations: "presentation", projects: "project", participation: "plusminus", homework: "homework" };
 
 /** True for a column whose fields take `+` or `−`: a project's marks. */
@@ -474,18 +478,22 @@ class GradebookView extends ExamElement {
    */
   columnHead(course, column, editable, semester, rowspan = null) {
     const head = { class: "sl-exam-column-head", "data-column": String(column.id), title: columnTitle(column), rowspan };
+    // A test column's evaluation, a control of its own beside the header's
+    // button or link, never inside it (test-evaluation design D4).
+    const evaluation = evaluatedCategories.includes(column.category) ? evaluationButton(this, course.id, column.id, column.name) : null;
     if (column.readOnly) {
       const [day, ...rest] = columnLines(column);
       return h(
         "th",
         { ...head, class: "sl-exam-column-head sl-exam-column-online" },
-        h("a", { href: `/exam/tests/${column.testId}`, "aria-label": t("exam.gradebook.openTest", { name: column.name }) }, day, rest)
+        h("a", { href: `/exam/tests/${column.testId}`, "aria-label": t("exam.gradebook.openTest", { name: column.name }) }, day, rest),
+        evaluation
       );
     }
     const testLink = column.testId
       ? h("a", { href: `/exam/tests/${column.testId}`, class: "sl-exam-column-test-link", "aria-label": t("exam.gradebook.openTest", { name: column.name }), title: t("exam.gradebook.openTest", { name: column.name }) }, "↗")
       : null;
-    if (!editable) return h("th", { ...head, "data-column": null }, columnLines(column), testLink);
+    if (!editable) return h("th", { ...head, "data-column": null }, columnLines(column), testLink, evaluation);
     // A project's end grade is edited through the project's heading above it.
     if (column.kind === "project") return h("th", { ...head, class: "sl-exam-column-head sl-exam-end-grade" }, columnLines(column));
     return h(
@@ -501,7 +509,8 @@ class GradebookView extends ExamElement {
         },
         columnLines(column)
       ),
-      testLink
+      testLink,
+      evaluation
     );
   }
 

@@ -30,6 +30,7 @@ import { defaultPeriods, matchWindow, nextWeekday, periodTimes, viennaInstant, v
 import { pickHandout } from "./handout-picker.js";
 import { testTiming } from "./test-timing.js";
 import { timingTone } from "./row-tone.js";
+import { openEvaluation } from "./evaluation.js";
 
 const stateLabels = {
   scheduled: () => t("exam.tests.stateScheduled"),
@@ -377,7 +378,8 @@ class TestDetail extends ExamElement {
         { class: "sl-exam-actions sl-exam-test-actions" },
         linkButton({ label: t("exam.tests.tryAsStudent"), href: `/exam/tests/${test.id}/preview`, newWindow: true, title: t("exam.tests.tryAsStudentNote"), class: "sl-exam-test-preview" }),
         linkButton({ label: t("exam.tests.boardSolution"), href: `/exam/tests/${test.id}/solution`, newWindow: true, title: t("exam.tests.boardSolutionNote"), class: "sl-exam-test-solution" }),
-        test.started ? null : linkButton({ label: t("exam.tests.addFromPool"), href: `/exam/pool?course=${course.id}`, class: "sl-exam-test-add" })
+        test.started ? null : linkButton({ label: t("exam.tests.addFromPool"), href: `/exam/pool?course=${course.id}`, class: "sl-exam-test-add" }),
+        this.evaluationAction(test)
       ),
       h("p", { class: "sl-exam-quiet" }, `${t("exam.tests.tryAsStudentNote")} ${t("exam.tests.boardSolutionNote")}`),
       this.renameForm(test),
@@ -959,6 +961,16 @@ Object.assign(TestDetail.prototype, {
    * An offline test's page: its course, duration and gradebook category, the
    * name and duration form, its handouts and its sittings. No questions.
    */
+  /**
+   * The button that opens the test's evaluation for its class, the same popup
+   * as the sheet's column header opens; none while the test has no column in
+   * the sheet (`test-evaluation`, design D5).
+   */
+  evaluationAction(test) {
+    if (test.column === null || test.column === undefined) return null;
+    return button({ label: t("exam.evaluation.open"), class: "sl-exam-test-evaluation", action: () => openEvaluation(this, test.course.id, test.column) });
+  },
+
   renderOffline(test) {
     const course = test.course;
     return readOnlyFor({ name: course.yearName, closed: course.yearClosed }, h(
@@ -975,6 +987,7 @@ Object.assign(TestDetail.prototype, {
         }`
       ),
       h("p", { class: "sl-exam-quiet" }, t("exam.offline.explanation")),
+      test.column === null ? null : h("p", { class: "sl-exam-actions sl-exam-test-actions" }, this.evaluationAction(test)),
       this.offlineForm(test),
       this.message,
       this.handoutsSection(test),

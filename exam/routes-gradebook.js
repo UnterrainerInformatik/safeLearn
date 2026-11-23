@@ -14,6 +14,7 @@ import {
   deleteColumn,
   deleteNote,
   deleteResult,
+  evaluateColumn,
   findCourse,
   readScale,
   resultsOf,
@@ -137,6 +138,10 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
   api("delete", "/courses/:id/notes/:column/:username", (req) =>
     deleteNote(db, idParam(req.params.id), req.params.column, req.params.username)
   );
+
+  // One test column's evaluation for its class (`test-evaluation`, design D2):
+  // a teacher's only, like the sheet. `:column` is the sheet's column key.
+  api("get", "/courses/:id/columns/:column/evaluation", (req) => evaluateColumn(db, idParam(req.params.id), req.params.column));
 
   // ---------------------------------------------------- a student's own view
 

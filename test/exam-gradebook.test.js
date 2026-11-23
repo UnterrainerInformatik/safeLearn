@@ -25,6 +25,7 @@ import {
   deleteColumn,
   deleteNote,
   deleteResult,
+  evaluateColumn,
   findCourse,
   readScale,
   resultsOf,
@@ -47,7 +48,7 @@ import {
   weightedMean,
   yearProposal,
 } from "../exam/grading.js";
-import { setAttendance } from "../exam/tests.js";
+import { getTest, setAttendance } from "../exam/tests.js";
 
 const temporaryDirs = [];
 const openDatabases = [];
@@ -1423,6 +1424,18 @@ describe("the factor A:B of an offline test", () => {
     assert.deepEqual([record.factor, record.group], [1.2, "B"]);
   });
 
+  test("the evaluation counts a raised group's result as the sheet does", () => {
+    const { db, course } = gradebookFixture();
+    const { columnId, sittingId } = offlineTest(db, course);
+    setAttendance(db, sittingId, "ben", { group: "B" });
+    setResult(db, columnId, "anna", { points: 15 });
+    setResult(db, columnId, "ben", { points: 15 });
+    updateColumn(db, columnId, { groupFactor: { a: 1, b: 1.2 } });
+    const evaluation = evaluateColumn(db, course.id, columnId);
+    assert.deepEqual(evaluation.distribution, { 1: 0, 2: 1, 3: 0, 4: 1, 5: 0 }, "ben's 15 / 24 × 1.20 is 75 %, a 2; anna's 62.5 % a 4");
+    close(evaluation.averageFraction, (0.625 + 0.75) / 2);
+  });
+
   test("refuses a factor out of range, both raised, and on a column without two handouts, leaving it unchanged", () => {
     const { db, course } = gradebookFixture();
     const { columnId } = offlineTest(db, course);
@@ -1442,5 +1455,131 @@ describe("the factor A:B of an offline test", () => {
       assert.throws(() => updateColumn(db, id, { groupFactor: { a: 1, b: 1.2 } }), (error) => error.key === "exam.errors.gradebook.noGroupFactor");
     }
     assert.equal(manual.groupFactor, undefined, "an ordinary column carries no factor");
+  });
+});
+
+describe("a test's evaluation for its class", () => {
+  /** A course whose class has `count` students, s01 to s<count>. */
+  function classOf(count) {
+    const db = freshDatabase();
+    const schoolYear = createYear(db, year);
+    const students = Array.from({ length: count }, (_, index) => ({ username: `s${String(index + 1).padStart(2, "0")}` }));
+    const klass = createClass(db, schoolYear.id, { name: "4BHIF", students });
+    const course = createCourse(db, klass.id, { subject: "WMC", language: "en", weights });
+    return { db, klass, course, students: students.map((student) => student.username) };
+  }
+
+  /** An online test of the course with one sitting, and an attempt per `[username, score or null]`, out of 4. */
+  function onlineTest(db, course, attempts = []) {
+    const at = "2026-11-10T08:00:00.000Z";
+    const testId = Number(db.prepare("INSERT INTO test (course_id, name, created_at, updated_at) VALUES (?, 'HTTP caching', ?, ?)").run(course.id, at, at).lastInsertRowid);
+    const sittingId = Number(
+      db.prepare("INSERT INTO sitting (test_id, opens_at, closes_at, duration_s, makeup, created_at) VALUES (?, ?, ?, 3000, 0, ?)").run(testId, at, "2026-11-10T09:00:00.000Z", at)
+        .lastInsertRowid
+    );
+    for (const [username, score] of attempts) {
+      db.prepare("INSERT INTO attempt (test_id, sitting_id, username, started_at, deadline, submitted_at, score, question_count) VALUES (?, ?, ?, ?, ?, ?, ?, 4)").run(
+        testId,
+        sittingId,
+        username,
+        at,
+        "2026-11-10T09:00:00.000Z",
+        score === null ? null : "2026-11-10T08:40:00.000Z",
+        score
+      );
+    }
+    return testId;
+  }
+
+  test("a test out of 24: the distribution, the average grade and the average percentage", () => {
+    const { db, course, students } = classOf(4);
+    const results = [22, 18, 16, 11].map((points, index) => [students[index], { points }]);
+    const created = column(db, course, { kind: "test", name: "1st test", date: "2026-11-03", maxPoints: 24 }, results);
+    const evaluation = evaluateColumn(db, course.id, String(created.id));
+    assert.deepEqual(evaluation.column, { key: String(created.id), name: "1st test", date: "2026-11-03", category: "manualTests" });
+    assert.deepEqual(evaluation.distribution, { 1: 1, 2: 1, 3: 1, 4: 0, 5: 1 });
+    assert.deepEqual([evaluation.results, evaluation.missing], [4, 0]);
+    close(evaluation.averageGrade, 2.75, "the average grade");
+    close(evaluation.averageFraction, 67 / 96, "the average fraction");
+    assert.equal(Math.round(evaluation.averageGrade * 10) / 10, 2.8);
+    assert.equal(Math.round(evaluation.averageFraction * 100), 70);
+  });
+
+  test("a column without results: every grade 0, no averages, the whole roster missing", () => {
+    const { db, course } = classOf(25);
+    updateCourse(db, course.id, { weights: { ...weights, shortTests: 10, homework: 5 } });
+    const created = column(db, course, { kind: "shorttest", name: "Quiz", date: "2026-11-03", maxPoints: 6 });
+    const evaluation = evaluateColumn(db, course.id, created.id);
+    assert.deepEqual(evaluation.distribution, { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 });
+    assert.deepEqual([evaluation.results, evaluation.missing, evaluation.averageGrade, evaluation.averageFraction], [0, 25, null, null]);
+    assert.equal(evaluation.column.category, "shortTests");
+  });
+
+  test("22 of 25 with a result leaves 3 missing", () => {
+    const { db, course, students } = classOf(25);
+    const results = students.slice(0, 22).map((username) => [username, { points: 12 }]);
+    const created = column(db, course, { kind: "test", name: "1st test", date: "2026-11-03", maxPoints: 24 }, results);
+    const evaluation = evaluateColumn(db, course.id, created.id);
+    assert.deepEqual([evaluation.results, evaluation.missing, evaluation.distribution[4]], [22, 3, 22]);
+  });
+
+  test("an online test counts its submitted attempts only; one still writing is missing", () => {
+    const { db, course, students } = classOf(3);
+    const testId = onlineTest(db, course, [
+      [students[0], 4],
+      [students[1], 2],
+      [students[2], null],
+    ]);
+    const evaluation = evaluateColumn(db, course.id, `test-${testId}`);
+    assert.deepEqual(evaluation.column, { key: `test-${testId}`, name: "HTTP caching", date: "2026-11-10", category: "onlineTests" });
+    assert.deepEqual(evaluation.distribution, { 1: 1, 2: 0, 3: 0, 4: 1, 5: 0 });
+    assert.deepEqual([evaluation.results, evaluation.missing], [2, 1]);
+    close(evaluation.averageFraction, 0.75);
+  });
+
+  test("a student who left counts with a result and is never missing without one", () => {
+    const { db, klass, course, students } = classOf(4);
+    const created = column(db, course, { kind: "test", name: "1st test", date: "2026-11-03", maxPoints: 24 }, [
+      [students[0], { points: 22 }],
+      [students[1], { points: 13 }],
+    ]);
+    removeFromRoster(db, klass.id, students[1]);
+    removeFromRoster(db, klass.id, students[2]);
+    const evaluation = evaluateColumn(db, course.id, created.id);
+    assert.deepEqual(evaluation.distribution, { 1: 1, 2: 0, 3: 0, 4: 1, 5: 0 }, "the 4 of the one who left counts");
+    assert.deepEqual([evaluation.results, evaluation.missing], [2, 1], "only s04 is missing");
+  });
+
+  test("homework, participation, a column of another course and an unknown key have no evaluation", () => {
+    const { db, klass, course } = classOf(2);
+    const homework = column(db, course, { kind: "homework", name: "Greeting service", date: "2026-11-03" });
+    const participation = column(db, course, { kind: "plusminus", date: "2026-11-04" });
+    const other = createCourse(db, klass.id, { subject: "POS", language: "en", weights });
+    const foreign = column(db, other, { kind: "test", name: "POS test", date: "2026-11-03", maxPoints: 10 });
+    for (const key of [homework.id, participation.id, foreign.id, "test-999", "x", ""]) {
+      assert.throws(() => evaluateColumn(db, course.id, key), NotFoundError, `column ${key}`);
+    }
+    assert.equal(evaluateColumn(db, other.id, foreign.id).column.name, "POS test");
+  });
+
+  test("a test names its sheet column: an online test from its first sitting on, an offline test always", () => {
+    const { db, course } = classOf(2);
+    const at = "2026-11-10T08:00:00.000Z";
+    const assembled = Number(db.prepare("INSERT INTO test (course_id, name, created_at, updated_at) VALUES (?, 'Only assembled', ?, ?)").run(course.id, at, at).lastInsertRowid);
+    assert.equal(getTest(db, assembled).column, null);
+    const sat = onlineTest(db, course);
+    assert.equal(getTest(db, sat).column, `test-${sat}`);
+    const columnId = Number(
+      db.prepare("INSERT INTO assessment (course_id, kind, name, held_on, max_points, created_at) VALUES (?, 'test', 'LT1', '2026-11-03', 24, ?)").run(course.id, at).lastInsertRowid
+    );
+    const offline = Number(
+      db
+        .prepare("INSERT INTO test (course_id, name, kind, duration_s, handout_a, assessment_id, created_at, updated_at) VALUES (?, 'LT1', 'offline', 6000, 'POS/A.md', ?, ?, ?)")
+        .run(course.id, columnId, at, at).lastInsertRowid
+    );
+    assert.equal(getTest(db, offline).column, columnId);
+    assert.equal(evaluateColumn(db, course.id, getTest(db, offline).column).column.name, "LT1");
+    updateCourse(db, course.id, { weights: { ...weights, onlineTests: 0, manualTests: 70 } });
+    assert.equal(getTest(db, sat).column, null, "a category at 0 % has no column on the sheet");
   });
 });
