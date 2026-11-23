@@ -11,3 +11,10 @@ Die 2026-09-10 beschlossene Regel — ein föderiertes Konto verschwindet, sobal
 Dazu am 2026-09-13 beobachtet: **manuell ausgelöste Syncs setzen `lastSync` nicht.** Nach zwei vollen Syncs über `ldap-teachers` steht dort immer noch gar kein `lastSync`, und `ldap-students` trägt unverändert seinen Wert vom 2025-10-19. Damit ist „Sync changed users" hier kein Delta: auf `ldap-teachers` beginnt das Fenster bei 1970 (also faktisch ein Full Sync), auf `ldap-students` im Oktober 2025. Solange kein periodischer Sync läuft, ist „Sync all users" die einzige Variante mit vorhersagbarem Verhalten — bei 1.978 Konten kostet sie ohnehin nur Sekunden (heute: 3,1 s für 1.721 Studenten, 1,0 s für 250 Lehrer).
 
 # Permissions
+
+# Gradebook
+
+## Test-Auswertung pro Test und Klasse
+Gerald braucht pro Test (Online- wie Offline-Test, ggf. auch Kurztests) eine Auswertung für die Klasse: wie ist der Test ausgefallen? Naheliegend ist ein Notenspiegel (Anzahl der 1er bis 5er), dazu Durchschnitt (Note und Prozent) und wie viele noch kein Ergebnis haben. Heute gibt es das nirgends — das Sheet färbt nur die Zeilen nach der Gesamtnote (`gradebook-sheet`, „Rows are coloured by their grade“), eine Spalte lässt sich aber nicht auf einen Blick zusammenfassen.
+
+Zu klären: Wo sitzt die Auswertung (im Hover/Dialog des Spaltenkopfs, als Fußzeile unter der Spalte, als eigene Seite)? Gilt sie für jede Spalte oder nur für Tests? „Pro Klasse“ — deckt sich das immer mit einem Kurs, oder sitzen in einem Kurs mehrere Klassen, die getrennt ausgewertet werden sollen? Die Farben sollten den Notenfarben folgen (1/2 grün, 5 rot, 3/4 neutral).
