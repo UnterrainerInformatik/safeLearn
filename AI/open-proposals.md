@@ -18,3 +18,16 @@ Dazu am 2026-09-13 beobachtet: **manuell ausgelöste Syncs setzen `lastSync` nic
 Gerald braucht pro Test (Online- wie Offline-Test, ggf. auch Kurztests) eine Auswertung für die Klasse: wie ist der Test ausgefallen? Naheliegend ist ein Notenspiegel (Anzahl der 1er bis 5er), dazu Durchschnitt (Note und Prozent) und wie viele noch kein Ergebnis haben. Heute gibt es das nirgends — das Sheet färbt nur die Zeilen nach der Gesamtnote (`gradebook-sheet`, „Rows are coloured by their grade“), eine Spalte lässt sich aber nicht auf einen Blick zusammenfassen.
 
 Zu klären: Wo sitzt die Auswertung (im Hover/Dialog des Spaltenkopfs, als Fußzeile unter der Spalte, als eigene Seite)? Gilt sie für jede Spalte oder nur für Tests? „Pro Klasse“ — deckt sich das immer mit einem Kurs, oder sitzen in einem Kurs mehrere Klassen, die getrennt ausgewertet werden sollen? Die Farben sollten den Notenfarben folgen (1/2 grün, 5 rot, 3/4 neutral).
+
+# Exam
+
+## Sitting: Startfenster + Dauer, geschlossen erst nach dem letzten Ablauf
+Gerald will ein anderes Modell für das Fenster einer Sitzung: Das Fenster ist ein **Startfenster**. In der UI gibt man den Startzeitpunkt und die Länge des Fensters ein (statt Von/Bis). Wer im Fenster startet, hat ab seinem Start die volle Dauer x Minuten. Die Sitzung ist erst **geschlossen, wenn der letzte abgegeben hat** bzw. seine Zeit abgelaufen ist — spätestens also Fensterende + Dauer.
+
+Heute ist das anders (`online-test`, „A sitting sets the window and the duration“ / „The server owns the deadline and submits automatically“): das Fenster ist Von/Bis, die Dauer muss kürzer sein als das Fenster, und die Deadline ist das Frühere von Start + Dauer und Fensterende — wer spät startet, bekommt also weniger Zeit. `sittingState` (`exam/tests.js`) setzt die Sitzung mit dem Fensterende auf `over`.
+
+Anzeige:
+- **View für die Klasse** (`/exam/sittings/<id>/screen`): das Startfenster zeigen und zusätzlich, wann beim Letzten die Zeit abläuft (der späteste Ablauf aller laufenden Versuche).
+- **Live-View (Lehrer):** pro Schüler, wie lange er noch Zeit hat. Für Schreibende gibt es „writing with the time left“ schon (`exam/client/live.js`); zu prüfen, ob das mit dem neuen Modell pro Schüler stimmt und überall sichtbar ist.
+
+Zu klären: Gilt das neue Modell auch für Offline-Sitzungen (die öffnen erst per Start und haben eine gemeinsame Zeit)? Was passiert mit bestehenden Sitzungen (Von/Bis → Start + Länge umrechnen)? Bleibt die Regel „Dauer kürzer als Fenster“ oder fällt sie weg? Ab wann sieht ein Schüler den Test nicht mehr — Fensterende für Nicht-Gestartete, eigene Deadline für Gestartete? Nachschreibtermine übernehmen das Modell ebenso.
