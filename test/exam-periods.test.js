@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { defaultPeriods, matchWindow, nextWeekday, parsePeriods, periodTimes, viennaInstant, windowFor } from "../exam/client/periods.js";
+import { defaultPeriods, defaultStart, matchStart, matchWindow, nextWeekday, parsePeriods, periodTimes, startWindowFor, viennaInstant, windowFor } from "../exam/client/periods.js";
 
 /** The school's list, from Gerald on 2026-10-18. */
 const schoolList = [
@@ -184,5 +184,64 @@ describe("the next weekday", () => {
 
   test("across the end of a month and a year", () => {
     assert.equal(nextWeekday("2027-12-31"), "2028-01-03");
+  });
+});
+
+describe("start windows and periods", () => {
+  test("period 4 on 2026-10-20, 5 minutes in, for 10 minutes, is 11:00 to 11:10 Vienna time", () => {
+    const window = startWindowFor(periods, "2026-10-20", 4, 5, 10);
+    assert.deepEqual(window, { opensAt: "2026-10-20T09:00:00.000Z", closesAt: "2026-10-20T09:10:00.000Z" });
+    assert.deepEqual(matchStart(periods, window.opensAt, window.closesAt), { date: "2026-10-20", n: 4, offset: 5, length: 10 });
+  });
+
+  test("a start window may run past the end of its period", () => {
+    assert.deepEqual(startWindowFor(periods, "2026-10-20", 3, 0, 60), { opensAt: "2026-10-20T08:00:00.000Z", closesAt: "2026-10-20T09:00:00.000Z" });
+  });
+
+  test("an older sitting from 10:00 to 11:45 reads as period 3, 0 minutes, 105 minutes", () => {
+    const { opensAt, closesAt } = windowFor(periods, "2026-10-20", 3, 4);
+    assert.deepEqual(matchStart(periods, opensAt, closesAt), { date: "2026-10-20", n: 3, offset: 0, length: 105 });
+  });
+
+  test("the last minute of a period is in it; its end and a break are not", () => {
+    const at = (time, length = 10) => {
+      const opens = viennaInstant("2026-10-20", time);
+      return matchStart(periods, opens.toISOString(), new Date(opens.getTime() + length * 60000).toISOString());
+    };
+    assert.deepEqual(at("10:49"), { date: "2026-10-20", n: 3, offset: 49, length: 10 });
+    assert.equal(at("10:50"), null, "the break before period 4");
+    assert.equal(at("07:58"), null, "before the first period");
+  });
+
+  test("a start window across midnight matches none, and is not made", () => {
+    const opens = viennaInstant("2026-10-20", "21:30");
+    assert.equal(matchStart(periods, opens.toISOString(), new Date(opens.getTime() + 3 * 3600000).toISOString()), null);
+    assert.throws(() => startWindowFor(periods, "2026-10-20", 16, 40, 180), /does not lie on/);
+    assert.throws(() => startWindowFor(periods, "2026-10-20", 99, 5, 10), /no period 99/);
+  });
+
+  test("without periods nothing matches", () => {
+    assert.equal(matchStart([], "2026-10-20T09:00:00.000Z", "2026-10-20T09:10:00.000Z"), null);
+    assert.equal(defaultStart([]), null);
+  });
+
+  test("on the DST changeover days the start window keeps its wall-clock times", () => {
+    for (const [date, opensAt, closesAt] of [
+      ["2026-10-24", "2026-10-24T09:00:00.000Z", "2026-10-24T09:10:00.000Z"],
+      ["2026-10-25", "2026-10-25T10:00:00.000Z", "2026-10-25T10:10:00.000Z"],
+      ["2027-03-28", "2027-03-28T09:00:00.000Z", "2027-03-28T09:10:00.000Z"],
+    ]) {
+      assert.deepEqual(startWindowFor(periods, date, 4, 5, 10), { opensAt, closesAt }, date);
+      assert.deepEqual(matchStart(periods, opensAt, closesAt), { date, n: 4, offset: 5, length: 10 }, date);
+    }
+  });
+
+  test("the form proposes the first period whose default start window has not closed", () => {
+    const at = (time, date = "2026-10-19") => defaultStart(periods, viennaInstant(date, time));
+    assert.deepEqual(at("10:08"), { date: "2026-10-19", n: 3, offset: 5, length: 10 }, "early in period 3");
+    assert.deepEqual(at("10:20"), { date: "2026-10-19", n: 4, offset: 5, length: 10 }, "period 3's 10:05-10:15 has closed");
+    assert.deepEqual(at("06:00"), { date: "2026-10-19", n: 0, offset: 5, length: 10 }, "before the first period");
+    assert.deepEqual(at("22:30"), { date: "2026-10-20", n: 1, offset: 5, length: 10 }, "in the evening");
+    assert.deepEqual(defaultStart(parsePeriods("0=07:05-07:55"), viennaInstant("2026-10-19", "22:30")), { date: "2026-10-20", n: 0, offset: 5, length: 10 });
   });
 });

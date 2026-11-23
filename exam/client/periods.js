@@ -1,7 +1,8 @@
 /**
  * The school's teaching periods (`school-periods`): parsing the deployment's
- * `SCHOOL_PERIODS`, turning a date and a range of periods into a sitting's
- * window, and recognising a window that lies on period boundaries.
+ * `SCHOOL_PERIODS`, turning a date, one period, an offset and a length into an
+ * online sitting's start window and back (sitting-start-window design D5), and
+ * - for offline sittings - a range of periods into a window and back.
  *
  * Free of DOM code on purpose: the server imports this file at start to check
  * the variable, the unit checks import it, and the browser loads the same file
@@ -156,4 +157,73 @@ export function defaultPeriods(periods, now = new Date()) {
   if (today) return { date, from: today.n, to: today.n };
   const first = periods.find((period) => period.n >= 1) ?? periods[0];
   return { date: nextDate(date), from: first.n, to: first.n };
+}
+
+/** "HH:MM" as minutes after midnight. */
+function minutesOf(time) {
+  const [hour, minute] = time.split(":").map(Number);
+  return hour * 60 + minute;
+}
+
+/** Minutes after midnight as "HH:MM"; null from 24:00 on, the next day. */
+function timeOf(minutes) {
+  if (minutes < 0 || minutes >= 24 * 60) return null;
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
+
+/**
+ * The start window of an online sitting on `date` (sitting-start-window
+ * design D5): it opens `offset` minutes after the start of period `n` and
+ * closes `length` minutes later, both by Vienna's clock on that date. Throws
+ * for an unknown period and for a start window that would cross midnight.
+ */
+export function startWindowFor(periods, date, n, offset, length) {
+  const period = periodNumbered(periods, n);
+  if (!period) throw new Error(`There is no period ${n}.`);
+  const opens = minutesOf(period.start) + offset;
+  const opensTime = timeOf(opens);
+  const closesTime = timeOf(opens + length);
+  if (opensTime === null || closesTime === null || !(length > 0)) throw new Error(`A start window from ${opensTime} for ${length} minutes does not lie on ${date}.`);
+  return { opensAt: viennaInstant(date, opensTime).toISOString(), closesAt: viennaInstant(date, closesTime).toISOString() };
+}
+
+/**
+ * `{ date, n, offset, length }` when the start window opens within period `n`
+ * - from its start up to but not including its end, to the minute - and
+ * closes on the same Vienna date; `offset` is the minutes after the period's
+ * start, `length` the start window's minutes. Null for any other window, and
+ * without periods.
+ */
+export function matchStart(periods, opensAt, closesAt) {
+  if (periods.length === 0) return null;
+  const opens = viennaLocal(opensAt);
+  const closes = viennaLocal(closesAt);
+  if (opens.date !== closes.date) return null;
+  const period = periods.find((candidate) => candidate.start <= opens.time && opens.time < candidate.end);
+  if (!period) return null;
+  return {
+    date: opens.date,
+    n: period.n,
+    offset: minutesOf(opens.time) - minutesOf(period.start),
+    length: Math.round((Date.parse(closesAt) - Date.parse(opensAt)) / 60000),
+  };
+}
+
+/** The offset and length of the start window a new sitting proposes (`school-periods`). */
+export const defaultOffset = 5;
+export const defaultLength = 10;
+
+/**
+ * What the form of an online sitting proposes at `now`: today and the first
+ * period whose default start window - 5 to 15 minutes after its start - has
+ * not closed yet; once none of today is left, the next day and its first
+ * period numbered 1 or higher, or its first period when there is none. With
+ * the default offset and length.
+ */
+export function defaultStart(periods, now = new Date()) {
+  if (periods.length === 0) return null;
+  const { date, time } = viennaLocal(now);
+  const today = periods.find((period) => minutesOf(time) < minutesOf(period.start) + defaultOffset + defaultLength);
+  const choice = today ? { date, n: today.n } : { date: nextDate(date), n: (periods.find((period) => period.n >= 1) ?? periods[0]).n };
+  return { ...choice, offset: defaultOffset, length: defaultLength };
 }

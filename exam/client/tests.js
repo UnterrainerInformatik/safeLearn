@@ -26,7 +26,7 @@ import { parseTime } from "../../i18n/format.js";
 import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, linkButton, markRows, readOnlyFor, t } from "./frame.js";
 import { displayClass, personName } from "./classes.js";
 import { openCreatorOf } from "./bar.js";
-import { defaultPeriods, matchWindow, nextWeekday, periodTimes, viennaInstant, viennaLocal, windowFor } from "./periods.js";
+import { defaultLength, defaultOffset, defaultPeriods, defaultStart, matchStart, matchWindow, nextWeekday, periodTimes, startWindowFor, viennaInstant, viennaLocal, windowFor } from "./periods.js";
 import { pickHandout } from "./handout-picker.js";
 import { testTiming } from "./test-timing.js";
 import { timingTone } from "./row-tone.js";
@@ -105,6 +105,31 @@ export function displayWindow({ opensAt, closesAt }, periods = []) {
   if (match) return h("span", { class: "sl-exam-window" }, `${format.weekdayDay(opensAt)} · `, periodLabel(periods, match.from, match.to));
   const sameDay = viennaLocal(opensAt).date === viennaLocal(closesAt).date;
   return h("span", { class: "sl-exam-window" }, `${displayTime(opensAt)} – ${sameDay ? format.time(closesAt) : displayTime(closesAt)}`);
+}
+
+/**
+ * The start window of an online sitting as an element (sitting-start-window
+ * design D6): its day, the period it opens in when there is one, and the word
+ * for the start with its clock times - `Di. 20.10. · 4. EH · Start
+ * 11:00–11:10`. One that closes on another date shows both in full.
+ */
+export function displayStartWindow({ opensAt, closesAt }, periods = []) {
+  if (viennaLocal(opensAt).date !== viennaLocal(closesAt).date) {
+    return h("span", { class: "sl-exam-window sl-exam-start-window" }, t("exam.periods.start", { from: displayTime(opensAt), to: displayTime(closesAt) }));
+  }
+  const match = matchStart(periods, opensAt, closesAt);
+  return h(
+    "span",
+    { class: "sl-exam-window sl-exam-start-window" },
+    `${format.weekdayDay(opensAt)} · `,
+    match ? [periodLabel(periods, match.n), " · "] : null,
+    t("exam.periods.start", { from: format.time(opensAt), to: format.time(closesAt) })
+  );
+}
+
+/** A sitting's window as its kind shows it: an online sitting's start window, an offline one's shared window. */
+export function displaySittingWindow(sitting, periods, offline) {
+  return offline ? displayWindow(sitting, periods) : displayStartWindow(sitting, periods);
 }
 
 /**
@@ -230,7 +255,7 @@ class TestList extends ExamElement {
                                 "li",
                                 { "data-state": sitting.state },
                                 sitting.makeup ? `${t("exam.tests.makeupPrefix")} ` : null,
-                                displayWindow(sitting, this.periods),
+                                displaySittingWindow(sitting, this.periods, test.kind === "offline"),
                                 ` · ${offlineState(test.kind, sitting)}`,
                                 sittingLinks(sitting, test.kind === "offline")
                               )
@@ -460,7 +485,7 @@ class TestDetail extends ExamElement {
                 "li",
                 { "data-sitting": String(sitting.id), "data-state": sitting.state },
                 h("strong", {}, `${sitting.makeup ? t("exam.tests.makeupLabel") : t("exam.tests.sittingLabel")} `),
-                displayWindow(sitting, this.periods),
+                displayStartWindow(sitting, this.periods),
                 `, ${t("exam.tests.minutesPerAttempt", { minutes: Math.round(sitting.durationS / 60) })} · ${stateLabels[sitting.state]()} · `,
                 sitting.makeup || sitting.participants.length < this.roster.length
                   ? this.participantNames(sitting.participants)
@@ -550,14 +575,13 @@ class TestDetail extends ExamElement {
     if (sitting) {
       windowState = { opensAt: sitting.opensAt, closesAt: sitting.closesAt };
     } else if (periods.length > 0) {
-      const proposed = defaultPeriods(periods);
-      windowState = windowFor(periods, proposed.date, proposed.from, proposed.to);
+      const proposed = defaultStart(periods);
+      windowState = startWindowFor(periods, proposed.date, proposed.n, proposed.offset, proposed.length);
     } else {
       const start = new Date(Date.now() + 60 * 60 * 1000);
       start.setMinutes(0, 0, 0);
-      windowState = { opensAt: start.toISOString(), closesAt: new Date(start.getTime() + 50 * 60 * 1000).toISOString() };
+      windowState = { opensAt: start.toISOString(), closesAt: new Date(start.getTime() + defaultLength * 60 * 1000).toISOString() };
     }
-    const windowEditor = this.windowEditor(windowState);
     const duration = h("input", {
       type: "number",
       name: "durationMinutes",
@@ -568,6 +592,8 @@ class TestDetail extends ExamElement {
       value: String(Math.round((sitting?.durationS ?? first?.durationS ?? 900) / 60)),
       disabled: makeup || (sitting !== null && test.sittings.some((candidate) => candidate.makeup)),
     });
+    const windowEditor = this.windowEditor(windowState, () => Number(duration.value));
+    duration.addEventListener("input", () => windowEditor.refresh());
     const chosen = new Set(sitting ? sitting.participants : []);
     const whole = h("input", { type: "checkbox", name: "whole", checked: !makeup && (sitting === null || sitting.participants.length === this.roster.length) });
     const people = h(
@@ -636,7 +662,7 @@ class TestDetail extends ExamElement {
    * naming how many go.
    */
   rescheduleForm(sitting) {
-    const windowEditor = this.windowEditor(this.proposedWindow(sitting, nextWeekday(viennaLocal(new Date()).date)));
+    const windowEditor = this.windowEditor(this.proposedWindow(sitting, nextWeekday(viennaLocal(new Date()).date)), () => Math.round(sitting.durationS / 60));
     const save = async () => {
       try {
         await examApi(`/sittings/${sitting.id}/reschedule`, { method: "POST", body: { ...windowEditor.current(), attempts: sitting.attempts } });
@@ -681,40 +707,54 @@ class TestDetail extends ExamElement {
   }
 
   /**
-   * The window `sitting` is proposed again with on `date`: its periods, or -
-   * for a sitting ended early, which closed before its periods did - from the
-   * period it opened with to the first one that leaves room for an attempt.
-   * Otherwise its clock time, the window as long as it was or long enough for
-   * an attempt.
+   * The start window `sitting` is proposed again with on `date` (design D5):
+   * the same period, minutes after its start and length when it opened within
+   * a period, otherwise the same clock time and length.
    */
   proposedWindow(sitting, date) {
     const periods = this.periods;
-    const match = matchWindow(periods, sitting.opensAt, sitting.closesAt);
-    if (match) return windowFor(periods, date, match.from, match.to);
-    const time = viennaLocal(sitting.opensAt).time;
-    const from = periods.find((period) => period.start === time);
-    if (from) {
-      const fitting = periods
-        .filter((period) => period.n >= from.n)
-        .map((period) => windowFor(periods, date, from.n, period.n))
-        .find((window) => Date.parse(window.closesAt) - Date.parse(window.opensAt) > sitting.durationS * 1000);
-      if (fitting) return fitting;
+    const match = matchStart(periods, sitting.opensAt, sitting.closesAt);
+    if (match) {
+      try {
+        return startWindowFor(periods, date, match.n, match.offset, match.length);
+      } catch {
+        // A start window that would cross midnight there: the clock time below.
+      }
     }
-    const opens = viennaInstant(date, time);
-    const length = Math.max(Date.parse(sitting.closesAt) - Date.parse(sitting.opensAt), sitting.durationS * 1000 + 5 * 60000);
+    const opens = viennaInstant(date, viennaLocal(sitting.opensAt).time);
+    const length = Date.parse(sitting.closesAt) - Date.parse(sitting.opensAt);
     return { opensAt: opens.toISOString(), closesAt: new Date(opens.getTime() + length).toISOString() };
   }
 
   /**
-   * The window of a sitting form, starting from `initial`: the periods editor
-   * with its switch to clock times when the school's periods are configured,
-   * the clock editor otherwise. `current()` answers the window as it stands.
+   * The start window of a sitting form, starting from `initial`: the periods
+   * editor with its switch to clock times when the school's periods are
+   * configured, the clock editor otherwise (`school-periods`). Below them the
+   * start window as it stands and the time the last attempt ends at the
+   * latest, from the minutes `duration()` answers. `current()` answers the
+   * start window, `refresh()` draws that line again.
    */
-  windowEditor(initial) {
+  windowEditor(initial, duration) {
     const periods = this.periods;
     let windowState = { ...initial };
-    if (periods.length === 0) return { element: this.clockEditor(windowState), current: () => windowState };
-    let byPeriods = matchWindow(periods, windowState.opensAt, windowState.closesAt) !== null;
+    const summary = h("p", { class: "sl-exam-quiet sl-exam-sitting-summary" });
+    const refresh = () => {
+      const minutes = duration();
+      const latest = Number.isInteger(minutes) && minutes > 0 ? new Date(Date.parse(windowState.closesAt) + minutes * 60000).toISOString() : null;
+      summary.replaceChildren(
+        displayStartWindow(windowState, periods),
+        latest ? h("span", { class: "sl-exam-sitting-latest" }, ` · ${t("exam.tests.latestEnd", { time: viennaLocal(latest).date === viennaLocal(windowState.closesAt).date ? format.time(latest) : displayTime(latest) })}`) : null
+      );
+    };
+    const changed = (next) => {
+      windowState = next;
+      refresh();
+    };
+    if (periods.length === 0) {
+      const element = h("div", { class: "sl-exam-sitting-window" }, ...this.clockEditor(windowState, changed), summary);
+      return { element, current: () => windowState, refresh };
+    }
+    let byPeriods = matchStart(periods, windowState.opensAt, windowState.closesAt) !== null;
     const element = h("div", { class: "sl-exam-sitting-window" });
     const draw = () => {
       const toggle = h(
@@ -723,12 +763,17 @@ class TestDetail extends ExamElement {
           type: "button",
           class: "sl-exam-sitting-mode",
           onClick: () => {
-            if (!byPeriods) {
-              // A window on period boundaries is carried over; any other keeps
-              // its date and gets the periods a new sitting would.
-              const match = matchWindow(periods, windowState.opensAt, windowState.closesAt);
-              const proposed = match ?? { ...defaultPeriods(periods), date: viennaLocal(windowState.opensAt).date };
-              windowState = windowFor(periods, proposed.date, proposed.from, proposed.to);
+            if (!byPeriods && matchStart(periods, windowState.opensAt, windowState.closesAt) === null) {
+              // A start window outside every period keeps its date and length
+              // and gets the period a new sitting would, 5 minutes in.
+              const date = viennaLocal(windowState.opensAt).date;
+              const length = Math.round((Date.parse(windowState.closesAt) - Date.parse(windowState.opensAt)) / 60000);
+              const proposed = defaultStart(periods);
+              try {
+                windowState = startWindowFor(periods, date, proposed.n, defaultOffset, length);
+              } catch {
+                windowState = startWindowFor(periods, date, proposed.n, defaultOffset, defaultLength);
+              }
             }
             byPeriods = !byPeriods;
             draw();
@@ -736,106 +781,121 @@ class TestDetail extends ExamElement {
         },
         byPeriods ? t("exam.tests.exactTimesInstead") : t("exam.tests.lessonsInstead")
       );
-      element.replaceChildren(...(byPeriods ? this.periodsEditor(windowState, (changed) => (windowState = changed)) : this.clockEditor(windowState)), h("p", {}, toggle));
+      element.replaceChildren(...(byPeriods ? this.periodsEditor(windowState, changed) : this.clockEditor(windowState, changed)), summary, h("p", {}, toggle));
+      refresh();
     };
     draw();
-    return { element, current: () => windowState };
+    return { element, current: () => windowState, refresh };
+  }
+
+  /** The field of a start window's length in whole minutes, 1 to 600. */
+  lengthField(minutes) {
+    return h("input", { type: "number", name: "lengthMinutes", min: "1", max: "600", step: "1", required: true, class: "sl-exam-number", value: String(minutes) });
   }
 
   /**
-   * The clock-time editor: the date the sitting is written on and the times
-   * it opens and closes, in Vienna time and the reader's format - a sitting
-   * never runs across midnight. Writes the window into `windowState` whenever
-   * the three fields hold a valid date and times; a time it cannot read marks
-   * its field invalid, so the form does not submit.
+   * The clock-time editor: the date the sitting is written on, the time its
+   * start window opens and its length in minutes, in Vienna time and the
+   * reader's format - a start window never runs across midnight. Hands the
+   * start window to `changed` whenever the fields hold a valid one; a time it
+   * cannot read, or a length past midnight, marks its field invalid, so the
+   * form does not submit.
    */
-  clockEditor(windowState) {
+  clockEditor(windowState, changed) {
     const date = h("sl-date-input", { name: "date", required: true, value: viennaLocal(windowState.opensAt).date });
-    const time = (name, iso) =>
-      h("input", {
-        type: "text",
-        name,
-        required: true,
-        inputmode: "numeric",
-        autocomplete: "off",
-        size: "5",
-        placeholder: t("exam.dateInput.timePattern"),
-        class: "sl-exam-time",
-        value: viennaLocal(iso).time,
-      });
-    const opens = time("opensTime", windowState.opensAt);
-    const closes = time("closesTime", windowState.closesAt);
+    const opens = h("input", {
+      type: "text",
+      name: "opensTime",
+      required: true,
+      inputmode: "numeric",
+      autocomplete: "off",
+      size: "5",
+      placeholder: t("exam.dateInput.timePattern"),
+      class: "sl-exam-time",
+      value: viennaLocal(windowState.opensAt).time,
+    });
+    const length = this.lengthField(Math.round((Date.parse(windowState.closesAt) - Date.parse(windowState.opensAt)) / 60000));
     const update = () => {
-      const [from, to] = [opens, closes].map((field) => {
-        const parsed = parseTime(field.value);
-        field.setCustomValidity(parsed === null ? t("exam.dateInput.unreadableTime") : "");
-        field.setAttribute("aria-invalid", String(parsed === null));
-        return parsed;
-      });
-      if (/^\d{4}-\d{2}-\d{2}$/.test(date.value) && from !== null && to !== null) {
-        windowState.opensAt = viennaInstant(date.value, from).toISOString();
-        windowState.closesAt = viennaInstant(date.value, to).toISOString();
+      const from = parseTime(opens.value);
+      opens.setCustomValidity(from === null ? t("exam.dateInput.unreadableTime") : "");
+      opens.setAttribute("aria-invalid", String(from === null));
+      length.setCustomValidity("");
+      const minutes = Number(length.value);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date.value) || from === null || !Number.isInteger(minutes) || minutes < 1 || minutes > 600) return;
+      const opensAt = viennaInstant(date.value, from);
+      const closesAt = new Date(opensAt.getTime() + minutes * 60000);
+      if (viennaLocal(closesAt).date !== date.value) {
+        length.setCustomValidity(t("exam.tests.startWindowMidnight"));
+        return;
       }
+      changed({ opensAt: opensAt.toISOString(), closesAt: closesAt.toISOString() });
     };
     date.addEventListener("change", update);
-    for (const field of [opens, closes]) {
+    for (const field of [opens, length]) {
       field.addEventListener("input", update);
       field.addEventListener("change", update);
     }
     return [
       h("label", {}, `${t("exam.tests.date")} `, date),
       " ",
-      h("label", {}, `${t("exam.tests.opens")} `, opens),
+      h("label", {}, `${t("exam.tests.startTime")} `, opens),
       " ",
-      h("label", {}, `${t("exam.tests.closes")} `, closes),
+      h("label", {}, `${t("exam.tests.startWindowLength")} `, length),
     ];
   }
 
   /**
-   * The periods editor: a date and a from and to period, each choice with its
-   * clock times as its tooltip, the to period never before the from period,
-   * and the window they make shown as it changes. Hands every new window to
-   * `changed`.
+   * The periods editor (design D5): a date, one period - each choice with its
+   * clock times as its tooltip -, the minutes after the period's start the
+   * start window opens, from 0 up to the period's length, and its length.
+   * Hands every new start window to `changed`.
    */
   periodsEditor(windowState, changed) {
     const periods = this.periods;
-    const current = matchWindow(periods, windowState.opensAt, windowState.closesAt);
-    const select = (name, numbers, selected) => {
-      const element = h(
-        "select",
-        { name, required: true },
-        numbers.map((period) => h("option", { value: String(period.n), title: periodTimes(periods, period.n) }, String(period.n)))
-      );
-      element.value = String(selected);
-      return element;
-    };
+    const current = matchStart(periods, windowState.opensAt, windowState.closesAt);
+    const period = h(
+      "select",
+      { name: "period", required: true },
+      periods.map((candidate) => h("option", { value: String(candidate.n), title: periodTimes(periods, candidate.n) }, String(candidate.n)))
+    );
+    period.value = String(current.n);
     const date = h("sl-date-input", { name: "date", required: true, value: current.date });
-    const from = select("fromPeriod", periods, current.from);
-    let to = select("toPeriod", periods.filter((period) => period.n >= current.from), current.to);
-    const toLabel = h("label", {}, `${t("exam.tests.toLesson")} `, to);
-    const times = h("span", { class: "sl-exam-sitting-times" });
-    const update = () => {
-      const fromN = Number(from.value);
-      const toN = Math.max(fromN, Number(to.value));
-      if (Number(to.firstChild?.value) !== fromN) {
-        const replaced = select("toPeriod", periods.filter((period) => period.n >= fromN), toN);
-        replaced.addEventListener("change", update);
-        to.replaceWith(replaced);
-        to = replaced;
-      }
-      times.replaceChildren(periodTimes(periods, fromN, toN));
-      if (/^\d{4}-\d{2}-\d{2}$/.test(date.value)) changed(windowFor(periods, date.value, fromN, toN));
+    const offset = h("input", { type: "number", name: "offsetMinutes", min: "0", step: "1", required: true, class: "sl-exam-number", value: String(current.offset) });
+    const length = this.lengthField(current.length);
+    const times = h("span", { class: "sl-exam-quiet sl-exam-sitting-times" });
+    const periodLength = (n) => {
+      const chosen = periods.find((candidate) => candidate.n === n);
+      const [start, end] = [chosen.start, chosen.end].map((time) => time.split(":").map(Number)).map(([hour, minute]) => hour * 60 + minute);
+      return end - start;
     };
-    for (const input of [date, from, to]) input.addEventListener("change", update);
-    times.replaceChildren(periodTimes(periods, current.from, current.to));
+    const update = () => {
+      const n = Number(period.value);
+      offset.max = String(periodLength(n) - 1);
+      times.replaceChildren(periodTimes(periods, n));
+      length.setCustomValidity("");
+      const [minutesIn, minutes] = [Number(offset.value), Number(length.value)];
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date.value) || !offset.checkValidity() || !Number.isInteger(minutes) || minutes < 1 || minutes > 600) return;
+      try {
+        changed(startWindowFor(periods, date.value, n, minutesIn, minutes));
+      } catch {
+        length.setCustomValidity(t("exam.tests.startWindowMidnight"));
+      }
+    };
+    for (const input of [date, period]) input.addEventListener("change", update);
+    for (const input of [offset, length]) {
+      input.addEventListener("input", update);
+      input.addEventListener("change", update);
+    }
+    offset.max = String(periodLength(current.n) - 1);
+    times.replaceChildren(periodTimes(periods, current.n));
     return [
       h("label", {}, `${t("exam.tests.date")} `, date),
       " ",
-      h("label", {}, `${t("exam.tests.fromLesson")} `, from),
+      h("label", {}, `${t("exam.tests.lessonLabel")} `, period, " ", times),
       " ",
-      toLabel,
+      h("label", {}, `${t("exam.tests.offsetMinutes")} `, offset),
       " ",
-      h("span", { class: "sl-exam-quiet" }, "= ", times),
+      h("label", {}, `${t("exam.tests.startWindowLength")} `, length),
     ];
   }
 

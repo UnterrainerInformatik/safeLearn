@@ -19,6 +19,8 @@ import {
   discardTest,
   endSitting,
   extendSitting,
+  extendStartWindow,
+  extendWritingTime,
   getTest,
   listTests,
   removeWrittenQuestion,
@@ -138,7 +140,11 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
     notify(sittingId, "attendance", participant.username);
     return participant;
   });
+  // An offline sitting's single extension; an online one extends its start
+  // window or its running attempts' writing time (sitting-start-window D4).
   api("post", "/sittings/:id/extend", (req) => announcedLive(extendSitting(db, idParam(req.params.id), req.body ?? {})));
+  api("post", "/sittings/:id/extend-start", (req) => announcedLive(extendStartWindow(db, idParam(req.params.id), req.body ?? {})));
+  api("post", "/sittings/:id/extend-writing", (req) => announcedLive(extendWritingTime(db, idParam(req.params.id), req.body ?? {})));
   // Rescheduling deletes the sitting's attempts - an admin's alone once there
   // are any; an open live view drops their rows.
   api("post", "/sittings/:id/reschedule", async (req) => {

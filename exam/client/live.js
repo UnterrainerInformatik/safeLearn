@@ -48,7 +48,7 @@
 
 import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, linkButton, saveOnChange, t } from "./frame.js";
 import { candidateMark, candidateNote, displayClass, displayPerson } from "./classes.js";
-import { displayWindow, handoutPrintControls } from "./tests.js";
+import { displayStartWindow, displayWindow, handoutPrintControls } from "./tests.js";
 import { setTone } from "./row-tone.js";
 
 const stateLabels = {
@@ -210,7 +210,11 @@ class LiveView extends ExamElement {
     this.windowShown = h("span", {});
     this.windowKey = null;
     this.remainingText = h("span", {});
-    this.windowLine = h("span", { class: "sl-exam-live-window" }, `${t("exam.live.window")} `, this.windowShown, this.remainingText);
+    // An online sitting's start window names itself ("Start 11:00–11:10"); an
+    // offline one's shared window is labelled. Below it, an online sitting's
+    // latest end (sitting-start-window design D6).
+    this.windowLine = h("span", { class: "sl-exam-live-window" }, this.offline ? `${t("exam.live.window")} ` : null, this.windowShown, this.remainingText);
+    this.endsLine = this.offline ? null : h("span", { class: "sl-exam-live-ends" });
     this.serverClock = h("span", { class: "sl-exam-live-clock" });
     this.message = h("p", { class: "sl-exam-message", role: "status" });
     this.windowActions = this.windowControls(snapshot.sitting);
@@ -238,6 +242,7 @@ class LiveView extends ExamElement {
       { class: "sl-exam-live-head" },
       h("p", {}, this.badge, " ", this.state),
       h("p", {}, this.windowLine),
+      this.endsLine ? h("p", {}, this.endsLine) : null,
       h(
         "p",
         { class: "sl-exam-quiet" },
@@ -320,6 +325,7 @@ class LiveView extends ExamElement {
       this.bigLabel,
       this.bigRemaining,
       h("p", { class: "sl-exam-screen-window" }, this.windowLine),
+      this.endsLine ? h("p", { class: "sl-exam-screen-ends" }, this.endsLine) : null,
       h("div", { class: "sl-exam-screen-clock-label" }, t("exam.live.time")),
       h("div", { class: "sl-exam-screen-clock" }, this.serverClock),
       // An offline sitting's screen shows no counts: nothing that tells presence or groups.
@@ -340,16 +346,31 @@ class LiveView extends ExamElement {
     if (serverTime) this.offset = Date.parse(serverTime) - Date.now();
   }
 
-  /** Whether the sitting is live, and how long until it opens or closes, by the server's clock. */
+  /**
+   * Whether the sitting is live, and how long until it opens or closes, by the
+   * server's clock. An online sitting stays live after its start window for as
+   * long as an attempt runs (sitting-start-window design D2): until `endsAt`,
+   * the latest end the server last told, which the view asks for again once
+   * the start window has closed.
+   */
   drawWindow() {
     if (!this.sitting || !this.badge) return;
     const now = this.serverNow();
     const opens = Date.parse(this.sitting.opensAt);
     const closes = Date.parse(this.sitting.closesAt);
+    const ends = this.sitting.endsAt ? Date.parse(this.sitting.endsAt) : null;
     // An offline sitting opens when it is started, never by the clock.
     const notStarted = this.offline && !this.sitting.startedAt;
-    const state = notStarted ? "scheduled" : now < opens ? "scheduled" : now < closes ? "open" : "over";
+    const startOpen = !this.offline && opens <= now && now < closes;
+    const state = notStarted ? "scheduled" : now < opens ? "scheduled" : now < closes ? "open" : !this.offline && ends !== null && now < ends ? "open" : "over";
+    // The latest end the server told during the start window is the planned
+    // one; once the start window closed, it tells the running attempts' own.
+    if (!this.offline && this.sitting.startOpen && now >= closes && this.endsPolled !== this.sitting.closesAt) {
+      this.endsPolled = this.sitting.closesAt;
+      this.poll();
+    }
     this.dataset.sitting = state;
+    this.dataset.startOpen = String(startOpen);
     this.badge.textContent = notStarted ? t("exam.offline.notStarted") : stateLabels[state]();
     this.badge.dataset.state = state;
     if (this.startButton) this.startButton.hidden = !notStarted;
@@ -357,22 +378,36 @@ class LiveView extends ExamElement {
       ? t("exam.offline.planned")
       : state === "scheduled"
         ? t("exam.live.opensIn", { time: span(opens - now) })
-        : state === "open"
-          ? t("exam.live.closesIn", { time: span(closes - now) })
-          : t("exam.live.closedAgo", { time: span(now - closes) });
+        : this.offline
+          ? state === "open"
+            ? t("exam.live.closesIn", { time: span(closes - now) })
+            : t("exam.live.closedAgo", { time: span(now - closes) })
+          : startOpen
+            ? t("exam.live.startClosesIn", { time: span(closes - now) })
+            : t("exam.live.startClosed");
+    if (this.endsLine) {
+      this.endsLine.textContent = state === "over" ? t("exam.live.endsOver") : ends !== null ? t("exam.live.endsAt", { time: format.time(new Date(ends)) }) : "";
+    }
     this.serverClock.textContent = format.clock(new Date(now));
     if (this.windowActions) this.windowActions.hidden = state !== "open";
+    if (this.extendStart) this.extendStart.hidden = !startOpen;
+    if (this.extendWriting) this.extendWriting.hidden = state !== "open" || ![...(this.participants?.values() ?? [])].some((participant) => participant.status === "writing");
     // The board has nothing to show once the sitting is over.
     if (this.screenLink) this.screenLink.hidden = state === "over";
     const key = `${this.sitting.opensAt} ${this.sitting.closesAt}`;
     if (key !== this.windowKey) {
       this.windowKey = key;
-      this.windowShown.replaceChildren(displayWindow(this.sitting, this.periods));
+      this.windowShown.replaceChildren(this.offline ? displayWindow(this.sitting, this.periods) : displayStartWindow(this.sitting, this.periods));
     }
     if (this.bigRemaining) {
       if (notStarted) {
         this.bigLabel.textContent = t("exam.offline.notStartedYet");
         this.bigRemaining.textContent = "–";
+        return;
+      }
+      if (!this.offline && state === "open") {
+        this.bigLabel.textContent = startOpen ? t("exam.live.bigStartClosesIn") : t("exam.live.bigEndsIn");
+        this.bigRemaining.textContent = span(startOpen ? closes - now : (ends ?? now) - now);
         return;
       }
       this.bigLabel.textContent = state === "scheduled" ? t("exam.live.bigOpensIn") : state === "open" ? t("exam.live.bigClosesIn") : t("exam.live.bigClosed");
@@ -383,9 +418,12 @@ class LiveView extends ExamElement {
   }
 
   /**
-   * End now and Extend, while the sitting is open (`exam-record-maintenance`):
-   * ending asks by a second click and submits every running attempt; extending
-   * moves the window's end by the minutes given. Either is told beside them.
+   * End now and the extensions, while the sitting is open
+   * (`exam-record-maintenance`): ending asks by a second click and submits
+   * every running attempt. An offline sitting has one Extend, which moves its
+   * shared window's end; an online one extends its start window while that is
+   * open, and the writing time of every running attempt while anyone writes
+   * (sitting-start-window design D4). Each is told beside them.
    */
   windowControls(sitting) {
     this.windowMessage = h("p", { class: "sl-exam-message sl-exam-live-window-message", role: "status" });
@@ -398,16 +436,24 @@ class LiveView extends ExamElement {
         this.windowMessage.textContent = error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.frame.saveFailed");
       }
     };
-    const minutes = h("input", { type: "number", min: "5", max: "120", step: "1", value: "5", class: "sl-exam-number sl-exam-live-extend-minutes", "aria-label": t("exam.live.extendMinutes") });
+    const extension = ({ path, min, value, label, aria, className }) => {
+      const minutes = h("input", { type: "number", min: String(min), max: "120", step: "1", value: String(value), class: `sl-exam-number ${className}-minutes`, "aria-label": aria });
+      return h("span", { class: `sl-exam-actions ${className}-control` }, minutes, button({ label, class: className, action: () => send(path, { minutes: Number(minutes.value) }) }));
+    };
+    let extensions;
+    if (this.offline) {
+      extensions = extension({ path: "extend", min: 5, value: 5, label: t("exam.live.extend"), aria: t("exam.live.extendMinutes"), className: "sl-exam-live-extend" });
+    } else {
+      this.extendStart = extension({ path: "extend-start", min: 5, value: 5, label: t("exam.live.extendStart"), aria: t("exam.live.extendStartMinutes"), className: "sl-exam-live-extend-start" });
+      this.extendWriting = extension({ path: "extend-writing", min: 1, value: 5, label: t("exam.live.extendWriting"), aria: t("exam.live.extendWritingMinutes"), className: "sl-exam-live-extend-writing" });
+      this.extendStart.hidden = true;
+      this.extendWriting.hidden = true;
+      extensions = [this.extendStart, this.extendWriting];
+    }
     return h(
       "span",
       { class: "sl-exam-actions sl-exam-live-window-actions", hidden: true },
-      h(
-        "span",
-        { class: "sl-exam-actions" },
-        minutes,
-        button({ label: t("exam.live.extend"), class: "sl-exam-live-extend", action: () => send("extend", { minutes: Number(minutes.value) }) })
-      ),
+      extensions,
       confirmButton({ class: "sl-exam-live-end", label: t("exam.live.endNow"), armed: t("exam.live.endNowArmed"), action: () => send("end") }),
       // Discarding is the first sitting's alone, while it is open (discard-started-online-test D2).
       sitting.makeup || this.offline ? null : this.discardControl()
@@ -1000,7 +1046,7 @@ class LiveView extends ExamElement {
       const change = JSON.parse(event.data);
       this.syncClock(change.serverTime);
       if (change.sitting) this.sitting = change.sitting;
-      // The window itself changed (ended, extended): every deadline may have moved.
+      // The window itself changed (ended, extended, writing time added): every deadline may have moved.
       if (change.participant) this.update(change.participant);
       else this.poll();
     });

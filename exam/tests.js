@@ -418,13 +418,68 @@ export function testQuestions(db, testId) {
 /**
  * The state of a sitting at `at`: scheduled, open or over. An offline sitting
  * (`offline: true`) stays scheduled until it is started, whatever its planned
- * time.
+ * time, and is over once its shared window has closed. The window of an online
+ * sitting is its start window (sitting-start-window design D2): the sitting is
+ * open while the start window is, and after it for as long as an attempt in it
+ * still runs - `runningUntil`, the latest deadline of its running attempts,
+ * null when none runs.
  */
 export function sittingState(sitting, at = now()) {
   if (sitting.offline && !sitting.startedAt) return "scheduled";
   if (at < sitting.opensAt) return "scheduled";
   if (at < sitting.closesAt) return "open";
+  if (!sitting.offline && sitting.runningUntil && at < sitting.runningUntil) return "open";
   return "over";
+}
+
+/**
+ * The latest deadline of the attempts of sitting `sittingId` still running at
+ * `at` - not submitted, deadline not passed -, or null when none runs.
+ */
+export function runningUntil(db, sittingId, at = now()) {
+  return db.prepare("SELECT MAX(deadline) AS until FROM attempt WHERE sitting_id = ? AND submitted_at IS NULL AND deadline > ?").get(sittingId, at)?.until ?? null;
+}
+
+/**
+ * The SQL condition "sitting `alias` is over" for an online sitting, with one
+ * `?` for the moment asked about (design D2): its start window has closed and
+ * no attempt in it is still running. An attempt past its deadline but not yet
+ * finalized counts as not running; the finalizer submits it at its deadline.
+ */
+export function sittingOverSql(alias) {
+  return `EXISTS (SELECT 1 FROM (SELECT ? AS t) q WHERE ${alias}.closes_at <= q.t
+    AND NOT EXISTS (SELECT 1 FROM attempt ra WHERE ra.sitting_id = ${alias}.id AND ra.submitted_at IS NULL AND ra.deadline > q.t))`;
+}
+
+/** The later of two ISO timestamps, either of which may be null. */
+function later(a, b) {
+  if (a === null) return b;
+  if (b === null) return a;
+  return a > b ? a : b;
+}
+
+/**
+ * How the sitting `row` stands at `at` (design D2): its `state`, whether its
+ * start window is open now (`startOpen`), and `endsAt`, the time the last
+ * participant's time runs out at the latest - while the start window is open
+ * (or still ahead) the later of its end plus the duration and the latest
+ * running deadline, after it the latest running deadline, null once over. An
+ * offline sitting has no start window; its `endsAt` is its shared window's end
+ * while it runs.
+ */
+function timingOf(db, row, offline, at) {
+  const until = offline ? null : runningUntil(db, row.id, at);
+  const state = sittingState({ opensAt: row.opens_at, closesAt: row.closes_at, offline, startedAt: row.started_at, runningUntil: until }, at);
+  if (offline) return { state, startOpen: false, endsAt: state === "over" ? null : row.closes_at };
+  const startOpen = row.opens_at <= at && at < row.closes_at;
+  if (state === "over") return { state, startOpen, endsAt: null };
+  const planned = new Date(Date.parse(row.closes_at) + row.duration_s * 1000).toISOString();
+  return { state, startOpen, endsAt: at < row.closes_at ? later(planned, until) : until };
+}
+
+/** How the sitting `row` stands at `at`, its test's kind looked up: `{ state, startOpen, endsAt }`. */
+export function sittingTiming(db, row, at = now()) {
+  return timingOf(db, row, testRow(db, row.test_id).kind === "offline", at);
 }
 
 /** A test's sittings in the order they open, each with its participants and the number of its attempts. */
@@ -439,14 +494,14 @@ export function testSittings(db, testId, at = now()) {
     .all(testId)
     .map((sitting) => {
       const rows = participants.all(sitting.id);
-      const window = { opensAt: sitting.opens_at, closesAt: sitting.closes_at };
       return {
         id: sitting.id,
-        ...window,
+        opensAt: sitting.opens_at,
+        closesAt: sitting.closes_at,
         durationS: sitting.duration_s,
         makeup: sitting.makeup === 1,
         startedAt: sitting.started_at ?? null,
-        state: sittingState({ ...window, offline, startedAt: sitting.started_at }, at),
+        ...timingOf(db, sitting, offline, at),
         participants: rows.map((row) => row.username),
         // Who was marked absent, for an offline sitting's make-up.
         absent: offline ? rows.filter((row) => row.present === 0).map((row) => row.username) : [],
@@ -596,10 +651,10 @@ function sittingRow(db, id) {
 }
 
 /** A sitting with its test's course and its participants, as its pages show it. */
-export function getSitting(db, id) {
+export function getSitting(db, id, at = now()) {
   const row = sittingRow(db, id);
   const test = testRow(db, row.test_id);
-  const sitting = testSittings(db, row.test_id).find((candidate) => candidate.id === id);
+  const sitting = testSittings(db, row.test_id, at).find((candidate) => candidate.id === id);
   const variables = test.kind === "offline" ? testVariables(db, test, row) : [];
   return { ...sitting, testId: test.id, testName: test.name, courseId: test.course_id, kind: test.kind ?? "online", handouts: test.kind === "offline" ? handoutsOf(test) : [], variables };
 }
@@ -627,9 +682,11 @@ function participantsOf(db, test, selected) {
 }
 
 /**
- * A sitting's window and duration, checked: the window has to end in the
- * future and after it opens, and an attempt's duration has to be shorter than
- * the window.
+ * A sitting's start window and duration, checked (sitting-start-window design
+ * D1): the start window has to close in the future and after it opens, and be
+ * at most 600 minutes long; the duration is 1 to 600 minutes and may be longer
+ * than the start window, since every attempt runs its full duration from its
+ * own start.
  */
 function sittingTimes({ opensAt, closesAt, durationMinutes }, at = now()) {
   const opens = instant(opensAt, "exam.errors.tests.startFormat");
@@ -639,11 +696,8 @@ function sittingTimes({ opensAt, closesAt, durationMinutes }, at = now()) {
   if (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 600) {
     throw new InvalidInputError("exam.errors.tests.durationMinutes");
   }
-  const durationS = durationMinutes * 60;
-  if (durationS * 1000 >= Date.parse(closes) - Date.parse(opens)) {
-    throw new InvalidInputError("exam.errors.tests.durationWindow");
-  }
-  return { opens, closes, durationS };
+  if (Date.parse(closes) - Date.parse(opens) > 600 * 60000) throw new InvalidInputError("exam.errors.tests.startWindowLength");
+  return { opens, closes, durationS: durationMinutes * 60 };
 }
 
 /** The first sitting of a test, the one its make-ups take their duration from, or null. */
@@ -716,10 +770,13 @@ export function updateSitting(db, id, input = {}) {
   });
 }
 
-/** The state of the sitting `row` at `at`, its test's kind taken into account. */
+/**
+ * The state of the sitting `row` at `at`, its test's kind and its running
+ * attempts taken into account: every state of a stored sitting goes through
+ * here, so none forgets the attempts still running (design D2).
+ */
 function rowState(db, row, at) {
-  const offline = testRow(db, row.test_id).kind === "offline";
-  return sittingState({ opensAt: row.opens_at, closesAt: row.closes_at, offline, startedAt: row.started_at }, at);
+  return sittingTiming(db, row, at).state;
 }
 
 /** Refuses anything but a sitting that is open now; an offline one before its start included. */
@@ -728,10 +785,10 @@ function requireOpen(db, row, at) {
 }
 
 /**
- * Ends an open sitting now (exam-ui-consistency design D9): its window closes,
- * and every running attempt is submitted with its saved answers, exactly as
- * at its deadline. The rule that the duration is shorter than the window is
- * one of scheduling and does not apply.
+ * Ends an open sitting now (exam-ui-consistency design D9, sitting-start-window
+ * D4): its window closes now - an online sitting's start window only if it is
+ * still open, an earlier end of it stays -, and every running attempt is
+ * submitted with its saved answers, exactly as at its deadline.
  */
 export function endSitting(db, id, at = now()) {
   const row = sittingRow(db, id);
@@ -741,35 +798,65 @@ export function endSitting(db, id, at = now()) {
   // raise from inside the transaction instead of telling the teacher anything.
   if (at <= row.opens_at) throw new ConflictError("exam.errors.tests.sittingEndBeforeOpen");
   inTransaction(db, () => {
-    db.prepare("UPDATE sitting SET closes_at = ? WHERE id = ?").run(at, id);
-    // An attempt's deadline is stored, the earlier of its start plus the duration and the window's end.
+    if (at < row.closes_at) db.prepare("UPDATE sitting SET closes_at = ? WHERE id = ?").run(at, id);
     db.prepare("UPDATE attempt SET deadline = ? WHERE sitting_id = ? AND submitted_at IS NULL AND deadline > ?").run(at, id, at);
   });
   finalizeDue(db, at);
-  return getSitting(db, id);
+  return getSitting(db, id, at);
 }
 
 /**
- * Extends an open sitting's window by 5 to 120 minutes. A running attempt's
- * deadline is the earlier of its start plus the duration and the new end, so
- * one cut short by the window gains time and one that runs its full duration
- * does not. The duration stays.
+ * Extends a started offline sitting by 5 to 120 minutes: its shared window
+ * closes that much later for every participant (`offline-test`). An online
+ * sitting is extended by `extendStartWindow` or `extendWritingTime` instead.
  */
 export function extendSitting(db, id, { minutes } = {}, at = now()) {
   const row = sittingRow(db, id);
+  if (testRow(db, row.test_id).kind !== "offline") throw new ConflictError("exam.errors.tests.extendOnline");
   requireOpen(db, row, at);
   if (!Number.isInteger(minutes) || minutes < 5 || minutes > 120) throw new InvalidInputError("exam.errors.tests.extendMinutes");
   const closes = new Date(Date.parse(row.closes_at) + minutes * 60000).toISOString();
+  db.prepare("UPDATE sitting SET closes_at = ? WHERE id = ?").run(closes, id);
+  return getSitting(db, id, at);
+}
+
+/** The sitting `id` of an online test, or a refusal for an offline one. */
+function onlineSittingRow(db, id) {
+  const row = sittingRow(db, id);
+  if (testRow(db, row.test_id).kind === "offline") throw new ConflictError("exam.errors.tests.extendOffline");
+  return row;
+}
+
+/**
+ * Extends the start window of an online sitting by 5 to 120 minutes, only
+ * while it is open (design D4): participants can start that much longer. No
+ * running attempt's deadline and not the duration change.
+ */
+export function extendStartWindow(db, id, { minutes } = {}, at = now()) {
+  const row = onlineSittingRow(db, id);
+  if (!(row.opens_at <= at && at < row.closes_at)) throw new ConflictError("exam.errors.tests.extendStartClosed");
+  if (!Number.isInteger(minutes) || minutes < 5 || minutes > 120) throw new InvalidInputError("exam.errors.tests.extendMinutes");
+  const closes = new Date(Date.parse(row.closes_at) + minutes * 60000).toISOString();
+  db.prepare("UPDATE sitting SET closes_at = ? WHERE id = ?").run(closes, id);
+  return getSitting(db, id, at);
+}
+
+/**
+ * Extends the writing time of an online sitting by 1 to 120 minutes, only
+ * while an attempt in it runs (design D4): the deadline of every attempt
+ * running now moves that much later. Submitted attempts, the duration, the
+ * start window and attempts started afterwards stay as they are.
+ */
+export function extendWritingTime(db, id, { minutes } = {}, at = now()) {
+  const row = onlineSittingRow(db, id);
+  if (row.opens_at > at || runningUntil(db, id, at) === null) throw new ConflictError("exam.errors.tests.extendWritingNone");
+  if (!Number.isInteger(minutes) || minutes < 1 || minutes > 120) throw new InvalidInputError("exam.errors.tests.extendWritingMinutes");
   inTransaction(db, () => {
-    db.prepare("UPDATE sitting SET closes_at = ? WHERE id = ?").run(closes, id);
-    const running = db.prepare("SELECT id, started_at FROM attempt WHERE sitting_id = ? AND submitted_at IS NULL").all(id);
+    const running = db.prepare("SELECT id, deadline FROM attempt WHERE sitting_id = ? AND submitted_at IS NULL AND deadline > ?").all(id, at);
     const set = db.prepare("UPDATE attempt SET deadline = ? WHERE id = ?");
-    for (const attempt of running) {
-      const full = new Date(Date.parse(attempt.started_at) + row.duration_s * 1000).toISOString();
-      set.run(full < closes ? full : closes, attempt.id);
-    }
+    for (const attempt of running) set.run(new Date(Date.parse(attempt.deadline) + minutes * 60000).toISOString(), attempt.id);
   });
-  return getSitting(db, id);
+  return getSitting(db, id, at);
 }
 
 /**
@@ -785,7 +872,7 @@ export function rescheduleSitting(db, id, { opensAt, closesAt, attempts } = {}, 
   const row = sittingRow(db, id);
   // An offline sitting that is over is followed by a make-up, not set again.
   if (testRow(db, row.test_id).kind === "offline") throw new ConflictError("exam.errors.tests.offlineNoReschedule");
-  if (sittingState({ opensAt: row.opens_at, closesAt: row.closes_at }, at) !== "over") throw new ConflictError("exam.errors.tests.sittingNotOver");
+  if (rowState(db, row, at) !== "over") throw new ConflictError("exam.errors.tests.sittingNotOver");
   const written = db.prepare("SELECT COUNT(*) AS n FROM attempt WHERE sitting_id = ?").get(id).n;
   if (written > 0 && !admin) throw new ForbiddenError("Forbidden");
   if (written !== (attempts ?? 0)) throw new ConflictError("exam.errors.tests.attemptsChanged");
@@ -827,7 +914,7 @@ export function discardTest(db, id, { attempts } = {}, at = now()) {
   if (test.kind === "offline") throw new ConflictError("exam.errors.tests.discardOffline");
   return inTransaction(db, () => {
     const first = firstSitting(db, id);
-    const state = (row) => sittingState({ opensAt: row.opens_at, closesAt: row.closes_at }, at);
+    const state = (row) => rowState(db, row, at);
     if (first === null || state(first) !== "open") {
       const makeupOpen = db
         .prepare("SELECT * FROM sitting WHERE test_id = ? AND makeup = 1")

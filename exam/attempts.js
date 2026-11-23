@@ -21,7 +21,7 @@ import { ConflictError, getCourse, inTransaction, InvalidInputError, isClosedYea
 import { readScale } from "./gradebook.js";
 import { gradeFor } from "./grading.js";
 import { notify } from "./live.js";
-import { startedCondition } from "./tests.js";
+import { sittingOverSql, startedCondition } from "./tests.js";
 
 /** A request for an attempt from another browser than the one it is bound to. Answered with 409. */
 export class DeviceRefusedError extends ConflictError {
@@ -217,10 +217,13 @@ export function scheduleSweep(db, intervalMs = 30000) {
 // ------------------------------------------------------- what is open
 
 /**
- * The tests `username` can write at `at`: those with a sitting open now that
- * they take part in and that they have not submitted. Each with its course,
- * how long an attempt takes, and the attempt if one is running. `testId`
- * narrows it to one test.
+ * The tests `username` can write at `at`: those with a sitting they take part
+ * in whose start window is open now and that they have not submitted, and
+ * those whose attempt of theirs is still running, also after the start window
+ * has closed (sitting-start-window design D3). Each with its course, how long
+ * an attempt takes, when it goes from the list - the attempt's deadline once
+ * started, the start window's end before -, and the attempt if one is
+ * running. `testId` narrows it to one test.
  *
  * After them, the offline sittings open for `username` (exam-offline-sittings
  * design D3): started, inside their window, and the participant marked
@@ -233,16 +236,24 @@ export function openTestsOf(db, username, { at = now(), testId = null } = {}) {
   finalizeDue(db, at, username);
   const rows = db
     .prepare(
-      `SELECT t.id AS testId, t.name, t.course_id AS courseId, MAX(s.closes_at) AS closesAt, MIN(s.duration_s) AS durationS
-       FROM sitting_participant p
-       JOIN sitting s ON s.id = p.sitting_id
-       JOIN test t ON t.id = s.test_id
-       WHERE p.username = ? AND t.kind = 'online' AND s.opens_at <= ? AND ? < s.closes_at
-         AND NOT EXISTS (SELECT 1 FROM attempt a WHERE a.test_id = t.id AND a.username = p.username AND a.submitted_at IS NOT NULL)
-       GROUP BY t.id
-       ORDER BY MAX(s.closes_at), t.id`
+      `SELECT testId, name, courseId, MAX(closesAt) AS closesAt, MIN(durationS) AS durationS FROM (
+         SELECT t.id AS testId, t.name, t.course_id AS courseId, s.closes_at AS closesAt, s.duration_s AS durationS
+         FROM sitting_participant p
+         JOIN sitting s ON s.id = p.sitting_id
+         JOIN test t ON t.id = s.test_id
+         WHERE p.username = ? AND t.kind = 'online' AND s.opens_at <= ? AND ? < s.closes_at
+           AND NOT EXISTS (SELECT 1 FROM attempt a WHERE a.test_id = t.id AND a.username = p.username AND a.submitted_at IS NOT NULL)
+         UNION ALL
+         SELECT t.id, t.name, t.course_id, a.deadline, s.duration_s
+         FROM attempt a
+         JOIN sitting s ON s.id = a.sitting_id
+         JOIN test t ON t.id = a.test_id
+         WHERE a.username = ? AND t.kind = 'online' AND a.submitted_at IS NULL AND ? < a.deadline
+       )
+       GROUP BY testId
+       ORDER BY MAX(closesAt), testId`
     )
-    .all(username, at, at)
+    .all(username, at, at, username, at)
     .filter((row) => testId === null || row.testId === testId);
   const attemptOf = db.prepare("SELECT id, deadline FROM attempt WHERE test_id = ? AND username = ?");
   const online = rows.map((row) => {
@@ -255,7 +266,8 @@ export function openTestsOf(db, username, { at = now(), testId = null } = {}) {
       className: course.className,
       subject: course.subject,
       language: course.language,
-      closesAt: row.closesAt,
+      // A started attempt goes from the list at its deadline, which may lie after the start window.
+      closesAt: attempt ? attempt.deadline : row.closesAt,
       durationS: row.durationS,
       attempt: attempt ? { attemptId: attempt.id, remainingMs: Math.max(0, msBetween(at, attempt.deadline)) } : null,
     };
@@ -319,9 +331,11 @@ export function nextOpenTestsChange(db, username, at = now()) {
 /**
  * Starts `username`'s attempt at a test, or answers the one they have.
  *
- * A new attempt is written in one transaction: its start, its deadline -
- * the earlier of start plus duration and the end of the sitting's window -
- * the shuffled questions, each question's shuffled answers behind fresh
+ * An attempt that exists is resumed whatever the start window; a new one is
+ * created only while the start window of a sitting of the student's is open
+ * (sitting-start-window design D3). It is written in one transaction: its
+ * start, its deadline - start plus the sitting's duration, never cut by the
+ * start window (design D1) -, the shuffled questions, each question's shuffled answers behind fresh
  * tokens, and the hash of a new device secret, which is answered as `secret`
  * for the browser's cookie. `UNIQUE (test_id, username)` makes a second start
  * of the same attempt impossible, across all sittings.
@@ -353,7 +367,7 @@ export function startAttempt(db, username, testId, at = now(), { userAgent = nul
   const secret = randomToken();
   const attemptId = inTransaction(db, () => {
     const questions = db.prepare("SELECT id FROM test_question WHERE test_id = ? ORDER BY position").all(testId);
-    const deadline = earlier(new Date(Date.parse(at) + sitting.duration_s * 1000).toISOString(), sitting.closes_at);
+    const deadline = new Date(Date.parse(at) + sitting.duration_s * 1000).toISOString();
     const { lastInsertRowid } = db
       .prepare(
         `INSERT INTO attempt (test_id, sitting_id, username, started_at, deadline, question_count, device_hash, device_user_agent)
@@ -439,22 +453,23 @@ export function resultView(db, row) {
 /**
  * The SQL condition under which a student may review attempt `alias`, with one
  * `?` for the moment asked about: it is submitted and its own sitting is over
- * (exam-attempt-review design D1). `reviewOpen` and the image rule use it, so
- * they cannot disagree.
+ * (exam-attempt-review design D1) - its start window has closed and no attempt
+ * in it still runs (sitting-start-window design D2). `reviewOpen` and the image
+ * rule use it, so they cannot disagree.
  */
 export function reviewOpenCondition(alias) {
-  return `(${alias}.submitted_at IS NOT NULL AND EXISTS (SELECT 1 FROM sitting rs WHERE rs.id = ${alias}.sitting_id AND rs.closes_at <= ?))`;
+  return `(${alias}.submitted_at IS NOT NULL AND EXISTS (SELECT 1 FROM sitting rs WHERE rs.id = ${alias}.sitting_id AND ${sittingOverSql("rs")}))`;
 }
 
 /**
  * Whether the student of attempt `row` may review it at `at`: it is submitted
- * and the sitting it was written in is over - its window has closed or the
- * teacher ended it. A make-up attempt follows its own sitting.
+ * and the sitting it was written in is over - its start window has closed and
+ * no attempt in it still runs, or the teacher ended it. A make-up attempt
+ * follows its own sitting.
  */
 export function reviewOpen(db, row, at = now()) {
   if (row.submitted_at === null) return false;
-  const sitting = db.prepare("SELECT closes_at FROM sitting WHERE id = ?").get(row.sitting_id);
-  return sitting !== undefined && sitting.closes_at <= at;
+  return db.prepare(`SELECT 1 FROM sitting rs WHERE rs.id = ? AND ${sittingOverSql("rs")}`).get(row.sitting_id, at) !== undefined;
 }
 
 /**

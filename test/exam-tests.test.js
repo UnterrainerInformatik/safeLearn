@@ -35,6 +35,8 @@ import {
   discardTest,
   endSitting,
   extendSitting,
+  extendStartWindow,
+  extendWritingTime,
   getTest,
   listTests,
   removeWrittenQuestion,
@@ -446,6 +448,8 @@ describe("the lists of tests", () => {
 
 /** An ISO timestamp `minutes` from now. */
 const inMinutes = (minutes) => new Date(Date.now() + minutes * 60000).toISOString();
+/** The ISO instant `minutes` after `iso`. */
+const shift = (iso, minutes) => new Date(Date.parse(iso) + minutes * 60000).toISOString();
 
 describe("sittings", () => {
   test("the first is written by the whole roster, a make-up by the students chosen, with the first one's duration", () => {
@@ -460,13 +464,17 @@ describe("sittings", () => {
     assert.equal(getQuestion(db, ids[0]).usage[0].usedOn, viennaDate(first.opensAt), "the usage is dated by the first sitting");
   });
 
-  test("an attempt's duration has to be shorter than the window, and the window has to end in the future", () => {
+  test("the duration may be longer than the start window, which opens before it closes, closes in the future and lasts up to 600 minutes", () => {
     const { db, course, ids } = seeded();
     const test = createTest(db, course.id, { name: "T", questionIds: [ids[0]] });
-    assert.throws(() => createSitting(db, test.id, { opensAt: inMinutes(60), closesAt: inMinutes(70), durationMinutes: 15 }), /shorter/);
-    assert.throws(() => createSitting(db, test.id, { opensAt: inMinutes(60), closesAt: inMinutes(70), durationMinutes: 10 }), /shorter/);
-    assert.throws(() => createSitting(db, test.id, { opensAt: inMinutes(-60), closesAt: inMinutes(-10), durationMinutes: 10 }), /future/);
+    const short = createSitting(db, test.id, { opensAt: inMinutes(60), closesAt: inMinutes(70), durationMinutes: 20 });
+    assert.deepEqual([Date.parse(short.closesAt) - Date.parse(short.opensAt), short.durationS], [10 * 60000, 1200], "a 10-minute start window, 20-minute attempts");
+    deleteSitting(db, short.id);
+    assert.throws(() => createSitting(db, test.id, { opensAt: inMinutes(60), closesAt: inMinutes(60), durationMinutes: 20 }), /open before it closes/);
     assert.throws(() => createSitting(db, test.id, { opensAt: inMinutes(70), closesAt: inMinutes(60), durationMinutes: 5 }), InvalidInputError);
+    assert.throws(() => createSitting(db, test.id, { opensAt: inMinutes(-60), closesAt: inMinutes(-10), durationMinutes: 10 }), /future/);
+    assert.throws(() => createSitting(db, test.id, { opensAt: inMinutes(60), closesAt: inMinutes(661), durationMinutes: 10 }), /600 minutes/);
+    assert.equal(createSitting(db, test.id, { opensAt: inMinutes(60), closesAt: inMinutes(660), durationMinutes: 10 }).durationS, 600, "600 minutes are fine");
   });
 
   test("a sitting changes and goes only until it opens", () => {
@@ -484,8 +492,8 @@ describe("sittings", () => {
 // ------------------------------------------------------------ attempts
 
 /**
- * A test of all three pool questions with a sitting open now for 50 minutes,
- * attempts lasting 15. `at` is a moment inside the window.
+ * A test of all three pool questions with a sitting whose start window is open
+ * now for 50 minutes, attempts lasting 15.
  */
 function running({ duration = 15, window = 50, participants = null } = {}) {
   const seed = seeded();
@@ -512,14 +520,30 @@ function correctTokens(db, attemptId) {
 }
 
 describe("attempts", () => {
-  test("the deadline is the earlier of start plus duration and the window's end", () => {
-    const { db, test } = running({ duration: 15, window: 50 });
+  test("the deadline is start plus duration, never cut by the start window", () => {
+    const { db, test, sitting } = running({ duration: 20, window: 10 });
     const now = new Date().toISOString();
     const anna = attemptRow(db, startAttempt(db, "anna", test.id, now).attemptId);
-    assert.equal(Date.parse(anna.deadline) - Date.parse(now), 15 * 60000);
-    const late = inMinutes(45);
+    assert.equal(Date.parse(anna.deadline) - Date.parse(now), 20 * 60000);
+    // Started a minute before the start window closes, as at 10:14 with 10:15.
+    const late = shift(sitting.closesAt, -1);
     const ben = attemptRow(db, startAttempt(db, "ben", test.id, late).attemptId);
-    assert.equal(ben.deadline, db.prepare("SELECT closes_at FROM sitting").get().closes_at, "started four minutes before the end");
+    assert.equal(ben.deadline, shift(late, 20), "the full 20 minutes");
+  });
+
+  test("an attempt is resumed after the start window, and a first start after it is refused", () => {
+    const { db, test, sitting } = running({ duration: 20, window: 10, participants: ["anna", "ben"] });
+    const late = shift(sitting.closesAt, -1);
+    const anna = startAttempt(db, "anna", test.id, late).attemptId;
+    const after = shift(sitting.closesAt, 5);
+    assert.deepEqual(startAttempt(db, "anna", test.id, after), { attemptId: anna, created: false }, "resumed at 10:20");
+    assert.throws(() => startAttempt(db, "ben", test.id, shift(sitting.closesAt, 1)), NotFoundError, "a first start at 10:16");
+    const [listed] = openTestsOf(db, "anna", { at: after });
+    assert.deepEqual([listed.testId, listed.closesAt, listed.attempt.attemptId], [test.id, attemptRow(db, anna).deadline, anna], "listed until the deadline");
+    assert.equal(listed.attempt.remainingMs, 14 * 60000);
+    assert.deepEqual(openTestsOf(db, "ben", { at: after }), [], "not offered to one who has not started");
+    assert.equal(openTestsOf(db, "ben", { at: shift(sitting.closesAt, -2) }).length, 1, "offered while the start window is open");
+    assert.deepEqual(openTestsOf(db, "anna", { at: shift(late, 20) }), [], "gone at the deadline");
   });
 
   test("one attempt per student and test, across all sittings, resumed and never restarted", () => {
@@ -1096,31 +1120,189 @@ describe("ending and extending an open sitting", () => {
     assert.equal(row.score, 1, "with the answer it had saved");
   });
 
-  test("extending moves the deadlines the window cut short, and not those that run their full duration", () => {
-    const { db, test, sitting } = running({ duration: 10, window: 50 });
-    const early = startAttempt(db, "anna", test.id, new Date().toISOString()).attemptId;
-    // Started four minutes before the window closes: its deadline is the window's end.
-    const lateStart = new Date(Date.parse(sitting.closesAt) - 4 * 60000).toISOString();
-    const late = startAttempt(db, "ben", test.id, lateStart).attemptId;
-    const before = attemptRow(db, early).deadline;
-    assert.equal(attemptRow(db, late).deadline, sitting.closesAt);
-    const extended = extendSitting(db, sitting.id, { minutes: 10 });
-    assert.equal(Date.parse(extended.closesAt) - Date.parse(sitting.closesAt), 10 * 60000);
-    assert.equal(attemptRow(db, early).deadline, before, "the full duration stays");
-    assert.equal(Date.parse(attemptRow(db, late).deadline), Date.parse(lateStart) + 10 * 60000, "start plus the duration now");
-    assert.equal(db.prepare("SELECT duration_s FROM sitting WHERE id = ?").get(sitting.id).duration_s, 600, "the duration is unchanged");
-    for (const minutes of [4, 121, 7.5, "10"]) assert.throws(() => extendSitting(db, sitting.id, { minutes }), InvalidInputError, String(minutes));
+  test("ending after the start window keeps the start window and submits the running attempt", () => {
+    const { db, test, sitting } = running({ duration: 20, window: 10 });
+    const anna = startAttempt(db, "anna", test.id, shift(sitting.closesAt, -1)).attemptId;
+    const at = shift(sitting.closesAt, 10);
+    const ended = endSitting(db, sitting.id, at);
+    assert.deepEqual([ended.closesAt, ended.state, ended.endsAt], [sitting.closesAt, "over", null], "the start window still reads as before");
+    assert.deepEqual([attemptRow(db, anna).submitted_at, attemptRow(db, anna).deadline], [at, at]);
   });
 
-  test("both are refused before the sitting opens and after it closed", () => {
+  test("the start window is extended while it is open, and no running deadline moves", () => {
+    const { db, test, sitting } = running({ duration: 20, window: 10, participants: ["anna", "ben"] });
+    const anna = startAttempt(db, "anna", test.id).attemptId;
+    const before = attemptRow(db, anna).deadline;
+    const extended = extendStartWindow(db, sitting.id, { minutes: 5 });
+    assert.equal(extended.closesAt, shift(sitting.closesAt, 5));
+    assert.equal(attemptRow(db, anna).deadline, before, "the student who started keeps their deadline");
+    assert.equal(startAttempt(db, "ben", test.id, shift(sitting.closesAt, 4)).created, true, "students can start until the new end");
+    assert.equal(db.prepare("SELECT duration_s FROM sitting WHERE id = ?").get(sitting.id).duration_s, 1200, "the duration is unchanged");
+    for (const minutes of [4, 121, 7.5, "10"]) assert.throws(() => extendStartWindow(db, sitting.id, { minutes }), InvalidInputError, String(minutes));
+    assert.throws(
+      () => extendStartWindow(db, sitting.id, { minutes: 5 }, shift(extended.closesAt, 1)),
+      (error) => error instanceof ConflictError && error.key === "exam.errors.tests.extendStartClosed",
+      "refused once it closed, also while attempts run"
+    );
+  });
+
+  test("the writing time moves every running deadline, and neither a submitted one nor a later starter's", () => {
+    const { db, klass, test, sitting } = running({ duration: 20, window: 10 });
+    addToRoster(db, klass.id, { username: "carla" });
+    db.prepare("INSERT INTO sitting_participant (sitting_id, username) VALUES (?, 'carla')").run(sitting.id);
+    assert.throws(
+      () => extendWritingTime(db, sitting.id, { minutes: 5 }),
+      (error) => error instanceof ConflictError && error.key === "exam.errors.tests.extendWritingNone",
+      "nobody is writing"
+    );
+    const anna = startAttempt(db, "anna", test.id).attemptId;
+    const ben = startAttempt(db, "ben", test.id).attemptId;
+    submitAttempt(db, attemptRow(db, ben));
+    const [annaBefore, benBefore] = [attemptRow(db, anna).deadline, attemptRow(db, ben).deadline];
+    extendWritingTime(db, sitting.id, { minutes: 5 });
+    assert.equal(attemptRow(db, anna).deadline, shift(annaBefore, 5));
+    assert.equal(attemptRow(db, ben).deadline, benBefore, "the submitted attempt is unchanged");
+    const start = shift(sitting.closesAt, -1);
+    const carla = startAttempt(db, "carla", test.id, start).attemptId;
+    assert.equal(attemptRow(db, carla).deadline, shift(start, 20), "a later starter gets the duration only");
+    assert.equal(db.prepare("SELECT closes_at FROM sitting WHERE id = ?").get(sitting.id).closes_at, sitting.closesAt, "the start window stays");
+    for (const minutes of [0, 121, 1.5, "5"]) assert.throws(() => extendWritingTime(db, sitting.id, { minutes }), InvalidInputError, String(minutes));
+    assert.equal(extendWritingTime(db, sitting.id, { minutes: 1 }).state, "open", "a single minute is fine");
+  });
+
+  test("an online sitting is not extended the offline way", () => {
+    const { db, sitting } = running();
+    assert.throws(() => extendSitting(db, sitting.id, { minutes: 10 }), (error) => error instanceof ConflictError && error.key === "exam.errors.tests.extendOnline");
+  });
+
+  test("all are refused before the sitting opens and once it is over", () => {
     const seed = seeded();
     const test = createTest(seed.db, seed.course.id, { name: "T", questionIds: seed.ids });
     const later = createSitting(seed.db, test.id, { opensAt: inMinutes(60), closesAt: inMinutes(120), durationMinutes: 15 });
-    assert.throws(() => endSitting(seed.db, later.id), ConflictError);
-    assert.throws(() => extendSitting(seed.db, later.id, { minutes: 10 }), ConflictError);
+    const refusedAll = () => {
+      assert.throws(() => endSitting(seed.db, later.id), ConflictError);
+      assert.throws(() => extendStartWindow(seed.db, later.id, { minutes: 10 }), ConflictError);
+      assert.throws(() => extendWritingTime(seed.db, later.id, { minutes: 10 }), ConflictError);
+    };
+    refusedAll();
     seed.db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ? WHERE id = ?").run(inMinutes(-60), inMinutes(-1), later.id);
-    assert.throws(() => endSitting(seed.db, later.id), ConflictError);
-    assert.throws(() => extendSitting(seed.db, later.id, { minutes: 10 }), ConflictError);
+    refusedAll();
+  });
+});
+
+describe("a sitting is open until its last attempt is over", () => {
+  const timing = (db, testId, at) => {
+    const { state, startOpen, endsAt } = testSittings(db, testId, at)[0];
+    return { state, startOpen, endsAt };
+  };
+
+  test("open after the start window while an attempt runs, over at its deadline", () => {
+    const { db, test, sitting } = running({ duration: 20, window: 10 });
+    const start = shift(sitting.closesAt, -1);
+    const deadline = shift(start, 20);
+    startAttempt(db, "anna", test.id, start);
+    assert.deepEqual(timing(db, test.id, shift(sitting.closesAt, -2)), { state: "open", startOpen: true, endsAt: shift(sitting.closesAt, 20) }, "during the start window");
+    assert.deepEqual(timing(db, test.id, shift(sitting.closesAt, 5)), { state: "open", startOpen: false, endsAt: deadline }, "after it, the last deadline");
+    assert.deepEqual(timing(db, test.id, deadline), { state: "over", startOpen: false, endsAt: null });
+    assert.equal(getTest(db, test.id).sittings[0].state, "open");
+  });
+
+  test("over at the start window's end when everybody submitted early, or nobody started", () => {
+    const nobody = running({ duration: 20, window: 10 });
+    assert.equal(timing(nobody.db, nobody.test.id, nobody.sitting.closesAt).state, "over", "nobody started");
+    const early = running({ duration: 20, window: 10 });
+    submitAttempt(early.db, attemptRow(early.db, startAttempt(early.db, "anna", early.test.id).attemptId));
+    assert.equal(timing(early.db, early.test.id, shift(early.sitting.closesAt, -0.01)).state, "open");
+    assert.equal(timing(early.db, early.test.id, early.sitting.closesAt).state, "over", "everybody submitted");
+  });
+
+  test("the latest end follows an extension of the writing time", () => {
+    const { db, test, sitting } = running({ duration: 20, window: 10 });
+    const start = shift(sitting.closesAt, -1);
+    startAttempt(db, "anna", test.id, start);
+    extendWritingTime(db, sitting.id, { minutes: 5 });
+    assert.equal(timing(db, test.id, new Date().toISOString()).endsAt, shift(start, 25), "later than the start window plus the duration");
+    assert.equal(timing(db, test.id, shift(sitting.closesAt, 5)).endsAt, shift(start, 25));
+  });
+
+  test("the live snapshot carries the start window and the latest end, also for the class, and follows the last submission", () => {
+    const { db, test, sitting } = running({ duration: 20, window: 10 });
+    const anna = startAttempt(db, "anna", test.id, shift(sitting.closesAt, -3)).attemptId;
+    const ben = startAttempt(db, "ben", test.id, shift(sitting.closesAt, -1)).attemptId;
+    const after = shift(sitting.closesAt, 2);
+    const live = (at, options) => {
+      const { state, startOpen, endsAt } = liveSnapshot(db, sitting.id, at, options).sitting;
+      return { state, startOpen, endsAt };
+    };
+    assert.deepEqual(live(after), { state: "open", startOpen: false, endsAt: attemptRow(db, ben).deadline });
+    assert.deepEqual(live(after, { screen: true }), live(after), "the view for the class carries the same");
+    submitAttempt(db, attemptRow(db, ben), after);
+    assert.equal(live(after).endsAt, attemptRow(db, anna).deadline, "the other one's deadline");
+    submitAttempt(db, attemptRow(db, anna), after);
+    assert.deepEqual(live(after), { state: "over", startOpen: false, endsAt: null });
+  });
+
+  test("the routes for both extensions are a teacher's and reach the live view", async () => {
+    const dbPath = temporaryPath();
+    const saved = { path: process.env.EXAM_DB_PATH, periods: process.env.SCHOOL_PERIODS, fetch: global.fetch };
+    process.env.EXAM_DB_PATH = dbPath;
+    delete process.env.SCHOOL_PERIODS;
+    const started = await init({ startPage: () => "/index.html" });
+    const { db } = openDatabase(dbPath);
+    openDatabases.push(db);
+    const seed = seeded(db);
+    const test = createTest(db, seed.course.id, { name: "T", questionIds: seed.ids });
+    const sitting = createSitting(db, test.id, { opensAt: inMinutes(60), closesAt: inMinutes(70), durationMinutes: 20 });
+    db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ? WHERE id = ?").run(inMinutes(-1), inMinutes(9), sitting.id);
+    const anna = startAttempt(db, "anna", test.id).attemptId;
+    global.fetch = async () => ({ ok: true, json: async () => ({ attributes: { config: [JSON.stringify({ vt: 1 })] } }) });
+    const app = express();
+    app.use(express.json());
+    app.use((req, res, next) => {
+      const username = req.get("X-As");
+      req.user = {
+        name: username,
+        preferred_username: username,
+        accessToken: "access-token",
+        accessTokenDecoded: { preferred_username: username },
+        keycloakConfig: { "auth-server-url": "https://identity.example/", realm: "demo", resource: "safelearn" },
+        rolesCalculated: JSON.stringify({ [req.get("X-Role")]: true }),
+      };
+      next();
+    });
+    app.use("/exam", started.router);
+    const server = app.listen(0);
+    const heard = [];
+    const stop = listen(sitting.id, (event) => heard.push(event));
+    try {
+      const extend = (kind, as, role, minutes) =>
+        saved.fetch(`http://127.0.0.1:${server.address().port}/exam/api/sittings/${sitting.id}/extend-${kind}`, {
+          method: "POST",
+          headers: { "X-As": as, "X-Role": role, "Content-Type": "application/json" },
+          body: JSON.stringify({ minutes }),
+        });
+      const deadline = attemptRow(db, anna).deadline;
+      assert.equal((await extend("start", "anna", "student", 5)).status, 403, "a student");
+      assert.equal((await extend("writing", "anna", "student", 5)).status, 403, "a student");
+      assert.deepEqual(heard, [], "nothing announced");
+      const start = await extend("start", "tdent", "teacher", 5);
+      assert.equal(start.status, 200);
+      const closes = db.prepare("SELECT closes_at FROM sitting").get().closes_at;
+      assert.equal((await start.json()).closesAt, closes);
+      assert.ok(closes > inMinutes(13), "five minutes later");
+      const writing = await extend("writing", "tdent", "teacher", 3);
+      assert.equal(writing.status, 200);
+      assert.equal(attemptRow(db, anna).deadline, shift(deadline, 3));
+      assert.equal((await extend("writing", "tdent", "teacher", 0)).status, 400, "refused minutes");
+      assert.deepEqual(heard, [{ type: "window", username: null }, { type: "window", username: null }]);
+    } finally {
+      stop();
+      await new Promise((resolve) => server.close(resolve));
+      global.fetch = saved.fetch;
+      if (saved.path === undefined) delete process.env.EXAM_DB_PATH;
+      else process.env.EXAM_DB_PATH = saved.path;
+      if (saved.periods !== undefined) process.env.SCHOOL_PERIODS = saved.periods;
+    }
   });
 });
 
@@ -1261,12 +1443,17 @@ describe("rescheduling a sitting that is over", () => {
   });
 
   test("a scheduled or open sitting is refused, and so is a window that is not a sitting's", () => {
-    const { db, sitting } = running();
+    const { db, test, sitting } = running();
     assert.throws(() => rescheduleSitting(db, sitting.id, window), /Only a sitting that is over/);
+    // Its start window closed, but an attempt in it still runs.
+    const anna = startAttempt(db, "anna", test.id, shift(sitting.closesAt, -1)).attemptId;
+    assert.throws(() => rescheduleSitting(db, sitting.id, window, { admin: true }, shift(sitting.closesAt, 5)), /Only a sitting that is over/, "an attempt still runs");
+    db.prepare("DELETE FROM attempt WHERE id = ?").run(anna);
     db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ? WHERE id = ?").run(inMinutes(60), inMinutes(120), sitting.id);
     assert.throws(() => rescheduleSitting(db, sitting.id, window), ConflictError);
     endSitting(db, sitting.id, inMinutes(90));
-    assert.throws(() => rescheduleSitting(db, sitting.id, { opensAt: inMinutes(200), closesAt: inMinutes(210) }, {}, inMinutes(100)), /shorter/, "the stored duration");
+    assert.throws(() => rescheduleSitting(db, sitting.id, { opensAt: inMinutes(200), closesAt: inMinutes(200) }, {}, inMinutes(100)), /open before it closes/);
+    assert.throws(() => rescheduleSitting(db, sitting.id, { opensAt: inMinutes(200), closesAt: inMinutes(801) }, {}, inMinutes(100)), /600 minutes/);
     assert.throws(() => rescheduleSitting(db, sitting.id, { opensAt: inMinutes(-60), closesAt: inMinutes(-10) }, {}, inMinutes(100)), /future/);
   });
 
@@ -1367,6 +1554,9 @@ describe("discarding a test while its first sitting is open", () => {
     assert.throws(() => discardTest(db, test.id, { attempts: 1 }), (error) => error instanceof ConflictError && error.key === "exam.errors.tests.discardNotOpen");
     assert.deepEqual(counts(db), scheduled);
     db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ? WHERE id = ?").run(inMinutes(-60), inMinutes(-10), sitting.id);
+    // Anna's attempt still runs, so the first sitting is open after its start window.
+    assert.equal(testSittings(db, test.id)[0].state, "open");
+    db.prepare("UPDATE attempt SET deadline = ? WHERE username = 'anna'").run(inMinutes(-5));
     assert.throws(() => discardTest(db, test.id, { attempts: 1 }), (error) => error.key === "exam.errors.tests.discardNotOpen", "a closed one");
     const makeup = createSitting(db, test.id, { opensAt: inMinutes(5), closesAt: inMinutes(60), participants: ["ben"] });
     db.prepare("UPDATE sitting SET opens_at = ? WHERE id = ?").run(inMinutes(-1), makeup.id);
@@ -1795,12 +1985,16 @@ describe("the review of an attempt", () => {
     assert.equal(reviewOpen(db, row(), new Date().toISOString()), false, "submitted early, window still open");
     assert.equal(reviewOpen(db, row(), afterWindow(sitting)), true, "window closed");
 
-    const ben = startAttempt(db, "ben", test.id).attemptId;
-    assert.equal(reviewOpen(db, attemptRow(db, ben), afterWindow(sitting)), false, "an attempt not submitted is never open");
-
-    extendSitting(db, sitting.id, { minutes: 10 });
+    extendStartWindow(db, sitting.id, { minutes: 10 });
     assert.equal(reviewOpen(db, row(), afterWindow(sitting)), false, "extended: not until the new end");
-    assert.equal(reviewOpen(db, row(), new Date(Date.parse(sitting.closesAt) + 11 * 60000).toISOString()), true);
+    const closes = shift(sitting.closesAt, 10);
+    assert.equal(reviewOpen(db, row(), shift(closes, 0.02)), true);
+
+    // A classmate starts a minute before the start window closes: 15 minutes past it, as at 10:15 and 10:30.
+    const ben = startAttempt(db, "ben", test.id, shift(closes, -1)).attemptId;
+    assert.equal(reviewOpen(db, attemptRow(db, ben), shift(closes, 20)), false, "an attempt not submitted is never open");
+    assert.equal(reviewOpen(db, row(), shift(closes, 10)), false, "a classmate is still writing");
+    assert.equal(reviewOpen(db, row(), shift(closes, 14)), true, "the classmate's time ran out");
 
     endSitting(db, sitting.id);
     assert.equal(reviewOpen(db, row(), new Date(Date.now() + 1000).toISOString()), true, "ended by the teacher");
@@ -1893,6 +2087,9 @@ describe("the review of an attempt", () => {
     assert.equal(studentMaySeeImage(db, "anna", image), false, "submitted early, the sitting still runs");
     assert.equal(studentMaySeeImage(db, "anna", image, afterWindow(sitting)), true, "the review is open");
     assert.equal(studentMaySeeImage(db, "ben", image, afterWindow(sitting)), false, "not for another student");
+    startAttempt(db, "ben", test.id, shift(sitting.closesAt, -1));
+    assert.equal(studentMaySeeImage(db, "anna", image, afterWindow(sitting)), false, "not while a classmate still writes");
+    assert.equal(studentMaySeeImage(db, "anna", image, shift(sitting.closesAt, 14)), true, "the image follows the review");
   });
 
   test("an online entry names its attempt and whether its review is open", () => {

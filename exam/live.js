@@ -16,7 +16,7 @@
 import { EventEmitter } from "node:events";
 
 import { getCourse, NotFoundError, now } from "./classes.js";
-import { sittingState, testVariables } from "./tests.js";
+import { sittingTiming, testVariables } from "./tests.js";
 import { handoutsOf } from "./handout.js";
 import { browserLabel } from "./user-agent.js";
 import { teacherNoteOf, teacherNotesOf } from "./teacher-notes.js";
@@ -189,7 +189,8 @@ export function liveSilence(db, sittingId, at = now()) {
 
 /**
  * A sitting as its live view shows it: the server's clock, the test, the
- * window, its state, and every participant. `screen` is the snapshot for the
+ * window, its state, whether its start window is open and when the last
+ * participant's time runs out, and every participant. `screen` is the snapshot for the
  * view for the class: it carries no teacher note at all, so not even the
  * projector's developer tools see one (exam-live-teacher-notes D2).
  */
@@ -210,7 +211,9 @@ export function liveSnapshot(db, sittingId, at = now(), { screen = false } = {})
       durationS: sitting.duration_s,
       makeup: sitting.makeup === 1,
       startedAt: sitting.started_at,
-      state: sittingState({ opensAt: sitting.opens_at, closesAt: sitting.closes_at, offline, startedAt: sitting.started_at }, at),
+      // `state`, `startOpen` and `endsAt` (sitting-start-window design D2):
+      // no name, so the view for the class carries them as they are.
+      ...sittingTiming(db, sitting, at),
     },
     kind: test.kind,
     // `attempts` counts the test's attempts, every sitting's: the number discarding it confirms.
