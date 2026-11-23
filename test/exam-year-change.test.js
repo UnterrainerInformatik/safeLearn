@@ -206,6 +206,44 @@ describe("the migration to the year change", () => {
   });
 });
 
+describe("the migration to free-text questions", () => {
+  test("a database at schema 22 with tests, attempts and a closed year keeps every row, every reference and every closed-year trigger", () => {
+    const dbPath = temporaryPath();
+    const db = new DatabaseSync(dbPath);
+    openDatabases.push(db);
+    db.exec("PRAGMA foreign_keys = ON");
+    migrate(db, dbPath, readMigrations().slice(0, 22));
+    const filled = filledYear(db);
+    setCurrentYear(db, createYear(db, year2027).id);
+    closeYear(db, filled.year.id, summer2027);
+    const tables = ["question", "answer", "image", "question_usage", "test", "test_question", "test_answer", "test_image", "attempt", "attempt_question", "attempt_token", "response"];
+    const rows = (table) => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all().map((row) => ({ ...row }));
+    const before = Object.fromEntries(tables.map((table) => [table, rows(table)]));
+    const schema = (type) => db.prepare("SELECT name FROM sqlite_master WHERE type = ? AND sql IS NOT NULL ORDER BY name").all(type).map((row) => row.name);
+    const triggers = schema("trigger");
+    const indexes = schema("index");
+    assert.ok(before.test_question.length > 0 && before.attempt.length > 0, "the fixture holds a written test");
+
+    assert.deepEqual(migrate(db, dbPath, readMigrations().slice(0, 23)), { from: 22, to: 23 });
+    for (const table of ["question", "test_question"]) {
+      assert.deepEqual(rows(table), before[table].map((row) => ({ ...row, solution_de: null, solution_en: null })), `every ${table} row keeps its type and gets no model solution`);
+    }
+    for (const table of tables.filter((table) => table !== "question" && table !== "test_question")) assert.deepEqual(rows(table), before[table], table);
+    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+    assert.deepEqual(schema("trigger"), triggers, "every trigger is there again");
+    assert.deepEqual(schema("index"), indexes, "every index is there again");
+
+    const copy = before.test_question[0];
+    refusedAsClosed(() => db.prepare("UPDATE test_question SET text_en = 'changed' WHERE id = ?").run(copy.id), "a closed year's copy");
+    refusedAsClosed(() => db.prepare("UPDATE test_question SET solution_en = 'x' WHERE id = ?").run(copy.id), "its model solution");
+    refusedAsClosed(() => db.prepare("DELETE FROM test_answer WHERE test_question_id = ?").run(copy.id), "its answers");
+    assert.throws(() => db.prepare("UPDATE question SET solution_de = '<p>x</p>' WHERE id = ?").run(copy.question_id), /CHECK/, "a choice question has no model solution");
+    assert.throws(() => db.prepare("UPDATE question SET type = 'freetext' WHERE id = ?").run(copy.question_id), /CHECK/, "a free-text question has one in both languages");
+    db.prepare("UPDATE question SET type = 'freetext', solution_de = '<p>a</p>', solution_en = '<p>a</p>' WHERE id = ?").run(copy.question_id);
+    assert.equal(db.prepare("SELECT type FROM test_question WHERE id = ?").get(copy.id).type, copy.type, "the written copy is untouched");
+  });
+});
+
 describe("the triggers", () => {
   test("every table with a path to school_year has its insert, update and delete trigger", () => {
     const db = freshDatabase();

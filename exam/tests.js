@@ -111,9 +111,10 @@ function testRow(db, id) {
 }
 
 /**
- * The pool questions with `questionIds`, in that order: every one known, not
- * retired - unless it is in `keep`, the ones the test already holds - and none
- * twice. A test without a question is refused.
+ * The pool questions with `questionIds` for an online test, in that order:
+ * every one known, a choice question (`online-test`: an online test holds no
+ * free-text question), not retired - unless it is in `keep`, the ones the
+ * test already holds - and none twice. A test without a question is refused.
  */
 function chosenQuestions(db, questionIds, { keep = [] } = {}) {
   if (!Array.isArray(questionIds) || questionIds.length === 0) {
@@ -129,6 +130,7 @@ function chosenQuestions(db, questionIds, { keep = [] } = {}) {
   return questionIds.map((id) => {
     const question = read.get(id);
     if (!question) throw new InvalidInputError("exam.errors.tests.noPoolQuestion", { id });
+    if (question.type === "freetext") throw new InvalidInputError("exam.errors.tests.freetextOnline", { name: question.name_de });
     if (question.retired === 1 && !keep.includes(id)) throw new InvalidInputError("exam.errors.tests.questionRetired", { name: question.name_de });
     return question;
   });
@@ -139,13 +141,20 @@ function imageRefs(texts) {
   return new Set([...texts.join(" ").matchAll(/\/exam\/api\/images\/(\d+)/g)].map((match) => Number(match[1])));
 }
 
-/** Every text of a test's copy, or of one row of it (`testQuestionId`). */
+/** Every text of a test's copy, or of one row of it (`testQuestionId`), model solutions included. */
 function copyTexts(db, testId, testQuestionId = null) {
   const rows = db
-    .prepare("SELECT id, text_de, text_en FROM test_question WHERE test_id = ? AND (? IS NULL OR id = ?)")
+    // Every column: the model solution's are there from schema 23 on.
+    .prepare("SELECT * FROM test_question WHERE test_id = ? AND (? IS NULL OR id = ?)")
     .all(testId, testQuestionId, testQuestionId);
   const answers = db.prepare("SELECT text_de, text_en FROM test_answer WHERE test_question_id = ?");
-  return rows.flatMap((row) => [row.text_de, row.text_en, ...answers.all(row.id).flatMap((answer) => [answer.text_de, answer.text_en])]);
+  return rows.flatMap((row) => [
+    row.text_de,
+    row.text_en,
+    row.solution_de ?? "",
+    row.solution_en ?? "",
+    ...answers.all(row.id).flatMap((answer) => [answer.text_de, answer.text_en]),
+  ]);
 }
 
 /** Links exactly the images a test's copy shows. Only for a test not yet begun. Inside a transaction. */
@@ -176,15 +185,27 @@ function copyAnswers(db, testQuestionId, questionId) {
  * replaced, and the test's images are linked again (design D3). Nothing
  * references the copy yet, since the test has no attempt. Inside a
  * transaction.
+ *
+ * An online test holds no free-text question: the copy of a question that
+ * became one while the test had begun - its sittings set again since - keeps
+ * the choice question it was (freetext-questions design D3), until the
+ * teacher takes it out.
  */
 export function refreshCopy(db, testId, question) {
-  const row = db.prepare("SELECT id FROM test_question WHERE test_id = ? AND question_id = ?").get(testId, question.id);
-  db.prepare("UPDATE test_question SET type = ?, name_de = ?, name_en = ?, text_de = ?, text_en = ? WHERE id = ?").run(
+  if (question.type === "freetext" && testRow(db, testId).kind === "online") return;
+  const row = db.prepare("SELECT id, type FROM test_question WHERE test_id = ? AND question_id = ?").get(testId, question.id);
+  // The model solution only where the question or its copy is a free-text
+  // one, as `snapshot` does; between two choice questions it stays NULL.
+  const solution = question.type === "freetext" || row.type === "freetext";
+  db.prepare(
+    `UPDATE test_question SET type = ?, name_de = ?, name_en = ?, text_de = ?, text_en = ?${solution ? ", solution_de = ?, solution_en = ?" : ""} WHERE id = ?`
+  ).run(
     question.type,
     question.name_de,
     question.name_en,
     question.text_de,
     question.text_en,
+    ...(solution ? [question.solution_de ?? null, question.solution_en ?? null] : []),
     row.id
   );
   db.prepare("DELETE FROM test_answer WHERE test_question_id = ?").run(row.id);
@@ -225,23 +246,23 @@ export function followPoolIfNotBegun(db, testId, at = now()) {
  * usage for the test's course. Called inside a transaction.
  */
 function snapshot(db, test, questions) {
-  const insertQuestion = db.prepare(
+  // The model solution is named only for a free-text question: a choice
+  // question has none, and is copied the same way at every schema.
+  const insertChoice = db.prepare(
     `INSERT INTO test_question (test_id, question_id, position, type, name_de, name_en, text_de, text_en)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   );
+  const insertFreetext = () =>
+    db.prepare(
+      `INSERT INTO test_question (test_id, question_id, position, type, name_de, name_en, text_de, text_en, solution_de, solution_en)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
   const recordUsage = db.prepare("INSERT INTO question_usage (question_id, test_id, course_id, used_on) VALUES (?, ?, ?, ?)");
   const usedOn = usageDate(db, test.id);
   questions.forEach((question, index) => {
-    const { lastInsertRowid } = insertQuestion.run(
-      test.id,
-      question.id,
-      index,
-      question.type,
-      question.name_de,
-      question.name_en,
-      question.text_de,
-      question.text_en
-    );
+    const columns = [test.id, question.id, index, question.type, question.name_de, question.name_en, question.text_de, question.text_en];
+    const { lastInsertRowid } =
+      question.type === "freetext" ? insertFreetext().run(...columns, question.solution_de, question.solution_en) : insertChoice.run(...columns);
     copyAnswers(db, Number(lastInsertRowid), question.id);
     recordUsage.run(question.id, test.id, test.course_id, usedOn);
   });

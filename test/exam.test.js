@@ -5218,7 +5218,9 @@ describe("the question editor", () => {
       heading: document.querySelector("#markdown-content h1")?.textContent,
       current: document.querySelector(".sl-exam-bar-page[aria-current]")?.dataset.page,
       titles: [document.querySelector("input[name=nameDe]").value, document.querySelector("input[name=nameEn]").value],
-      texts: [...document.querySelectorAll(".sl-exam-editor-row:not(.sl-exam-editor-answer) sl-rich-text")].map((el) => el.value),
+      // A choice question's texts; the model solution's row is there, hidden, for free text.
+      texts: [...document.querySelectorAll(".sl-exam-editor-row:not(.sl-exam-editor-answer, .sl-exam-editor-solution) sl-rich-text")].map((el) => el.value),
+      solutionHidden: document.querySelector(".sl-exam-editor-solution").hidden,
       answers: [...document.querySelectorAll(".sl-exam-editor-answer")].map((row) => [
         row.querySelector("input").checked,
         ...[...row.querySelectorAll("sl-rich-text")].map((el) => el.value),
@@ -5231,6 +5233,7 @@ describe("the question editor", () => {
       current: "pool",
       titles: ["Tippfehler-Frage", "Typo question"],
       texts: ["<p>Was ist richtig?</p>", "<p>What is right?</p>"],
+      solutionHidden: true,
       answers: [
         [true, "<p>das</p>", "<p>this</p>"],
         [false, "<p>jenes</p>", "<p>that</p>"],
@@ -5342,6 +5345,88 @@ describe("the question editor", () => {
     assert.match(stored.textEn, /^<p>Pasted <strong>bold<\/strong><img src="\/exam\/api\/images\/\d+" alt=""><\/p>$/);
     assert.notEqual(/images\/(\d+)/.exec(stored.textDe)[1], /images\/(\d+)/.exec(stored.textEn)[1], "two different pictures, two images");
     assert.deepEqual(stored.answers.map((a) => [a.textDe, a.textEn, a.correct]), [["Antwort 1", "Answer 1", true], ["Antwort 2", "Answer 2", false]]);
+  });
+
+  test("a free-text question: written in the editor with its model solution, found by its type, previewed in English, and without a box for an online test", async () => {
+    const choice = await newQuestion({ nameDe: "Wahl neben Freitext", nameEn: "Choice beside free text" });
+    await openPage(teacher.page, `/exam/pool/questions/new?category=${categoryId}&course=${course.id}`, ".sl-exam-editor sl-rich-text .sl-rich-text-area");
+    const shown = () =>
+      teacher.page.evaluate(() => ({
+        answers: document.querySelector(".sl-exam-editor-answers").checkVisibility() ? document.querySelectorAll(".sl-exam-editor-answer").length : 0,
+        solution: document.querySelector(".sl-exam-editor-solution").checkVisibility(),
+      }));
+    assert.deepEqual(await shown(), { answers: 2, solution: false }, "a choice question shows its answers");
+    const text = ".sl-exam-editor-row:not(.sl-exam-editor-answer):not(.sl-exam-editor-solution)";
+    await teacher.page.type("input[name=nameDe]", "Freitext-Check");
+    await teacher.page.type("input[name=nameEn]", "Free-text check");
+    await teacher.page.type(`${text} .sl-exam-editor-de .sl-rich-text-area`, "Erkläre PUT.");
+    await teacher.page.type(`${text} .sl-exam-editor-en .sl-rich-text-area`, "Explain PUT.");
+    await teacher.page.type('.sl-exam-editor-answer[data-answer="1"] .sl-exam-editor-de .sl-rich-text-area', "kept");
+
+    await teacher.page.select("select[name=type]", "freetext");
+    assert.deepEqual(await shown(), { answers: 0, solution: true }, "the model solution in place of the answers");
+    assert.deepEqual(
+      await teacher.page.$$eval(".sl-exam-editor-solution > div", (cells) => cells.map((cell) => cell.lang || cell.textContent)),
+      ["Model solution", "de", "en"],
+      "both languages side by side"
+    );
+    await teacher.page.select("select[name=type]", "multichoiceset");
+    assert.equal(await teacher.page.$eval('.sl-exam-editor-answer[data-answer="1"] .sl-exam-editor-de sl-rich-text', (el) => el.value), "kept", "the answers are kept until the save");
+    await teacher.page.select("select[name=type]", "freetext");
+
+    await teacher.page.type(".sl-exam-editor-solution .sl-exam-editor-de .sl-rich-text-area", "PUT ersetzt die Ressource.");
+    await click(teacher.page, ".sl-exam-editor-actions button[type=submit]");
+    await teacher.page.waitForSelector(".sl-exam-editor-problems li", { timeout: 10000 });
+    assert.deepEqual(await teacher.page.$$eval(".sl-exam-editor-problems li", (items) => items.map((li) => li.textContent)), ["The English model solution is missing."]);
+    assert.ok(await teacher.page.$(".sl-exam-editor-solution .sl-exam-editor-en sl-rich-text.is-refused"), "marked at its field");
+    await teacher.page.type(".sl-exam-editor-solution .sl-exam-editor-en .sl-rich-text-area", "PUT replaces the resource.");
+    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(teacher.page, ".sl-exam-editor-actions button[type=submit]")]);
+    const [created] = (await fetchAs(teacher, `/exam/api/pool/questions?category=${categoryId}&q=Freitext-Check`)).json;
+    const stored = (await fetchAs(teacher, `/exam/api/pool/questions/${created.id}`)).json;
+    assert.deepEqual([stored.type, stored.answers, stored.solutionDe, stored.solutionEn], ["freetext", [], "PUT ersetzt die Ressource.", "PUT replaces the resource."]);
+
+    // The browser, with the course in the bar: the type selector narrows the list.
+    const row = `.sl-exam-pool-questions tr[data-question="${created.id}"]`;
+    await openPage(teacher.page, `/exam/pool?category=${categoryId}&course=${course.id}`, row);
+    assert.ok((await teacher.page.$$(".sl-exam-pool-questions tbody tr")).length > 1, "all types at first");
+    assert.deepEqual(
+      await teacher.page.$$eval(".sl-exam-pool-type option", (options) => options.map((option) => option.textContent)),
+      ["All types", "Several correct answers", "One correct answer", "True / false", "Free text"]
+    );
+    await teacher.page.select(".sl-exam-pool-type", "freetext");
+    const listed = await teacher.page.$$eval(".sl-exam-pool-questions tbody tr", (rows) =>
+      rows.map((tr) => ({
+        id: Number(tr.dataset.question),
+        box: tr.querySelector(".sl-exam-pool-box") !== null,
+        reason: tr.querySelector(".sl-exam-pool-not-online")?.textContent ?? null,
+        kind: tr.querySelector(".sl-exam-pool-kind").textContent.split(" · ").at(-1),
+      }))
+    );
+    assert.deepEqual(listed, [{ id: created.id, box: false, reason: "Online tests cannot hold free-text questions.", kind: "Free text" }]);
+    await click(teacher.page, `${row} .sl-exam-pool-name`);
+    await teacher.page.waitForSelector(".sl-exam-pool-solution", { timeout: 10000 });
+    assert.equal(await teacher.page.$eval(row, (tr) => tr.classList.contains("is-chosen")), false, "a click does not choose it");
+    await click(teacher.page, ".sl-exam-pool-languages button:nth-child(2)");
+    await teacher.page.waitForFunction(() => document.querySelector(".sl-exam-pool-question")?.lang === "en", { timeout: 10000 });
+    const preview = await teacher.page.evaluate(() => ({
+      text: document.querySelector(".sl-exam-pool-text").textContent,
+      heading: document.querySelector(".sl-exam-pool-solution h3").textContent,
+      solution: document.querySelector(".sl-exam-pool-solution-text").textContent,
+      answers: document.querySelectorAll(".sl-exam-pool-answers li").length,
+    }));
+    assert.deepEqual(preview, { text: "Explain PUT.", heading: "Model solution", solution: "PUT replaces the resource.", answers: 0 });
+    await teacher.page.select(".sl-exam-pool-type", "");
+    assert.ok((await teacher.page.$$(".sl-exam-pool-questions tbody .sl-exam-pool-box")).length > 0, "choice questions keep their box");
+
+    // The server refuses it for an online test whatever the page sends.
+    const refused = await fetchAs(teacher, `/exam/api/courses/${course.id}/tests`, { method: "POST", body: { name: "Freitext online", questionIds: [created.id] } });
+    assert.equal(refused.status, 400);
+    assert.match(refused.json.error, /Freitext-Check.*free-text question/);
+    // Out of the checks' category again, so that the checks after this one count as before.
+    for (const id of [created.id, choice.id]) {
+      const gone = await fetchAs(teacher, `/exam/api/pool/questions/${id}`, { method: "DELETE", body: { tests: 0 } });
+      assert.equal(gone.status, 200, JSON.stringify(gone.json));
+    }
   });
 
   test("uploads: 20 MB and a renamed PDF refused, an unsaved one gone after the purge", async () => {
@@ -6157,7 +6242,8 @@ ${answers("en")}
       created: [...document.querySelectorAll(".sl-exam-import-preview h3 + ul li")].map((li) => li.textContent),
     }));
     assert.equal(preview.button, "Import 3 questions");
-    assert.deepEqual(preview.rows, ["Import-Checks / Statuscodes / Import checks / Statuscodesnew3003"]);
+    // Per type: several, one, true/false, free text; then the questions.
+    assert.deepEqual(preview.rows, ["Import-Checks / Statuscodes / Import checks / Statuscodesnew30003"]);
     assert.deepEqual(preview.created, ["Import-Checks at the top", "Statuscodes under Import-Checks (new as well)"]);
     assert.equal((await imports()).length, 0, "the preview stores nothing");
 
@@ -6182,6 +6268,29 @@ ${answers("en")}
     assert.match(browser.stripe, /inset/, "the row carries the stripe");
     const [record] = await imports();
     assert.deepEqual({ fileName: record.fileName, questions: record.questions, unreviewed: record.unreviewed, inUse: record.inUse }, { fileName: "statuscodes.md", questions: 3, unreviewed: 3, inUse: false });
+  });
+
+  test("a file with a free-text question is previewed with its type and imported with both model solutions", async () => {
+    const content = `---\nformat: safelearn-questions/1\n---\n\n# Import-Checks / Freitext\nen: Import checks / Free text\n\n## Freitext-Import\nen: Free-text import\ntype: freetext\n\n### de\n\nErkläre \`PATCH\`.\n\n#### solution\n\n\`PATCH\` ändert einzelne Felder.\n\n### en\n\nExplain \`PATCH\`.\n\n#### solution\n\n\`PATCH\` changes single fields.\n`;
+    await uploadInPage(content, "freetext.md");
+    const preview = await teacher.page.evaluate(() => ({
+      button: document.querySelector(".sl-exam-import-go").textContent,
+      head: [...document.querySelectorAll(".sl-exam-import-preview thead th")].map((th) => th.textContent),
+      rows: [...document.querySelectorAll(".sl-exam-import-preview tbody tr")].map((tr) => [...tr.querySelectorAll("td")].slice(-5).map((td) => td.textContent)),
+    }));
+    assert.equal(preview.button, "Import 1 question");
+    assert.equal(preview.head.at(-2), "Free text", "the preview counts the type");
+    assert.deepEqual(preview.rows, [["0", "0", "0", "1", "1"]]);
+    await Promise.all([teacher.page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(teacher.page, ".sl-exam-import-go")]);
+    const [listed] = (await fetchAs(teacher, "/exam/api/pool/questions?q=Freitext-Import")).json;
+    const stored = (await fetchAs(teacher, `/exam/api/pool/questions/${listed.id}`)).json;
+    assert.deepEqual(
+      [stored.type, stored.answers, stored.solutionDe, stored.solutionEn],
+      ["freetext", [], "<p><code>PATCH</code> ändert einzelne Felder.</p>", "<p><code>PATCH</code> changes single fields.</p>"]
+    );
+    // Taken back again, so that the checks after this one see the imports as before.
+    const [record] = (await imports()).filter((entry) => entry.fileName === "freetext.md");
+    assert.equal((await fetchAs(teacher, `/exam/api/pool/imports/${record.id}`, { method: "DELETE" })).status, 200);
   });
 
   test("Mark as reviewed moves on to the next one, an editor save clears the mark too, and a chosen row shows both", async () => {

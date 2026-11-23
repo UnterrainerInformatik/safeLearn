@@ -1,13 +1,15 @@
 /**
  * The question pool's element (`question-pool`), for teachers:
  *
- * - `pool`: the category tree, a text search, the matching questions with how
- *   often and when each was used, and a preview of one question in German or
- *   English with its correct answers marked and its usage history. With a
+ * - `pool`: the category tree, a text search, a type selector, the matching
+ *   questions with how often and when each was used, and a preview of one
+ *   question in German or English with its correct answers marked - or a
+ *   free-text question's model solution - and its usage history. With a
  *   course chosen in the module bar (`data-sl-course`), a click anywhere on a
  *   question's row also chooses it for a test - or unchooses it - and the
  *   chosen rows are coloured; they become a new test for that course, or are
  *   added to one of its tests that has not been written yet (`online-test`).
+ *   A free-text question has no box there: an online test cannot hold it.
  *   It leads into the editor (`question-editor`): "Edit" on the preview, and
  *   "New question" always, in the chosen category if there is one; retired
  *   questions are listed, marked, only when asked for. The tree is also where
@@ -35,7 +37,13 @@ const typeLabels = {
   multichoiceset: t("exam.pool.type.multichoiceset"),
   multichoice: t("exam.pool.type.multichoice"),
   truefalse: t("exam.pool.type.truefalse"),
+  freetext: t("exam.pool.type.freetext"),
 };
+
+/** Whether an online test can hold a question of `type`: a choice question only. */
+function onlineType(type) {
+  return type !== "freetext";
+}
 
 /** A date or the day of a timestamp in the reader's format, "–" for none. */
 function displayDate(iso) {
@@ -70,6 +78,8 @@ class PoolView extends ExamElement {
     // The questions known not to be reviewed, for the assembly's reminder.
     this.unreviewedIds = new Set();
     this.query = "";
+    // The type selector narrows the list in the browser (design D5); "" is all types.
+    this.typeFilter = "";
     this.language = "de";
     this.list = h("div", { class: "sl-exam-pool-list" });
     this.preview = h("div", { class: "sl-exam-pool-preview" }, h("p", { class: "sl-exam-quiet" }, t("exam.pool.choosePrompt")));
@@ -122,6 +132,19 @@ class PoolView extends ExamElement {
         this.refreshList();
       },
     });
+    const typeSelect = h(
+      "select",
+      {
+        class: "sl-exam-pool-type",
+        "aria-label": t("exam.pool.typeFilter"),
+        onChange: () => {
+          this.typeFilter = typeSelect.value;
+          this.drawList();
+        },
+      },
+      h("option", { value: "", selected: true }, t("exam.pool.allTypes")),
+      Object.entries(typeLabels).map(([value, label]) => h("option", { value }, label))
+    );
     this.unreviewedLabel = h("span", {}, ` ${t("exam.pool.notReviewed")}`);
     this.unreviewedFilter = h("label", { class: "sl-exam-pool-unreviewed-filter", hidden: true }, this.unreviewedBox, this.unreviewedLabel);
     this.refreshList();
@@ -147,6 +170,7 @@ class PoolView extends ExamElement {
           "div",
           { class: "sl-exam-pool-tools" },
           search,
+          typeSelect,
           h("label", { class: "sl-exam-quiet" }, retired, ` ${t("exam.pool.showRetired")}`),
           this.unreviewedFilter,
           this.newQuestion
@@ -319,6 +343,14 @@ class PoolView extends ExamElement {
       if (question.unreviewed) this.unreviewedIds.add(question.id);
       else this.unreviewedIds.delete(question.id);
     }
+    this.loaded = questions;
+    this.drawList();
+  }
+
+  /** The questions loaded last, narrowed to the type chosen, as the list's table. */
+  drawList() {
+    if (!this.loaded) return;
+    const questions = this.typeFilter === "" ? this.loaded : this.loaded.filter((question) => question.type === this.typeFilter);
     if (questions.length === 0) {
       this.list.replaceChildren(h("p", { class: "sl-exam-quiet" }, t("exam.pool.noMatch")));
       return;
@@ -359,16 +391,19 @@ class PoolView extends ExamElement {
               // bar, choosing or unchoosing the question for the test.
               onClick: (event) => {
                 this.showQuestion(question.id);
-                if (this.course) this.toggle(question.id, event.currentTarget);
+                if (this.course && onlineType(question.type)) this.toggle(question.id, event.currentTarget);
               },
             },
             // The row's choice as a box: a click on it reaches the row, which
-            // does the choosing, so box and row never disagree (design D6).
+            // does the choosing, so box and row never disagree (design D6). A
+            // free-text question has none, and says why.
             this.course
               ? h(
                   "td",
                   { class: "sl-exam-pool-pick" },
-                  h("input", { type: "checkbox", class: "sl-exam-pool-box", checked: this.chosen.has(question.id), "aria-label": t("exam.pool.chooseQuestion", { name: question.nameDe }) })
+                  onlineType(question.type)
+                    ? h("input", { type: "checkbox", class: "sl-exam-pool-box", checked: this.chosen.has(question.id), "aria-label": t("exam.pool.chooseQuestion", { name: question.nameDe }) })
+                    : null
                 )
               : null,
             h(
@@ -381,7 +416,8 @@ class PoolView extends ExamElement {
                 "div",
                 { class: "sl-exam-quiet sl-exam-pool-kind" },
                 `${question.category.de.join(" / ")} · ${typeLabels[question.type] ?? question.type}${question.retired ? ` · ${t("exam.pool.retired")}` : ""}`
-              )
+              ),
+              this.course && !onlineType(question.type) ? h("div", { class: "sl-exam-quiet sl-exam-pool-not-online" }, t("exam.pool.freetextNotOnline")) : null
             ),
             h("td", {}, `${question.uses}×`),
             h("td", {}, displayDate(question.lastUsedOn))
@@ -457,18 +493,25 @@ class PoolView extends ExamElement {
         question.unreviewed ? this.reviewBanner(question) : null,
         h("div", { class: "sl-exam-pool-question-tools" }, switcher, linkButton({ label: t("exam.pool.edit"), href: this.editAddress(question), class: "sl-exam-pool-edit" })),
         storedMarkup(de ? question.textDe : question.textEn, "sl-exam-pool-text"),
-        h(
-          "ol",
-          { class: "sl-exam-pool-answers" },
-          question.answers.map((answer) =>
-            h(
-              "li",
-              { class: answer.correct ? "is-correct" : "" },
-              h("span", { class: "sl-exam-pool-mark", "aria-label": answer.correct ? t("exam.pool.correct") : t("exam.pool.wrong") }, answer.correct ? "✓" : "✗"),
-              storedMarkup(de ? answer.textDe : answer.textEn, "sl-exam-pool-answer")
+        question.type === "freetext"
+          ? h(
+              "section",
+              { class: "sl-exam-pool-solution", "aria-label": t("exam.pool.modelSolution") },
+              h("h3", {}, t("exam.pool.modelSolution")),
+              storedMarkup(de ? question.solutionDe : question.solutionEn, "sl-exam-pool-solution-text")
             )
-          )
-        ),
+          : h(
+              "ol",
+              { class: "sl-exam-pool-answers" },
+              question.answers.map((answer) =>
+                h(
+                  "li",
+                  { class: answer.correct ? "is-correct" : "" },
+                  h("span", { class: "sl-exam-pool-mark", "aria-label": answer.correct ? t("exam.pool.correct") : t("exam.pool.wrong") }, answer.correct ? "✓" : "✗"),
+                  storedMarkup(de ? answer.textDe : answer.textEn, "sl-exam-pool-answer")
+                )
+              )
+            ),
         h("h3", {}, t("exam.pool.usedTimes", { count: question.uses })),
         usage
       )

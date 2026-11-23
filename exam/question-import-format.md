@@ -1,6 +1,6 @@
 # safeLearn question import - format description
 
-You are writing a file of multiple-choice questions that a teacher imports into the safeLearn question pool. The pool is used for short online tests at an HTL (a technical secondary school in Austria; students are 14 to 19). Every question is written in **German and in English**. Write the file exactly in the format below. The import checks every rule listed here and refuses the whole file if one question breaks one. The teacher then hands the problems back to you.
+You are writing a file of questions that a teacher imports into the safeLearn question pool. The pool is used for short online tests and short tests on paper at an HTL (a technical secondary school in Austria; students are 14 to 19). Every question is written in **German and in English**. Write the file exactly in the format below. The import checks every rule listed here and refuses the whole file if one question breaks one. The teacher then hands the problems back to you.
 
 Reply with the file only, nothing before or after it, unless you are asked for something else. If you show it inside a code block, fence that block with `~~~~`, because the file itself contains ```` ``` ```` code blocks. Better still, offer it as a downloadable `.md` file.
 
@@ -83,6 +83,26 @@ CDI fills the following field even without an annotation:
 ```java
 private UserRepository repository;
 ```
+
+## PUT und PATCH
+en: PUT and PATCH
+type: freetext
+
+### de
+
+Erkläre den Unterschied zwischen `PUT` und `PATCH` an einem Beispiel.
+
+#### solution
+
+`PUT` ersetzt die Ressource vollständig durch den mitgeschickten Zustand, `PATCH` ändert nur die genannten Felder. Beispiel: `PUT /users/7` mit Name und E-Mail ersetzt den Benutzer, ein fehlendes Feld geht verloren. `PATCH /users/7` mit nur der E-Mail ändert nur die E-Mail. `PUT` ist idempotent, `PATCH` nicht unbedingt.
+
+### en
+
+Explain the difference between `PUT` and `PATCH` with an example.
+
+#### solution
+
+`PUT` replaces the resource entirely with the state sent, `PATCH` changes only the fields named. Example: `PUT /users/7` with name and e-mail replaces the user, and a field left out is lost. `PATCH /users/7` with only the e-mail changes only the e-mail. `PUT` is idempotent, `PATCH` not necessarily.
 ~~~~
 
 ## Structure
@@ -92,6 +112,7 @@ private UserRepository repository;
 - **Question**: a line `## <German short title>`, directly followed by the lines `en: <English short title>` and `type: <type>`. A `truefalse` question has a third line, `solution: true` or `solution: false`. A short title has 3 to 8 words and at most 200 characters. It tells the teacher what the question is about and is never shown to students.
 - **Languages**: then a line `### de` with the German question text and answers, and a line `### en` with the English ones, in this order.
 - **Answers**: after the question text, the answers as a task list, one answer per item. `- [x] ` marks a correct answer and `- [ ] ` a wrong one. A `truefalse` question has no answers. Its answers are always Richtig/Falsch and True/False.
+- **Model solution**: a `freetext` question has no answers. Under each of `### de` and `### en`, after the question text, a line `#### solution` follows, and below it that language's model solution. No other type has a `#### solution` section.
 
 ## Types
 
@@ -100,8 +121,13 @@ private UserRepository repository;
 | `multichoiceset` | **Several correct answers. Prefer this type.** | 4 to 6, of which at least 1 is correct (typically 2 or 3). |
 | `multichoice` | Exactly one correct answer | 3 to 5, exactly 1 correct |
 | `truefalse` | A statement that is true or false | none, `solution:` instead |
+| `freetext` | The student writes the answer | none, `#### solution` with a model solution in both languages instead |
 
-Every question is worth one point and graded all-or-nothing. Students get the point only if they mark exactly the correct answers. Several correct answers therefore test more than one correct answer does. Use `multichoiceset` unless the question has one answer by its nature.
+In an online test, every question is worth one point and graded all-or-nothing. Students get the point only if they mark exactly the correct answers. Several correct answers therefore test more than one correct answer does. Use `multichoiceset` unless the question has one answer by its nature.
+
+## Free-text questions
+
+A `freetext` question is **graded by a teacher**, not by the module. It is used in short tests on paper, never in online tests. Its model solution is what the teacher grades against: state what a full answer contains, the points it has to make and, where it helps, an example. Write it as a complete answer, not as keywords. Ask for something that can be answered in a few sentences or a short piece of code. A `freetext` question has no hint with a number of correct answers.
 
 ## The number of correct answers
 
@@ -129,9 +155,9 @@ The number is the number of answers you marked `[x]`. Count them again after eve
 
 ## Formatting
 
-Texts and answers are Markdown: paragraphs, `**bold**`, `*italic*`, `` `inline code` ``, code blocks with a language (```` ```java ````), bulleted and numbered lists. Nothing else:
+Texts, answers and model solutions are Markdown: paragraphs, `**bold**`, `*italic*`, `` `inline code` ``, code blocks with a language (```` ```java ````), bulleted and numbered lists. Nothing else:
 
-- no images (the teacher adds them later in the editor), no links, no tables, no headings inside a text, no HTML;
+- no images (the teacher adds them later in the editor), no links, no tables, no headings inside a text other than `#### solution`, no HTML;
 - an answer is a single list item. Keep answers short. Code in an answer is inline code.
 
 ## What the import refuses
@@ -140,7 +166,8 @@ The import refuses the whole file, with the line of every problem, if:
 
 - the front matter is missing or names another format;
 - a question has no category above it, or an `en:`, `type:` or `solution:` line is missing or misplaced;
-- a title, a question text or an answer is missing in one language;
+- a title, a question text, an answer or a `freetext` question's model solution is missing in one language;
+- a `freetext` question has a task list, or a question of another type has a `#### solution` section;
 - a question has fewer than two answers, a `multichoice` question has not exactly one correct answer, or a `multichoiceset` question has none;
 - the German and the English answers differ in number or in their `[x]` marks;
 - a `multichoiceset` question text does not end with the hint in both languages, or its number differs from the number of `[x]` answers, or a `multichoice` question's hint says anything but 1;

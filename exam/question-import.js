@@ -86,9 +86,10 @@ function closesFence(line, fence) {
 /**
  * The Markdown of one language section, as stored HTML and answers, with the
  * problems of its content. `lines` are `{ number, text }`; `withAnswers` is
- * false for a true/false question, which has none.
+ * false for a true/false or a free-text question and for a model solution,
+ * which have none, and `noAnswers` the problem a task list there makes.
  */
-function readSection(lines, { withAnswers, problem }) {
+function readSection(lines, { withAnswers, noAnswers = "exam.errors.import.sectionTrueFalseAnswers", problem }) {
   const firstLine = lines.find((line) => line.text.trim() !== "")?.number ?? lines[0]?.number ?? null;
   const source = lines.map((line) => line.text).join("\n");
   const tokens = markdown.lexer(source);
@@ -143,7 +144,7 @@ function readSection(lines, { withAnswers, problem }) {
       });
     }
   } else if (isTaskList) {
-    problem(last.line, "exam.errors.import.sectionTrueFalseAnswers");
+    problem(last.line, noAnswers);
     textTokens = content.slice(0, -1);
   }
 
@@ -190,7 +191,7 @@ export function parseQuestionFile(text) {
 
   let category = null; // index into result.categories
   let question = null;
-  let section = null; // { language, lines }
+  let section = null; // { language, lines, solution: { line, lines } or null }
   let fence = null;
   // Where the header lines below a heading are read: the lines still expected.
   let header = null; // { kind, expect: [...], line }
@@ -199,11 +200,22 @@ export function parseQuestionFile(text) {
     if (!section || !question) return;
     // The section by its English name and by its marker, for either catalog.
     const where = { language: languageNames[section.language], code: section.language };
+    const freetext = question.type === "freetext";
+    const problem = (line, key, params = {}) => add(line ?? section.line, question.nameDe, key, { ...where, ...params });
     const read = readSection(section.lines, {
-      withAnswers: question.type !== "truefalse",
-      problem: (line, key, params = {}) => add(line ?? section.line, question.nameDe, key, { ...where, ...params }),
+      withAnswers: question.type !== "truefalse" && !freetext,
+      noAnswers: freetext ? "exam.errors.import.sectionFreetextAnswers" : undefined,
+      problem,
     });
     question[section.language] = { ...read, line: section.line };
+    // A free-text question's model solution (design D4); a missing one is the
+    // editor's rule, named at the question.
+    if (section.solution && freetext) {
+      const solution = readSection(section.solution.lines, { withAnswers: false, noAnswers: "exam.errors.import.solutionAnswers", problem });
+      question[section.language].solution = solution.html;
+      question[section.language].solutionLine = section.solution.line;
+      if (solution.refusedContent) question.broken = true;
+    }
     // An image is the parser's problem already; the editor would name it again.
     if (read.refusedContent) question.broken = true;
     section = null;
@@ -243,7 +255,7 @@ export function parseQuestionFile(text) {
 
     if (fence !== null) {
       if (closesFence(line, fence)) fence = null;
-      if (section) section.lines.push({ number, text: line });
+      if (section) (section.solution ?? section).lines.push({ number, text: line });
       else if (line.trim() !== "") add(number, question?.nameDe ?? null, "exam.errors.import.outsideSection");
       return;
     }
@@ -332,13 +344,27 @@ export function parseQuestionFile(text) {
         add(number, question.nameDe, "exam.errors.import.englishFirst");
         question.broken = true;
       }
-      section = { language, line: number, lines: [] };
+      section = { language, line: number, lines: [], solution: null };
+      return;
+    }
+    // `#### solution` ends the question text of a language section; what
+    // follows is the model solution of a free-text question (design D4).
+    if (heading && heading[1].length === 4 && heading[2].trim() === "solution" && section && question) {
+      const where = { language: languageNames[section.language], code: section.language };
+      if (section.solution) {
+        add(number, question.nameDe, "exam.errors.import.solutionTwice", where);
+        question.broken = true;
+      } else if (question.type !== "freetext" && question.type !== null) {
+        add(number, question.nameDe, "exam.errors.import.solutionNotFreetext", where);
+        question.broken = true;
+      }
+      section.solution ??= { line: number, lines: [] };
       return;
     }
 
     if (section) {
       if (fenceOpening(line)) fence = fenceOpening(line);
-      section.lines.push({ number, text: line });
+      (section.solution ?? section).lines.push({ number, text: line });
       return;
     }
     if (line.trim() === "") return;
@@ -397,14 +423,18 @@ function editorLine(question, { field, answer }) {
   if (field === "nameDe") return question.line;
   if (field === "nameEn") return question.enLine ?? question.line;
   if (field === "textDe" || field === "textEn") return question[language]?.line ?? question.line;
+  // A missing model solution is named at the question, an empty one at its heading.
+  if (field === "solutionDe" || field === "solutionEn") return question[language]?.solutionLine ?? question.line;
   if (field === "type") return question.typeLine ?? question.line;
   return question.line;
 }
 
 /** A parsed question as the editor's input. */
 function editorInput(question, categoryId) {
-  const answers =
-    question.type === "truefalse"
+  const freetext = question.type === "freetext";
+  const answers = freetext
+    ? []
+    : question.type === "truefalse"
       ? [
           { textDe: trueFalseText.de.true, textEn: trueFalseText.en.true, correct: question.solution === true },
           { textDe: trueFalseText.de.false, textEn: trueFalseText.en.false, correct: question.solution === false },
@@ -421,6 +451,7 @@ function editorInput(question, categoryId) {
     nameEn: question.nameEn,
     textDe: question.de.html,
     textEn: question.en.html,
+    ...(freetext ? { solutionDe: question.de.solution ?? "", solutionEn: question.en.solution ?? "" } : {}),
     answers,
   };
 }
@@ -483,7 +514,8 @@ export function checkQuestionFile(db, text, fileName = "") {
       if (found.field === "categoryId") continue;
       add(editorLine(question, found), question.nameDe, found.key, found.params);
     }
-    if (question.type === "truefalse") continue;
+    // Neither has answers to pair nor a hint to count (a free-text question is graded by a teacher).
+    if (question.type === "truefalse" || question.type === "freetext") continue;
 
     // Pairing: the same number of answers with the same marks.
     const de = question.de.answers;

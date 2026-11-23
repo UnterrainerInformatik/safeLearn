@@ -6,7 +6,10 @@
  *   title, the question text, and each answer as a pair with one correct flag
  *   for both. Answers are added and removed here, in no order that matters:
  *   every attempt shuffles them. A true/false
- *   question has its two fixed answers and only says which one is right.
+ *   question has its two fixed answers and only says which one is right. A
+ *   free-text question has no answers: in their place, its model solution in
+ *   both languages side by side. Switching the type hides the answers and
+ *   keeps them until the save, which drops them for a free-text question.
  *
  * A refused save shows every problem at its field and keeps the input. A save
  * refused because somebody else saved in between keeps the input too and
@@ -28,6 +31,7 @@ export const typeLabels = {
   multichoice: t("exam.editor.type.multichoice"),
   multichoiceset: t("exam.editor.type.multichoiceset"),
   truefalse: t("exam.pool.type.truefalse"),
+  freetext: t("exam.pool.type.freetext"),
 };
 
 /** The category tree as a flat list of `{ id, label }`, indented by depth. */
@@ -87,20 +91,25 @@ class QuestionEditor extends ExamElement {
     this.textDe = richText(t("exam.editor.germanText"), stored?.textDe);
     this.textEn = richText(t("exam.editor.englishText"), stored?.textEn);
 
-    // The answers while the type is not true/false; kept when switching back.
-    this.answers = stored && stored.type !== "truefalse"
+    // The answers while the type is a choice with answers of its own; kept
+    // when switching to true/false or free text and back.
+    this.answers = stored && stored.type !== "truefalse" && stored.type !== "freetext"
       ? stored.answers.map((answer) => this.answerRow(answer))
       : [this.answerRow(), this.answerRow()];
     this.statementTrue = stored?.type === "truefalse" ? stored.answers[0].correct : true;
     this.answerList = h("div", { class: "sl-exam-editor-answers", "data-field": "answers" });
+    this.solutionDe = richText(t("exam.editor.germanSolution"), stored?.solutionDe);
+    this.solutionEn = richText(t("exam.editor.englishSolution"), stored?.solutionEn);
 
     this.problemList = h("ul", { class: "sl-exam-editor-problems sl-embed-error", role: "alert" });
     this.message = h("div", { class: "sl-exam-message", role: "status" });
     this.reach = h("div", { class: "sl-exam-editor-reach sl-exam-quiet" });
     this.drawReach();
 
-    const row = (label, de, en) =>
-      h("div", { class: "sl-exam-editor-row" }, h("div", { class: "sl-exam-editor-label" }, label), h("div", { class: "sl-exam-editor-de", lang: "de" }, de), h("div", { class: "sl-exam-editor-en", lang: "en" }, en));
+    const row = (label, de, en, extra = "") =>
+      h("div", { class: `sl-exam-editor-row${extra}` }, h("div", { class: "sl-exam-editor-label" }, label), h("div", { class: "sl-exam-editor-de", lang: "de" }, de), h("div", { class: "sl-exam-editor-en", lang: "en" }, en));
+    // A free-text question's model solution, in place of the answers.
+    this.solutionRow = row(t("exam.pool.modelSolution"), this.solutionDe, this.solutionEn, " sl-exam-editor-solution");
 
     this.saveButton = h("button", { type: "submit", class: "sl-exam-primary" }, stored ? t("exam.categories.save") : t("exam.editor.createQuestion"));
     const form = h(
@@ -122,6 +131,7 @@ class QuestionEditor extends ExamElement {
       h("div", { class: "sl-exam-editor-row sl-exam-editor-head" }, h("div"), h("div", {}, "Deutsch"), h("div", {}, "English")),
       row(t("exam.editor.title"), this.nameDe, this.nameEn),
       row(t("exam.pool.question"), this.textDe, this.textEn),
+      this.solutionRow,
       this.answerList,
       this.problemList,
       this.reach,
@@ -205,6 +215,11 @@ class QuestionEditor extends ExamElement {
   }
 
   drawAnswers() {
+    // A free-text question shows its model solution in place of the answers.
+    const freetext = this.type.value === "freetext";
+    this.solutionRow.hidden = !freetext;
+    this.answerList.hidden = freetext;
+    if (freetext) return;
     if (this.type.value === "truefalse") {
       const choice = (value, label) =>
         h(
@@ -283,8 +298,11 @@ class QuestionEditor extends ExamElement {
       nameEn: this.nameEn.value,
       textDe: this.textDe.value,
       textEn: this.textEn.value,
+      ...(type === "freetext" ? { solutionDe: this.solutionDe.value, solutionEn: this.solutionEn.value } : {}),
       answers:
-        type === "truefalse"
+        type === "freetext"
+          ? []
+          : type === "truefalse"
           ? [{ correct: this.statementTrue }, { correct: !this.statementTrue }]
           : this.answers.map((answer) => ({ textDe: answer.de.value, textEn: answer.en.value, correct: answer.correct.checked })),
     };
@@ -296,7 +314,7 @@ class QuestionEditor extends ExamElement {
       const answer = this.answers[problem.answer - 1];
       return answer ? (problem.field === "textEn" ? answer.en : answer.de) : null;
     }
-    return { nameDe: this.nameDe, nameEn: this.nameEn, textDe: this.textDe, textEn: this.textEn, type: this.type, categoryId: this.category, answers: this.answerList }[problem.field] ?? null;
+    return { nameDe: this.nameDe, nameEn: this.nameEn, textDe: this.textDe, textEn: this.textEn, solutionDe: this.solutionDe, solutionEn: this.solutionEn, type: this.type, categoryId: this.category, answers: this.answerList }[problem.field] ?? null;
   }
 
   clearProblems() {

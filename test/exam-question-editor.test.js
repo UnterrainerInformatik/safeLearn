@@ -20,7 +20,8 @@ import { createClass, createCourse, createYear } from "../exam/classes.js";
 import { migrate, openDatabase, readMigrations } from "../exam/db.js";
 import { importPool } from "../exam/pool-import.js";
 import { getQuestion, listQuestions } from "../exam/pool.js";
-import { createSitting, createTest, deleteTest, getTest, testQuestions, updateTest } from "../exam/tests.js";
+import { createOfflineTest, createSitting, createTest, deleteTest, getTest, testQuestions, updateTest } from "../exam/tests.js";
+import { readImage } from "../exam/pool.js";
 import { previewView } from "../exam/attempts.js";
 import {
   createCategory,
@@ -169,6 +170,7 @@ function editable(db, id) {
     nameEn: q.nameEn,
     textDe: q.textDe,
     textEn: q.textEn,
+    ...(q.type === "freetext" ? { solutionDe: q.solutionDe, solutionEn: q.solutionEn } : {}),
     answers: q.answers.map(({ textDe, textEn, correct }) => ({ textDe, textEn, correct })),
   };
 }
@@ -453,6 +455,127 @@ describe("saving a question", () => {
     input.textEn = "<p>too late</p>";
     saveQuestion(db, ids["Methoden de"], input);
     for (const table of ["test_question", "test_answer", "test_image"]) assert.deepEqual(poolAndSnapshots(db)[table], before[table], `${table} is unchanged`);
+  });
+});
+
+describe("free-text questions", () => {
+  /** A free-text question in the category of `Methoden de`, as the editor sends it. */
+  function freetext(db, ids, overrides = {}) {
+    return {
+      categoryId: getQuestion(db, ids["Methoden de"]).categoryId,
+      type: "freetext",
+      nameDe: "PUT und PATCH",
+      nameEn: "PUT and PATCH",
+      textDe: "<p>Erkläre den Unterschied zwischen PUT und PATCH.</p>",
+      textEn: "<p>Explain the difference between PUT and PATCH.</p>",
+      solutionDe: "<p>PUT ersetzt:</p><pre><code>PUT /users/7</code></pre>",
+      solutionEn: "<p>PUT replaces:</p><pre><code>PUT /users/7</code></pre>",
+      answers: [],
+      ...overrides,
+    };
+  }
+
+  test("a free-text question is saved with both model solutions and no answers, and read back with them", () => {
+    const { db, ids } = seeded();
+    const { question } = createQuestion(db, freetext(db, ids, { answers: [{ textDe: "<p>x</p>", textEn: "<p>x</p>", correct: true }] }));
+    assert.equal(question.type, "freetext");
+    assert.deepEqual(question.answers, [], "answers sent along are dropped");
+    assert.equal(question.solutionDe, "<p>PUT ersetzt:</p><pre><code>PUT /users/7</code></pre>");
+    assert.equal(question.solutionEn, "<p>PUT replaces:</p><pre><code>PUT /users/7</code></pre>");
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM answer WHERE question_id = ?").get(question.id).n, 0);
+    assert.equal(listQuestions(db).find((q) => q.id === question.id).type, "freetext", "the list shows its type");
+    assert.equal(getQuestion(db, ids["Methoden de"]).solutionDe, null, "a choice question has none");
+  });
+
+  test("a model solution missing in English is named, and the stored question is unchanged", () => {
+    const { db, ids } = seeded();
+    const { question } = createQuestion(db, freetext(db, ids));
+    const input = { ...editable(db, question.id), solutionEn: "<p> </p>" };
+    assert.deepEqual(refusal(() => saveQuestion(db, question.id, input)), [["solutionEn", null, "The English model solution is missing."]]);
+    assert.equal(getQuestion(db, question.id).solutionEn, question.solutionEn);
+    assert.deepEqual(refusal(() => createQuestion(db, freetext(db, ids, { solutionDe: "" }))), [["solutionDe", null, "The German model solution is missing."]]);
+  });
+
+  test("a choice question becomes a free-text question without answers, and back", () => {
+    const { db, ids } = seeded();
+    const id = ids["Methoden de"];
+    const input = { ...editable(db, id), type: "freetext", solutionDe: "<p>GET und PUT</p>", solutionEn: "<p>GET and PUT</p>" };
+    const { question } = saveQuestion(db, id, input);
+    assert.equal(question.type, "freetext");
+    assert.deepEqual(question.answers, []);
+    assert.equal(question.solutionEn, "<p>GET and PUT</p>");
+    const back = { ...editable(db, id), type: "multichoiceset", answers: [{ textDe: "<p>GET</p>", textEn: "<p>GET</p>", correct: true }, { textDe: "<p>POST</p>", textEn: "<p>POST</p>", correct: false }] };
+    const { question: choice } = saveQuestion(db, id, back);
+    assert.deepEqual([choice.type, choice.solutionDe, choice.solutionEn, choice.answers.length], ["multichoiceset", null, null, 2]);
+  });
+
+  test("the type of a question planned for an online test cannot change to free text; the refusal names the test", () => {
+    const { db, course: wmc, ids } = seeded();
+    const id = ids["Methoden de"];
+    const planned = createTest(db, wmc.id, { name: "HTTP caching", questionIds: [id] });
+    createSitting(db, planned.id, { opensAt: inMinutes(60 * 24 * 7), closesAt: inMinutes(60 * 24 * 7 + 50), durationMinutes: 15 });
+    const before = poolAndSnapshots(db);
+    const input = { ...editable(db, id), type: "freetext", solutionDe: "<p>a</p>", solutionEn: "<p>a</p>" };
+    assert.deepEqual(refusal(() => saveQuestion(db, id, input)), [
+      ["type", null, 'This question is part of the online test "HTTP caching", which has not begun, and an online test holds no free-text question. Take the question out of it first.'],
+    ]);
+    assert.deepEqual(poolAndSnapshots(db), before, "the question and the test are unchanged");
+    assert.equal(getQuestion(db, id).type, "multichoiceset");
+  });
+
+  test("a question of a written test can become free text, and the written test keeps its version with its answers", () => {
+    const { db, course: wmc, ids } = seeded();
+    const id = ids["Methoden de"];
+    const written = createTest(db, wmc.id, { name: "Last semester", questionIds: [id] });
+    fakeAttempt(db, written.id, "anna");
+    const snapshot = testQuestions(db, written.id);
+    saveQuestion(db, id, { ...editable(db, id), type: "freetext", solutionDe: "<p>a</p>", solutionEn: "<p>a</p>" });
+    assert.equal(getQuestion(db, id).type, "freetext");
+    assert.deepEqual(testQuestions(db, written.id), snapshot, "the written test's copy is the choice question it was");
+    assert.equal(testQuestions(db, written.id)[0].answers.length, 3);
+  });
+
+  test("an image in a model solution is the question's, served, linked by a test holding it and kept while a begun test shows it", () => {
+    const { db, course: wmc, ids } = seeded();
+    const { src } = stageUpload(db, otherPng, "teacher");
+    const { question } = createQuestion(db, freetext(db, ids, { solutionDe: `<p><img src="${src}">Skizze</p>` }));
+    const [{ id: imageId }] = db.prepare("SELECT id FROM image WHERE question_id = ?").all(question.id);
+    assert.equal(question.solutionDe, `<p><img src="/exam/api/images/${imageId}">Skizze</p>`);
+    assert.equal(readImage(db, imageId).questionId, question.id, "it is served as the question's image");
+
+    // A test on paper holding the question (pool-quickie): its copy follows the
+    // pool until it begins, and links the solution's image.
+    const paper = createOfflineTest(db, wmc.id, { name: "Quickie", durationMinutes: 15, gradebookKind: "shorttest" });
+    db.prepare(
+      `INSERT INTO test_question (test_id, question_id, position, type, name_de, name_en, text_de, text_en, solution_de, solution_en)
+       SELECT ?, id, 0, type, name_de, name_en, text_de, text_en, solution_de, solution_en FROM question WHERE id = ?`
+    ).run(paper.id, question.id);
+    const edited = { ...editable(db, question.id), solutionEn: "<p>changed</p>" };
+    saveQuestion(db, question.id, edited);
+    const copy = db.prepare("SELECT solution_de, solution_en FROM test_question WHERE test_id = ?").get(paper.id);
+    assert.deepEqual({ ...copy }, { solution_de: question.solutionDe, solution_en: "<p>changed</p>" }, "the copy follows the pool");
+    assert.deepEqual(db.prepare("SELECT image_id FROM test_image WHERE test_id = ?").all(paper.id).map((row) => row.image_id), [imageId]);
+
+    // Once that test has begun, the image outlives the solution's next version.
+    db.prepare("INSERT INTO sitting (test_id, opens_at, closes_at, duration_s, started_at, created_at) VALUES (?, ?, ?, 900, ?, ?)").run(paper.id, inMinutes(-5), inMinutes(10), inMinutes(-5), inMinutes(-5));
+    saveQuestion(db, question.id, { ...editable(db, question.id), solutionDe: "<p>ohne Bild</p>" });
+    assert.ok(readImage(db, imageId), "the begun test still shows it");
+    assert.match(db.prepare("SELECT solution_de FROM test_question WHERE test_id = ?").get(paper.id).solution_de, /images\/\d+/, "and keeps its version");
+  });
+
+  test("an online test is not created with a free-text question, and none is added to one; the question is named", () => {
+    const { db, course: wmc, ids } = seeded();
+    const { question } = createQuestion(db, freetext(db, ids));
+    const tests = () => db.prepare("SELECT COUNT(*) AS n FROM test").get().n;
+    assert.throws(
+      () => createTest(db, wmc.id, { name: "Quiz", questionIds: [ids["Methoden de"], ids["Wahr de"], question.id] }),
+      (error) => error instanceof InvalidInputError && error.message === 'The question "PUT und PATCH" is a free-text question; an online test holds no free-text question.'
+    );
+    assert.equal(tests(), 0, "no test is created");
+    const quiz = createTest(db, wmc.id, { name: "Quiz", questionIds: [ids["Methoden de"]] });
+    const before = poolAndSnapshots(db);
+    assert.throws(() => updateTest(db, quiz.id, { questionIds: [ids["Methoden de"], question.id] }), /PUT und PATCH/);
+    assert.deepEqual(poolAndSnapshots(db), before, "the test is unchanged");
   });
 });
 

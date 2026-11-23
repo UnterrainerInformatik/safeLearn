@@ -21,6 +21,7 @@ const typeLabels = {
   multichoiceset: t("exam.pool.type.multichoiceset"),
   multichoice: t("exam.pool.type.multichoice"),
   truefalse: t("exam.pool.type.truefalse"),
+  freetext: t("exam.pool.type.freetext"),
 };
 
 /**

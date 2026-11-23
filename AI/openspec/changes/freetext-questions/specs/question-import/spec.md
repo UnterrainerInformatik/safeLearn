@@ -1,0 +1,102 @@
+## MODIFIED Requirements
+
+### Requirement: The import file is Markdown in the format safelearn-questions/1
+
+An import file SHALL be a UTF-8 Markdown file that declares the format `safelearn-questions/1` in a front matter at its top. Its content SHALL be read as follows:
+
+- A level-1 heading starts a category. Its text is the German path, segments separated by " / " (slash with a space on each side). The next line SHALL be `en: ` followed by the English path, with the same number of segments.
+- A level-2 heading starts a question in the category above it. Its text is the German short title. The next lines SHALL be `en: ` with the English short title and `type: ` with one of `multichoiceset`, `multichoice`, `truefalse` or `freetext`. A `truefalse` question SHALL instead of answers carry a line `solution: true` or `solution: false`.
+- Below them, a level-3 heading `de` and a level-3 heading `en` each hold that language's question text, followed - except for `truefalse` and `freetext` - by the answers as a task list: `- [x]` for a correct answer, `- [ ]` for a wrong one.
+- A `freetext` question SHALL carry, under each of its `de` and `en` headings, after the question text, a level-4 heading `solution` followed by that language's model solution, and no task list.
+- Texts, answers and model solutions SHALL be formatted in Markdown: paragraphs, bold, italic, inline code, code blocks, bulleted and numbered lists. They SHALL be stored sanitized like every other pool text.
+
+A file SHALL be accepted only up to 1 MB and up to 200 questions.
+
+#### Scenario: A file without the format declaration
+
+- **WHEN** a teacher uploads a Markdown file that has no front matter naming `safelearn-questions/1`
+- **THEN** the check refuses it, says that it is not a question file in this format, and nothing is stored
+
+#### Scenario: Code in an answer
+
+- **WHEN** a file's answer reads ``- [x] `PUT /users/7` ``
+- **THEN** the imported answer shows `PUT /users/7` as inline code in that language
+
+#### Scenario: A free-text question
+
+- **WHEN** a file holds a question with `type: freetext`, a German text followed by `#### solution` and a German model solution, and the same in English
+- **THEN** the imported question is a `freetext` question with both texts and both model solutions, and no answers
+
+### Requirement: The format description tells a Claude everything it needs
+
+The import page SHALL offer the format description as a Markdown file for download. It SHALL contain the syntax with a complete example of every question type, every rule the check applies, the pool's conventions, and the pool's category tree as it stands at download, in German and English, so that new questions are filed under existing categories. It SHALL tell the writer:
+
+- to prefer questions with several correct answers (`multichoiceset`);
+- to end the question text of every `multichoiceset` question with the number of correct answers, "(N richtige Antworten)" in German and "(N correct answers)" in English, with "(1 richtige Antwort)" and "(1 correct answer)" for one;
+- to end the question text of every `multichoice` question with "(1 richtige Antwort)" / "(1 correct answer)" as well, although the check does not require it there;
+- that answers are shown shuffled, so no answer may refer to another one or to its position ("all of the above", "A and C");
+- to write both languages with the same meaning and the same correct answers in the same order;
+- that a `freetext` question is graded by a teacher, is used in tests on paper and not in online tests, and needs a model solution in both languages that states what a full answer contains;
+- that images cannot be imported.
+
+#### Scenario: Downloading the description
+
+- **WHEN** a teacher downloads the format description while the pool has the category "HTTP und REST / Caching"
+- **THEN** the file lists "HTTP und REST / Caching" with its English path, and states the rule for the number of correct answers
+
+#### Scenario: The free-text example
+
+- **WHEN** a teacher downloads the format description
+- **THEN** it holds a complete `freetext` example with `#### solution` in both languages, and says that such a question is graded by a teacher
+
+### Requirement: The check refuses a file that does not fit, naming every problem with its line
+
+Before anything is stored, the whole file SHALL be checked. It SHALL be refused if any question breaks a rule the question editor applies to a save (titles and texts in both languages, every answer's text in both languages, at least two answers, correct flags fitting the type, a model solution in both languages for a `freetext` question), or any of the following:
+
+- The German and the English section of a question differ in the number of answers or in which positions are correct.
+- A `multichoiceset` question's German or English text does not end with the hint stating how many answers are correct, or the hint's number differs from the number of answers marked correct. A `multichoice` question that carries the hint SHALL state one.
+- A `freetext` question carries a task list, or a question of another type carries a `#### solution` section.
+- A text embeds an image, or the file contains anything the format does not know (a question outside a category, a missing `en:` line, an unknown type).
+- The same file was imported before and that import has not been taken back.
+
+A refusal SHALL list every problem it found, each with the line number in the file and the question's German title, so that the list can be handed back to whoever wrote the file. A refused file SHALL change nothing.
+
+#### Scenario: A wrong count in the hint
+
+- **WHEN** a `multichoiceset` question on line 42 ends with "(2 richtige Antworten)" and has three answers marked correct
+- **THEN** the check refuses the file and names line 42, the question's title, and that the hint says 2 but 3 answers are marked correct
+
+#### Scenario: The hint missing in English only
+
+- **WHEN** a `multichoiceset` question's German text ends with "(2 richtige Antworten)" and its English text has no hint
+- **THEN** the check refuses the file and names the missing English hint
+
+#### Scenario: The languages disagree
+
+- **WHEN** a question's German answers are marked `x - x -` and its English answers `x x - -`
+- **THEN** the check refuses the file and names the question and both patterns
+
+#### Scenario: Several problems at once
+
+- **WHEN** a file has a missing English title in one question and a single-choice question with two correct answers in another
+- **THEN** the refusal lists both problems with their lines, and nothing is stored
+
+#### Scenario: The same file again
+
+- **WHEN** a teacher uploads a file byte for byte identical to one imported before
+- **THEN** the check refuses it and names the earlier import's date and teacher
+
+#### Scenario: The same file after taking it back
+
+- **WHEN** a teacher takes back an import and then uploads the identical file again
+- **THEN** the check accepts it like a new file
+
+#### Scenario: A free-text question without an English solution
+
+- **WHEN** a `freetext` question on line 80 has `#### solution` under `de` and none under `en`
+- **THEN** the check refuses the file and names line 80, the question's title and the missing English model solution
+
+#### Scenario: Answers on a free-text question
+
+- **WHEN** a `freetext` question carries a task list under `de`
+- **THEN** the check refuses the file and names the question and that a free-text question has no answers

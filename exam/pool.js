@@ -141,7 +141,9 @@ export function listQuestions(db, { categoryId = null, query = "", includeRetire
 
 /**
  * One question as the preview and the editor show it: both languages, every
- * answer in its original order with its correct flag, the category's path,
+ * answer in its original order with its correct flag - or, for a `freetext`
+ * question, no answers and its model solution in both languages
+ * (`solutionDe`/`solutionEn`, null for a choice question) - the category's path,
  * each test that holds it, planned or written, with course and date, the
  * tests not yet begun that a save changes and a deletion takes it out of
  * (exam-questions-follow-pool design D7), the version a save has to name
@@ -149,14 +151,29 @@ export function listQuestions(db, { categoryId = null, query = "", includeRetire
  * whom and from which file (exam-question-import design D7).
  */
 export function getQuestion(db, id) {
-  const row = db
-    .prepare(
-      `SELECT q.id, q.category_id AS categoryId, q.type, q.name_de AS nameDe, q.name_en AS nameEn,
-         q.text_de AS textDe, q.text_en AS textEn, q.retired, q.version, q.unreviewed, ${importColumns}
-       FROM question q LEFT JOIN question_import i ON i.id = q.import_id WHERE q.id = ?`
-    )
+  // Every column of the question, so that the model solution reads as null
+  // where the schema has none yet (before migration 023).
+  const stored = db
+    .prepare(`SELECT q.*, ${importColumns} FROM question q LEFT JOIN question_import i ON i.id = q.import_id WHERE q.id = ?`)
     .get(id);
-  if (!row) throw new NotFoundError("exam.errors.pool.noQuestion");
+  if (!stored) throw new NotFoundError("exam.errors.pool.noQuestion");
+  const row = {
+    id: stored.id,
+    categoryId: stored.category_id,
+    type: stored.type,
+    nameDe: stored.name_de,
+    nameEn: stored.name_en,
+    textDe: stored.text_de,
+    textEn: stored.text_en,
+    solutionDe: stored.solution_de ?? null,
+    solutionEn: stored.solution_en ?? null,
+    retired: stored.retired,
+    version: stored.version,
+    unreviewed: stored.unreviewed,
+    importedAt: stored.importedAt,
+    importedBy: stored.importedBy,
+    importFileName: stored.importFileName,
+  };
   const answers = db
     .prepare("SELECT position, text_de AS textDe, text_en AS textEn, correct FROM answer WHERE question_id = ? ORDER BY position")
     .all(id)

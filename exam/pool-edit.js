@@ -90,16 +90,19 @@ function imageProblem(db, questionId, src) {
 
 /**
  * The problem an image's reason (`imageProblem`) makes at `field`: in the
- * question text when `answer` is null, else in that answer (1-based).
+ * question text when `answer` is null, in the model solution when it is
+ * "solution", else in that answer (1-based).
  */
 function imageProblemAt(field, reason, answer) {
   const keys = {
-    otherQuestion: ["exam.errors.pool.textImageOtherQuestion", "exam.errors.pool.answerImageOtherQuestion"],
-    uploadGone: ["exam.errors.pool.textImageUploadGone", "exam.errors.pool.answerImageUploadGone"],
-    notUploaded: ["exam.errors.pool.textImageNotUploaded", "exam.errors.pool.answerImageNotUploaded"],
-    outside: ["exam.errors.pool.textImageOutside", "exam.errors.pool.answerImageOutside"],
+    otherQuestion: ["exam.errors.pool.textImageOtherQuestion", "exam.errors.pool.answerImageOtherQuestion", "exam.errors.pool.solutionImageOtherQuestion"],
+    uploadGone: ["exam.errors.pool.textImageUploadGone", "exam.errors.pool.answerImageUploadGone", "exam.errors.pool.solutionImageUploadGone"],
+    notUploaded: ["exam.errors.pool.textImageNotUploaded", "exam.errors.pool.answerImageNotUploaded", "exam.errors.pool.solutionImageNotUploaded"],
+    outside: ["exam.errors.pool.textImageOutside", "exam.errors.pool.answerImageOutside", "exam.errors.pool.solutionImageOutside"],
   }[reason];
-  return answer === null ? problemAt(field, keys[0], {}, null) : problemAt(field, keys[1], { answer }, answer);
+  if (answer === null) return problemAt(field, keys[0], {}, null);
+  if (answer === "solution") return problemAt(field, keys[2], {}, null);
+  return problemAt(field, keys[1], { answer }, answer);
 }
 
 /** A problem saving reports at the text as a whole, whichever answer it is in. */
@@ -124,9 +127,12 @@ function imageSources(html) {
 /**
  * Every problem `input` has as a question of the pool (the spec's list): both
  * languages of the title and text present, every answer's text present in
- * both languages, the correct flags fitting the type, an existing category,
- * and only images the question may embed. An empty list means it can be
- * saved. `questionId` is the question being edited, or null for a new one.
+ * both languages, the correct flags fitting the type - or, for a `freetext`
+ * question, the model solution in both languages, its answers ignored - an
+ * existing category, only images the question may embed, and no change to
+ * `freetext` while an online test not yet begun holds the question
+ * (freetext-questions design D3). An empty list means it can be saved.
+ * `questionId` is the question being edited, or null for a new one.
  */
 export function questionProblems(db, input, questionId = null) {
   const problems = [];
@@ -150,9 +156,18 @@ export function questionProblems(db, input, questionId = null) {
     if (!present(value[field])) problem(field, missing);
   }
 
-  const answers = Array.isArray(value.answers) ? value.answers : [];
+  const freetext = value.type === "freetext";
+  const answers = freetext ? [] : Array.isArray(value.answers) ? value.answers : [];
   const correct = answers.filter((answer) => answer?.correct === true).length;
-  if (value.type === "truefalse") {
+  if (freetext) {
+    for (const [field, missing] of [["solutionDe", "exam.errors.pool.solutionMissingDe"], ["solutionEn", "exam.errors.pool.solutionMissingEn"]]) {
+      if (!present(value[field])) problem(field, missing);
+    }
+    if (questionId !== null && db.prepare("SELECT type FROM question WHERE id = ?").get(questionId)?.type !== "freetext") {
+      const online = onlineTestsNotBegun(db, questionId);
+      if (online.length > 0) problem("type", "exam.errors.pool.freetextPlannedOnline", { count: online.length, tests: online.map((test) => `"${test.name}"`).join(", ") });
+    }
+  } else if (value.type === "truefalse") {
     if (answers.length !== 2) problem("answers", "exam.errors.pool.trueFalseAnswers");
     else if (correct !== 1) problem("answers", "exam.errors.pool.trueFalseMark");
   } else {
@@ -170,6 +185,7 @@ export function questionProblems(db, input, questionId = null) {
     ["textDe", null, value.textDe],
     ["textEn", null, value.textEn],
     ...(value.type === "truefalse" ? [] : answers.flatMap((answer, index) => [["textDe", index + 1, answer?.textDe], ["textEn", index + 1, answer?.textEn]])),
+    ...(freetext ? [["solutionDe", "solution", value.solutionDe], ["solutionEn", "solution", value.solutionEn]] : []),
   ];
   for (const [field, answer, html] of texts) {
     for (const src of imageSources(html)) {
@@ -178,6 +194,12 @@ export function questionProblems(db, input, questionId = null) {
     }
   }
   return problems;
+}
+
+/** The online tests not yet begun that hold the question `questionId`. */
+function onlineTestsNotBegun(db, questionId) {
+  const kind = db.prepare("SELECT kind FROM test WHERE id = ?");
+  return pendingTestsWith(db, questionId).filter((test) => kind.get(test.id).kind === "online");
 }
 
 /**
@@ -195,7 +217,8 @@ function writeContent(db, questionId, input) {
      ON CONFLICT (question_id, sha256) DO UPDATE SET sha256 = excluded.sha256 RETURNING id`
   );
   const usedUploads = new Set();
-  // `answer` is the answer's number, or null for the question text.
+  // `answer` is the answer's number, "solution" for the model solution, or
+  // null for the question text.
   const resolve = (src, answer) => {
     const reason = imageProblem(db, questionId, src);
     if (reason) throw new QuestionProblemsError([withoutAnswer(imageProblemAt("text", reason, answer))]);
@@ -208,7 +231,12 @@ function writeContent(db, questionId, input) {
 
   const textDe = cleanStoredHtml(input.textDe, resolve, null);
   const textEn = cleanStoredHtml(input.textEn, resolve, null);
-  db.prepare("UPDATE question SET text_de = ?, text_en = ? WHERE id = ?").run(textDe, textEn, questionId);
+  // A model solution only for a free-text question (design D1, D2): its
+  // images are resolved, kept and collected like the question text's.
+  const freetext = input.type === "freetext";
+  const solutionDe = freetext ? cleanStoredHtml(input.solutionDe, resolve, "solution") : null;
+  const solutionEn = freetext ? cleanStoredHtml(input.solutionEn, resolve, "solution") : null;
+  db.prepare("UPDATE question SET text_de = ?, text_en = ?, solution_de = ?, solution_en = ? WHERE id = ?").run(textDe, textEn, solutionDe, solutionEn, questionId);
 
   db.prepare("DELETE FROM answer WHERE question_id = ?").run(questionId);
   const insertAnswer = db.prepare("INSERT INTO answer (question_id, position, text_de, text_en, correct) VALUES (?, ?, ?, ?, ?)");
@@ -236,7 +264,7 @@ function writeContent(db, questionId, input) {
  */
 function removeUnreferencedImages(db, questionId) {
   const texts = [
-    ...Object.values(db.prepare("SELECT text_de, text_en FROM question WHERE id = ?").get(questionId)),
+    ...Object.values(db.prepare("SELECT text_de, text_en, solution_de, solution_en FROM question WHERE id = ?").get(questionId)),
     ...db.prepare("SELECT text_de, text_en FROM answer WHERE question_id = ?").all(questionId).flatMap(Object.values),
   ].join(" ");
   const referenced = new Set([...texts.matchAll(/\/exam\/api\/images\/(\d+)/g)].map((match) => Number(match[1])));
@@ -253,15 +281,24 @@ function endOfCategory(db, categoryId) {
   return db.prepare("SELECT COALESCE(MAX(position), 0) + 1 AS position FROM question WHERE category_id = ?").get(categoryId).position;
 }
 
-/** The input normalized for storing: a true/false question always gets its two answers. */
+/** The input normalized for storing: a free-text question has no answers, whatever was sent. */
 function normalizedInput(input) {
-  const answers = Array.isArray(input.answers) ? input.answers : [];
+  const answers = input.type === "freetext" ? [] : Array.isArray(input.answers) ? input.answers : [];
   return {
     ...input,
     nameDe: trimmedName(input.nameDe),
     nameEn: trimmedName(input.nameEn),
     answers,
   };
+}
+
+/**
+ * What the model solution columns hold until `writeContent` stores the real
+ * ones: an empty text for a free-text question, NULL otherwise, so that the
+ * row fits the type in between (the CHECK of migration 023).
+ */
+function solutionPlaceholder(type) {
+  return type === "freetext" ? "" : null;
 }
 
 /** What a save answers: the question as the editor reads it. */
@@ -286,10 +323,21 @@ export function saveQuestion(db, id, input = {}) {
     const { changes } = db
       .prepare(
         `UPDATE question SET category_id = ?, type = ?, name_de = ?, name_en = ?, position = ?,
-           version = version + 1, updated_at = ?, unreviewed = 0
+           solution_de = ?, solution_en = ?, version = version + 1, updated_at = ?, unreviewed = 0
          WHERE id = ? AND version = ?`
       )
-      .run(value.categoryId, value.type, value.nameDe, value.nameEn, position, now(), id, Number.isInteger(value.version) ? value.version : -1);
+      .run(
+        value.categoryId,
+        value.type,
+        value.nameDe,
+        value.nameEn,
+        position,
+        solutionPlaceholder(value.type),
+        solutionPlaceholder(value.type),
+        now(),
+        id,
+        Number.isInteger(value.version) ? value.version : -1
+      );
     if (changes === 0) {
       throw new ConflictError("exam.errors.pool.changedMeanwhile");
     }
@@ -309,10 +357,22 @@ export function insertQuestion(db, input, { importId = null, unreviewed = false 
   const at = now();
   const { id } = db
     .prepare(
-      `INSERT INTO question (category_id, type, name_de, name_en, text_de, text_en, position, created_at, updated_at, import_id, unreviewed)
-       VALUES (?, ?, ?, ?, '', '', ?, ?, ?, ?, ?) RETURNING id`
+      `INSERT INTO question (category_id, type, name_de, name_en, text_de, text_en, solution_de, solution_en, position, created_at, updated_at, import_id, unreviewed)
+       VALUES (?, ?, ?, ?, '', '', ?, ?, ?, ?, ?, ?, ?) RETURNING id`
     )
-    .get(value.categoryId, value.type, value.nameDe, value.nameEn, endOfCategory(db, value.categoryId), at, at, importId, unreviewed ? 1 : 0);
+    .get(
+      value.categoryId,
+      value.type,
+      value.nameDe,
+      value.nameEn,
+      solutionPlaceholder(value.type),
+      solutionPlaceholder(value.type),
+      endOfCategory(db, value.categoryId),
+      at,
+      at,
+      importId,
+      unreviewed ? 1 : 0
+    );
   writeContent(db, id, value);
   return id;
 }

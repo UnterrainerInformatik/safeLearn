@@ -23,8 +23,15 @@ import { JSDOM } from "jsdom";
 
 import { cleanStoredHtml, trueFalseText } from "./stored-html.js";
 
-/** The types the pool keeps. `essay` is dropped; anything else refuses the import. */
-export const questionTypes = ["multichoiceset", "multichoice", "truefalse"];
+/**
+ * The choice questions: the types the module grades by itself, the only ones
+ * an online test holds, and the only ones the Moodle import keeps. `essay` is
+ * dropped there; anything else refuses that import.
+ */
+export const choiceTypes = ["multichoiceset", "multichoice", "truefalse"];
+
+/** The types the pool keeps: the choice questions and `freetext`, which a teacher grades. */
+export const questionTypes = [...choiceTypes, "freetext"];
 
 const imageTypes = {
   png: "image/png",
@@ -134,7 +141,7 @@ function correctPattern(question) {
 /** Why `question` cannot be kept even on its own, or null. */
 function typeProblem(question) {
   const correct = question.answers.filter((answer) => answer.correct).length;
-  if (!questionTypes.includes(question.type)) return `type ${question.type} is not one the pool keeps`;
+  if (!choiceTypes.includes(question.type)) return `type ${question.type} is not one the pool keeps`;
   if (question.answers.length < 2) return "it has fewer than two answers";
   if (question.type === "multichoice" && correct !== 1) return `a multichoice question has exactly one correct answer, not ${correct}`;
   if (question.type === "truefalse" && question.answers.length !== 2) return "a true/false question has two answers";
@@ -261,7 +268,7 @@ export function planImport(deXml, enXml) {
   const de = parseMoodleXml(deXml);
   const en = parseMoodleXml(enXml);
   const { pairs, categories, essays } = pairPools(de, en);
-  const byType = Object.fromEntries(questionTypes.map((type) => [type, pairs.filter((pair) => pair.de.type === type).length]));
+  const byType = Object.fromEntries(choiceTypes.map((type) => [type, pairs.filter((pair) => pair.de.type === type).length]));
   return {
     de,
     en,

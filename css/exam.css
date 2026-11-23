@@ -1967,6 +1967,13 @@ body.sl-exam-screen-page {
   margin-top: 1em;
 }
 
+/* Hidden for a free-text question, which has a model solution instead, and
+   the model solution for every other type. */
+.sl-exam-editor-row[hidden],
+.sl-exam-editor-answers[hidden] {
+  display: none;
+}
+
 .sl-exam-editor-truefalse label {
   margin-right: 1em;
 }
@@ -2593,6 +2600,24 @@ sl-date-input .sl-date-input-grid button.is-selected {
 sl-date-input .sl-date-input-grid button.is-disabled {
   opacity: 0.3;
   cursor: not-allowed;
+}
+
+/* A free-text question's model solution in the preview, set off from its
+   text like the correct answers are. */
+
+.sl-exam-pool-solution {
+  border-left: 3px solid #1a7f37;
+  padding-left: 0.8em;
+  margin: 0.8em 0;
+}
+
+#markdown-content.dark-mode .sl-exam-pool-solution {
+  border-left-color: #3fb950;
+}
+
+.sl-exam-pool-solution h3 {
+  margin: 0 0 0.3em;
+  font-size: 1em;
 }
 
 /* The pool's box for choosing a question for the test. */

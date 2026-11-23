@@ -155,6 +155,28 @@ ${answers(en)}
 `;
 }
 
+/** A `freetext` question; `solutionDe`/`solutionEn` null leave out that `#### solution`. */
+function freetextQuestion({
+  title = "PUT und PATCH",
+  titleEn = "PUT and PATCH",
+  solutionDe = "`PUT` ersetzt die Ressource, `PATCH` ändert einzelne Felder.",
+  solutionEn = "`PUT` replaces the resource, `PATCH` changes single fields.",
+} = {}) {
+  const solution = (text) => (text === null ? "" : `\n#### solution\n\n${text}\n`);
+  return `## ${title}
+en: ${titleEn}
+type: freetext
+
+### de
+
+Erkläre den Unterschied zwischen \`PUT\` und \`PATCH\`.
+${solution(solutionDe)}
+### en
+
+Explain the difference between \`PUT\` and \`PATCH\`.
+${solution(solutionEn)}`;
+}
+
 function category(de = "HTTP und REST", en = "HTTP and REST") {
   return `# ${de}\nen: ${en}\n`;
 }
@@ -287,6 +309,7 @@ describe("reading a question file", () => {
         ["multichoiceset", "Statuscode nach POST", "Status code after POST"],
         ["multichoice", "Idempotenz", "Idempotency"],
         ["truefalse", "Feld-Injection", "Field injection"],
+        ["freetext", "PUT und PATCH", "PUT and PATCH"],
       ]
     );
     assert.equal(parsed.questions[2].solution, false);
@@ -298,7 +321,31 @@ describe("reading a question file", () => {
     assert.ok(description.includes(`format: ${formatVersion}`));
     const refusals = /## What the import refuses\n\n[^\n]*\n\n((?:- [^\n]*\n)+)/.exec(description)[1].trim().split("\n");
     // One test below per line of that list, in its order.
-    assert.equal(refusals.length, 9, "the description lists nine refusals; each has a test in 'what the check refuses'");
+    assert.equal(refusals.length, 10, "the description lists ten refusals; each has a test in 'what the check refuses'");
+  });
+
+  test("the description has a complete free-text example and says that a teacher grades it", () => {
+    const description = fs.readFileSync(formatDescriptionPath, "utf8");
+    const example = parseQuestionFile(descriptionExample()).questions.find((q) => q.type === "freetext");
+    assert.ok(example.de.solution && example.en.solution, "a model solution in both languages");
+    assert.equal(descriptionExample().match(/^#### solution$/gm).length, 2);
+    assert.match(description, /\*\*graded by a teacher\*\*/);
+    assert.match(description, /never in online tests/);
+  });
+
+  test("a free-text question: both texts, both model solutions with their code, no answers", () => {
+    const db = freshDatabase();
+    const content = file(category(), freetextQuestion({ solutionDe: "Zum Beispiel:\n\n```http\nPATCH /users/7\n```\n\n- nur die E-Mail" }));
+    const [q] = parseQuestionFile(content).questions;
+    assert.equal(q.de.html, "<p>Erkläre den Unterschied zwischen <code>PUT</code> und <code>PATCH</code>.</p>", "the question text ends at #### solution");
+    assert.equal(q.de.solutionLine, lineOf(content, "#### solution"));
+    importQuestionFile(db, content, { fileName: "free.md", username: "teacher" });
+    const [{ id }] = listQuestions(db);
+    const stored = getQuestion(db, id);
+    assert.equal(stored.type, "freetext");
+    assert.deepEqual(stored.answers, []);
+    assert.equal(stored.solutionDe, "<p>Zum Beispiel:</p>\n<pre><code>PATCH /users/7\n</code></pre>\n<ul>\n<li>nur die E-Mail</li>\n</ul>");
+    assert.equal(stored.solutionEn, "<p><code>PUT</code> replaces the resource, <code>PATCH</code> changes single fields.</p>");
   });
 
   test("answers keep their marks, lines and inline code; the hint stays in the text", () => {
@@ -383,7 +430,7 @@ describe("what the check refuses", () => {
     assert.match(problemsOf(db, noSolution)[0][1], /The line `solution: ` is missing/);
 
     const unknown = file(category(), question({ type: "essay" }));
-    assert.deepEqual(problemsOf(db, unknown), [[lineOf(unknown, "type: "), 'The type "essay" is unknown. Use multichoiceset, multichoice or truefalse.']]);
+    assert.deepEqual(problemsOf(db, unknown), [[lineOf(unknown, "type: "), 'The type "essay" is unknown. Use multichoiceset, multichoice, truefalse or freetext.']]);
 
     const noEnglish = file(category(), question().replace(/### en[\s\S]*$/, ""));
     assert.match(problemsOf(db, noEnglish)[0][1], /The section `### en` is missing/);
@@ -398,9 +445,35 @@ describe("what the check refuses", () => {
       ["The English title is missing.", "The English question text is missing.", "Answer 4 has no English text."]
     );
     assert.equal(problems[0][0], lineOf(content, "en: \n") );
+
+    // A free-text question's missing model solution, named at the question.
+    const filler = Array.from({ length: 60 }, () => "").join("\n");
+    const noSolution = file(category(), filler, freetextQuestion({ solutionEn: null }));
+    assert.deepEqual(checkQuestionFile(db, noSolution).problems, [
+      { line: lineOf(noSolution, "## PUT und PATCH"), question: "PUT und PATCH", message: "The English model solution is missing." },
+    ]);
+    const empty = file(category(), freetextQuestion({ solutionDe: "" }));
+    assert.deepEqual(problemsOf(db, empty), [[lineOf(empty, "#### solution"), "The German model solution is missing."]]);
   });
 
-  test("4. fewer than two answers, a multichoice with two correct, a multichoiceset with none", () => {
+  test("4. answers on a free-text question, a model solution on another type", () => {
+    const db = freshDatabase();
+    const answers = file(category(), freetextQuestion().replace("`PATCH`.\n", "`PATCH`.\n\n- [x] PUT\n- [ ] PATCH\n"));
+    assert.deepEqual(checkQuestionFile(db, answers).problems, [
+      {
+        line: lineOf(answers, "- [x] PUT"),
+        question: "PUT und PATCH",
+        message: "The German section has answers, but a free-text question has none. Remove the task list and write the model solution below `#### solution`.",
+      },
+    ]);
+    const choice = file(category(), question().replace("- [x] `GET`", "#### solution\n\nGET und PUT.\n\n- [x] `GET`"));
+    assert.deepEqual(
+      problemsOf(db, choice).filter(([, message]) => /solution/.test(message)),
+      [[lineOf(choice, "#### solution"), "The German section has `#### solution`, but only a free-text question (`type: freetext`) has a model solution."]]
+    );
+  });
+
+  test("5. fewer than two answers, a multichoice with two correct, a multichoiceset with none", () => {
     const db = freshDatabase();
     const content = file(
       category(),
@@ -416,7 +489,7 @@ describe("what the check refuses", () => {
     ]);
   });
 
-  test("5. the languages differ in the number of answers or their marks, both patterns named", () => {
+  test("6. the languages differ in the number of answers or their marks, both patterns named", () => {
     const db = freshDatabase();
     const marks = file(category(), question({ de: ["x", "-", "x", "-"], en: ["x", "x", "-", "-"] }));
     assert.deepEqual(problemsOf(db, marks), [
@@ -428,7 +501,7 @@ describe("what the check refuses", () => {
     ]);
   });
 
-  test("6. the hint: missing in English only, a wrong count, a multichoice hint that says 2", () => {
+  test("7. the hint: missing in English only, a wrong count, a multichoice hint that says 2", () => {
     const db = freshDatabase();
     const noEnglish = file(category(), question({ hintEn: "" }));
     assert.deepEqual(checkQuestionFile(db, noEnglish).problems, [
@@ -454,13 +527,13 @@ describe("what the check refuses", () => {
     assert.deepEqual(problemsOf(db, file(category(), question({ de: ["x", "-", "-"], hintDe: "(1 richtige Antworten)", hintEn: "(1 correct answer)" }))), []);
   });
 
-  test("6b. a hint after a code block counts, in its own paragraph", () => {
+  test("7b. a hint after a code block counts, in its own paragraph", () => {
     const db = freshDatabase();
     const content = file(category(), question({ textDe: "Was stimmt?\n\n```java\nint x = 1;\n```\n\n", textEn: "What is true?\n\n```java\nint x = 1;\n```\n\n" }));
     assert.deepEqual(problemsOf(db, content), []);
   });
 
-  test("7. an image or raw HTML anywhere in a text", () => {
+  test("8. an image or raw HTML anywhere in a text", () => {
     const db = freshDatabase();
     const content = file(category(), question({ textDe: "Was zeigt ![Bild](bild.png) hier?" }).replace("- [ ] `POST`", "- [ ] <b>POST</b>"));
     assert.deepEqual(
@@ -472,7 +545,7 @@ describe("what the check refuses", () => {
     );
   });
 
-  test("8. more than 200 questions, or more than 1 MB", () => {
+  test("9. more than 200 questions, or more than 1 MB", () => {
     const db = freshDatabase();
     const many = file(category(), ...Array.from({ length: questionLimit + 1 }, (_, i) => question({ title: `Frage ${i}` })));
     assert.deepEqual(problemsOf(db, many), [[lineOf(many, `## Frage ${questionLimit}\n`), "The file holds 201 questions; one import takes at most 200. Split it into several files."]]);
@@ -480,7 +553,7 @@ describe("what the check refuses", () => {
     assert.deepEqual(problemsOf(db, huge), [[1, "The file is larger than 1 MB. Split it into several files."]]);
   });
 
-  test("9. exactly this file again, naming the earlier import's date and teacher", () => {
+  test("10. exactly this file again, naming the earlier import's date and teacher", () => {
     const db = freshDatabase();
     const content = file(category(), question());
     importQuestionFile(db, content, { fileName: "first.md", username: "g.unterrainer" });
@@ -548,13 +621,19 @@ describe("the preview", () => {
   test("a new subcategory under an existing category, with its questions per type", () => {
     const db = freshDatabase();
     createCategory(db, { nameDe: "HTTP und REST", nameEn: "HTTP and REST" });
-    const content = file(category("HTTP und REST / Statuscodes", "HTTP and REST / Status codes"), question(), question({ title: "Zweite", type: "multichoice", de: ["x", "-", "-"], hintDe: "", hintEn: "" }));
+    const content = file(
+      category("HTTP und REST / Statuscodes", "HTTP and REST / Status codes"),
+      question(),
+      question({ title: "Zweite", type: "multichoice", de: ["x", "-", "-"], hintDe: "", hintEn: "" }),
+      freetextQuestion()
+    );
     const { plan } = checkQuestionFile(db, content);
     assert.deepEqual(plan.newCategories, [{ pathDe: "HTTP und REST / Statuscodes", pathEn: "HTTP and REST / Status codes", parentDe: "HTTP und REST" }]);
     assert.deepEqual(plan.categories, [
-      { pathDe: "HTTP und REST / Statuscodes", pathEn: "HTTP and REST / Status codes", existingId: null, counts: { multichoice: 1, multichoiceset: 1, truefalse: 0 }, questions: 2 },
+      { pathDe: "HTTP und REST / Statuscodes", pathEn: "HTTP and REST / Status codes", existingId: null, counts: { multichoice: 1, multichoiceset: 1, truefalse: 0, freetext: 1 }, questions: 3 },
     ]);
-    assert.equal(plan.questions, 2);
+    assert.equal(plan.questions, 3);
+    assert.deepEqual(plan.counts, { multichoiceset: 1, multichoice: 1, truefalse: 0, freetext: 1 });
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM question_category").get().n, 1, "the preview stores nothing");
   });
 
