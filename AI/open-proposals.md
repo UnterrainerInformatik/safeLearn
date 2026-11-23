@@ -40,3 +40,14 @@ Gerald will das so:
 - **Wiederholung eines komplett negativen Tests ist kein Nachtermin.** Dann müssen alle nochmal schreiben, und der alte Test muss samt seinen Ergebnissen (den vielen 5ern) weg. Heute geht das nicht: „Discard“ (`exam-record-maintenance`, „An open test can be discarded“) gibt es nur, solange die erste Sitzung eines Online-Tests offen ist — nicht danach, und nie für Offline-Tests.
 
 Zu klären: Wer zählt als „noch nicht geschrieben“ — kein Versuch / bei Offline nicht anwesend? Was ist mit Schülern, die nach dem ersten Termin in den Kurs gekommen sind? Bleibt „never required“ (nicht jeder Fehlende muss einen Nachtermin bekommen) — reicht dann, dass er einfach nicht erscheint? Für die Wiederholung: den alten Test nach Ende löschen (mit Bestätigung samt Zahl der gelöschten Ergebnisse wie beim Discard) und neu ansetzen, oder ein eigener Schritt „Test wiederholen“, der die Ergebnisse verwirft und den Test mit denselben Fragen neu öffnet? Wie verhält sich das in einem abgeschlossenen Schuljahr?
+
+## Freitext-Fragen im Pool, Quickies daraus zusammensetzen
+Gerald will im Fragen-Pool ein **Flag für Freitext-Fragen**, damit der Pool auch Fragen mit freier Antwort verwalten kann. Online-Tests können solche Fragen nicht auswerten und dürfen sie nicht enthalten. Für **Quickies (Kurztests)** wären sie aber genau richtig: Ein Quickie soll sich dann aus Pool-Fragen zusammensetzen lassen wie heute ein Online-Test. Das ist besser für die Wiederverwendbarkeit als ein eigenes Handout pro Quickie.
+
+Heute kennt der Pool nur automatisch auswertbare Typen: `question.type` ist per `CHECK` auf `multichoiceset`, `multichoice` und `truefalse` beschränkt (Migrationen 005, 006, 011; der Snapshot `test_question` genauso). Ein Kurztest ist entweder eine händische Spalte im Sheet oder ein Offline-Test mit einem Handout aus dem Korpus (`offline-test`). Eine Zusammenstellung aus Pool-Fragen gibt es nur für Online-Tests (`online-test`).
+
+Zu klären:
+- Ist es ein Flag oder ein neuer Fragetyp `freetext`? Hat eine Freitext-Frage eine Musterlösung oder einen Erwartungshorizont und eine Punktezahl?
+- Was wird aus einem zusammengesetzten Quickie: ein Offline-Test, dessen Handout aus den Fragen erzeugt wird (Druck, Lösung, Gruppen A/B), oder etwas Eigenes? Werden die Ergebnisse weiter händisch als Punkte in der Kurztest-Spalte eingetragen?
+- Dürfen Quickies auch Multiple-Choice-Fragen aus dem Pool mischen?
+- Wie verhalten sich der Fragen-Browser und der Import (Filter, die Sperre beim Zusammensetzen eines Online-Tests)?
