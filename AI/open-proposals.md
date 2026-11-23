@@ -31,3 +31,12 @@ Anzeige:
 - **Live-View (Lehrer):** pro Schüler, wie lange er noch Zeit hat. Für Schreibende gibt es „writing with the time left“ schon (`exam/client/live.js`); zu prüfen, ob das mit dem neuen Modell pro Schüler stimmt und überall sichtbar ist.
 
 Zu klären: Gilt das neue Modell auch für Offline-Sitzungen (die öffnen erst per Start und haben eine gemeinsame Zeit)? Was passiert mit bestehenden Sitzungen (Von/Bis → Start + Länge umrechnen)? Bleibt die Regel „Dauer kürzer als Fenster“ oder fällt sie weg? Ab wann sieht ein Schüler den Test nicht mehr — Fensterende für Nicht-Gestartete, eigene Deadline für Gestartete? Nachschreibtermine übernehmen das Modell ebenso.
+
+## Nachtest: keine Auswahl, sondern alle, die noch nicht geschrieben haben
+Beim Anlegen eines Nachtermins (make-up) wählt man heute die Teilnehmer per Checkbox aus dem Roster aus (`online-test` „A sitting sets the window and the duration“, `offline-test` „A make-up sitting is offered, never required“, Formular in `exam/client/tests.js`). Dort stehen auch Schüler, die den Test schon geschrieben haben.
+
+Gerald will das so:
+- **Keine Auswahl.** Ein Nachtermin gilt automatisch für **alle, die den Test noch nicht geschrieben haben** — sie dürfen im Fenster des Nachtermins schreiben. Wer schon geschrieben hat, kommt nicht vor (zumindest ausgeblendet, eigentlich gar keine Liste).
+- **Wiederholung eines komplett negativen Tests ist kein Nachtermin.** Dann müssen alle nochmal schreiben, und der alte Test muss samt seinen Ergebnissen (den vielen 5ern) weg. Heute geht das nicht: „Discard“ (`exam-record-maintenance`, „An open test can be discarded“) gibt es nur, solange die erste Sitzung eines Online-Tests offen ist — nicht danach, und nie für Offline-Tests.
+
+Zu klären: Wer zählt als „noch nicht geschrieben“ — kein Versuch / bei Offline nicht anwesend? Was ist mit Schülern, die nach dem ersten Termin in den Kurs gekommen sind? Bleibt „never required“ (nicht jeder Fehlende muss einen Nachtermin bekommen) — reicht dann, dass er einfach nicht erscheint? Für die Wiederholung: den alten Test nach Ende löschen (mit Bestätigung samt Zahl der gelöschten Ergebnisse wie beim Discard) und neu ansetzen, oder ein eigener Schritt „Test wiederholen“, der die Ergebnisse verwirft und den Test mit denselben Fragen neu öffnet? Wie verhält sich das in einem abgeschlossenen Schuljahr?
