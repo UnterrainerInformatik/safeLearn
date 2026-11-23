@@ -452,16 +452,111 @@ const inMinutes = (minutes) => new Date(Date.now() + minutes * 60000).toISOStrin
 const shift = (iso, minutes) => new Date(Date.parse(iso) + minutes * 60000).toISOString();
 
 describe("sittings", () => {
-  test("the first is written by the whole roster, a make-up by the students chosen, with the first one's duration", () => {
+  test("the first is written by the whole roster, a make-up by everybody who has not written, with the first one's duration", () => {
     const { db, course, ids } = seeded();
     const test = createTest(db, course.id, { name: "T", questionIds: [ids[0]] });
     const first = createSitting(db, test.id, { opensAt: inMinutes(60), closesAt: inMinutes(110), durationMinutes: 15 });
     assert.deepEqual([first.makeup, first.participants, first.durationS], [false, ["anna", "ben"], 900]);
-    assert.throws(() => createSitting(db, test.id, { opensAt: inMinutes(200), closesAt: inMinutes(260), durationMinutes: 15 }), /chosen/);
-    const makeup = createSitting(db, test.id, { opensAt: inMinutes(200), closesAt: inMinutes(260), durationMinutes: 40, participants: ["BEN"] });
-    assert.deepEqual([makeup.makeup, makeup.participants, makeup.durationS], [true, ["ben"], 900], "a make-up keeps the duration");
-    assert.throws(() => createSitting(db, test.id, { opensAt: inMinutes(300), closesAt: inMinutes(360), participants: ["carla"] }), /not on the class's roster/);
+    // Planned before the first sitting: nobody has written yet.
+    const makeup = createSitting(db, test.id, { opensAt: inMinutes(200), closesAt: inMinutes(260), durationMinutes: 40 });
+    assert.deepEqual([makeup.makeup, makeup.participants, makeup.retakes, makeup.durationS], [true, ["anna", "ben"], [], 900], "a make-up keeps the duration");
+    assert.throws(
+      () => createSitting(db, test.id, { opensAt: inMinutes(300), closesAt: inMinutes(360), participants: ["ben"] }),
+      (error) => error instanceof InvalidInputError && error.key === "exam.errors.tests.makeupNoChoice",
+      "choosing participants of a make-up is refused"
+    );
+    assert.throws(() => updateSitting(db, makeup.id, { participants: ["ben"] }), /exam.errors.tests.makeupNoChoice|chosen/, "also when changing it");
+    assert.throws(() => createSitting(db, test.id, { opensAt: inMinutes(300), closesAt: inMinutes(360), retakes: ["carla"] }), /not on the class's roster/);
+    assert.throws(() => createSitting(db, test.id, { opensAt: inMinutes(300), closesAt: inMinutes(360), retakes: ["ben"] }), (error) => error.key === "exam.errors.tests.retakeNotWritten", "a retake has to have written");
+    assert.throws(() => updateSitting(db, first.id, { retakes: [] }), (error) => error.key === "exam.errors.tests.retakesOnlyMakeup");
     assert.equal(getQuestion(db, ids[0]).usage[0].usedOn, viennaDate(first.opensAt), "the usage is dated by the first sitting");
+    assert.deepEqual(getTest(db, test.id).written, [], "nobody has written yet");
+  });
+
+  test("a make-up ahead follows who has written, and is fixed once its start window opens", () => {
+    const { db, klass, test, sitting } = running();
+    const participants = (id) => testSittings(db, test.id).find((s) => s.id === id).participants;
+    const anna = startAttempt(db, "anna", test.id);
+    const makeup = createSitting(db, test.id, { opensAt: inMinutes(120), closesAt: inMinutes(170) });
+    assert.deepEqual(makeup.participants, ["ben"], "who has not started");
+    assert.deepEqual(getTest(db, test.id).written, ["anna"], "the form names who has written");
+    startAttempt(db, "ben", test.id);
+    assert.deepEqual(participants(makeup.id), [], "planned before the first sitting was over: who starts there leaves the make-up");
+    addToRoster(db, klass.id, { username: "carla", givenName: "Carla", familyName: "C" });
+    assert.deepEqual(participants(makeup.id), ["carla"], "a joiner is in it");
+    deleteAttempt(db, anna.attemptId);
+    assert.deepEqual(participants(makeup.id), ["anna", "carla"], "who lost their attempt is in it again");
+    removeFromRoster(db, klass.id, "carla");
+    assert.deepEqual(participants(makeup.id), ["anna"], "who leaves is not");
+    // Missed the first make-up too: a second one takes them in.
+    db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ? WHERE id = ?").run(inMinutes(-1), inMinutes(1), makeup.id);
+    addToRoster(db, klass.id, { username: "dora", givenName: "Dora", familyName: "D" });
+    assert.deepEqual(participants(makeup.id), ["anna"], "fixed once its start window opened");
+    db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ? WHERE id = ?").run(inMinutes(-10), inMinutes(-5), makeup.id);
+    const second = createSitting(db, test.id, { opensAt: inMinutes(200), closesAt: inMinutes(260) });
+    assert.deepEqual(second.participants, ["anna", "dora"], "a second make-up after a missed first one");
+    assert.ok(sitting.id < makeup.id);
+  });
+
+  test("the migration to retakes keeps every participant as no retake, and a closed year still refuses a write", () => {
+    const dbPath = temporaryPath();
+    const db = new DatabaseSync(dbPath);
+    openDatabases.push(db);
+    db.exec("PRAGMA foreign_keys = ON");
+    migrate(db, dbPath, readMigrations().slice(0, 21));
+    const { year, test } = (() => {
+      const seed = seeded(db);
+      const created = createTest(db, seed.course.id, { name: "T", questionIds: [seed.ids[0]] });
+      return { ...seed, test: created };
+    })();
+    db.exec(`INSERT INTO sitting (test_id, opens_at, closes_at, duration_s, makeup, created_at) VALUES
+        (${test.id}, '2026-10-01T08:00:00.000Z', '2026-10-01T09:00:00.000Z', 600, 0, 'x'),
+        (${test.id}, '2026-10-08T08:00:00.000Z', '2026-10-08T09:00:00.000Z', 600, 1, 'x');
+      INSERT INTO sitting_participant (sitting_id, username) VALUES (1, 'anna'), (1, 'ben'), (2, 'ben');`);
+    const rows = () => db.prepare("SELECT * FROM sitting_participant ORDER BY sitting_id, username").all().map((row) => ({ ...row }));
+    const before = rows();
+    assert.deepEqual(migrate(db, dbPath, readMigrations().slice(0, 22)), { from: 21, to: 22 });
+    assert.deepEqual(rows(), before.map((row) => ({ ...row, retake: 0 })));
+    assert.throws(() => db.prepare("UPDATE sitting_participant SET retake = 2").run(), /CHECK/);
+    db.prepare("UPDATE school_year SET closed_at = ? WHERE id = ?").run(new Date().toISOString(), year.id);
+    assert.throws(() => db.prepare("UPDATE sitting_participant SET retake = 1 WHERE sitting_id = 2").run(), /school year closed/);
+  });
+
+  test("at start-up a make-up ahead loses a chosen student who has written, and one that has opened keeps its rows", () => {
+    const dbPath = temporaryPath();
+    const opened = openDatabase(dbPath).db;
+    const { course, ids } = seeded(opened);
+    const test = createTest(opened, course.id, { name: "T", questionIds: [ids[0]] });
+    const first = createSitting(opened, test.id, { opensAt: inMinutes(60), closesAt: inMinutes(110), durationMinutes: 15 });
+    opened.prepare("UPDATE sitting SET opens_at = ? WHERE id = ?").run(inMinutes(-1), first.id);
+    startAttempt(opened, "anna", test.id);
+    // Two make-ups as the old code stored them: Anna chosen in both, Ben in none.
+    const insert = opened.prepare("INSERT INTO sitting (test_id, opens_at, closes_at, duration_s, makeup, created_at) VALUES (?, ?, ?, 900, 1, 'x')");
+    const ahead = Number(insert.run(test.id, inMinutes(120), inMinutes(170)).lastInsertRowid);
+    const begun = Number(insert.run(test.id, inMinutes(-5), inMinutes(30)).lastInsertRowid);
+    for (const id of [ahead, begun]) opened.prepare("INSERT INTO sitting_participant (sitting_id, username) VALUES (?, 'anna')").run(id);
+    opened.close();
+    const { db } = openDatabase(dbPath);
+    openDatabases.push(db);
+    const participants = (id) => testSittings(db, test.id).find((s) => s.id === id).participants;
+    assert.deepEqual(participants(ahead), ["ben"], "by the rule from the start");
+    assert.deepEqual(participants(begun), ["anna"], "an opened make-up keeps its participants");
+  });
+
+  test("a retake is marked, kept while they have written, and taken back before the make-up opens", () => {
+    const { db, test } = running();
+    const anna = startAttempt(db, "anna", test.id);
+    submitAttempt(db, attemptRow(db, anna.attemptId));
+    const makeup = createSitting(db, test.id, { opensAt: inMinutes(120), closesAt: inMinutes(170), retakes: ["ANNA"] });
+    assert.deepEqual([makeup.participants, makeup.retakes], [["anna", "ben"], ["anna"]]);
+    const back = updateSitting(db, makeup.id, { retakes: [] });
+    assert.deepEqual([back.participants, back.retakes], [["ben"], []], "taken back");
+    assert.equal(attemptRow(db, anna.attemptId).submitted_at !== null, true, "the first attempt is unchanged");
+    const again = updateSitting(db, makeup.id, { retakes: ["anna"] });
+    assert.deepEqual(again.retakes, ["anna"]);
+    deleteAttempt(db, anna.attemptId);
+    const plain = testSittings(db, test.id).find((s) => s.id === makeup.id);
+    assert.deepEqual([plain.participants, plain.retakes], [["anna", "ben"], []], "a retake who no longer has written is a plain participant");
   });
 
   test("the duration may be longer than the start window, which opens before it closes, closes in the future and lasts up to 600 minutes", () => {
@@ -553,11 +648,48 @@ describe("attempts", () => {
     assert.ok(first.secret);
     assert.deepEqual(startAttempt(db, "anna", test.id), { attemptId: first.attemptId, created: false }, "a reload resumes");
     submitAttempt(db, attemptRow(db, first.attemptId));
-    createSitting(db, test.id, { opensAt: inMinutes(5), closesAt: inMinutes(60), participants: ["anna"] });
+    const makeup = createSitting(db, test.id, { opensAt: inMinutes(5), closesAt: inMinutes(60) });
+    assert.deepEqual(makeup.participants, ["ben"], "who has written is no participant of a make-up");
+    // Even a row written by hand, as an old make-up's chosen student, starts nothing without the retake mark.
+    db.prepare("INSERT INTO sitting_participant (sitting_id, username) VALUES (?, 'anna')").run(makeup.id);
     db.prepare("UPDATE sitting SET opens_at = ? WHERE makeup = 1").run(inMinutes(-1));
-    assert.throws(() => startAttempt(db, "anna", test.id), /submitted/, "a make-up added by mistake starts nothing");
+    assert.throws(() => startAttempt(db, "anna", test.id), /submitted/, "a make-up she is not a retake of starts nothing");
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM attempt").get().n, 1);
     assert.deepEqual(openTestsOf(db, "anna"), [], "and the test is not shown to her any more");
+  });
+
+  test("a retake starts a new attempt in the make-up, and the first one goes in the same step", () => {
+    const { db, test } = running();
+    const first = startAttempt(db, "anna", test.id);
+    submitAttempt(db, attemptRow(db, first.attemptId));
+    setTeacherNote(db, test.id, "anna", "seen");
+    const makeup = createSitting(db, test.id, { opensAt: inMinutes(120), closesAt: inMinutes(170), retakes: ["anna"] });
+    assert.deepEqual(makeup.retakes, ["anna"]);
+    assert.throws(() => startAttempt(db, "anna", test.id), /submitted/, "not before the make-up opens");
+    db.prepare("UPDATE sitting SET opens_at = ? WHERE id = ?").run(inMinutes(-1), makeup.id);
+    assert.equal(openTestsOf(db, "anna").length, 1, "offered to the retake");
+    const retake = startAttempt(db, "anna", test.id);
+    assert.equal(retake.created, true);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM attempt WHERE sitting_id = ?").get(testSittings(db, test.id)[0].id).n, 0, "the first attempt is gone");
+    const now = attemptRow(db, retake.attemptId);
+    assert.deepEqual([now.sitting_id, now.submitted_at], [makeup.id, null], "the new one runs in the make-up, without a result yet");
+    assert.deepEqual(startAttempt(db, "anna", test.id), { attemptId: retake.attemptId, created: false }, "a reload resumes it and deletes nothing");
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM attempt WHERE username = 'anna'").get().n, 1);
+    assert.equal(teacherNoteOf(db, test.id, "anna"), "seen", "the teachers' note stays");
+  });
+
+  test("a retake who does not come keeps the first attempt, and one whose first attempt still runs resumes it", () => {
+    const { db, test } = running();
+    const anna = startAttempt(db, "anna", test.id);
+    submitAttempt(db, attemptRow(db, anna.attemptId));
+    const makeup = createSitting(db, test.id, { opensAt: inMinutes(120), closesAt: inMinutes(170), retakes: ["anna"] });
+    db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ? WHERE id = ?").run(inMinutes(-10), inMinutes(-5), makeup.id);
+    assert.ok(attemptRow(db, anna.attemptId).submitted_at, "the window closed without her: the first result remains");
+    const ben = startAttempt(db, "ben", test.id);
+    // A retake mark for a running attempt cannot be set through the API; written by hand it starts nothing.
+    db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ? WHERE id = ?").run(inMinutes(-1), inMinutes(60), makeup.id);
+    db.prepare("INSERT INTO sitting_participant (sitting_id, username, retake) VALUES (?, 'ben', 1) ON CONFLICT DO UPDATE SET retake = 1").run(makeup.id);
+    assert.deepEqual(startAttempt(db, "ben", test.id), { attemptId: ben.attemptId, created: false }, "the running attempt is resumed, unchanged");
   });
 
   test("a make-up is written only by its participants", () => {
@@ -1060,7 +1192,7 @@ describe("a teacher's note on a participant", () => {
     const { db, course, ids } = seeded();
     const test = createTest(db, course.id, { name: "T", questionIds: [ids[0]] });
     const first = createSitting(db, test.id, { opensAt: inMinutes(60), closesAt: inMinutes(110), durationMinutes: 15 });
-    const makeup = createSitting(db, test.id, { opensAt: inMinutes(200), closesAt: inMinutes(260), durationMinutes: 15, participants: ["ben"] });
+    const makeup = createSitting(db, test.id, { opensAt: inMinutes(200), closesAt: inMinutes(260), durationMinutes: 15 });
     assert.deepEqual(setTeacherNote(db, test.id, "BEN", "Looked at the neighbour's screen twice\r\ncheck against Huber"), {
       username: "ben",
       teacherNote: "Looked at the neighbour's screen twice\ncheck against Huber",
@@ -1412,7 +1544,7 @@ describe("rescheduling a sitting that is over", () => {
   test("each sitting counts its own attempts, not the test's", () => {
     const { db, test } = running({ participants: ["anna"] });
     startAttempt(db, "anna", test.id);
-    createSitting(db, test.id, { opensAt: inMinutes(5), closesAt: inMinutes(60), participants: ["ben"] });
+    createSitting(db, test.id, { opensAt: inMinutes(5), closesAt: inMinutes(60) });
     db.prepare("UPDATE sitting SET opens_at = ? WHERE makeup = 1").run(inMinutes(-1));
     startAttempt(db, "ben", test.id);
     startAttempt(db, "ben", test.id);
@@ -1468,7 +1600,7 @@ describe("rescheduling a sitting that is over", () => {
 
   test("a make-up keeps its window, participants and attempts", () => {
     const { db, test, sitting } = over({ attempts: false });
-    const makeup = createSitting(db, test.id, { opensAt: inMinutes(5), closesAt: inMinutes(60), participants: ["anna"] });
+    const makeup = createSitting(db, test.id, { opensAt: inMinutes(5), closesAt: inMinutes(60) });
     db.prepare("UPDATE sitting SET opens_at = ? WHERE id = ?").run(inMinutes(-1), makeup.id);
     startAttempt(db, "anna", test.id);
     const before = testSittings(db, test.id).find((candidate) => candidate.id === makeup.id);
@@ -1514,7 +1646,7 @@ describe("discarding a test while its first sitting is open", () => {
     const ben = startAttempt(db, "ben", test.id).attemptId;
     saveAnswer(db, attemptRow(db, ben), 1, correctTokens(db, ben)[1]);
     startAttempt(db, "carla", test.id);
-    createSitting(db, test.id, { opensAt: inMinutes(200), closesAt: inMinutes(260), participants: ["anna"] });
+    createSitting(db, test.id, { opensAt: inMinutes(200), closesAt: inMinutes(260) });
     setTeacherNote(db, test.id, "ben", "Looked at the neighbour's screen");
     setNote(db, course.id, `test-${test.id}`, "anna", "Well done");
     saveQuestion(db, ids[2], edited(db, ids[2], "<p>edited after the opening</p>"));
@@ -1546,24 +1678,48 @@ describe("discarding a test while its first sitting is open", () => {
     assert.deepEqual(counts(db), before);
   });
 
-  test("a scheduled or closed first sitting is refused, and so is one where only a make-up is open", () => {
+  test("a first sitting not yet opened is refused, one that is over is not, and one where a make-up is open is refused", () => {
     const { db, test, sitting } = open();
     startAttempt(db, "anna", test.id);
     db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ? WHERE id = ?").run(inMinutes(60), inMinutes(120), sitting.id);
     const scheduled = counts(db);
-    assert.throws(() => discardTest(db, test.id, { attempts: 1 }), (error) => error instanceof ConflictError && error.key === "exam.errors.tests.discardNotOpen");
+    assert.throws(() => discardTest(db, test.id, { attempts: 1 }), (error) => error instanceof ConflictError && error.key === "exam.errors.tests.discardNotOpened");
     assert.deepEqual(counts(db), scheduled);
     db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ? WHERE id = ?").run(inMinutes(-60), inMinutes(-10), sitting.id);
     // Anna's attempt still runs, so the first sitting is open after its start window.
     assert.equal(testSittings(db, test.id)[0].state, "open");
     db.prepare("UPDATE attempt SET deadline = ? WHERE username = 'anna'").run(inMinutes(-5));
-    assert.throws(() => discardTest(db, test.id, { attempts: 1 }), (error) => error.key === "exam.errors.tests.discardNotOpen", "a closed one");
-    const makeup = createSitting(db, test.id, { opensAt: inMinutes(5), closesAt: inMinutes(60), participants: ["ben"] });
+    assert.deepEqual(getTest(db, test.id).discard, { allowed: true, results: 1 }, "a first sitting that is over can be discarded");
+    const makeup = createSitting(db, test.id, { opensAt: inMinutes(5), closesAt: inMinutes(60) });
     db.prepare("UPDATE sitting SET opens_at = ? WHERE id = ?").run(inMinutes(-1), makeup.id);
     startAttempt(db, "ben", test.id);
     const makeupOpen = counts(db);
     assert.throws(() => discardTest(db, test.id, { attempts: 2 }), (error) => error.key === "exam.errors.tests.discardMakeupOpen");
     assert.deepEqual(counts(db), makeupOpen);
+  });
+
+  test("a test that is over goes with its results, and a new first sitting is for the whole class", () => {
+    const { db, course, test, sitting } = open();
+    submitAttempt(db, attemptRow(db, startAttempt(db, "anna", test.id).attemptId));
+    submitAttempt(db, attemptRow(db, startAttempt(db, "ben", test.id).attemptId));
+    endSitting(db, sitting.id);
+    const makeup = createSitting(db, test.id, { opensAt: inMinutes(200), closesAt: inMinutes(260) });
+    assert.deepEqual(makeup.participants, ["carla"]);
+    assert.deepEqual(getTest(db, test.id).discard, { allowed: true, results: 2 });
+    const discarded = discardTest(db, test.id, { attempts: 2 });
+    assert.deepEqual([discarded.sittings, discarded.attempts.started, discarded.discardedSittingIds], [[], 0, [sitting.id, makeup.id]]);
+    assert.deepEqual(courseOverview(db, course.id, "ws").columns, [], "no column left");
+    const again = createSitting(db, test.id, { opensAt: inMinutes(60), closesAt: inMinutes(110), durationMinutes: 15 });
+    assert.deepEqual([again.makeup, again.participants], [false, ["anna", "ben", "carla"]]);
+  });
+
+  test("a closed school year is refused", () => {
+    const { db, year, test, sitting } = open();
+    startAttempt(db, "anna", test.id);
+    endSitting(db, sitting.id);
+    db.prepare("UPDATE school_year SET closed_at = ? WHERE id = ?").run(new Date().toISOString(), year.id);
+    assert.throws(() => discardTest(db, test.id, { attempts: 1 }), (error) => error.key === "exam.errors.years.closed");
+    assert.equal(count(db, "attempt"), 1);
   });
 
   test("the route is a teacher's, not only an admin's, and tells the former sitting's live view", async () => {
@@ -1620,11 +1776,20 @@ describe("discarding a test while its first sitting is open", () => {
     }
   });
 
-  test("an offline test is refused", () => {
+  test("an offline test goes with the results in its column, once a sitting was started and none runs", () => {
     const { db, course } = seeded();
     const offline = createOfflineTest(db, course.id, { name: "Paper", durationMinutes: 50, gradebookKind: "test" });
-    assert.throws(() => discardTest(db, offline.id, { attempts: 0 }), (error) => error.key === "exam.errors.tests.discardOffline");
-    assert.deepEqual(getTest(db, offline.id).id, offline.id);
+    const sitting = createSitting(db, offline.id, { opensAt: inMinutes(60) });
+    assert.throws(() => discardTest(db, offline.id, { attempts: 0 }), (error) => error.key === "exam.errors.tests.discardNotStarted");
+    db.prepare("UPDATE sitting SET started_at = ?, opens_at = ?, closes_at = ? WHERE id = ?").run(inMinutes(-10), inMinutes(-10), inMinutes(40), sitting.id);
+    assert.throws(() => discardTest(db, offline.id, { attempts: 0 }), (error) => error.key === "exam.errors.tests.discardRunning");
+    db.prepare("UPDATE sitting SET closes_at = ? WHERE id = ?").run(inMinutes(-1), sitting.id);
+    setResult(db, offline.assessmentId, "anna", { percent: 50 });
+    assert.deepEqual(getTest(db, offline.id).discard, { allowed: true, results: 1 });
+    assert.throws(() => discardTest(db, offline.id, { attempts: 0 }), /changed/);
+    const discarded = discardTest(db, offline.id, { attempts: 1 });
+    assert.deepEqual([discarded.sittings, discarded.assessmentId], [[], offline.assessmentId], "the column stays");
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM manual_entry WHERE assessment_id = ?").get(offline.assessmentId).n, 0, "without results");
   });
 });
 
@@ -1667,7 +1832,7 @@ describe("a test follows the pool until it begins", () => {
     const before = textsOf(db, test.id);
     saveQuestion(db, ids[2], edited(db, ids[2], "<p>too late</p>"));
     assert.deepEqual(textsOf(db, test.id), before);
-    const makeup = createSitting(db, test.id, { opensAt: inMinutes(5), closesAt: inMinutes(60), participants: ["ben"] });
+    const makeup = createSitting(db, test.id, { opensAt: inMinutes(5), closesAt: inMinutes(60) });
     db.prepare("UPDATE sitting SET opens_at = ? WHERE id = ?").run(inMinutes(-1), makeup.id);
     const ben = startAttempt(db, "ben", test.id).attemptId;
     assert.ok(!writingView(db, attemptRow(db, ben)).questions.some((q) => q.text === "<p>too late</p>"), "the make-up writes the snapshot");
@@ -1689,7 +1854,7 @@ describe("a test follows the pool until it begins", () => {
     const { db, test, sitting, ids } = running({ participants: ["anna"] });
     submitAttempt(db, attemptRow(db, startAttempt(db, "anna", test.id).attemptId));
     endSitting(db, sitting.id);
-    const makeup = createSitting(db, test.id, { opensAt: inMinutes(5), closesAt: inMinutes(60), participants: ["ben"] });
+    const makeup = createSitting(db, test.id, { opensAt: inMinutes(5), closesAt: inMinutes(60) });
     db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ? WHERE id = ?").run(inMinutes(-30), inMinutes(-1), makeup.id);
     const before = textsOf(db, test.id);
     saveQuestion(db, ids[2], edited(db, ids[2], "<p>not for the make-up</p>"));
@@ -1803,7 +1968,7 @@ describe("deleting a question from the pool", () => {
     make("Unplanned A");
     // A make-up far ahead does not move a test: its first sitting dates it.
     const middle = make("Middle", 24);
-    createSitting(db, middle.id, { opensAt: inMinutes(96 * 60), closesAt: inMinutes(96 * 60 + 50), durationMinutes: 15, participants: ["anna"] });
+    createSitting(db, middle.id, { opensAt: inMinutes(96 * 60), closesAt: inMinutes(96 * 60 + 50), durationMinutes: 15 });
     make("Unplanned B");
     db.prepare("UPDATE test SET created_at = ? WHERE name = ?").run("2026-01-01T00:00:00.000Z", "Unplanned A");
     db.prepare("UPDATE test SET created_at = ? WHERE name = ?").run("2026-01-02T00:00:00.000Z", "Unplanned B");
@@ -1823,7 +1988,7 @@ describe("deleting a question from the pool", () => {
     assert.equal(listTests(db, { courseId: course.id }).groups[0].tests[0].questions, 0);
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM image").get().n, 0, "the deleted question's image went with it");
     assert.throws(
-      () => createSitting(db, test.id, { opensAt: inMinutes(200), closesAt: inMinutes(260), participants: ["anna"] }),
+      () => createSitting(db, test.id, { opensAt: inMinutes(200), closesAt: inMinutes(260) }),
       (error) => error instanceof ConflictError && /no questions/.test(error.message)
     );
     db.prepare("UPDATE sitting SET opens_at = ? WHERE id = ?").run(inMinutes(-1), sitting.id);
@@ -1857,7 +2022,7 @@ describe("deleting a question from the pool", () => {
     const before = withoutPoolIds(getTest(db, test.id));
     db.prepare("UPDATE school_year SET closed_at = ? WHERE id = ?").run(new Date().toISOString(), year.id);
     deleteQuestion(db, ids[2], { tests: 0 });
-    assert.deepEqual(withoutPoolIds({ ...getTest(db, test.id), course: before.course }), before);
+    assert.deepEqual(withoutPoolIds({ ...getTest(db, test.id), course: before.course, discard: before.discard }), before);
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM question_usage WHERE question_id = ?").get(ids[2]).n, 0);
     assert.throws(() => db.prepare("UPDATE test_question SET text_en = 'x' WHERE test_id = ?").run(test.id), /school year closed/, "anything else is still refused");
     assert.throws(() => db.prepare("UPDATE test_question SET question_id = NULL WHERE question_id = ?").run(ids[0]), /school year closed/, "and so is letting go of a question that still exists");
@@ -2002,7 +2167,7 @@ describe("the review of an attempt", () => {
 
   test("a make-up attempt follows its own sitting, and the first sitting's are open while it is ahead", () => {
     const { db, test, sitting, anna } = reviewed();
-    const makeup = createSitting(db, test.id, { opensAt: inMinutes(120), closesAt: inMinutes(170), durationMinutes: 15, participants: ["ben"] });
+    const makeup = createSitting(db, test.id, { opensAt: inMinutes(120), closesAt: inMinutes(170), durationMinutes: 15 });
     const ben = startAttempt(db, "ben", test.id, inMinutes(125)).attemptId;
     submitAttempt(db, attemptRow(db, ben), inMinutes(126));
     const between = inMinutes(130);

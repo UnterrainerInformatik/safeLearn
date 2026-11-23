@@ -19,7 +19,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { after, afterEach, before, describe, test } from "node:test";
 
-import { createClass, createCourse, createYear, updateCourse } from "../exam/classes.js";
+import { addToRoster, createClass, createCourse, createYear, updateCourse } from "../exam/classes.js";
 import { migrate, openDatabase, readMigrations } from "../exam/db.js";
 import { courseColumns, deleteColumn, setNote, setResult, updateColumn } from "../exam/gradebook.js";
 import { importPool } from "../exam/pool-import.js";
@@ -448,7 +448,7 @@ describe("the attendance table", () => {
     const snapshot = liveSnapshot(db, sitting.id);
     assert.equal(snapshot.kind, "offline");
     assert.ok(snapshot.sitting.startedAt);
-    assert.deepEqual(Object.keys(snapshot.participants[0]).sort(), ["familyName", "givenName", "group", "present", "teacherNote", "username"], "names and the teacher's note only");
+    assert.deepEqual(Object.keys(snapshot.participants[0]).sort(), ["familyName", "givenName", "group", "present", "retake", "teacherNote", "username"], "names, the retake mark and the teacher's note only");
     // The teacher's note is independent of presence and group (`offline-test`).
     setTeacherNote(db, snapshot.test.id, "ben", "Phone on the desk, taken away at 10:12");
     setAttendance(db, sitting.id, "ben", { present: false });
@@ -478,24 +478,53 @@ describe("the attendance table", () => {
 });
 
 describe("a make-up of an offline test", () => {
-  test("is for the participants chosen, with the same duration and handouts, and its own start", () => {
-    const { db, course } = seeded();
+  test("is for everybody not present in a started sitting, with the same duration and handouts, and its own start", () => {
+    const { db, klass, course } = seeded();
     const { test: offline, sitting } = running(db, course);
     for (const username of ["ben", "cara"]) setAttendance(db, sitting.id, username, { present: false });
     // Started a minute back, so the end below cannot fall into the millisecond
     // the window opened in (`endSitting` refuses that, by design).
     startSitting(db, sitting.id, inMinutes(-1));
     endSitting(db, sitting.id);
-    assert.deepEqual(getSitting(db, sitting.id).absent, ["ben", "cara"]);
-    assert.equal(keyOf(() => createSitting(db, offline.id, { opensAt: inMinutes(60) })), "exam.errors.tests.makeupParticipants");
-    const makeup = createSitting(db, offline.id, { opensAt: inMinutes(60), participants: ["ben"] });
+    assert.equal(keyOf(() => createSitting(db, offline.id, { opensAt: inMinutes(60), participants: ["ben"] })), "exam.errors.tests.makeupNoChoice");
+    const makeup = createSitting(db, offline.id, { opensAt: inMinutes(60) });
     assert.equal(makeup.makeup, true);
-    assert.deepEqual(makeup.participants, ["ben"]);
+    assert.deepEqual([makeup.participants, makeup.retakes], [["ben", "cara"], []], "both absent ones, nobody chosen");
+    assert.deepEqual(getTest(db, offline.id).written, ["anna"], "the form names who was present");
     assert.equal(makeup.durationS, 6000);
     assert.equal(makeup.state, "scheduled");
+    // Marked present after the make-up was planned: no longer a participant.
+    setAttendance(db, sitting.id, "cara", { present: true });
+    assert.deepEqual(getSitting(db, makeup.id).participants, ["ben"]);
+    assert.deepEqual(getTest(db, offline.id).written, ["anna", "cara"]);
+    setAttendance(db, sitting.id, "cara", { present: false });
+    setAttendance(db, makeup.id, "cara", { present: false });
     startSitting(db, makeup.id);
+    // Fixed at the start: a student added now is not in it.
+    addToRoster(db, klass.id, { username: "dora" });
+    assert.deepEqual(getSitting(db, makeup.id).participants, ["ben", "cara"]);
     assert.equal(openTestsOf(db, "ben")[0].sittingId, makeup.id);
     assert.deepEqual(openTestsOf(db, "cara"), [], "the third has no sitting left");
+  });
+
+  test("a retake on paper is marked, present in group B, and counts with group B", () => {
+    const { db, course } = seeded();
+    const { test: offline, sitting } = running(db, course);
+    setAttendance(db, sitting.id, "ben", { present: false });
+    startSitting(db, sitting.id, inMinutes(-1));
+    endSitting(db, sitting.id);
+    assert.equal(keyOf(() => createSitting(db, offline.id, { opensAt: inMinutes(60), retakes: ["ben"] })), "exam.errors.tests.retakeNotWritten");
+    const makeup = createSitting(db, offline.id, { opensAt: inMinutes(60), retakes: ["anna"] });
+    assert.deepEqual([makeup.participants, makeup.retakes], [["anna", "ben"], ["anna"]]);
+    setAttendance(db, makeup.id, "anna", { group: "B" });
+    const back = updateSitting(db, makeup.id, { retakes: [] });
+    assert.deepEqual(back.participants, ["ben"], "a retake taken back");
+    const again = updateSitting(db, makeup.id, { retakes: ["anna"] });
+    assert.deepEqual(again.retakes, ["anna"]);
+    setAttendance(db, makeup.id, "anna", { group: "B" });
+    startSitting(db, makeup.id);
+    assert.equal(liveSnapshot(db, makeup.id).participants.find((p) => p.username === "anna").retake, true, "the attendance table marks the retake");
+    assert.equal(countingGroups(db, course.id).get(`${offline.id}/anna`), "B");
   });
 });
 
@@ -509,8 +538,9 @@ describe("the group that counts for the factor A:B", () => {
     assert.deepEqual([...countingGroups(db, course.id)], [], "a planned sitting has nobody present yet");
     startSitting(db, sitting.id, inMinutes(-1));
     endSitting(db, sitting.id);
-    const makeup = createSitting(db, offline.id, { opensAt: inMinutes(60), participants: ["ben"] });
+    const makeup = createSitting(db, offline.id, { opensAt: inMinutes(60) });
     setAttendance(db, makeup.id, "ben", { group: "B" });
+    setAttendance(db, makeup.id, "cara", { present: false });
     startSitting(db, makeup.id);
     const groups = countingGroups(db, course.id);
     assert.equal(groups.get(`${offline.id}/anna`), "B");
@@ -715,7 +745,7 @@ describe("a handout's variables", () => {
     setTestVariables(db, test.id, { SUBMISSION_LINK: "a", FRANKLYN_PIN: "b", SUBMISSION_LINK_B: "c" });
     startSitting(db, first.id, "2026-11-14T08:00:00.000Z");
     assert.equal(variablesFor(db, test.id, first.id).DATE, "14.11.2026", "the started day");
-    const makeup = createSitting(db, test.id, { opensAt: "2027-01-27T08:00:00.000Z", participants: ["anna"] });
+    const makeup = createSitting(db, test.id, { opensAt: "2027-01-27T08:00:00.000Z" });
     assert.equal(variablesFor(db, test.id, makeup.id).DATE, "27.01.2027");
     startSitting(db, makeup.id, "2026-11-21T08:00:00.000Z");
     assert.equal(variablesFor(db, test.id, makeup.id).DATE, "21.11.2026", "the make-up's own day");
@@ -978,7 +1008,7 @@ describe("a handout's variables", () => {
 
       setTestVariables(db, test.id, { SUBMISSION_LINK_B: "b" });
       startSitting(db, first.id, "2026-11-14T08:00:00.000Z");
-      const makeup = createSitting(db, test.id, { opensAt: "2027-01-27T08:00:00.000Z", participants: ["anna"] });
+      const makeup = createSitting(db, test.id, { opensAt: "2027-01-27T08:00:00.000Z" });
       assert.equal((await ask(print)).status, 200);
       assert.equal(renders.pop().vars.DATE, "14.11.2026", "the test's page: the first started sitting");
       assert.equal((await ask(`/sittings/${makeup.id}/handouts/A/print`)).status, 200);

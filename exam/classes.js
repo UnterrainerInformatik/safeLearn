@@ -11,6 +11,7 @@
 import { i18nFor } from "../i18n/server.js";
 import { viennaLocal } from "./client/periods.js";
 import { classCandidates, isKnownTeacher } from "./roster-source.js";
+import { refreshClassMakeups } from "./makeups.js";
 
 const { t: englishT, format: englishFormat } = i18nFor("en", "de-AT");
 
@@ -499,6 +500,8 @@ export function addToRoster(db, classId, person) {
         now()
       );
     }
+    // A student who joins has not written, so the make-ups ahead take them in (makeup-for-everyone-not-written D1).
+    refreshClassMakeups(db, classId);
     return rosterOf(db, classId);
   });
 }
@@ -511,11 +514,15 @@ export function addToRoster(db, classId, person) {
 export function removeFromRoster(db, classId, username) {
   getClass(db, classId);
   const key = typeof username === "string" ? username.trim().toLowerCase() : "";
-  const { changes } = db
-    .prepare("UPDATE roster_entry SET left_at = ? WHERE class_id = ? AND username = ? AND left_at IS NULL")
-    .run(now(), classId, key);
-  if (changes === 0) throw new NotFoundError("exam.errors.classes.notOnRoster", { username: key });
-  return rosterOf(db, classId);
+  return inTransaction(db, () => {
+    const { changes } = db
+      .prepare("UPDATE roster_entry SET left_at = ? WHERE class_id = ? AND username = ? AND left_at IS NULL")
+      .run(now(), classId, key);
+    if (changes === 0) throw new NotFoundError("exam.errors.classes.notOnRoster", { username: key });
+    // Who leaves is no participant of a make-up ahead, retake or not.
+    refreshClassMakeups(db, classId);
+    return rosterOf(db, classId);
+  });
 }
 
 /**

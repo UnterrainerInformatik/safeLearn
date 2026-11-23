@@ -80,12 +80,13 @@ export function listen(sittingId, listener) {
  * attempt is bound to and which was refused last (exam-live-bound-browser
  * D4) - `boundBrowser` null while the attempt is unbound or there is none,
  * its `full` null for a binding from before browser strings were kept; and
- * the teacher's note on them in this test, null for none. Never an answer.
+ * the teacher's note on them in this test, null for none; and `retake`, whether
+ * they write a make-up again. Never an answer.
  */
 function participantFrom(row, attempt, { count: refused, userAgent: refusedAgent }, at, offline = false, teacherNote = null) {
   // An offline sitting's participant is a row of the attendance table (exam-offline-sittings design D8).
   if (offline) {
-    return { username: row.username, givenName: row.given_name, familyName: row.family_name, present: row.present === 1, group: row.handout_group, teacherNote };
+    return { username: row.username, givenName: row.given_name, familyName: row.family_name, present: row.present === 1, group: row.handout_group, retake: row.retake === 1, teacherNote };
   }
   const status = attempt === undefined ? "not started" : attempt.submitted_at !== null ? "submitted" : "writing";
   const awayNow = attempt?.away_since && attempt.submitted_at === null ? Math.max(0, Date.parse(at) - Date.parse(attempt.away_since)) : 0;
@@ -93,6 +94,8 @@ function participantFrom(row, attempt, { count: refused, userAgent: refusedAgent
     username: row.username,
     givenName: row.given_name,
     familyName: row.family_name,
+    // Marked to write the test again in this make-up (makeup-for-everyone-not-written D5).
+    retake: row.retake === 1,
     status,
     attemptId: attempt?.id ?? null,
     startedAt: attempt?.started_at ?? null,
@@ -133,7 +136,8 @@ function sittingRow(db, sittingId) {
 }
 
 function participantRows(db, sittingId, username = null) {
-  const select = `SELECT p.username, p.present, p.handout_group, s.given_name, s.family_name FROM sitting_participant p JOIN student s ON s.username = p.username
+  // `p.*`, so a database before the retake column (022) still reads.
+  const select = `SELECT p.*, s.given_name, s.family_name FROM sitting_participant p JOIN student s ON s.username = p.username
     WHERE p.sitting_id = ?`;
   return username === null
     ? db.prepare(`${select} ORDER BY s.family_name COLLATE NOCASE, s.given_name COLLATE NOCASE, p.username`).all(sittingId)

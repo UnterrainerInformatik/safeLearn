@@ -6,8 +6,8 @@
  * 403, and the pages are not there for it (`gate.js`). Taking back what
  * students have written - deleting a written test, removing a question from
  * one, deleting an attempt, rescheduling a sitting that has some - is an
- * admin's alone; only discarding a test while its first sitting is open is a
- * teacher's too.
+ * admin's alone; only discarding a whole test, so it can be written again
+ * from the start, is a teacher's too.
  */
 
 import {
@@ -152,12 +152,13 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
     for (const username of deleted) notify(sitting.id, "deleted", username);
     return announcedLive(sitting);
   });
-  // Discarding a test while its first sitting is open (discard-started-online-test
-  // D1, D4) is a teacher's: every attempt and sitting goes, the students' pages
-  // and the former sitting's live view are told.
+  // Discarding a test (discard-started-online-test D1, D4; makeup-for-everyone-not-written
+  // D4), online or offline, open or over, is a teacher's: every attempt, entered
+  // result and sitting goes, the students' pages and the former sittings' live
+  // views are told. `attempts` confirms the number of results that go.
   api("post", "/tests/:id/discard", (req) => {
-    const { discardedSittingId, ...test } = discardTest(db, idParam(req.params.id), req.body ?? {});
-    notify(discardedSittingId, "discarded", null, { testId: test.id });
+    const { discardedSittingId, discardedSittingIds, ...test } = discardTest(db, idParam(req.params.id), req.body ?? {});
+    for (const sittingId of discardedSittingIds) notify(sittingId, "discarded", null, { testId: test.id });
     return announced(test);
   });
   api("post", "/attempts/:id/release", (req) => releaseAttempt(db, idParam(req.params.id)));

@@ -16,15 +16,6 @@ Dazu am 2026-09-13 beobachtet: **manuell ausgelöste Syncs setzen `lastSync` nic
 
 # Exam
 
-## Nachtest: keine Auswahl, sondern alle, die noch nicht geschrieben haben
-Beim Anlegen eines Nachtermins (make-up) wählt man heute die Teilnehmer per Checkbox aus dem Roster aus (`online-test` „A sitting sets the window and the duration“, `offline-test` „A make-up sitting is offered, never required“, Formular in `exam/client/tests.js`). Dort stehen auch Schüler, die den Test schon geschrieben haben.
-
-Gerald will das so:
-- **Keine Auswahl.** Ein Nachtermin gilt automatisch für **alle, die den Test noch nicht geschrieben haben** — sie dürfen im Fenster des Nachtermins schreiben. Wer schon geschrieben hat, kommt nicht vor (zumindest ausgeblendet, eigentlich gar keine Liste).
-- **Wiederholung eines komplett negativen Tests ist kein Nachtermin.** Dann müssen alle nochmal schreiben, und der alte Test muss samt seinen Ergebnissen (den vielen 5ern) weg. Heute geht das nicht: „Discard“ (`exam-record-maintenance`, „An open test can be discarded“) gibt es nur, solange die erste Sitzung eines Online-Tests offen ist — nicht danach, und nie für Offline-Tests.
-
-Zu klären: Wer zählt als „noch nicht geschrieben“ — kein Versuch / bei Offline nicht anwesend? Was ist mit Schülern, die nach dem ersten Termin in den Kurs gekommen sind? Bleibt „never required“ (nicht jeder Fehlende muss einen Nachtermin bekommen) — reicht dann, dass er einfach nicht erscheint? Für die Wiederholung: den alten Test nach Ende löschen (mit Bestätigung samt Zahl der gelöschten Ergebnisse wie beim Discard) und neu ansetzen, oder ein eigener Schritt „Test wiederholen“, der die Ergebnisse verwirft und den Test mit denselben Fragen neu öffnet? Wie verhält sich das in einem abgeschlossenen Schuljahr?
-
 ## Freitext-Fragen im Pool, Quickies daraus zusammensetzen
 Gerald will im Fragen-Pool ein **Flag für Freitext-Fragen**, damit der Pool auch Fragen mit freier Antwort verwalten kann. Online-Tests können solche Fragen nicht auswerten und dürfen sie nicht enthalten. Für **Quickies (Kurztests)** wären sie aber genau richtig: Ein Quickie soll sich dann aus Pool-Fragen zusammensetzen lassen wie heute ein Online-Test. Das ist besser für die Wiederverwendbarkeit als ein eigenes Handout pro Quickie.
 

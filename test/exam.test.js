@@ -4149,7 +4149,7 @@ describe("online tests: the live view", () => {
 
     const makeup = await fetchAs(teacher, `/exam/api/tests/${written.id}/sittings`, {
       method: "POST",
-      body: { opensAt: new Date(Date.now() - 60000).toISOString(), closesAt: new Date(Date.now() + 50 * 60000).toISOString(), participants: [absentee] },
+      body: { opensAt: new Date(Date.now() - 60000).toISOString(), closesAt: new Date(Date.now() + 50 * 60000).toISOString() },
     });
     assert.equal(makeup.status, 200, JSON.stringify(makeup.json));
     await openPage(teacher.page, `/exam/sittings/${makeup.json.id}/live`, "#markdown-content");
@@ -4979,7 +4979,7 @@ describe("printing an offline test's handout", () => {
     const [first] = sittings;
     const started = await fetchAs(teacher, `/exam/api/sittings/${first.id}/start`, { method: "POST" });
     assert.equal(started.status, 200, JSON.stringify(started.json));
-    const makeup = await fetchAs(teacher, `/exam/api/tests/${offline.id}/sittings`, { method: "POST", body: { opensAt: inDays(4), participants: [student.username.toLowerCase()] } });
+    const makeup = await fetchAs(teacher, `/exam/api/tests/${offline.id}/sittings`, { method: "POST", body: { opensAt: inDays(4) } });
     assert.equal(makeup.status, 200, JSON.stringify(makeup.json));
     sittings.push(makeup.json);
 
@@ -7239,13 +7239,13 @@ describe("the module's actions", () => {
       // The test page offers the same button while the first sitting is open.
       await openPage(teacher.page, `/exam/tests/${test.id}`, ".sl-exam-test-discard");
       await click(teacher.page, ".sl-exam-test-discard");
-      assert.equal(await teacher.page.$eval(".sl-exam-test-discard", (b) => b.textContent), "Click again: delete 1 attempt and discard the test");
+      assert.equal(await teacher.page.$eval(".sl-exam-test-discard", (b) => b.textContent), "Click again: delete 1 result and discard the test");
       const row = `sl-exam-live tr[data-username="${student.username.toLowerCase()}"]`;
       await openLive(sitting);
       await teacher.page.waitForSelector(`${row}[data-status="writing"]`, { timeout: 20000 });
       await teacher.page.waitForSelector(".sl-exam-live-discard", { visible: true, timeout: 10000 });
       await click(teacher.page, ".sl-exam-live-discard");
-      assert.equal(await teacher.page.$eval(".sl-exam-live-discard", (b) => b.textContent), "Click again: delete 1 attempt and discard the test");
+      assert.equal(await teacher.page.$eval(".sl-exam-live-discard", (b) => b.textContent), "Click again: delete 1 result and discard the test");
       await click(teacher.page, ".sl-exam-live-discard");
       discarded = true;
       await teacher.page.waitForSelector(".sl-exam-live-discarded", { timeout: 15000 });
@@ -7270,6 +7270,81 @@ describe("the module's actions", () => {
         const attempt = database((db) => db.prepare("SELECT id FROM attempt WHERE test_id = ?").get(test.id)?.id);
         if (attempt) await fetchAs(student, `/exam/api/attempts/${attempt}/submit`, { method: "POST" });
       } else await fetchAs(teacher, `/exam/api/tests/${test.id}`, { method: "DELETE" });
+    }
+  });
+
+  test("a make-up is for whoever has not written, a ticked retake writes again, and a test that is over is discarded from its page", async () => {
+    const username = student.username.toLowerCase();
+    const { test, sitting } = await openSitting("Make-up for the rest");
+    const offline = (await fetchAs(teacher, `/exam/api/courses/${course.id}/offline-tests`, { method: "POST", body: { name: "Make-up on paper", durationMinutes: 50, gradebookKind: "test" } })).json;
+    try {
+      const first = await fetchAs(student, `/exam/api/tests/${test.id}/attempt`, { method: "POST" });
+      assert.equal(first.status, 200, JSON.stringify(first.json));
+      assert.equal((await fetchAs(student, `/exam/api/attempts/${first.json.attempt}/submit`, { method: "POST" })).status, 200);
+      assert.equal((await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/end`, { method: "POST" })).status, 200);
+
+      // The form names only who has written, each with a retake box; nobody else is chosen.
+      const page = teacher.page;
+      await openPage(page, `/exam/tests/${test.id}`, ".sl-exam-sitting-makeup");
+      await click(page, ".sl-exam-sitting-makeup");
+      await page.waitForSelector(".sl-exam-makeup-explanation", { timeout: 10000 });
+      assert.deepEqual(await page.$$eval(".sl-exam-sitting-form input[name=retake]", (boxes) => boxes.map((box) => box.value)), [username], "only the one who wrote");
+      assert.equal(await page.$(".sl-exam-sitting-form input[name=participant]"), null, "no choice of participants");
+      assert.equal(await page.$(".sl-exam-sitting-form input[name=whole]"), null);
+      await click(page, ".sl-exam-sitting-form input[name=retake]");
+      await click(page, ".sl-exam-sitting-form button[type=submit]");
+      await page.waitForSelector(".sl-exam-test-sittings li:nth-child(2) .sl-exam-sitting-retake-list", { timeout: 15000 });
+      const makeup = (await fetchAs(teacher, `/exam/api/tests/${test.id}`)).json.sittings.find((s) => s.makeup);
+      assert.deepEqual([makeup.participants, makeup.retakes], [[gbOther, username].sort(), [username]], "the one who did not write, and the retake");
+
+      // Opened now: the retake starts anew, and the first result is gone.
+      database((db) => db.prepare("UPDATE sitting SET opens_at = ? WHERE id = ?").run(new Date(Date.now() - 1000).toISOString(), makeup.id));
+      const again = await fetchAs(student, `/exam/api/tests/${test.id}/attempt`, { method: "POST" });
+      assert.equal(again.status, 200, JSON.stringify(again.json));
+      const rows = database((db) => db.prepare("SELECT sitting_id, submitted_at FROM attempt WHERE test_id = ? AND username = ?").all(test.id, username).map((row) => ({ ...row })));
+      assert.deepEqual(rows, [{ sitting_id: makeup.id, submitted_at: null }], "only the new attempt, running");
+      await openLive(makeup);
+      await page.waitForSelector(`sl-exam-live tr[data-username="${username}"] .sl-exam-retake-mark`, { timeout: 20000 });
+      assert.equal((await fetchAs(student, `/exam/api/attempts/${again.json.attempt}/submit`, { method: "POST" })).status, 200);
+      assert.equal((await fetchAs(teacher, `/exam/api/sittings/${makeup.id}/end`, { method: "POST" })).status, 200);
+
+      // An online test that is over is discarded from its page, the count in the armed label.
+      await openPage(page, `/exam/tests/${test.id}`, ".sl-exam-test-discard");
+      await click(page, ".sl-exam-test-discard");
+      assert.equal(await page.$eval(".sl-exam-test-discard", (b) => b.textContent), "Click again: delete 1 result and discard the test");
+      await click(page, ".sl-exam-test-discard");
+      await page.waitForFunction(() => !document.querySelector(".sl-exam-test-sittings li"), { timeout: 15000 });
+      assert.equal(database((db) => db.prepare("SELECT COUNT(*) AS n FROM attempt WHERE test_id = ?").get(test.id).n), 0);
+
+      // Offline: the absent student is in the make-up's attendance table, and the test is discarded with its entry.
+      const planned = await fetchAs(teacher, `/exam/api/tests/${offline.id}/sittings`, { method: "POST", body: { opensAt: new Date(Date.now() + 3600000).toISOString() } });
+      assert.equal(planned.status, 200, JSON.stringify(planned.json));
+      assert.equal((await fetchAs(teacher, `/exam/api/sittings/${planned.json.id}/participants/${gbOther}`, { method: "PUT", body: { present: false } })).status, 200);
+      assert.equal((await fetchAs(teacher, `/exam/api/sittings/${planned.json.id}/start`, { method: "POST" })).status, 200);
+      // Over: started two minutes back and closed a second ago.
+      database((db) =>
+        db.prepare("UPDATE sitting SET started_at = ?, opens_at = ?, closes_at = ? WHERE id = ?").run(new Date(Date.now() - 120000).toISOString(), new Date(Date.now() - 120000).toISOString(), new Date(Date.now() - 1000).toISOString(), planned.json.id)
+      );
+      const paperMakeup = await fetchAs(teacher, `/exam/api/tests/${offline.id}/sittings`, { method: "POST", body: { opensAt: new Date(Date.now() + 2 * 3600000).toISOString() } });
+      assert.equal(paperMakeup.status, 200, JSON.stringify(paperMakeup.json));
+      await openPage(page, `/exam/sittings/${paperMakeup.json.id}/live`, `tr[data-username="${gbOther}"]`);
+      assert.deepEqual(await page.$$eval("sl-exam-live tbody tr", (all) => all.map((row) => row.dataset.username)), [gbOther], "the absent student, nobody else");
+      assert.equal((await fetchAs(teacher, `/exam/api/sittings/${paperMakeup.json.id}`, { method: "DELETE" })).status, 200);
+      assert.equal((await fetchAs(teacher, `/exam/api/assessments/${offline.assessmentId}/results/${username}`, { method: "PUT", body: { percent: 40 } })).status, 200);
+      await openPage(page, `/exam/tests/${offline.id}`, ".sl-exam-test-discard");
+      await click(page, ".sl-exam-test-discard");
+      assert.equal(await page.$eval(".sl-exam-test-discard", (b) => b.textContent), "Click again: delete 1 result and discard the test");
+      await click(page, ".sl-exam-test-discard");
+      await page.waitForFunction(() => !document.querySelector(".sl-exam-test-sittings li"), { timeout: 15000 });
+      assert.equal(database((db) => db.prepare("SELECT COUNT(*) AS n FROM manual_entry WHERE assessment_id = ?").get(offline.assessmentId).n), 0, "the column has no result left");
+    } finally {
+      for (const id of [test.id, offline.id]) {
+        for (const attempt of database((db) => db.prepare("SELECT id FROM attempt WHERE test_id = ? AND submitted_at IS NULL").all(id).map((row) => row.id))) {
+          await fetchAs(student, `/exam/api/attempts/${attempt}/submit`, { method: "POST" });
+        }
+      }
+      if (offline.assessmentId) await fetchAs(teacher, `/exam/api/assessments/${offline.assessmentId}/results/${username}`, { method: "DELETE" });
+      await fetchAs(teacher, `/exam/api/tests/${offline.id}`, { method: "DELETE" });
     }
   });
 

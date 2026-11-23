@@ -381,6 +381,64 @@ class TestDetail extends ExamElement {
     });
   }
 
+  /** A sitting's participants for its summary, the retakes among them marked (makeup-for-everyone-not-written D5). */
+  sittingParticipants(sitting) {
+    const names = sitting.makeup || sitting.participants.length < this.roster.length ? this.participantNames(sitting.participants) : t("exam.tests.wholeClassLower");
+    const retakes = sitting.retakes ?? [];
+    return retakes.length === 0 ? names : [names, h("span", { class: "sl-exam-quiet sl-exam-sitting-retake-list" }, ` · ${t("exam.tests.retakeMarker")}: `, this.participantNames(retakes))];
+  }
+
+  /**
+   * What a make-up's form shows instead of a choice of participants
+   * (makeup-for-everyone-not-written design D5): the students who have
+   * written, each with a box that marks them to write the test again, ticked
+   * for the current retakes of `sitting`. Answers the element - null when
+   * nobody has written - and a reader of the ticked usernames.
+   */
+  retakeChoice(test, sitting) {
+    const ticked = new Set(sitting?.retakes ?? []);
+    const written = test.written ?? [];
+    const element =
+      written.length === 0
+        ? null
+        : h(
+            "div",
+            { class: "sl-exam-sitting-retakes" },
+            h("p", {}, t("exam.tests.writtenHeading")),
+            h(
+              "ul",
+              { class: "sl-exam-sitting-people" },
+              written.map((username) =>
+                h("li", {}, h("label", {}, h("input", { type: "checkbox", name: "retake", value: username, checked: ticked.has(username) }), " ", this.participantNames([username])))
+              )
+            )
+          );
+    return { element, retakes: () => (element ? [...element.querySelectorAll("input[name=retake]:checked")].map((input) => input.value) : []) };
+  }
+
+  /**
+   * The test page's "Discard test" (makeup-for-everyone-not-written design
+   * D4): whenever the server would discard the test now - an online test
+   * once it has opened and no make-up is open, an offline one once started
+   * and not running -, its second click naming the results that go.
+   */
+  discardSection(test) {
+    if (!test.discard?.allowed) return null;
+    this.discardLine = h("span", { class: "sl-exam-message", role: "status" });
+    return h(
+      "p",
+      { class: "sl-exam-test-discard-row" },
+      confirmButton({
+        class: "sl-exam-test-discard",
+        label: t("exam.live.discard"),
+        armed: () => t("exam.live.discardArmed", { count: test.discard.results }),
+        action: () => this.discardTest(test),
+      }),
+      " ",
+      this.discardLine
+    );
+  }
+
   render(test) {
     this.test = test;
     this.message = h("p", { class: "sl-exam-message", role: "status" });
@@ -468,8 +526,8 @@ class TestDetail extends ExamElement {
   /**
    * The test's sittings with their windows, durations, participants and
    * states, and the form that schedules one - the first for the whole class or
-   * chosen students, every later one a make-up for chosen students with the
-   * first one's duration. A sitting that has not opened can be changed or
+   * chosen students, every later one a make-up for everybody who has not
+   * written, with the first one's duration. A sitting that has not opened can be changed or
    * deleted; one that is over can be rescheduled - with attempts by an admin
    * only, since they are deleted.
    */
@@ -487,9 +545,7 @@ class TestDetail extends ExamElement {
                 h("strong", {}, `${sitting.makeup ? t("exam.tests.makeupLabel") : t("exam.tests.sittingLabel")} `),
                 displayStartWindow(sitting, this.periods),
                 `, ${t("exam.tests.minutesPerAttempt", { minutes: Math.round(sitting.durationS / 60) })} · ${stateLabels[sitting.state]()} · `,
-                sitting.makeup || sitting.participants.length < this.roster.length
-                  ? this.participantNames(sitting.participants)
-                  : t("exam.tests.wholeClassLower"),
+                this.sittingParticipants(sitting),
                 sittingLinks(sitting),
                 sitting.state === "scheduled"
                   ? [
@@ -518,18 +574,6 @@ class TestDetail extends ExamElement {
                       ),
                     ]
                   : null,
-                // While the first sitting is open, the whole test can be discarded (discard-started-online-test D2, D6).
-                !sitting.makeup && sitting.state === "open"
-                  ? [
-                      " ",
-                      confirmButton({
-                        class: "sl-exam-test-discard",
-                        label: t("exam.live.discard"),
-                        armed: () => t("exam.live.discardArmed", { count: test.attempts.started }),
-                        action: () => this.discardTest(test, sitting),
-                      }),
-                    ]
-                  : null,
                 this.sittingLine(sitting)
               )
             )
@@ -541,8 +585,31 @@ class TestDetail extends ExamElement {
       { class: "sl-exam-test-sittings-section" },
       h("h2", {}, t("exam.tests.sittingsHeading")),
       list,
+      this.discardSection(test),
       this.sittingForm
     );
+  }
+
+  /**
+   * The choice of a first sitting's participants: the whole class, or the
+   * students ticked. A make-up has none (makeup-for-everyone-not-written D5).
+   */
+  participantChoice(sitting, makeup) {
+    const chosen = new Set(sitting ? sitting.participants : []);
+    const whole = h("input", { type: "checkbox", name: "whole", checked: !makeup && (sitting === null || sitting.participants.length === this.roster.length) });
+    const people = h(
+      "ul",
+      { class: "sl-exam-sitting-people" },
+      this.roster.map((entry) =>
+        h("li", {}, h("label", {}, h("input", { type: "checkbox", name: "participant", value: entry.username, checked: chosen.has(entry.username) }), " ", this.participantNames([entry.username])))
+      )
+    );
+    const showPeople = () => {
+      people.hidden = whole.checked;
+    };
+    whole.addEventListener("change", showPeople);
+    showPeople();
+    return { whole, people };
   }
 
   /**
@@ -594,30 +661,8 @@ class TestDetail extends ExamElement {
     });
     const windowEditor = this.windowEditor(windowState, () => Number(duration.value));
     duration.addEventListener("input", () => windowEditor.refresh());
-    const chosen = new Set(sitting ? sitting.participants : []);
-    const whole = h("input", { type: "checkbox", name: "whole", checked: !makeup && (sitting === null || sitting.participants.length === this.roster.length) });
-    const people = h(
-      "ul",
-      { class: "sl-exam-sitting-people" },
-      this.roster.map((entry) =>
-        h(
-          "li",
-          {},
-          h(
-            "label",
-            {},
-            h("input", { type: "checkbox", name: "participant", value: entry.username, checked: chosen.has(entry.username) }),
-            " ",
-            this.participantNames([entry.username])
-          )
-        )
-      )
-    );
-    const showPeople = () => {
-      people.hidden = whole.checked;
-    };
-    whole.addEventListener("change", showPeople);
-    showPeople();
+    const { whole, people } = this.participantChoice(sitting, makeup);
+    const retakes = makeup ? this.retakeChoice(test, sitting) : null;
     const message = h("p", { class: "sl-exam-message", role: "status" });
     const form = h(
       "form",
@@ -627,7 +672,8 @@ class TestDetail extends ExamElement {
           const body = {
             ...windowEditor.current(),
             durationMinutes: Number(duration.value),
-            participants: whole.checked ? null : [...people.querySelectorAll("input:checked")].map((input) => input.value),
+            // A make-up's participants are never chosen, only its retakes (makeup-for-everyone-not-written D2).
+            ...(makeup ? { retakes: retakes.retakes() } : { participants: whole.checked ? null : [...people.querySelectorAll("input:checked")].map((input) => input.value) }),
           };
           try {
             await examApi(sitting ? `/sittings/${sitting.id}` : `/tests/${test.id}/sittings`, { method: sitting ? "PUT" : "POST", body });
@@ -641,14 +687,7 @@ class TestDetail extends ExamElement {
       h("h3", {}, sitting ? t("exam.tests.changeSitting") : makeup ? t("exam.tests.scheduleMakeup") : t("exam.tests.scheduleSitting")),
       windowEditor.element,
       h("label", {}, `${t("exam.tests.minutesPerAttemptLabel")} `, duration),
-      makeup
-        ? h(
-            "p",
-            { class: "sl-exam-quiet" },
-            t("exam.tests.makeupExplanation")
-          )
-        : h("label", {}, whole, ` ${t("exam.tests.wholeClass")}`),
-      people,
+      makeup ? [h("p", { class: "sl-exam-quiet sl-exam-makeup-explanation" }, t("exam.tests.makeupExplanation")), retakes.element] : [h("label", {}, whole, ` ${t("exam.tests.wholeClass")}`), people],
       h("p", {}, h("button", { type: "submit", class: "sl-exam-primary", disabled: !sitting && empty, title: !sitting && empty ? t("exam.tests.noQuestions") : null }, sitting ? t("exam.tests.save") : t("exam.tests.schedule")), sitting || makeup ? [" ", h("button", { type: "button", class: "sl-exam-action", onClick: () => this.drawSittingForm(test, null) }, t("exam.tests.cancel"))] : null),
       message
     );
@@ -905,20 +944,20 @@ class TestDetail extends ExamElement {
   }
 
   /**
-   * Discards the test with every attempt the page counted; the page then
+   * Discards the test with every result the page counted; the page then
    * shows it without a sitting, editable again. A count that changed is
-   * refused at the sitting, and the button's next armed label names the
+   * refused beside the button, and the button's next armed label names the
    * current one.
    */
-  async discardTest(test, sitting) {
+  async discardTest(test) {
     try {
-      await examApi(`/tests/${test.id}/discard`, { method: "POST", body: { attempts: test.attempts.started } });
+      await examApi(`/tests/${test.id}/discard`, { method: "POST", body: { attempts: test.discard.results } });
       this.reload();
     } catch (error) {
-      this.sittingLine(sitting).textContent = refusal(error);
+      this.discardLine.textContent = refusal(error);
       if (error instanceof ExamApiError && error.status === 409) {
         try {
-          test.attempts = (await examApi(`/tests/${test.id}`)).attempts;
+          test.discard = (await examApi(`/tests/${test.id}`)).discard;
         } catch {
           // The refusal stays told; the next load counts again.
         }
@@ -1209,8 +1248,8 @@ Object.assign(TestDetail.prototype, {
    * The sittings of an offline test: planned, started or over, with their
    * participants and who was absent, the attendance page and the class's
    * view; a sitting not yet started can be changed or deleted. The form
-   * plans the first sitting for the class or a make-up for chosen students,
-   * those absent before ticked.
+   * plans the first sitting for the class or a make-up for everybody not
+   * present before, the retakes ticked among those who were.
    */
   offlineSittingsSection(test) {
     const list =
@@ -1226,7 +1265,7 @@ Object.assign(TestDetail.prototype, {
                 h("strong", {}, `${sitting.makeup ? t("exam.tests.makeupLabel") : t("exam.tests.sittingLabel")} `),
                 sitting.startedAt ? displayWindow(sitting, this.periods) : t("exam.offline.plannedFor", { time: displayTime(sitting.opensAt) }),
                 ` · ${offlineState("offline", sitting)} · `,
-                sitting.makeup || sitting.participants.length < this.roster.length ? this.participantNames(sitting.participants) : t("exam.tests.wholeClassLower"),
+                this.sittingParticipants(sitting),
                 sitting.absent.length > 0 ? [h("br", {}), h("span", { class: "sl-exam-quiet" }, `${t("exam.offline.absentList")} `, this.participantNames(sitting.absent))] : null,
                 sittingLinks(sitting, true),
                 sitting.startedAt
@@ -1242,7 +1281,7 @@ Object.assign(TestDetail.prototype, {
           );
     this.sittingForm = h("div", { class: "sl-exam-sitting-form" });
     this.drawOfflineForm(test, null);
-    return h("section", { class: "sl-exam-test-sittings-section" }, h("h2", {}, t("exam.tests.sittingsHeading")), list, this.sittingForm);
+    return h("section", { class: "sl-exam-test-sittings-section" }, h("h2", {}, t("exam.tests.sittingsHeading")), list, this.discardSection(test), this.sittingForm);
   },
 
   /** The form planning a new offline sitting, a make-up, or changing `sitting` before its start. */
@@ -1271,29 +1310,15 @@ Object.assign(TestDetail.prototype, {
     date.addEventListener("change", update);
     time.addEventListener("input", update);
     time.addEventListener("change", update);
-    // A make-up proposes those absent before.
-    const absentBefore = new Set(test.sittings.flatMap((candidate) => candidate.absent));
-    const chosen = new Set(sitting ? sitting.participants : makeup ? absentBefore : []);
-    const whole = h("input", { type: "checkbox", name: "whole", checked: !makeup && (sitting === null || sitting.participants.length === this.roster.length) });
-    const people = h(
-      "ul",
-      { class: "sl-exam-sitting-people" },
-      this.roster.map((entry) =>
-        h("li", {}, h("label", {}, h("input", { type: "checkbox", name: "participant", value: entry.username, checked: chosen.has(entry.username) }), " ", this.participantNames([entry.username])))
-      )
-    );
-    const showPeople = () => {
-      people.hidden = whole.checked;
-    };
-    whole.addEventListener("change", showPeople);
-    showPeople();
+    const { whole, people } = this.participantChoice(sitting, makeup);
+    const retakes = makeup ? this.retakeChoice(test, sitting) : null;
     const message = h("p", { class: "sl-exam-message", role: "status" });
     const form = h(
       "form",
       {
         onSubmit: async (event) => {
           event.preventDefault();
-          const body = { opensAt, participants: whole.checked ? null : [...people.querySelectorAll("input:checked")].map((input) => input.value) };
+          const body = makeup ? { opensAt, retakes: retakes.retakes() } : { opensAt, participants: whole.checked ? null : [...people.querySelectorAll("input:checked")].map((input) => input.value) };
           try {
             await examApi(sitting ? `/sittings/${sitting.id}` : `/tests/${test.id}/sittings`, { method: sitting ? "PUT" : "POST", body });
             this.reload();
@@ -1307,8 +1332,7 @@ Object.assign(TestDetail.prototype, {
       " ",
       h("label", {}, `${t("exam.offline.plannedStart")} `, time),
       h("p", { class: "sl-exam-quiet" }, t("exam.offline.startNote")),
-      makeup ? h("p", { class: "sl-exam-quiet" }, t("exam.offline.makeupExplanation")) : h("label", {}, whole, ` ${t("exam.tests.wholeClass")}`),
-      people,
+      makeup ? [h("p", { class: "sl-exam-quiet sl-exam-makeup-explanation" }, t("exam.offline.makeupExplanation")), retakes.element] : [h("label", {}, whole, ` ${t("exam.tests.wholeClass")}`), people],
       h(
         "p",
         {},

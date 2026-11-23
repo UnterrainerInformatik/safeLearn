@@ -1593,6 +1593,17 @@ a.sl-exam-button.sl-exam-open:hover,
   background-color: rgba(27, 31, 35, 0.12);
 }
 
+/* A make-up's row whose student writes the test again
+   (makeup-for-everyone-not-written D5): a quiet tag beside the name. */
+.sl-exam-retake-mark {
+  display: inline-block;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-size: 0.85em;
+  font-weight: 600;
+  background-color: rgba(27, 31, 35, 0.1);
+}
+
 .sl-exam-live-badge[data-state="open"] {
   color: #ffffff;
   background-color: #c0392b;

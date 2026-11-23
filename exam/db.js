@@ -12,6 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { backupBeforeMigration } from "./backup.js";
+import { refreshAllMakeups } from "./makeups.js";
 
 const migrationsDir = path.join(import.meta.dirname, "migrations");
 
@@ -168,6 +169,8 @@ export function openDatabase(dbPath = databasePath()) {
     db.exec("PRAGMA journal_mode = WAL");
     db.exec("PRAGMA foreign_keys = ON");
     const migrated = migrate(db, dbPath);
+    // A make-up still ahead follows the rule from the start (makeup-for-everyone-not-written D2).
+    refreshAllMakeups(db);
     return { db, migrated };
   } catch (error) {
     db.close();

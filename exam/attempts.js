@@ -21,6 +21,7 @@ import { ConflictError, getCourse, inTransaction, InvalidInputError, isClosedYea
 import { readScale } from "./gradebook.js";
 import { gradeFor } from "./grading.js";
 import { notify } from "./live.js";
+import { refreshMakeups } from "./makeups.js";
 import { sittingOverSql, startedCondition } from "./tests.js";
 
 /** A request for an attempt from another browser than the one it is bound to. Answered with 409. */
@@ -242,7 +243,8 @@ export function openTestsOf(db, username, { at = now(), testId = null } = {}) {
          JOIN sitting s ON s.id = p.sitting_id
          JOIN test t ON t.id = s.test_id
          WHERE p.username = ? AND t.kind = 'online' AND s.opens_at <= ? AND ? < s.closes_at
-           AND NOT EXISTS (SELECT 1 FROM attempt a WHERE a.test_id = t.id AND a.username = p.username AND a.submitted_at IS NOT NULL)
+           AND NOT EXISTS (SELECT 1 FROM attempt a WHERE a.test_id = t.id AND a.username = p.username AND a.submitted_at IS NOT NULL
+             AND NOT (p.retake = 1 AND a.sitting_id <> s.id))
          UNION ALL
          SELECT t.id, t.name, t.course_id, a.deadline, s.duration_s
          FROM attempt a
@@ -339,6 +341,13 @@ export function nextOpenTestsChange(db, username, at = now()) {
  * tokens, and the hash of a new device secret, which is answered as `secret`
  * for the browser's cookie. `UNIQUE (test_id, username)` makes a second start
  * of the same attempt impossible, across all sittings.
+ *
+ * A retake (makeup-for-everyone-not-written design D3): a student marked to
+ * write the test again in a make-up whose start window is open, with a
+ * submitted attempt from another sitting, gets a new attempt in the make-up,
+ * and the earlier one is deleted with its answers in the same transaction.
+ * An earlier attempt still running is resumed instead, as before, so the
+ * student can finish it; no new one starts while it runs.
  */
 export function startAttempt(db, username, testId, at = now(), { userAgent = null, fullscreen = true } = {}) {
   // A missing field is an old page's start, which knew nothing of full screen (exam-fullscreen-tick-rate D1).
@@ -347,18 +356,29 @@ export function startAttempt(db, username, testId, at = now(), { userAgent = nul
   // An offline test is written on paper or elsewhere, never here (design D1).
   if (db.prepare("SELECT * FROM test WHERE id = ?").get(testId)?.kind === "offline") throw new ConflictError("exam.errors.attempts.offlineTest");
   const existing = db.prepare("SELECT * FROM attempt WHERE test_id = ? AND username = ?").get(testId, username);
-  if (existing) {
+  const retakeIn = existing?.submitted_at
+    ? db
+        .prepare(
+          `SELECT s.* FROM sitting s JOIN sitting_participant p ON p.sitting_id = s.id
+           WHERE s.test_id = ? AND p.username = ? AND p.retake = 1 AND s.id <> ? AND s.opens_at <= ? AND ? < s.closes_at
+           ORDER BY s.closes_at DESC, s.id LIMIT 1`
+        )
+        .get(testId, username, existing.sitting_id, at, at)
+    : undefined;
+  if (existing && !retakeIn) {
     if (existing.submitted_at !== null) throw new ConflictError("exam.errors.attempts.submittedByYou");
     if (!fullscreen) flagFullscreenUnavailable(db, existing);
     return { attemptId: existing.id, created: false };
   }
-  const sitting = db
-    .prepare(
-      `SELECT s.* FROM sitting s JOIN sitting_participant p ON p.sitting_id = s.id
-       WHERE s.test_id = ? AND p.username = ? AND s.opens_at <= ? AND ? < s.closes_at
-       ORDER BY s.closes_at DESC, s.id LIMIT 1`
-    )
-    .get(testId, username, at, at);
+  const sitting =
+    retakeIn ??
+    db
+      .prepare(
+        `SELECT s.* FROM sitting s JOIN sitting_participant p ON p.sitting_id = s.id
+         WHERE s.test_id = ? AND p.username = ? AND s.opens_at <= ? AND ? < s.closes_at
+         ORDER BY s.closes_at DESC, s.id LIMIT 1`
+      )
+      .get(testId, username, at, at);
   if (!sitting) throw new NotFoundError("exam.errors.attempts.noOpenTest");
   // A test whose last question was deleted from the pool before it began.
   if (db.prepare("SELECT 1 FROM test_question WHERE test_id = ? LIMIT 1").get(testId) === undefined) {
@@ -366,6 +386,8 @@ export function startAttempt(db, username, testId, at = now(), { userAgent = nul
   }
   const secret = randomToken();
   const attemptId = inTransaction(db, () => {
+    // The retake's earlier attempt goes with its questions, tokens and answers; the notes stay.
+    if (retakeIn) db.prepare("DELETE FROM attempt WHERE id = ?").run(existing.id);
     const questions = db.prepare("SELECT id FROM test_question WHERE test_id = ? ORDER BY position").all(testId);
     const deadline = new Date(Date.parse(at) + sitting.duration_s * 1000).toISOString();
     const { lastInsertRowid } = db
@@ -383,8 +405,11 @@ export function startAttempt(db, username, testId, at = now(), { userAgent = nul
       placeQuestion.run(id, position, question.id);
       shuffle(answersOf.all(question.id)).forEach((answer, place) => placeAnswer.run(id, randomToken(), answer.id, place));
     });
+    // Having started, the student has written for the make-ups still ahead (makeup-for-everyone-not-written D1).
+    refreshMakeups(db, testId, at);
     return id;
   });
+  if (retakeIn) notify(existing.sitting_id, "deleted", username);
   notify(sitting.id, "started", username);
   return { attemptId, created: true, secret };
 }
@@ -837,7 +862,11 @@ export function releaseAttempt(db, id) {
 export function deleteAttempt(db, id) {
   const row = db.prepare("SELECT * FROM attempt WHERE id = ?").get(id);
   if (!row) throw new NotFoundError("exam.errors.attempts.noAttempt");
-  db.prepare("DELETE FROM attempt WHERE id = ?").run(id);
+  inTransaction(db, () => {
+    db.prepare("DELETE FROM attempt WHERE id = ?").run(id);
+    // Without the attempt the student has not written, so the make-ups ahead take them in.
+    refreshMakeups(db, row.test_id);
+  });
   notify(row.sitting_id, "deleted", row.username);
   return { deleted: id };
 }

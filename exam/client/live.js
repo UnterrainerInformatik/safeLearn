@@ -175,6 +175,11 @@ const resortMs = 10000;
  */
 const statusRank = { "not started": 0, writing: 1, submitted: 2 };
 
+/** The "Retake" marker of a make-up's row whose student writes the test again (makeup-for-everyone-not-written D5). */
+function retakeMark(participant) {
+  return participant.retake ? [" ", h("span", { class: "sl-exam-retake-mark" }, t("exam.tests.retakeMarker"))] : null;
+}
+
 class LiveView extends ExamElement {
   disconnectedCallback() {
     this.stopAll();
@@ -630,7 +635,7 @@ class LiveView extends ExamElement {
     const tr = h(
       "tr",
       { "data-username": username, "data-present": participant.present ? "1" : "0", "data-group": this.handouts.length > 1 ? participant.group : null },
-      participant.examParticipant ? h("td", candidateMark(), displayPerson(participant), candidateNote()) : h("td", {}, displayPerson(participant)),
+      participant.examParticipant ? h("td", candidateMark(), displayPerson(participant), candidateNote(), retakeMark(participant)) : h("td", {}, displayPerson(participant), retakeMark(participant)),
       h("td", {}, h("label", {}, present, " ", participant.present ? t("exam.offline.present") : t("exam.offline.absent"))),
       this.handouts.length > 1 ? h("td", { class: "sl-exam-actions" }, groupButton("A"), groupButton("B")) : null,
       this.noteCell(participant)
@@ -678,7 +683,7 @@ class LiveView extends ExamElement {
       "tr",
       { "data-username": username, "data-status": participant.status },
       // A Matura candidate of the course stands out (`exam-participant-role`); the class's screen shows no names at all.
-      participant.examParticipant ? h("td", candidateMark(), displayPerson(participant), candidateNote()) : h("td", {}, displayPerson(participant)),
+      participant.examParticipant ? h("td", candidateMark(), displayPerson(participant), candidateNote(), retakeMark(participant)) : h("td", {}, displayPerson(participant), retakeMark(participant)),
       h("td", { class: "sl-exam-live-status" }, statusLabels[participant.status]()),
       h("td", { class: "sl-exam-live-left" }, participant.remainingMs === null ? "" : clock(participant.remainingMs)),
       this.focusCell(participant),

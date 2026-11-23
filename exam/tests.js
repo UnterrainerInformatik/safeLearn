@@ -44,6 +44,7 @@ import { finalizeDue } from "./attempts.js";
 import { entryCategory } from "./grading.js";
 import { handoutGroups, handoutPath, handoutResolves, handoutsOf, handoutVariableNames, variableNamesOf } from "./handout.js";
 import { handoutVariableName } from "../obsidian.js";
+import { activeRoster, refreshMakeups, writtenOf } from "./makeups.js";
 
 /** The calendar date in Vienna of an ISO timestamp, as `YYYY-MM-DD`. */
 export function viennaDate(iso) {
@@ -482,7 +483,11 @@ export function sittingTiming(db, row, at = now()) {
   return timingOf(db, row, testRow(db, row.test_id).kind === "offline", at);
 }
 
-/** A test's sittings in the order they open, each with its participants and the number of its attempts. */
+/**
+ * A test's sittings in the order they open, each with its participants, the
+ * retakes among them (makeup-for-everyone-not-written design D2) and the
+ * number of its attempts.
+ */
 export function testSittings(db, testId, at = now()) {
   const offline = testRow(db, testId).kind === "offline";
   // Whole rows, so the checks of earlier migrations can still read a sitting
@@ -503,7 +508,8 @@ export function testSittings(db, testId, at = now()) {
         startedAt: sitting.started_at ?? null,
         ...timingOf(db, sitting, offline, at),
         participants: rows.map((row) => row.username),
-        // Who was marked absent, for an offline sitting's make-up.
+        retakes: rows.filter((row) => row.retake === 1).map((row) => row.username),
+        // Who was marked absent in an offline sitting, as its summary names them.
         absent: offline ? rows.filter((row) => row.present === 0).map((row) => row.username) : [],
         attempts: attempts.get(sitting.id).n,
       };
@@ -547,6 +553,11 @@ export function getTest(db, id) {
     attempts: { started, submitted },
     questions: testQuestions(db, id),
     sittings: testSittings(db, id),
+    // Who on the roster has written and is no participant of a make-up
+    // unless marked as a retake: the list a make-up's form shows (design D5).
+    written: activeRoster(db, row).filter((username) => writtenOf(db, id).has(username)),
+    // Whether `discardTest` would go ahead now, and how many results it deletes (design D4).
+    discard: discardable(db, row),
   };
 }
 
@@ -582,7 +593,7 @@ function courseTests(db, courseId) {
     .map(({ handout_a, handout_b, ...test }) => ({
       ...test,
       handouts: handoutsOf({ handout_a, handout_b }).map(({ group, path, resolves }) => ({ group, path, resolves })),
-      sittings: testSittings(db, test.id).map(({ participants, absent, ...sitting }) => ({ ...sitting, participants: participants.length })),
+      sittings: testSittings(db, test.id).map(({ participants, retakes, absent, ...sitting }) => ({ ...sitting, participants: participants.length, retakes: retakes.length })),
       ...attemptCounts(db, test.id),
     }));
 }
@@ -708,7 +719,9 @@ function firstSitting(db, testId) {
 /**
  * Schedules a sitting of a test. The first one is written by the whole roster
  * of the course's class - or by the `participants` chosen; every later one is
- * a make-up for the `participants` chosen, with the first one's duration.
+ * a make-up with the first one's duration, for everybody who has not written
+ * the test and the `retakes` marked (makeup-for-everyone-not-written design
+ * D1, D2), its participants never chosen.
  */
 export function createSitting(db, testId, input = {}) {
   const test = testRow(db, testId);
@@ -719,11 +732,10 @@ export function createSitting(db, testId, input = {}) {
   }
   const first = firstSitting(db, testId);
   const makeup = first !== null;
-  if (makeup && (participants === null || participants === undefined)) {
-    throw new InvalidInputError("exam.errors.tests.makeupParticipants");
-  }
+  checkParticipantFields(makeup, input);
   const times = sittingTimes({ opensAt, closesAt, durationMinutes: makeup ? first.duration_s / 60 : durationMinutes });
-  const usernames = participantsOf(db, test, participants);
+  const usernames = makeup ? [] : participantsOf(db, test, participants);
+  const retakes = makeup ? chosenRetakes(db, test, input.retakes) ?? [] : [];
   return inTransaction(db, () => {
     const { lastInsertRowid } = db
       .prepare("INSERT INTO sitting (test_id, opens_at, closes_at, duration_s, makeup, created_at) VALUES (?, ?, ?, ?, ?, ?)")
@@ -731,7 +743,9 @@ export function createSitting(db, testId, input = {}) {
     const id = Number(lastInsertRowid);
     const take = db.prepare("INSERT INTO sitting_participant (sitting_id, username) VALUES (?, ?)");
     for (const username of usernames) take.run(id, username);
+    if (makeup) writeRetakes(db, id, retakes);
     refreshUsageDate(db, testId);
+    refreshMakeups(db, testId, now(), { also: makeup ? id : null });
     return getSitting(db, id);
   });
 }
@@ -756,8 +770,9 @@ export function updateSitting(db, id, input = {}) {
     throw new ConflictError("exam.errors.tests.makeupDuration");
   }
   const times = sittingTimes({ opensAt: input.opensAt ?? row.opens_at, closesAt: input.closesAt ?? row.closes_at, durationMinutes });
-  if (row.makeup === 1 && input.participants === null) throw new InvalidInputError("exam.errors.tests.makeupParticipants");
+  checkParticipantFields(row.makeup === 1, input);
   const usernames = input.participants === undefined ? null : participantsOf(db, test, input.participants);
+  const retakes = row.makeup === 1 ? chosenRetakes(db, test, input.retakes) : undefined;
   return inTransaction(db, () => {
     db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ?, duration_s = ? WHERE id = ?").run(times.opens, times.closes, times.durationS, id);
     if (usernames !== null) {
@@ -765,7 +780,9 @@ export function updateSitting(db, id, input = {}) {
       const take = db.prepare("INSERT INTO sitting_participant (sitting_id, username) VALUES (?, ?)");
       for (const username of usernames) take.run(id, username);
     }
+    if (retakes !== undefined) writeRetakes(db, id, retakes);
     refreshUsageDate(db, row.test_id);
+    refreshMakeups(db, row.test_id, now(), { also: row.makeup === 1 ? id : null });
     return getSitting(db, id);
   });
 }
@@ -895,45 +912,83 @@ export function rescheduleSitting(db, id, { opensAt, closesAt, attempts } = {}, 
     for (const username of usernames) take.run(id, username);
     refreshUsageDate(db, row.test_id);
     followPoolIfNotBegun(db, row.test_id, at);
+    // Who lost their attempt has not written any more.
+    refreshMakeups(db, row.test_id, at);
     return { ...getSitting(db, id), deleted };
   });
 }
 
 /**
- * Discards an online test while its first sitting is open
- * (discard-started-online-test design D1-D3): every attempt of the test goes
- * with its answers, running or submitted, every sitting goes with it - the
- * make-ups that cannot have opened yet included - and so do the notes in its
+ * Why `discardTest` refuses the test row `test` at `at`, or null when it
+ * would go ahead (makeup-for-everyone-not-written design D4): a closed year;
+ * a make-up open or an offline sitting running; nothing opened (online) or
+ * started (offline) yet. An open first sitting of an online test does not
+ * keep it from going.
+ */
+function discardRefusal(db, test, at) {
+  if (getCourse(db, test.course_id).year.closed) return "exam.errors.years.closed";
+  const sittings = db.prepare("SELECT * FROM sitting WHERE test_id = ?").all(test.id);
+  const open = sittings.filter((row) => rowState(db, row, at) === "open");
+  if (test.kind === "offline") {
+    if (open.length > 0) return "exam.errors.tests.discardRunning";
+    if (!sittings.some((row) => row.started_at !== null)) return "exam.errors.tests.discardNotStarted";
+    return null;
+  }
+  if (open.some((row) => row.makeup === 1)) return "exam.errors.tests.discardMakeupOpen";
+  if (!sittings.some((row) => row.opens_at <= at)) return "exam.errors.tests.discardNotOpened";
+  return null;
+}
+
+/** How many results discarding deletes: an online test's attempts, an offline test's entries in its column. */
+function discardCount(db, test) {
+  if (test.kind === "offline") {
+    return test.assessment_id === null ? 0 : db.prepare("SELECT COUNT(*) AS n FROM manual_entry WHERE assessment_id = ?").get(test.assessment_id).n;
+  }
+  return db.prepare("SELECT COUNT(*) AS n FROM attempt WHERE test_id = ?").get(test.id).n;
+}
+
+/** What the test page needs for its discard button: `{ allowed, results }`. */
+function discardable(db, test, at = now()) {
+  return { allowed: discardRefusal(db, test, at) === null, results: discardCount(db, test) };
+}
+
+/**
+ * Discards a test so that it can be written again from the start
+ * (discard-started-online-test design D1-D3, makeup-for-everyone-not-written
+ * D4): an online test while its first sitting is open or once it has opened
+ * and is over, an offline test once a sitting of it was started and none
+ * runs. Every attempt of the test goes with its answers, running or
+ * submitted, every sitting goes with it - the make-ups ahead included -, an
+ * offline test's results in its column go, and so do the notes in its
  * gradebook column and the teachers' notes on its participants. The test
- * keeps its name and questions and follows the pool again, as if it had never
- * been started. Only as many attempts as `attempts` confirms may go. Answers
- * the test and the id of the former first sitting, whose live view is told.
+ * keeps its name, questions, handouts and duration; an online test follows
+ * the pool again, an offline one keeps its column and its date. Only as many
+ * results as `attempts` confirms may go. Answers the test, the id of the
+ * former first sitting and those of all its former sittings, whose live
+ * views are told.
  */
 export function discardTest(db, id, { attempts } = {}, at = now()) {
   const test = testRow(db, id);
-  if (test.kind === "offline") throw new ConflictError("exam.errors.tests.discardOffline");
   return inTransaction(db, () => {
+    const refusal = discardRefusal(db, test, at);
+    if (refusal !== null) throw new ConflictError(refusal);
+    if (discardCount(db, test) !== (attempts ?? 0)) throw new ConflictError("exam.errors.tests.attemptsChanged");
     const first = firstSitting(db, id);
-    const state = (row) => rowState(db, row, at);
-    if (first === null || state(first) !== "open") {
-      const makeupOpen = db
-        .prepare("SELECT * FROM sitting WHERE test_id = ? AND makeup = 1")
-        .all(id)
-        .some((row) => state(row) === "open");
-      throw new ConflictError(makeupOpen ? "exam.errors.tests.discardMakeupOpen" : "exam.errors.tests.discardNotOpen");
-    }
-    const written = db.prepare("SELECT COUNT(*) AS n FROM attempt WHERE test_id = ?").get(id).n;
-    if (written !== (attempts ?? 0)) throw new ConflictError("exam.errors.tests.attemptsChanged");
+    const sittingIds = db.prepare("SELECT id FROM sitting WHERE test_id = ? ORDER BY id").all(id).map((row) => row.id);
     // An attempt's questions, tokens, answers and refused browsers go with it,
     // a sitting's participants with the sitting. The sitting is not ended
     // through `endSitting` first: that would grade attempts only to delete them.
     db.prepare("DELETE FROM result_note WHERE test_id = ?").run(id);
     db.prepare("DELETE FROM teacher_note WHERE test_id = ?").run(id);
+    if (test.assessment_id !== null) {
+      db.prepare("DELETE FROM result_note WHERE assessment_id = ?").run(test.assessment_id);
+      db.prepare("DELETE FROM manual_entry WHERE assessment_id = ?").run(test.assessment_id);
+    }
     db.prepare("DELETE FROM attempt WHERE test_id = ?").run(id);
     db.prepare("DELETE FROM sitting WHERE test_id = ?").run(id);
     followPoolIfNotBegun(db, id, at);
     refreshUsageDate(db, id);
-    return { ...getTest(db, id), discardedSittingId: first.id };
+    return { ...getTest(db, id), discardedSittingId: first?.id ?? null, discardedSittingIds: sittingIds };
   });
 }
 
@@ -957,6 +1012,8 @@ export function deleteSitting(db, id) {
     refreshUsageDate(db, row.test_id);
     refreshColumnDate(db, row.test_id);
     followPoolIfNotBegun(db, row.test_id);
+    // A deleted started offline sitting takes its presence with it.
+    refreshMakeups(db, row.test_id);
   });
   return { deleted: id };
 }
@@ -1233,26 +1290,76 @@ function writeParticipants(db, sittingId, usernames) {
   for (const username of usernames) take.run(sittingId, username);
 }
 
+// ----------------------------------------------------------------- make-ups
+
+/**
+ * The retakes a make-up request names (design D2): every one on the roster,
+ * not left, and counted as having written the test; anybody else is refused
+ * by name. Undefined keeps the current ones.
+ */
+function chosenRetakes(db, test, retakes) {
+  if (retakes === undefined) return undefined;
+  if (!Array.isArray(retakes)) throw new InvalidInputError("exam.errors.tests.retakeList");
+  const usernames = [...new Set(retakes.map((username) => String(username).trim().toLowerCase()))];
+  const roster = activeRoster(db, test);
+  const strangers = usernames.filter((username) => !roster.includes(username));
+  if (strangers.length > 0) throw new InvalidInputError("exam.errors.tests.notOnRoster", { count: strangers.length, names: strangers.join(", ") });
+  const written = writtenOf(db, test.id);
+  const unwritten = usernames.filter((username) => !written.has(username));
+  if (unwritten.length > 0) throw new InvalidInputError("exam.errors.tests.retakeNotWritten", { count: unwritten.length, names: unwritten.join(", ") });
+  return usernames;
+}
+
+/**
+ * What a sitting request may say about participants (design D2): a make-up
+ * takes no `participants`, only `retakes`; a first sitting takes no `retakes`.
+ */
+function checkParticipantFields(makeup, input) {
+  if (makeup && input.participants !== undefined) throw new InvalidInputError("exam.errors.tests.makeupNoChoice");
+  if (!makeup && input.retakes !== undefined) throw new InvalidInputError("exam.errors.tests.retakesOnlyMakeup");
+}
+
+/**
+ * Marks exactly `usernames` as the retakes of the make-up `sittingId`, adding
+ * a row for each one who has none. The others lose the mark;
+ * `refreshMakeups`, called next, takes those who have written out. Inside a
+ * transaction.
+ */
+function writeRetakes(db, sittingId, usernames) {
+  db.prepare("UPDATE sitting_participant SET retake = 0 WHERE sitting_id = ? AND retake = 1").run(sittingId);
+  const take = db.prepare("INSERT OR IGNORE INTO sitting_participant (sitting_id, username) VALUES (?, ?)");
+  const mark = db.prepare("UPDATE sitting_participant SET retake = 1 WHERE sitting_id = ? AND username = ?");
+  for (const username of usernames) {
+    take.run(sittingId, username);
+    mark.run(sittingId, username);
+  }
+}
+
+
 /**
  * Plans a sitting of an offline test (design D2): its planned start and its
  * participants - the whole roster, or those chosen; every later one is a
- * make-up for the participants chosen. Its window is planned from the start
- * for the test's duration, and opens only when a teacher starts it.
+ * make-up for everybody not present in a started sitting and the `retakes`
+ * marked (makeup-for-everyone-not-written design D1, D2). Its window is
+ * planned from the start for the test's duration, and opens only when a
+ * teacher starts it.
  */
-function createOfflineSitting(db, test, { opensAt, participants = null } = {}) {
+function createOfflineSitting(db, test, input = {}) {
+  const { opensAt, participants = null } = input;
   const makeup = firstSitting(db, test.id) !== null;
-  if (makeup && (participants === null || participants === undefined)) {
-    throw new InvalidInputError("exam.errors.tests.makeupParticipants");
-  }
+  checkParticipantFields(makeup, input);
   const times = plannedTimes(opensAt, test.duration_s);
-  const usernames = participantsOf(db, test, participants);
+  const usernames = makeup ? [] : participantsOf(db, test, participants);
+  const retakes = makeup ? chosenRetakes(db, test, input.retakes) ?? [] : [];
   return inTransaction(db, () => {
     const { lastInsertRowid } = db
       .prepare("INSERT INTO sitting (test_id, opens_at, closes_at, duration_s, makeup, created_at) VALUES (?, ?, ?, ?, ?, ?)")
       .run(test.id, times.opens, times.closes, test.duration_s, makeup ? 1 : 0, now());
     const id = Number(lastInsertRowid);
-    writeParticipants(db, id, usernames);
+    if (makeup) writeRetakes(db, id, retakes);
+    else writeParticipants(db, id, usernames);
     refreshColumnDate(db, test.id);
+    refreshMakeups(db, test.id, now(), { also: makeup ? id : null });
     return getSitting(db, id);
   });
 }
@@ -1266,12 +1373,15 @@ function requireNotStarted(row) {
 function updateOfflineSitting(db, row, test, input = {}) {
   requireNotStarted(row);
   const times = plannedTimes(input.opensAt ?? row.opens_at, row.duration_s);
-  if (row.makeup === 1 && input.participants === null) throw new InvalidInputError("exam.errors.tests.makeupParticipants");
+  checkParticipantFields(row.makeup === 1, input);
   const usernames = input.participants === undefined ? null : participantsOf(db, test, input.participants);
+  const retakes = row.makeup === 1 ? chosenRetakes(db, test, input.retakes) : undefined;
   return inTransaction(db, () => {
     db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ? WHERE id = ?").run(times.opens, times.closes, row.id);
     if (usernames !== null) writeParticipants(db, row.id, usernames);
+    if (retakes !== undefined) writeRetakes(db, row.id, retakes);
     refreshColumnDate(db, row.test_id);
+    refreshMakeups(db, row.test_id, now(), { also: row.makeup === 1 ? row.id : null });
     return getSitting(db, row.id);
   });
 }
@@ -1296,6 +1406,8 @@ export function startSitting(db, id, at = now()) {
   inTransaction(db, () => {
     db.prepare("UPDATE sitting SET started_at = ?, opens_at = ?, closes_at = ? WHERE id = ?").run(at, at, plannedClose(at, row.duration_s), id);
     refreshColumnDate(db, row.test_id);
+    // Its participants are fixed now; who is present in it has written for the make-ups ahead.
+    refreshMakeups(db, row.test_id, at);
   });
   return getSitting(db, id);
 }
@@ -1319,7 +1431,11 @@ export function setAttendance(db, sittingId, username, { present, group } = {}) 
   if (group === "B" && test.handout_b === null) throw new InvalidInputError("exam.errors.tests.noHandoutB");
   const nextPresent = present === undefined ? participant.present : present ? 1 : 0;
   const nextGroup = group ?? participant.handout_group;
-  db.prepare("UPDATE sitting_participant SET present = ?, handout_group = ? WHERE sitting_id = ? AND username = ?").run(nextPresent, nextGroup, sittingId, name);
+  inTransaction(db, () => {
+    db.prepare("UPDATE sitting_participant SET present = ?, handout_group = ? WHERE sitting_id = ? AND username = ?").run(nextPresent, nextGroup, sittingId, name);
+    // Present in a started sitting is having written, for the make-ups ahead (makeup-for-everyone-not-written D1).
+    refreshMakeups(db, row.test_id);
+  });
   return { username: name, present: nextPresent === 1, group: nextGroup };
 }
 
