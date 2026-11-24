@@ -41,4 +41,4 @@
 
 - [x] 7.1 `docs-exam-module.md`: weights, tests on paper from the pool, groups, printing, the correction table and the result rule
 - [x] 7.2 `AI/architecture.md`: `test_question.weight`/`handout_group`/`answer_lines`, `question_grade`, `question_count` as total weight, the offline "begun" rule and the computed column
-- [ ] 7.3 `AI/open-proposals.md`: remove the entry "Freitext-Fragen im Pool, Quickies daraus zusammensetzen" (at archive, after `freetext-questions` was archived too)
+- [x] 7.3 `AI/open-proposals.md`: remove the entry "Freitext-Fragen im Pool, Quickies daraus zusammensetzen" (at archive, after `freetext-questions` was archived too)

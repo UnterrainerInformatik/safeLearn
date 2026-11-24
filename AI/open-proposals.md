@@ -15,14 +15,3 @@ Dazu am 2026-09-13 beobachtet: **manuell ausgelöste Syncs setzen `lastSync` nic
 # Gradebook
 
 # Exam
-
-## Freitext-Fragen im Pool, Quickies daraus zusammensetzen
-Gerald will im Fragen-Pool ein **Flag für Freitext-Fragen**, damit der Pool auch Fragen mit freier Antwort verwalten kann. Online-Tests können solche Fragen nicht auswerten und dürfen sie nicht enthalten. Für **Quickies (Kurztests)** wären sie aber genau richtig: Ein Quickie soll sich dann aus Pool-Fragen zusammensetzen lassen wie heute ein Online-Test. Das ist besser für die Wiederverwendbarkeit als ein eigenes Handout pro Quickie.
-
-Heute kennt der Pool nur automatisch auswertbare Typen: `question.type` ist per `CHECK` auf `multichoiceset`, `multichoice` und `truefalse` beschränkt (Migrationen 005, 006, 011; der Snapshot `test_question` genauso). Ein Kurztest ist entweder eine händische Spalte im Sheet oder ein Offline-Test mit einem Handout aus dem Korpus (`offline-test`). Eine Zusammenstellung aus Pool-Fragen gibt es nur für Online-Tests (`online-test`).
-
-Zu klären:
-- Ist es ein Flag oder ein neuer Fragetyp `freetext`? Hat eine Freitext-Frage eine Musterlösung oder einen Erwartungshorizont und eine Punktezahl?
-- Was wird aus einem zusammengesetzten Quickie: ein Offline-Test, dessen Handout aus den Fragen erzeugt wird (Druck, Lösung, Gruppen A/B), oder etwas Eigenes? Werden die Ergebnisse weiter händisch als Punkte in der Kurztest-Spalte eingetragen?
-- Dürfen Quickies auch Multiple-Choice-Fragen aus dem Pool mischen?
-- Wie verhalten sich der Fragen-Browser und der Import (Filter, die Sperre beim Zusammensetzen eines Online-Tests)?

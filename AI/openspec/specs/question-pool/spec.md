@@ -16,7 +16,7 @@ All teachers SHALL work on one pool. After the one-time import, questions SHALL 
 
 ### Requirement: A question has a type, two languages and correct flags
 
-A question SHALL be one of `multichoiceset` (several correct answers), `multichoice` (exactly one correct answer), `truefalse` or `freetext` (an answer the student writes). It SHALL carry its short title and its text in German and in English, a category, and any images it embeds. A question of the first three types, a choice question, SHALL carry each answer's text in German and in English and a correct flag per answer. It SHALL be worth one point and SHALL be graded all-or-nothing. A `freetext` question SHALL carry no answers and no correct flags. It SHALL carry a model solution in German and in English. It SHALL NOT be graded by the module; a teacher grades it.
+A question SHALL be one of `multichoiceset` (several correct answers), `multichoice` (exactly one correct answer), `truefalse` or `freetext` (an answer the student writes). It SHALL carry its short title and its text in German and in English, a category, and any images it embeds. A question of the first three types, a choice question, SHALL carry each answer's text in German and in English and a correct flag per answer. A `freetext` question SHALL carry no answers and no correct flags. It SHALL carry a model solution in German and in English. A question SHALL count in a test with the weight that test gives it (`online-test`, `offline-test-questions`). In an online test, a choice question SHALL be graded all-or-nothing by the module. In a test on paper, every question SHALL be graded by a teacher with a grade from 1 to 5.
 
 #### Scenario: A multichoice question with two correct answers
 
@@ -27,6 +27,11 @@ A question SHALL be one of `multichoiceset` (several correct answers), `multicho
 
 - **WHEN** a teacher saves a `freetext` question "Erkläre den Unterschied zwischen PUT und PATCH" with its English text and a model solution in both languages
 - **THEN** the pool holds it as a `freetext` question without answers, with both model solutions
+
+#### Scenario: One question, two weights
+
+- **WHEN** a question has the weight 1 in one test and the weight 3 in another
+- **THEN** the pool holds one question, and each test counts it with its own weight
 
 ### Requirement: The import pairs the German and English files by position and refuses a mismatch
 
