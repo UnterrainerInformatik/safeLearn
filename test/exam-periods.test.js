@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { defaultPeriods, defaultStart, matchStart, matchWindow, nextWeekday, parsePeriods, periodTimes, startWindowFor, viennaInstant, windowFor } from "../exam/client/periods.js";
+import { defaultPeriods, defaultStart, matchPlan, matchStart, matchWindow, nextWeekday, parsePeriods, periodTimes, planFor, startWindowFor, viennaInstant, windowFor } from "../exam/client/periods.js";
 
 /** The school's list, from Gerald on 2026-10-18. */
 const schoolList = [
@@ -243,5 +243,57 @@ describe("start windows and periods", () => {
     assert.deepEqual(at("06:00"), { date: "2026-10-19", n: 0, offset: 5, length: 10 }, "before the first period");
     assert.deepEqual(at("22:30"), { date: "2026-10-20", n: 1, offset: 5, length: 10 }, "in the evening");
     assert.deepEqual(defaultStart(parsePeriods("0=07:05-07:55"), viennaInstant("2026-10-19", "22:30")), { date: "2026-10-20", n: 0, offset: 5, length: 10 });
+  });
+});
+
+describe("offline plans and periods", () => {
+  const minutes = ({ opensAt, closesAt }) => (Date.parse(closesAt) - Date.parse(opensAt)) / 60000;
+
+  test("lessons 4 to 6 on 2026-11-30 are 10:55 to 13:35, 160 minutes; 5 minutes in, 155", () => {
+    const plan = planFor(periods, "2026-11-30", 4, 0, 6);
+    assert.deepEqual(plan, { opensAt: "2026-11-30T09:55:00.000Z", closesAt: "2026-11-30T12:35:00.000Z" });
+    assert.equal(minutes(plan), 160);
+    assert.deepEqual(matchPlan(periods, plan.opensAt, 160), { date: "2026-11-30", from: 4, offset: 0, to: 6 });
+    const late = planFor(periods, "2026-11-30", 4, 5, 6);
+    assert.deepEqual(late, { opensAt: "2026-11-30T10:00:00.000Z", closesAt: "2026-11-30T12:35:00.000Z" });
+    assert.equal(minutes(late), 155);
+    assert.deepEqual(matchPlan(periods, late.opensAt, 155), { date: "2026-11-30", from: 4, offset: 5, to: 6 });
+  });
+
+  test("a plan that ends within its start lesson reads as that lesson", () => {
+    const opensAt = viennaInstant("2026-11-30", "09:00").toISOString();
+    assert.deepEqual(matchPlan(periods, opensAt, 20), { date: "2026-11-30", from: 2, offset: 5, to: 2 });
+    assert.deepEqual(matchPlan(periods, opensAt, 45), { date: "2026-11-30", from: 2, offset: 5, to: 2 }, "to the end of lesson 2");
+    assert.equal(minutes(planFor(periods, "2026-11-30", 2, 5, 2)), 45);
+  });
+
+  test("a plan that ends off the period ends, after its start lesson, matches none", () => {
+    const opensAt = viennaInstant("2026-11-30", "10:55").toISOString();
+    assert.equal(matchPlan(periods, opensAt, 100), null, "ends at 12:35, within lesson 5");
+  });
+
+  test("a plan starting 07:58 matches none, nor one in a break", () => {
+    assert.equal(matchPlan(periods, viennaInstant("2026-11-30", "07:58").toISOString(), 50), null);
+    assert.equal(matchPlan(periods, viennaInstant("2026-11-30", "09:50").toISOString(), 10), null);
+    assert.equal(matchPlan([], viennaInstant("2026-11-30", "10:55").toISOString(), 50), null);
+  });
+
+  test("a reversed range, an unknown period, an offset past the lesson and a plan past midnight are not made", () => {
+    assert.throws(() => planFor(periods, "2026-11-30", 5, 0, 4), /no plan from period 5 to period 4/);
+    assert.throws(() => planFor(periods, "2026-11-30", 99, 0, 99), /no plan/);
+    assert.throws(() => planFor(periods, "2026-11-30", 3, 50, 3), /do not lie within period 3/);
+    assert.throws(() => planFor(parsePeriods("1=23:30-23:59"), "2026-11-30", 1, 30, 1), /do not lie within/);
+    const opensAt = viennaInstant("2026-11-30", "21:30").toISOString();
+    assert.equal(matchPlan(periods, opensAt, 180), null, "across midnight");
+  });
+
+  test("on the DST changeover days the plan keeps its wall-clock times", () => {
+    for (const [date, opensAt, closesAt] of [
+      ["2026-10-25", "2026-10-25T09:55:00.000Z", "2026-10-25T12:35:00.000Z"],
+      ["2027-03-28", "2027-03-28T08:55:00.000Z", "2027-03-28T11:35:00.000Z"],
+    ]) {
+      assert.deepEqual(planFor(periods, date, 4, 0, 6), { opensAt, closesAt }, date);
+      assert.deepEqual(matchPlan(periods, opensAt, 160), { date, from: 4, offset: 0, to: 6 }, date);
+    }
   });
 });

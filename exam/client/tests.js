@@ -33,7 +33,7 @@ import { parseTime } from "../../i18n/format.js";
 import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, gridArrowKeys, h, linkButton, markRows, readOnlyFor, saveOnChange, t } from "./frame.js";
 import { displayClass, personName } from "./classes.js";
 import { openCreatorOf } from "./bar.js";
-import { defaultLength, defaultOffset, defaultPeriods, defaultStart, matchStart, matchWindow, nextWeekday, periodTimes, startWindowFor, viennaInstant, viennaLocal, windowFor } from "./periods.js";
+import { defaultLength, defaultOffset, defaultPeriods, defaultStart, matchPlan, matchStart, matchWindow, nextWeekday, periodTimes, planFor, startWindowFor, viennaInstant, viennaLocal } from "./periods.js";
 import { pickHandout } from "./handout-picker.js";
 import { testTiming } from "./test-timing.js";
 import { timingTone } from "./row-tone.js";
@@ -151,9 +151,57 @@ export function displayStartWindow({ opensAt, closesAt }, periods = []) {
   );
 }
 
-/** A sitting's window as its kind shows it: an online sitting's start window, an offline one's shared window. */
+/**
+ * A planned offline sitting, not yet started, as an element
+ * (offline-sitting-periods design D5): its day, its start and end lesson when
+ * the plan lies on them as the form reads it, the word for planned with its
+ * clock times, and its duration - `Mo. 30.11. · 4.–6. EH · geplant
+ * 10:55–13:35 · 160 Min`.
+ */
+export function displayPlan({ opensAt, durationS }, periods = []) {
+  const minutes = Math.round(durationS / 60);
+  const closesAt = new Date(Date.parse(opensAt) + durationS * 1000).toISOString();
+  const match = matchPlan(periods, opensAt, minutes);
+  const sameDay = viennaLocal(opensAt).date === viennaLocal(closesAt).date;
+  return h(
+    "span",
+    { class: "sl-exam-window sl-exam-plan" },
+    `${format.weekdayDay(opensAt)} · `,
+    match ? [periodLabel(periods, match.from, match.to), " · "] : null,
+    t("exam.periods.planned", { from: format.time(opensAt), to: sameDay ? format.time(closesAt) : displayTime(closesAt) }),
+    ` · ${t("exam.periods.plannedMinutes", { minutes })}`
+  );
+}
+
+/** An offline sitting's window: its plan until it is started, then the shared window it runs in. */
+export function displayOfflineWindow(sitting, periods) {
+  return sitting.startedAt ? displayWindow(sitting, periods) : displayPlan(sitting, periods);
+}
+
+/** A sitting's window as its kind shows it: an online sitting's start window, an offline one's plan or shared window. */
 export function displaySittingWindow(sitting, periods, offline) {
-  return offline ? displayWindow(sitting, periods) : displayStartWindow(sitting, periods);
+  return offline ? displayOfflineWindow(sitting, periods) : displayStartWindow(sitting, periods);
+}
+
+/** "HH:MM" as minutes after midnight. */
+function minutesOfTime(time) {
+  const [hour, minute] = time.split(":").map(Number);
+  return hour * 60 + minute;
+}
+
+/** The whole minutes from `opensAt` to `closesAt`. */
+function minutesBetween(opensAt, closesAt) {
+  return Math.round((Date.parse(closesAt) - Date.parse(opensAt)) / 60000);
+}
+
+/** A duration field of an offline sitting, whole minutes from 1 to 600. */
+function planDurationField(minutes) {
+  return h("input", { type: "number", name: "durationMinutes", min: "1", max: "600", step: "1", required: true, class: "sl-exam-number", value: String(minutes) });
+}
+
+/** True when `minutes` is a duration an offline sitting can have. */
+function validDuration(minutes) {
+  return Number.isInteger(minutes) && minutes >= 1 && minutes <= 600;
 }
 
 /**
@@ -1541,7 +1589,7 @@ Object.assign(TestDetail.prototype, {
                 "li",
                 { "data-sitting": String(sitting.id), "data-state": sitting.startedAt ? sitting.state : "planned" },
                 h("strong", {}, `${sitting.makeup ? t("exam.tests.makeupLabel") : t("exam.tests.sittingLabel")} `),
-                sitting.startedAt ? displayWindow(sitting, this.periods) : t("exam.offline.plannedFor", { time: displayTime(sitting.opensAt) }),
+                displayOfflineWindow(sitting, this.periods),
                 ` · ${offlineState("offline", sitting)} · `,
                 this.sittingParticipants(sitting),
                 sitting.absent.length > 0 ? [h("br", {}), h("span", { class: "sl-exam-quiet" }, `${t("exam.offline.absentList")} `, this.participantNames(sitting.absent))] : null,
@@ -1562,7 +1610,13 @@ Object.assign(TestDetail.prototype, {
     return h("section", { class: "sl-exam-test-sittings-section" }, h("h2", {}, t("exam.tests.sittingsHeading")), list, this.discardSection(test), this.sittingForm);
   },
 
-  /** The form planning a new offline sitting, a make-up, or changing `sitting` before its start. */
+  /**
+   * The form planning a new offline sitting, a make-up, or changing `sitting`
+   * before its start (offline-sitting-periods design D3): a plan
+   * `{ opensAt, durationMinutes }` that the lessons editor and the clock
+   * editor read and write. A first sitting proposes the test's duration, a
+   * make-up the first sitting's and lists the earlier sittings' durations.
+   */
   drawOfflineForm(test, sitting, openMakeup = false) {
     const first = test.sittings.find((candidate) => !candidate.makeup) ?? null;
     const makeup = sitting ? sitting.makeup : first !== null;
@@ -1570,24 +1624,9 @@ Object.assign(TestDetail.prototype, {
       this.sittingForm.replaceChildren(h("p", {}, h("button", { type: "button", class: "sl-exam-action sl-exam-sitting-makeup", onClick: () => this.drawOfflineForm(test, null, true) }, t("exam.tests.scheduleMakeup"))));
       return;
     }
-    // Proposed like an online sitting's: the next lesson, or the next full hour without periods.
-    const proposed = this.periods.length > 0 ? defaultPeriods(this.periods) : null;
-    const start = sitting
-      ? sitting.opensAt
-      : proposed
-        ? windowFor(this.periods, proposed.date, proposed.from, proposed.to).opensAt
-        : new Date(Math.ceil(Date.now() / 3600000) * 3600000).toISOString();
-    let opensAt = start;
-    const date = h("sl-date-input", { name: "date", required: true, value: viennaLocal(start).date });
-    const time = h("input", { type: "text", name: "opensTime", required: true, inputmode: "numeric", autocomplete: "off", size: "5", placeholder: t("exam.dateInput.timePattern"), class: "sl-exam-time", value: viennaLocal(start).time });
-    const update = () => {
-      const parsed = parseTime(time.value);
-      time.setCustomValidity(parsed === null ? t("exam.dateInput.unreadableTime") : "");
-      if (/^\d{4}-\d{2}-\d{2}$/.test(date.value) && parsed !== null) opensAt = viennaInstant(date.value, parsed).toISOString();
-    };
-    date.addEventListener("change", update);
-    time.addEventListener("input", update);
-    time.addEventListener("change", update);
+    const proposedMinutes = Math.round((sitting ? sitting.durationS : makeup ? first.durationS : test.durationS) / 60);
+    const planEditor = this.planEditor(sitting, proposedMinutes);
+    const earlier = makeup ? test.sittings.slice(0, sitting ? test.sittings.findIndex((candidate) => candidate.id === sitting.id) : test.sittings.length) : [];
     const { whole, people } = this.participantChoice(sitting, makeup);
     const retakes = makeup ? this.retakeChoice(test, sitting) : null;
     const message = h("p", { class: "sl-exam-message", role: "status" });
@@ -1596,7 +1635,10 @@ Object.assign(TestDetail.prototype, {
       {
         onSubmit: async (event) => {
           event.preventDefault();
-          const body = makeup ? { opensAt, retakes: retakes.retakes() } : { opensAt, participants: whole.checked ? null : [...people.querySelectorAll("input:checked")].map((input) => input.value) };
+          const plan = planEditor.current();
+          const body = makeup
+            ? { ...plan, retakes: retakes.retakes() }
+            : { ...plan, participants: whole.checked ? null : [...people.querySelectorAll("input:checked")].map((input) => input.value) };
           try {
             await examApi(sitting ? `/sittings/${sitting.id}` : `/tests/${test.id}/sittings`, { method: sitting ? "PUT" : "POST", body });
             this.reload();
@@ -1606,9 +1648,18 @@ Object.assign(TestDetail.prototype, {
         },
       },
       h("h3", {}, sitting ? t("exam.tests.changeSitting") : makeup ? t("exam.tests.scheduleMakeup") : t("exam.offline.planSitting")),
-      h("label", {}, `${t("exam.tests.date")} `, date),
-      " ",
-      h("label", {}, `${t("exam.offline.plannedStart")} `, time),
+      earlier.length > 0
+        ? h(
+            "p",
+            { class: "sl-exam-earlier-durations" },
+            t("exam.offline.earlierDurations", {
+              list: earlier
+                .map((candidate) => (candidate.makeup ? t("exam.offline.earlierMakeup", { minutes: Math.round(candidate.durationS / 60) }) : t("exam.offline.earlierSitting", { minutes: Math.round(candidate.durationS / 60) })))
+                .join(", "),
+            })
+          )
+        : null,
+      planEditor.element,
       h("p", { class: "sl-exam-quiet" }, t("exam.offline.startNote")),
       makeup ? [h("p", { class: "sl-exam-quiet sl-exam-makeup-explanation" }, t("exam.offline.makeupExplanation")), retakes.element] : [h("label", {}, whole, ` ${t("exam.tests.wholeClass")}`), people],
       h(
@@ -1620,6 +1671,240 @@ Object.assign(TestDetail.prototype, {
       message
     );
     this.sittingForm.replaceChildren(form);
+  },
+
+  /**
+   * The plan of an offline sitting (offline-sitting-periods design D3): the
+   * lessons editor with its switch to clock times when the school's periods
+   * are configured, the clock editor otherwise; below them the plan as it
+   * will be listed. A planned `sitting` opens with its lessons when its plan
+   * matches them, otherwise with its clock times; a new one with the lesson
+   * running now or next, 0 minutes and `proposedMinutes`. `current()`
+   * answers `{ opensAt, durationMinutes }`.
+   */
+  planEditor(sitting, proposedMinutes) {
+    const periods = this.periods;
+    const proposal = (date) => {
+      const proposed = defaultPeriods(periods);
+      return { date: date ?? proposed.date, from: proposed.from, offset: 0, to: proposed.from };
+    };
+    let lessons = null;
+    let plan;
+    if (sitting) {
+      plan = { opensAt: sitting.opensAt, durationMinutes: proposedMinutes };
+      lessons = matchPlan(periods, plan.opensAt, plan.durationMinutes);
+    } else if (periods.length > 0) {
+      lessons = proposal();
+      plan = { opensAt: planFor(periods, lessons.date, lessons.from, 0, lessons.to).opensAt, durationMinutes: proposedMinutes };
+    } else {
+      plan = { opensAt: new Date(Math.ceil(Date.now() / 3600000) * 3600000).toISOString(), durationMinutes: proposedMinutes };
+    }
+    const summary = h("p", { class: "sl-exam-quiet sl-exam-sitting-summary" });
+    const refresh = () => summary.replaceChildren(displayPlan({ opensAt: plan.opensAt, durationS: plan.durationMinutes * 60 }, periods));
+    const changed = (next, nextLessons = null) => {
+      plan = next;
+      lessons = nextLessons;
+      refresh();
+    };
+    const element = h("div", { class: "sl-exam-sitting-window sl-exam-plan-editor" });
+    if (periods.length === 0) {
+      element.replaceChildren(...this.planClockEditor(plan, changed), summary);
+      refresh();
+      return { element, current: () => plan };
+    }
+    let byLessons = lessons !== null;
+    const draw = () => {
+      const toggle = h(
+        "button",
+        {
+          type: "button",
+          class: "sl-exam-sitting-mode",
+          onClick: () => {
+            if (!byLessons) {
+              // Back to lessons: the plan's own when it lies on them, the
+              // lessons last chosen while the plan has not moved since, or
+              // the lesson a new sitting would, keeping date and duration.
+              const kept = lessons && planFor(periods, lessons.date, lessons.from, lessons.offset, lessons.to).opensAt === plan.opensAt ? lessons : null;
+              lessons = matchPlan(periods, plan.opensAt, plan.durationMinutes) ?? kept ?? proposal(viennaLocal(plan.opensAt).date);
+              plan = { opensAt: planFor(periods, lessons.date, lessons.from, lessons.offset, lessons.to).opensAt, durationMinutes: plan.durationMinutes };
+            }
+            byLessons = !byLessons;
+            draw();
+          },
+        },
+        byLessons ? t("exam.tests.exactTimesInstead") : t("exam.tests.lessonsInstead")
+      );
+      element.replaceChildren(...(byLessons ? this.planLessonsEditor(lessons, plan.durationMinutes, changed) : this.planClockEditor(plan, changed)), summary, h("p", {}, toggle));
+      refresh();
+    };
+    draw();
+    return { element, current: () => plan };
+  },
+
+  /**
+   * The lessons editor of an offline plan: a date, a start lesson, the
+   * minutes after its start, an end lesson from the start lesson on - each
+   * choice with its clock times as its tooltip - and the duration. A change
+   * of a lesson or the minutes sets the duration to the end lesson's end
+   * minus the planned start; the date and a typed duration leave the rest.
+   * Hands the plan, with the lessons it was chosen by, to `changed`.
+   */
+  planLessonsEditor(initial, durationMinutes, changed) {
+    const periods = this.periods;
+    const lessonOptions = (select, fromN) =>
+      select.replaceChildren(
+        ...periods.filter((candidate) => candidate.n >= fromN).map((candidate) => h("option", { value: String(candidate.n), title: periodTimes(periods, candidate.n) }, String(candidate.n)))
+      );
+    const date = h("sl-date-input", { name: "date", required: true, value: initial.date });
+    const from = h("select", { name: "fromPeriod", required: true });
+    lessonOptions(from, -Infinity);
+    from.value = String(initial.from);
+    const offset = h("input", { type: "number", name: "offsetMinutes", min: "0", step: "1", required: true, class: "sl-exam-number", value: String(initial.offset) });
+    const to = h("select", { name: "toPeriod", required: true });
+    lessonOptions(to, initial.from);
+    to.value = String(initial.to);
+    const duration = planDurationField(durationMinutes);
+    const fromTimes = h("span", { class: "sl-exam-quiet sl-exam-sitting-times" });
+    const toTimes = h("span", { class: "sl-exam-quiet sl-exam-sitting-times" });
+    const periodLength = (n) => {
+      const chosen = periods.find((candidate) => candidate.n === n);
+      return minutesOfTime(chosen.end) - minutesOfTime(chosen.start);
+    };
+    const fields = () => ({ date: date.value, from: Number(from.value), offset: Number(offset.value), to: Number(to.value) });
+    const decorate = () => {
+      offset.max = String(periodLength(Number(from.value)) - 1);
+      fromTimes.replaceChildren(periodTimes(periods, Number(from.value)));
+      toTimes.replaceChildren(periodTimes(periods, Number(to.value)));
+    };
+    // Hands the plan on from the fields as they stand.
+    const emit = () => {
+      duration.setCustomValidity("");
+      const chosen = fields();
+      const minutes = Number(duration.value);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(chosen.date) || !offset.checkValidity() || !validDuration(minutes)) return;
+      let opensAt;
+      try {
+        opensAt = planFor(periods, chosen.date, chosen.from, chosen.offset, chosen.to).opensAt;
+      } catch {
+        return;
+      }
+      if (viennaLocal(Date.parse(opensAt) + minutes * 60000).date !== chosen.date) {
+        duration.setCustomValidity(t("exam.offline.endNotAfterStart"));
+        return;
+      }
+      changed({ opensAt, durationMinutes: minutes }, chosen);
+    };
+    // A lesson or the minutes changed: the duration follows the end lesson.
+    const recompute = () => {
+      const n = Number(from.value);
+      const end = Math.max(Number(to.value), n);
+      lessonOptions(to, n);
+      to.value = String(end);
+      decorate();
+      const chosen = fields();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(chosen.date) && offset.checkValidity()) {
+        try {
+          const window = planFor(periods, chosen.date, chosen.from, chosen.offset, chosen.to);
+          duration.value = String(minutesBetween(window.opensAt, window.closesAt));
+        } catch {
+          // An offset past the lesson: the field is invalid already.
+        }
+      }
+      emit();
+    };
+    for (const select of [from, to]) select.addEventListener("change", recompute);
+    offset.addEventListener("input", recompute);
+    offset.addEventListener("change", recompute);
+    date.addEventListener("change", emit);
+    duration.addEventListener("input", emit);
+    duration.addEventListener("change", emit);
+    decorate();
+    return [
+      h("label", {}, `${t("exam.tests.date")} `, date),
+      " ",
+      h("label", {}, `${t("exam.offline.startLesson")} `, from, " ", fromTimes),
+      " ",
+      h("label", {}, `${t("exam.tests.offsetMinutes")} `, offset),
+      " ",
+      h("label", {}, `${t("exam.offline.endLesson")} `, to, " ", toTimes),
+      " ",
+      h("label", {}, `${t("exam.offline.durationField")} `, duration),
+      h("p", { class: "sl-exam-quiet" }, t("exam.offline.durationNote")),
+    ];
+  },
+
+  /**
+   * The clock editor of an offline plan: a date, the planned start and end,
+   * and the duration, in Vienna time and the reader's format. A change of the
+   * start or the end sets the duration - a later start keeps the end -, a
+   * typed duration moves the end. An end not after the start, or one past
+   * midnight, marks its field invalid, so the form does not submit.
+   */
+  planClockEditor(initial, changed) {
+    const local = viennaLocal(initial.opensAt);
+    const closes = viennaLocal(Date.parse(initial.opensAt) + initial.durationMinutes * 60000);
+    const timeField = (name, value) =>
+      h("input", { type: "text", name, required: true, inputmode: "numeric", autocomplete: "off", size: "5", placeholder: t("exam.dateInput.timePattern"), class: "sl-exam-time", value });
+    const date = h("sl-date-input", { name: "date", required: true, value: local.date });
+    const opens = timeField("opensTime", local.time);
+    const ends = timeField("endsTime", closes.date === local.date ? closes.time : "");
+    const duration = planDurationField(initial.durationMinutes);
+    const readable = (field) => {
+      const parsed = parseTime(field.value);
+      field.setCustomValidity(parsed === null ? t("exam.dateInput.unreadableTime") : "");
+      field.setAttribute("aria-invalid", String(parsed === null));
+      return parsed;
+    };
+    const emit = (opensTime, minutes) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date.value)) return;
+      changed({ opensAt: viennaInstant(date.value, opensTime).toISOString(), durationMinutes: minutes });
+    };
+    // The start, the end or the date changed: the duration follows them.
+    const fromTimes = () => {
+      const [start, end] = [readable(opens), readable(ends)];
+      duration.setCustomValidity("");
+      if (start === null || end === null) return;
+      const minutes = minutesOfTime(end) - minutesOfTime(start);
+      if (minutes < 1) {
+        ends.setCustomValidity(t("exam.offline.endNotAfterStart"));
+        ends.setAttribute("aria-invalid", "true");
+        return;
+      }
+      duration.value = String(minutes);
+      if (!validDuration(minutes)) return;
+      emit(start, minutes);
+    };
+    // A typed duration moves the end.
+    const fromDuration = () => {
+      const start = readable(opens);
+      const minutes = Number(duration.value);
+      duration.setCustomValidity("");
+      if (start === null || !validDuration(minutes)) return;
+      const end = minutesOfTime(start) + minutes;
+      if (end >= 24 * 60) {
+        duration.setCustomValidity(t("exam.offline.endNotAfterStart"));
+        return;
+      }
+      ends.value = `${String(Math.floor(end / 60)).padStart(2, "0")}:${String(end % 60).padStart(2, "0")}`;
+      readable(ends);
+      emit(start, minutes);
+    };
+    date.addEventListener("change", fromTimes);
+    for (const field of [opens, ends]) {
+      field.addEventListener("input", fromTimes);
+      field.addEventListener("change", fromTimes);
+    }
+    duration.addEventListener("input", fromDuration);
+    duration.addEventListener("change", fromDuration);
+    return [
+      h("label", {}, `${t("exam.tests.date")} `, date),
+      " ",
+      h("label", {}, `${t("exam.offline.plannedStart")} `, opens),
+      " ",
+      h("label", {}, `${t("exam.offline.plannedEnd")} `, ends),
+      " ",
+      h("label", {}, `${t("exam.offline.durationField")} `, duration),
+    ];
   },
 });
 

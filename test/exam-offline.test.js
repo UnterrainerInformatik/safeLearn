@@ -428,6 +428,57 @@ describe("an offline sitting", () => {
   });
 });
 
+describe("the duration of an offline sitting", () => {
+  test("is its own: a 160-minute plan of a 100-minute test runs 160 minutes from its start", () => {
+    const { db, course } = seeded();
+    const offline = createOfflineTest(db, course.id, { name: "POS Langtest 1", durationMinutes: 100, gradebookKind: "test" });
+    const opensAt = inMinutes(30);
+    const planned = createSitting(db, offline.id, { opensAt, durationMinutes: 160 });
+    assert.equal(planned.durationS, 160 * 60);
+    assert.equal(Date.parse(planned.closesAt) - Date.parse(planned.opensAt), 160 * 60000, "the planned end follows the sitting's duration");
+    const at = "2026-11-30T09:57:00.000Z"; // 10:57 Vienna time
+    const started = startSitting(db, planned.id, at);
+    assert.equal(started.closesAt, "2026-11-30T12:37:00.000Z", "10:57 to 13:37 Vienna time");
+  });
+
+  test("defaults to the test's for a first sitting, the first sitting's for a make-up, and its own on a change", () => {
+    const { db, course } = seeded();
+    const offline = createOfflineTest(db, course.id, { name: "POS Langtest 1", durationMinutes: 100, gradebookKind: "test" });
+    const first = createSitting(db, offline.id, { opensAt: inMinutes(30) });
+    assert.equal(first.durationS, 100 * 60, "the test's duration is the proposal");
+    const changed = updateSitting(db, first.id, { opensAt: inMinutes(40), durationMinutes: 160 });
+    assert.equal(changed.durationS, 160 * 60);
+    assert.equal(updateSitting(db, first.id, { opensAt: inMinutes(50) }).durationS, 160 * 60, "kept without durationMinutes");
+    const makeup = createSitting(db, offline.id, { opensAt: inMinutes(300) });
+    assert.equal(makeup.durationS, 160 * 60, "a make-up proposes the first sitting's");
+    const shorter = updateSitting(db, makeup.id, { durationMinutes: 100 });
+    assert.equal(Date.parse(shorter.closesAt) - Date.parse(shorter.opensAt), 100 * 60000);
+    assert.equal(getSitting(db, first.id).durationS, 160 * 60, "the first sitting keeps its own");
+  });
+
+  test("refuses 0 and 601 minutes and plans nothing", () => {
+    const { db, course } = seeded();
+    const offline = createOfflineTest(db, course.id, { name: "POS Langtest 1", durationMinutes: 100, gradebookKind: "test" });
+    for (const durationMinutes of [0, 601, 2.5, "50"]) {
+      assert.equal(keyOf(() => createSitting(db, offline.id, { opensAt: inMinutes(30), durationMinutes })), "exam.errors.tests.durationMinutes", String(durationMinutes));
+    }
+    assert.deepEqual(getTest(db, offline.id).sittings ?? [], []);
+    const sitting = createSitting(db, offline.id, { opensAt: inMinutes(30) });
+    assert.equal(keyOf(() => updateSitting(db, sitting.id, { durationMinutes: 601 })), "exam.errors.tests.durationMinutes");
+    assert.equal(getSitting(db, sitting.id).durationS, 100 * 60);
+  });
+
+  test("changing the test's duration leaves a planned sitting's alone", () => {
+    const { db, course } = seeded();
+    const offline = createOfflineTest(db, course.id, { name: "POS Langtest 1", durationMinutes: 100, gradebookKind: "test" });
+    const sitting = createSitting(db, offline.id, { opensAt: inMinutes(30), durationMinutes: 160 });
+    assert.equal(updateTest(db, offline.id, { durationMinutes: 90 }).durationS, 90 * 60);
+    const kept = getSitting(db, sitting.id);
+    assert.equal(kept.durationS, 160 * 60);
+    assert.equal(Date.parse(kept.closesAt) - Date.parse(kept.opensAt), 160 * 60000);
+  });
+});
+
 describe("the attendance table", () => {
   test("everyone starts present in group A; absence and group take effect on the open tests at once", () => {
     const { db, course } = seeded();

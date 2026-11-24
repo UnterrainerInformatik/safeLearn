@@ -1473,11 +1473,8 @@ function updateOfflineTest(db, test, { name, durationMinutes, handoutA, handoutB
       db.prepare("UPDATE assessment SET name = ? WHERE id = ?").run(trimmed, test.assessment_id);
     }
     if (questions !== null) replaceGroup(db, test, group, questions);
-    if (durationS !== test.duration_s) {
-      for (const sitting of db.prepare("SELECT id, opens_at FROM sitting WHERE test_id = ?").all(test.id)) {
-        db.prepare("UPDATE sitting SET duration_s = ?, closes_at = ? WHERE id = ?").run(durationS, plannedClose(sitting.opens_at, durationS), sitting.id);
-      }
-    }
+    // The test's duration is only the proposal for a first sitting: sittings
+    // already planned keep their own (offline-sitting-periods design D4).
     return getTest(db, test.id);
   });
 }
@@ -1487,7 +1484,7 @@ function plannedClose(opens, durationS) {
   return new Date(Date.parse(opens) + durationS * 1000).toISOString();
 }
 
-/** A planned offline window: it opens at `opensAt` for the test's duration, and has to end in the future. */
+/** A planned offline window: it opens at `opensAt` for the sitting's duration, and has to end in the future. */
 function plannedTimes(opensAt, durationS, at = now()) {
   const opens = instant(opensAt, "exam.errors.tests.startFormat");
   const closes = plannedClose(opens, durationS);
@@ -1568,20 +1565,24 @@ function writeRetakes(db, sittingId, usernames) {
  * participants - the whole roster, or those chosen; every later one is a
  * make-up for everybody not present in a started sitting and the `retakes`
  * marked (makeup-for-everyone-not-written design D1, D2). Its window is
- * planned from the start for the test's duration, and opens only when a
- * teacher starts it.
+ * planned from the start for its own `durationMinutes` - by default the
+ * test's for a first sitting and the first sitting's for a make-up
+ * (offline-sitting-periods design D4) - and opens only when a teacher starts
+ * it.
  */
 function createOfflineSitting(db, test, input = {}) {
   const { opensAt, participants = null } = input;
-  const makeup = firstSitting(db, test.id) !== null;
+  const first = firstSitting(db, test.id);
+  const makeup = first !== null;
   checkParticipantFields(makeup, input);
-  const times = plannedTimes(opensAt, test.duration_s);
+  const durationS = input.durationMinutes === undefined ? (makeup ? first.duration_s : test.duration_s) : offlineDuration(input.durationMinutes);
+  const times = plannedTimes(opensAt, durationS);
   const usernames = makeup ? [] : participantsOf(db, test, participants);
   const retakes = makeup ? chosenRetakes(db, test, input.retakes) ?? [] : [];
   return inTransaction(db, () => {
     const { lastInsertRowid } = db
       .prepare("INSERT INTO sitting (test_id, opens_at, closes_at, duration_s, makeup, created_at) VALUES (?, ?, ?, ?, ?, ?)")
-      .run(test.id, times.opens, times.closes, test.duration_s, makeup ? 1 : 0, now());
+      .run(test.id, times.opens, times.closes, durationS, makeup ? 1 : 0, now());
     const id = Number(lastInsertRowid);
     if (makeup) writeRetakes(db, id, retakes);
     else writeParticipants(db, id, usernames);
@@ -1596,15 +1597,19 @@ function requireNotStarted(row) {
   if (row.started_at !== null) throw new ConflictError("exam.errors.tests.sittingStarted");
 }
 
-/** Changes the planned start and the participants of an offline sitting not yet started. */
+/**
+ * Changes the planned start, the duration (`durationMinutes`, kept when
+ * missing) and the participants of an offline sitting not yet started.
+ */
 function updateOfflineSitting(db, row, test, input = {}) {
   requireNotStarted(row);
-  const times = plannedTimes(input.opensAt ?? row.opens_at, row.duration_s);
+  const durationS = input.durationMinutes === undefined ? row.duration_s : offlineDuration(input.durationMinutes);
+  const times = plannedTimes(input.opensAt ?? row.opens_at, durationS);
   checkParticipantFields(row.makeup === 1, input);
   const usernames = input.participants === undefined ? null : participantsOf(db, test, input.participants);
   const retakes = row.makeup === 1 ? chosenRetakes(db, test, input.retakes) : undefined;
   return inTransaction(db, () => {
-    db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ? WHERE id = ?").run(times.opens, times.closes, row.id);
+    db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ?, duration_s = ? WHERE id = ?").run(times.opens, times.closes, durationS, row.id);
     if (usernames !== null) writeParticipants(db, row.id, usernames);
     if (retakes !== undefined) writeRetakes(db, row.id, retakes);
     refreshColumnDate(db, row.test_id);
@@ -1615,7 +1620,7 @@ function updateOfflineSitting(db, row, test, input = {}) {
 
 /**
  * Starts an offline sitting now (design D2): its window runs from `at` for
- * the test's duration, and its column is dated by the day. Refused for an
+ * the sitting's duration, and its column is dated by the day. Refused for an
  * online sitting, for one already started, while a handout of the test
  * does not resolve - the refusal names the handout to choose again - and
  * while a variable of a handout has no value - the refusal names them

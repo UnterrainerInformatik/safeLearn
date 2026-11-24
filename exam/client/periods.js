@@ -2,7 +2,8 @@
  * The school's teaching periods (`school-periods`): parsing the deployment's
  * `SCHOOL_PERIODS`, turning a date, one period, an offset and a length into an
  * online sitting's start window and back (sitting-start-window design D5), and
- * - for offline sittings - a range of periods into a window and back.
+ * - for offline sittings - a range of periods into a window and back, and a
+ * start lesson, an offset and an end lesson into a planned sitting and back.
  *
  * Free of DOM code on purpose: the server imports this file at start to check
  * the variable, the unit checks import it, and the browser loads the same file
@@ -226,4 +227,44 @@ export function defaultStart(periods, now = new Date()) {
   const today = periods.find((period) => minutesOf(time) < minutesOf(period.start) + defaultOffset + defaultLength);
   const choice = today ? { date, n: today.n } : { date: nextDate(date), n: (periods.find((period) => period.n >= 1) ?? periods[0]).n };
   return { ...choice, offset: defaultOffset, length: defaultLength };
+}
+
+/**
+ * The plan of an offline sitting on `date` (offline-sitting-periods design
+ * D2): it starts `offset` minutes after the start of period `from` and ends
+ * at the end of period `to`, both by Vienna's clock on that date. The offset
+ * never moves the end. Throws for an unknown period, for `to` before `from`,
+ * for an offset outside the start period, and for a plan past midnight.
+ */
+export function planFor(periods, date, from, offset, to) {
+  const first = periodNumbered(periods, from);
+  const last = periodNumbered(periods, to);
+  if (!first || !last || to < from) throw new Error(`There is no plan from period ${from} to period ${to}.`);
+  const opens = minutesOf(first.start) + offset;
+  if (!Number.isInteger(offset) || offset < 0 || opens >= minutesOf(first.end)) throw new Error(`${offset} minutes do not lie within period ${from}.`);
+  const opensTime = timeOf(opens);
+  if (opensTime === null || minutesOf(last.end) <= opens) throw new Error(`A plan from ${opensTime} to ${last.end} does not lie on ${date}.`);
+  return { opensAt: viennaInstant(date, opensTime).toISOString(), closesAt: viennaInstant(date, last.end).toISOString() };
+}
+
+/**
+ * `{ date, from, offset, to }` when an offline sitting planned from `opensAt`
+ * for `durationMinutes` lies on the periods as the form reads it: the start
+ * lies within period `from` - from its start up to but not including its end,
+ * to the minute - and the planned end, on the same Vienna date, lies within
+ * `from` (then `to` is `from`) or is the end of a later period `to`. Null for
+ * any other plan, and without periods.
+ */
+export function matchPlan(periods, opensAt, durationMinutes) {
+  if (periods.length === 0 || !(durationMinutes > 0)) return null;
+  const opens = viennaLocal(opensAt);
+  const closes = viennaLocal(Date.parse(opensAt) + durationMinutes * 60000);
+  if (opens.date !== closes.date) return null;
+  const first = periods.find((candidate) => candidate.start <= opens.time && opens.time < candidate.end);
+  if (!first) return null;
+  const offset = minutesOf(opens.time) - minutesOf(first.start);
+  if (closes.time <= first.end) return { date: opens.date, from: first.n, offset, to: first.n };
+  const last = periods.find((candidate) => candidate.n > first.n && candidate.end === closes.time);
+  if (!last) return null;
+  return { date: opens.date, from: first.n, offset, to: last.n };
 }

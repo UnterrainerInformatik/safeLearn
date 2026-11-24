@@ -48,7 +48,7 @@
 
 import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, linkButton, saveOnChange, t } from "./frame.js";
 import { candidateMark, candidateNote, displayClass, displayPerson } from "./classes.js";
-import { displayStartWindow, displayWindow, handoutPrintControls, sheetPrintControls } from "./tests.js";
+import { displayOfflineWindow, displayStartWindow, handoutPrintControls, sheetPrintControls } from "./tests.js";
 import { setTone } from "./row-tone.js";
 
 const stateLabels = {
@@ -402,10 +402,11 @@ class LiveView extends ExamElement {
     if (this.extendWriting) this.extendWriting.hidden = state !== "open" || ![...(this.participants?.values() ?? [])].some((participant) => participant.status === "writing");
     // The board has nothing to show once the sitting is over.
     if (this.screenLink) this.screenLink.hidden = state === "over";
-    const key = `${this.sitting.opensAt} ${this.sitting.closesAt}`;
+    const key = `${this.sitting.opensAt} ${this.sitting.closesAt} ${this.sitting.durationS} ${this.sitting.startedAt}`;
     if (key !== this.windowKey) {
       this.windowKey = key;
-      this.windowShown.replaceChildren(this.offline ? displayWindow(this.sitting, this.periods) : displayStartWindow(this.sitting, this.periods));
+      // A planned offline sitting shows its plan, a started one its shared window.
+      this.windowShown.replaceChildren(this.offline ? displayOfflineWindow(this.sitting, this.periods) : displayStartWindow(this.sitting, this.periods));
     }
     if (this.bigRemaining) {
       if (notStarted) {
