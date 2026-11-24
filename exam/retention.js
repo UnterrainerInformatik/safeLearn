@@ -71,7 +71,8 @@ function dueStudents(db, today, years) {
 
 /** The kinds of record a purge deletes, each with how its rows of one student are counted. */
 const recordKinds = Object.freeze({
-  results: "SELECT COUNT(*) AS n FROM manual_entry WHERE username = ?",
+  // A teacher's grades per question of a test on paper are results too (pool-quickie design D4).
+  results: "SELECT (SELECT COUNT(*) FROM manual_entry WHERE username = ?1) + (SELECT COUNT(*) FROM question_grade WHERE username = ?1) AS n",
   notes: "SELECT COUNT(*) AS n FROM result_note WHERE username = ?",
   // A kind of its own: free text only teachers saw (exam-live-teacher-notes D4).
   teacherNotes: "SELECT COUNT(*) AS n FROM teacher_note WHERE username = ?",
@@ -123,6 +124,7 @@ export function purgeLeavers(db, today, expected, years = defaultRetentionYears)
       "DELETE FROM result_note WHERE username = ?",
       "DELETE FROM teacher_note WHERE username = ?",
       "DELETE FROM manual_entry WHERE username = ?",
+      "DELETE FROM question_grade WHERE username = ?",
       "DELETE FROM semester_grade WHERE username = ?",
       // An attempt's questions, tokens, answers and refused browsers go with it.
       "DELETE FROM attempt WHERE username = ?",

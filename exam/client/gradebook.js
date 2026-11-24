@@ -214,6 +214,8 @@ function scrollingTable(table) {
 /** What a result field shows for a stored result in `column`. */
 function cellText(column, result) {
   if (!result) return "";
+  // A test on paper's result, computed from its correction table: the percentage before a factor A:B.
+  if (column.paper) return percent(result.enteredValue ?? result.value);
   if (column.readOnly) return `${format.number(result.points)}/${format.number(column.maxPoints)}`;
   if (isMark(column)) return result.value === 1 ? "+" : "−";
   if (isGraded(column)) return String(result.grade);
@@ -481,7 +483,7 @@ class GradebookView extends ExamElement {
     // A test column's evaluation, a control of its own beside the header's
     // button or link, never inside it (test-evaluation design D4).
     const evaluation = evaluatedCategories.includes(column.category) ? evaluationButton(this, course.id, column.id, column.name) : null;
-    if (column.readOnly) {
+    if (column.readOnly && !column.paper) {
       const [day, ...rest] = columnLines(column);
       return h(
         "th",
@@ -684,7 +686,11 @@ class GradebookView extends ExamElement {
     const noted = row.notes?.[column.id] ?? null;
     if (!editable) {
       const mark = noted === null ? null : h("span", { class: "sl-exam-note-mark", title: noted, "aria-label": noted });
-      if (column.readOnly) return h("td", { class: mark ? "sl-exam-online-result sl-exam-noted-cell" : "sl-exam-online-result", "data-column": String(column.id), "data-student": row.username }, cellText(column, result), mark);
+      if (column.readOnly) {
+        const counted = h("span", { class: "sl-exam-counted" });
+        showCounted(counted, result);
+        return h("td", { class: mark ? "sl-exam-online-result sl-exam-noted-cell" : "sl-exam-online-result", "data-column": String(column.id), "data-student": row.username }, cellText(column, result), counted, mark);
+      }
       const counted = h("span", { class: "sl-exam-counted" });
       showCounted(counted, result);
       return h("td", { class: mark ? "sl-exam-noted-cell" : null }, cellText(column, result), counted, mark);
@@ -695,6 +701,7 @@ class GradebookView extends ExamElement {
         "td",
         { class: "sl-exam-online-result sl-exam-noted-cell", "data-column": String(column.id), "data-student": row.username },
         h("span", { class: "sl-exam-online-text" }, cellText(column, result)),
+        column.paper ? (() => { const counted = h("span", { class: "sl-exam-counted" }); showCounted(counted, result); return counted; })() : null,
         note.mark,
         note.field
       );
@@ -973,9 +980,9 @@ class GradebookView extends ExamElement {
     const name = h("input", { type: "text", name: "name", value: column?.name ?? "", placeholder: t("exam.gradebook.namePlaceholder"), "aria-label": t("exam.gradebook.name") });
     const proposed = column ? column.date : defaultDate(course.year, semester);
     const date = h("sl-date-input", { name: "date", required: true, min: course.year.startsOn, max: course.year.endsOn, value: proposed, "aria-label": t("exam.gradebook.date") });
-    // Marks and grades have no maximum (design D6).
+    // Marks and grades have no maximum (design D6), nor has a test on paper's computed column.
     const max =
-      ["plusminus", "projectmark", "presentation", "project"].includes(kind)
+      ["plusminus", "projectmark", "presentation", "project"].includes(kind) || column?.paper
         ? null
         : h("input", {
             type: "text",
@@ -1037,8 +1044,14 @@ class GradebookView extends ExamElement {
           {},
           cancel(t("exam.gradebook.close"), "sl-exam-column-close"),
           " ",
-          // An offline test's column goes with its test, on the test's page.
-          column.testId
+          // An offline test's column goes with its test, on the test's page; a test on paper's is graded there.
+          column.paper
+            ? [
+                linkButton({ label: t("exam.paper.openCorrection"), href: `/exam/tests/${column.testId}#correction`, kind: "primary", class: "sl-exam-column-correction" }),
+                " ",
+                linkButton({ label: t("exam.gradebook.openTestPage"), href: `/exam/tests/${column.testId}`, class: "sl-exam-column-test" }),
+              ]
+            : column.testId
             ? linkButton({ label: t("exam.gradebook.openTestPage"), href: `/exam/tests/${column.testId}`, class: "sl-exam-column-test" })
             : kind === "project"
               ? this.deleteProjectButton(column, marks, remove)

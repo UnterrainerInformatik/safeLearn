@@ -13,7 +13,14 @@
  * handouts - a path that no longer resolves in red - chosen in the picker,
  * their preview and solution page, the values of their variables - a name
  * without one in red - and its sittings, which are planned and
- * started from their attendance page; it has no questions.
+ * started from their attendance page.
+ *
+ * A test on paper (`offline-test-questions`) is an offline test composed
+ * from pool questions instead of handouts: its page shows each group's
+ * questions with their order, weight and answer lines, the print buttons of
+ * each group's sheet and solution, and the correction table, in which each
+ * question of each present student gets a grade from 1 to 5. Every
+ * question of an online test carries a weight too (pool-quickie design D1).
  *
  * A snapshot's texts are stored markup, sanitized when the pool was imported,
  * as in the pool's preview.
@@ -23,7 +30,7 @@
  */
 
 import { parseTime } from "../../i18n/format.js";
-import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, linkButton, markRows, readOnlyFor, t } from "./frame.js";
+import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, gridArrowKeys, h, linkButton, markRows, readOnlyFor, saveOnChange, t } from "./frame.js";
 import { displayClass, personName } from "./classes.js";
 import { openCreatorOf } from "./bar.js";
 import { defaultLength, defaultOffset, defaultPeriods, defaultStart, matchStart, matchWindow, nextWeekday, periodTimes, startWindowFor, viennaInstant, viennaLocal, windowFor } from "./periods.js";
@@ -87,6 +94,23 @@ export function handoutPrintControls(base, handout, missing) {
         )
       : null
   );
+}
+
+/**
+ * The print buttons of one group's sheet of a test on paper
+ * (`offline-test-questions`): the sheet and its solution, each in a new tab.
+ * `base` is the test's or the sitting's page path, whose date the print
+ * carries.
+ */
+export function sheetPrintControls(base, group) {
+  const control = (solution) =>
+    linkButton({
+      label: solution ? t("exam.paper.printSolution") : t("exam.paper.printSheet"),
+      href: `${base}/sheets/${group}/${solution ? "solution/" : ""}print`,
+      newWindow: true,
+      class: solution ? "sl-exam-sheet-print-solution" : "sl-exam-sheet-print",
+    });
+  return h("span", { class: "sl-exam-sheet-prints", "data-group": group }, control(false), " ", control(true));
 }
 
 /** The variables of `handout` that `variables` - a test's, `{ name, value }` - hold no value for. */
@@ -237,7 +261,7 @@ class TestList extends ExamElement {
                       h("a", { href: `/exam/tests/${test.id}` }, test.name),
                       test.kind === "offline" ? [" ", kindMarker(), handoutPaths(test.handouts)] : null
                     ),
-                    test.kind === "offline"
+                    test.kind === "offline" && !test.paper
                       ? h("td", { class: "sl-exam-quiet" }, "–")
                       : test.questions === 0
                         ? h("td", { class: "sl-embed-error", title: t("exam.tests.noQuestions") }, "0")
@@ -454,6 +478,8 @@ class TestDetail extends ExamElement {
         { class: "sl-exam-quiet sl-exam-test-head" },
         h("a", { href: `/exam/tests?course=${course.id}` }, `${displayClass(course.className)} ${course.subject}`),
         ` (${course.yearName}) · ${en ? t("exam.classes.languageEnglish") : t("exam.classes.languageGerman")} · ${t("exam.tests.questionCount", { count: test.questions.length })} · `,
+        h("span", { class: "sl-exam-test-total-weight" }, t("exam.paper.totalWeight", { weight: test.totalWeight?.A ?? test.questions.length })),
+        " · ",
         test.started ? t("exam.tests.writtenBy", { started: test.attempts.started, submitted: test.attempts.submitted }) : t("exam.tests.notWrittenYet")
       ),
       h(
@@ -487,6 +513,7 @@ class TestDetail extends ExamElement {
             "li",
             { "data-question": String(question.id), lang: course.language },
             h("h3", {}, en ? question.nameEn : question.nameDe),
+            this.weightControl(test, question, test.started),
             storedMarkup(en ? question.textEn : question.textDe, "sl-exam-pool-text"),
             h(
               "ol",
@@ -1070,6 +1097,256 @@ Object.assign(TestDetail.prototype, {
     return button({ label: t("exam.evaluation.open"), class: "sl-exam-test-evaluation", action: () => openEvaluation(this, test.course.id, test.column) });
   },
 
+  /**
+   * A question's weight (pool-quickie design D1): a field from 1 to 10 saved
+   * as it changes, or the weight as text once `locked`. Each save redraws the
+   * total weight.
+   */
+  weightControl(test, question, locked) {
+    if (locked) return h("p", { class: "sl-exam-quiet sl-exam-question-weight", "data-weight": String(question.weight) }, t("exam.paper.weightShown", { weight: question.weight }));
+    const field = h("input", {
+      type: "number",
+      min: "1",
+      max: "10",
+      step: "1",
+      class: "sl-exam-number sl-exam-question-weight-field",
+      name: `weight-${question.id}`,
+      value: String(question.weight),
+      "aria-label": t("exam.paper.weightLabel"),
+    });
+    saveOnChange(field, {
+      check: (value) => (/^(10|[1-9])$/.test(value.trim()) ? null : t("exam.errors.tests.weight")),
+      save: (value) => examApi(`/tests/${test.id}/questions/${question.id}`, { method: "PUT", body: { weight: Number(value) } }),
+      onSaved: (answer) => this.drawTotals(answer),
+    });
+    return h("p", { class: "sl-exam-question-weight" }, h("label", {}, `${t("exam.paper.weightLabel")} `, field));
+  },
+
+  /** Writes the total weights `test` answers into the page's total fields. */
+  drawTotals(test) {
+    this.test.totalWeight = test.totalWeight;
+    this.test.questions = test.questions;
+    for (const total of this.querySelectorAll("[data-total-group]")) {
+      total.textContent = t("exam.paper.totalWeight", { weight: test.totalWeight[total.dataset.totalGroup] });
+    }
+    const online = this.querySelector(".sl-exam-test-total-weight");
+    if (online) online.textContent = t("exam.paper.totalWeight", { weight: test.totalWeight.A });
+  },
+
+  /**
+   * A test on paper's questions (`offline-test-questions`): per group its
+   * questions in their order - changeable until the first sitting starts -
+   * with weight and, for a free-text question, its answer lines, the group's
+   * total weight, the print buttons of its sheet and solution, and the way to
+   * choose its questions in the browser. Group B is offered once group A
+   * holds questions.
+   */
+  paperSection(test) {
+    const groups = test.twoGroups ? ["A", "B"] : ["A"];
+    const choose = (group) =>
+      linkButton({
+        label: t("exam.paper.chooseQuestions", { group }),
+        href: `/exam/pool?course=${test.course.id}&test=${test.id}&group=${group}`,
+        class: "sl-exam-paper-choose",
+        "data-group": group,
+      });
+    const en = test.course.language === "en";
+    const section = (group) => {
+      const questions = test.questions.filter((question) => question.group === group);
+      const ids = questions.map((question) => question.questionId);
+      const move = (index, step) => {
+        const order = [...ids];
+        [order[index], order[index + step]] = [order[index + step], order[index]];
+        this.change({ questionIds: order.filter((id) => id !== null), group });
+      };
+      return h(
+        "section",
+        { class: "sl-exam-paper-group", "data-group": group },
+        h("h3", {}, test.twoGroups ? t("exam.paper.groupHeading", { group }) : t("exam.tests.questionsHeading")),
+        h(
+          "p",
+          { class: "sl-exam-quiet sl-exam-paper-group-head" },
+          t("exam.tests.questionCount", { count: questions.length }),
+          " · ",
+          h("span", { "data-total-group": group }, t("exam.paper.totalWeight", { weight: test.totalWeight[group] })),
+          " · ",
+          sheetPrintControls(`/exam/tests/${test.id}`, group)
+        ),
+        questions.length === 0
+          ? h("p", { class: "sl-exam-test-empty", role: "status" }, t("exam.paper.noQuestions"))
+          : h(
+              "ol",
+              { class: "sl-exam-test-questions sl-exam-paper-questions" },
+              questions.map((question, index) =>
+                h(
+                  "li",
+                  { "data-question": String(question.id), "data-type": question.type, lang: test.course.language },
+                  h("h4", {}, en ? question.nameEn : question.nameDe, question.type === "freetext" ? h("span", { class: "sl-exam-quiet" }, ` · ${t("exam.paper.freetext")}`) : null),
+                  h(
+                    "p",
+                    { class: "sl-exam-actions sl-exam-paper-settings" },
+                    this.weightControl(test, question, false),
+                    question.type === "freetext" ? this.linesControl(test, question) : null,
+                    test.begun
+                      ? null
+                      : [
+                          index > 0 ? button({ label: "↑", class: "sl-exam-paper-up", title: t("exam.paper.moveUp"), "aria-label": t("exam.paper.moveUp"), action: () => move(index, -1) }) : null,
+                          index < questions.length - 1
+                            ? button({ label: "↓", class: "sl-exam-paper-down", title: t("exam.paper.moveDown"), "aria-label": t("exam.paper.moveDown"), action: () => move(index, 1) })
+                            : null,
+                          question.questionId === null
+                            ? null
+                            : confirmButton({
+                                class: "sl-exam-test-remove",
+                                label: t("exam.tests.removeQuestion"),
+                                armed: t("exam.tests.removeQuestionUnwrittenArmed"),
+                                action: () => this.change({ questionIds: ids.filter((id) => id !== null && id !== question.questionId), group }),
+                              }),
+                        ]
+                  ),
+                  storedMarkup(en ? question.textEn : question.textDe, "sl-exam-pool-text")
+                )
+              )
+            ),
+        test.begun ? null : h("p", {}, choose(group))
+      );
+    };
+    const addB = !test.begun && !test.twoGroups && test.questions.length > 0 ? h("p", {}, choose("B")) : null;
+    return h(
+      "section",
+      { class: "sl-exam-test-paper" },
+      h("h2", {}, t("exam.paper.questionsHeading")),
+      h("p", { class: "sl-exam-quiet" }, test.begun ? t("exam.paper.fixedNote") : t("exam.paper.followsNote")),
+      groups.map(section),
+      addB
+    );
+  },
+
+  /** A free-text question's answer lines on the sheet, from 1 to 40, saved as they change. */
+  linesControl(test, question) {
+    const field = h("input", {
+      type: "number",
+      min: "1",
+      max: "40",
+      step: "1",
+      class: "sl-exam-number sl-exam-question-lines-field",
+      name: `lines-${question.id}`,
+      value: String(question.answerLines),
+      "aria-label": t("exam.paper.linesLabel"),
+    });
+    saveOnChange(field, {
+      check: (value) => (/^\d{1,2}$/.test(value.trim()) && Number(value) >= 1 && Number(value) <= 40 ? null : t("exam.errors.tests.answerLines")),
+      save: (value) => examApi(`/tests/${test.id}/questions/${question.id}`, { method: "PUT", body: { answerLines: Number(value) } }),
+    });
+    return h("label", { class: "sl-exam-question-lines" }, ` ${t("exam.paper.linesLabel")} `, field);
+  },
+
+  /**
+   * The correction table of a test on paper (pool-quickie design D8): loaded
+   * on its own, one table per group with a row per present student of that
+   * group and a grade field per question, saved as it changes, with the
+   * sheet's arrow keys; each row shows its result once complete, and beside
+   * it the result the factor A:B makes of it.
+   */
+  correctionSection(test) {
+    const holder = h("div", { class: "sl-exam-correction-body" }, h("p", { class: "sl-exam-quiet" }, "…"));
+    const section = h("section", { class: "sl-exam-test-correction", id: "correction" }, h("h2", {}, t("exam.paper.correctionHeading")), holder);
+    examApi(`/tests/${test.id}/grades`)
+      .then((table) => holder.replaceChildren(this.correctionTables(test, table)))
+      .catch((error) => holder.replaceChildren(h("p", { class: "sl-exam-message" }, refusal(error))));
+    return section;
+  },
+
+  correctionTables(test, table) {
+    if (table.rows.length === 0) return h("p", { class: "sl-exam-quiet sl-exam-correction-empty" }, t("exam.paper.noRows"));
+    const groups = table.twoGroups ? ["A", "B"] : ["A"];
+    const raised = table.factor.a > 1 || table.factor.b > 1;
+    const percentText = (value) => (value === null || value === undefined ? "" : format.percent(value, 1));
+    let rowIndex = 0;
+    const draw = (group) => {
+      const questions = table.questions[group];
+      const rows = table.rows.filter((row) => row.group === group);
+      if (rows.length === 0) return null;
+      const body = h(
+        "tbody",
+        {},
+        rows.map((row) => {
+          const r = rowIndex++;
+          const result = h("td", { class: "sl-exam-correction-result", "data-result": row.username });
+          const showResult = (answer) => {
+            result.replaceChildren(
+              answer.value === null ? h("span", { class: "sl-exam-quiet" }, "–") : percentText(answer.value),
+              raised && answer.counted !== null && answer.counted !== answer.value ? h("span", { class: "sl-exam-quiet sl-exam-correction-counted" }, ` → ${percentText(answer.counted)}`) : null
+            );
+          };
+          showResult(row);
+          return h(
+            "tr",
+            { "data-username": row.username, "data-group": group },
+            h("th", { scope: "row" }, personName(row)),
+            questions.map((question, c) => {
+              const field = h("input", {
+                type: "text",
+                inputmode: "numeric",
+                maxlength: "1",
+                size: "2",
+                class: "sl-exam-cell sl-exam-grade-cell",
+                "data-row": String(r),
+                "data-col": String(c),
+                "data-question": String(question.id),
+                value: row.grades[question.id] === undefined ? "" : String(row.grades[question.id]),
+                "aria-label": `${personName(row)}: ${t("exam.paper.sheetQuestion", { n: question.n })}`,
+              });
+              saveOnChange(field, {
+                check: (value) => (value.trim() === "" || /^[1-5]$/.test(value.trim()) ? null : t("exam.errors.paper.gradeRange")),
+                save: (value) =>
+                  examApi(`/tests/${test.id}/grades/${question.id}/${encodeURIComponent(row.username)}`, {
+                    method: "PUT",
+                    body: { grade: value.trim() === "" ? null : Number(value.trim()) },
+                  }),
+                onSaved: (answer) => showResult(answer),
+              });
+              return h("td", {}, field);
+            }),
+            result
+          );
+        })
+      );
+      return h(
+        "div",
+        { class: "sl-exam-correction-group", "data-group": group },
+        table.twoGroups ? h("h3", {}, t("exam.paper.groupHeading", { group })) : null,
+        gridArrowKeys(
+          markRows(
+            h(
+              "table",
+              { class: "sl-exam-table sl-exam-correction-table" },
+              h(
+                "thead",
+                {},
+                h(
+                  "tr",
+                  {},
+                  h("th", {}, t("exam.live.columnStudent")),
+                  questions.map((question) => h("th", { title: question.name, "data-question": String(question.id) }, t("exam.paper.columnQuestion", { n: question.n, weight: question.weight }))),
+                  h("th", {}, t("exam.paper.columnResult"))
+                )
+              ),
+              body
+            )
+          )
+        )
+      );
+    };
+    return h(
+      "div",
+      {},
+      raised ? h("p", { class: "sl-exam-quiet sl-exam-correction-factor" }, t("exam.paper.factorNote", { a: format.fixed(table.factor.a, 2), b: format.fixed(table.factor.b, 2) })) : null,
+      groups.map(draw),
+      h("p", { class: "sl-exam-quiet" }, t("exam.paper.correctionNote"))
+    );
+  },
+
   renderOffline(test) {
     const course = test.course;
     return readOnlyFor({ name: course.yearName, closed: course.yearClosed }, h(
@@ -1085,13 +1362,14 @@ Object.assign(TestDetail.prototype, {
           test.gradebookKind === "shorttest" ? t("exam.offline.countsAsShortTest") : t("exam.offline.countsAsTest")
         }`
       ),
-      h("p", { class: "sl-exam-quiet" }, t("exam.offline.explanation")),
+      h("p", { class: "sl-exam-quiet" }, test.paper ? t("exam.paper.explanation") : t("exam.offline.explanation")),
       test.column === null ? null : h("p", { class: "sl-exam-actions sl-exam-test-actions" }, this.evaluationAction(test)),
       this.offlineForm(test),
       this.message,
-      this.handoutsSection(test),
-      this.variablesSection(test),
-      this.offlineSittingsSection(test)
+      test.paper ? this.paperSection(test) : this.handoutsSection(test),
+      test.paper ? null : this.variablesSection(test),
+      this.offlineSittingsSection(test),
+      test.paper ? this.correctionSection(test) : null
     ));
   },
 

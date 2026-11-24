@@ -26,7 +26,8 @@ import {
 } from "./classes.js";
 import { bandMidpoint, entryCategory, gradeFor, proposal, semesterOf, semesters, yearProposal } from "./grading.js";
 import { reviewOpenCondition } from "./attempts.js";
-import { countingGroups, viennaDate } from "./tests.js";
+import { countingGroups, hasTwoGroups, isPaper, viennaDate } from "./tests.js";
+import { paperResults } from "./paper-grades.js";
 
 /**
  * The kinds of manual column: those of the categories, and a project's `+`/`-`
@@ -173,14 +174,17 @@ function columnFromRow(row, results = 0, notes = 0) {
     projectId: row.project_id ?? null,
     // The offline test this column belongs to, which its header links to (`offline-test`).
     testId: row.test_id ?? null,
-    // An offline test's factor A:B and whether it counts, with two handouts (offline-test-group-factor D4).
+    // An offline test's factor A:B and whether it counts, with two groups (offline-test-group-factor D4):
+    // two handouts, or questions for group B. `twoHandouts` keeps its name.
     ...(factor ? { groupFactor: { a: factor.a, b: factor.b }, twoHandouts: factor.twoHandouts } : {}),
+    // The column of a test on paper is computed from its correction table and read-only (`offline-test-questions`).
+    ...(row.paper ? { paper: true, readOnly: true } : {}),
   };
 }
 
-/** A test row's factor A:B; a database before migration 020 reads 1:1. */
+/** A test row's factor A:B; a database before migration 020 reads 1:1. `two_groups` is set by `testsByColumn`. */
 function factorOf(test) {
-  return { a: test.group_factor_a ?? 1, b: test.group_factor_b ?? 1, twoHandouts: test.handout_b !== null && test.handout_b !== undefined };
+  return { a: test.group_factor_a ?? 1, b: test.group_factor_b ?? 1, twoHandouts: test.two_groups ?? (test.handout_b !== null && test.handout_b !== undefined) };
 }
 
 /**
@@ -194,13 +198,13 @@ function testsByColumn(db, courseId) {
       .prepare("SELECT * FROM test WHERE course_id = ?")
       .all(courseId)
       .filter((test) => test.assessment_id !== undefined && test.assessment_id !== null)
-      .map((test) => [test.assessment_id, test])
+      .map((test) => [test.assessment_id, { ...test, two_groups: hasTwoGroups(db, test) }])
   );
 }
 
-/** A column's fields from the offline test it belongs to: `test_id` and `group_factor`, or nulls. */
+/** A column's fields from the offline test it belongs to: `test_id`, `group_factor` and `paper`, or nulls. */
 function testFields(test) {
-  return test ? { test_id: test.id, group_factor: factorOf(test) } : { test_id: null, group_factor: null };
+  return test ? { test_id: test.id, group_factor: factorOf(test), paper: isPaper(test) } : { test_id: null, group_factor: null, paper: false };
 }
 
 /** A column's row with the offline test it belongs to, if any, as `test_id`. */
@@ -213,6 +217,20 @@ function getColumnRow(db, id) {
 
 function resultCount(db, id) {
   return db.prepare("SELECT COUNT(*) AS n FROM manual_entry WHERE assessment_id = ?").get(id).n;
+}
+
+/** How many complete results each column of a test on paper holds, by column id. */
+function paperCounts(db, courseId) {
+  const counts = new Map();
+  for (const { test, rows } of paperResults(db, courseId, readScale(db)).values()) {
+    counts.set(test.assessment_id, [...rows.values()].filter((row) => row.value !== null).length);
+  }
+  return counts;
+}
+
+/** Refuses a typed result, a maximum or a delete for the computed column of a test on paper. */
+function requireTyped(column) {
+  if (column.paper) throw new ConflictError("exam.errors.gradebook.columnComputed");
 }
 
 /**
@@ -233,7 +251,8 @@ function noteCount(db, row) {
 
 export function getColumn(db, id) {
   const row = getColumnRow(db, id);
-  return columnFromRow(row, resultCount(db, id), noteCount(db, row));
+  const results = row.paper ? paperCounts(db, row.course_id).get(row.id) ?? 0 : resultCount(db, id);
+  return columnFromRow(row, results, noteCount(db, row));
 }
 
 /**
@@ -268,6 +287,7 @@ export function courseColumns(db, courseId, semester = null) {
   const tests = testsByColumn(db, courseId);
   const rows = db.prepare("SELECT * FROM assessment WHERE course_id = ? ORDER BY held_on, created_at, id").all(courseId);
   const notes = columnNoteCounts(db, courseId, rows);
+  for (const [id, n] of paperCounts(db, courseId)) counts.set(id, n);
   const manual = rows.map((row) => columnFromRow({ ...row, ...testFields(tests.get(row.id)) }, counts.get(row.id) ?? 0, notes.get(row.id) ?? 0));
   const projectDates = new Map(manual.filter((column) => column.kind === "project").map((column) => [column.id, column.date]));
   const sorted = [...onlineColumns(db, courseId), ...manual]
@@ -393,6 +413,7 @@ export function updateColumn(db, id, input = {}) {
   const course = getCourse(db, row.course_id);
   const date = input.date === undefined ? row.held_on : columnDate(input.date, course.year);
   const name = input.name === undefined ? row.name : columnName(input.name, date);
+  if (input.maxPoints !== undefined) requireTyped(row);
   const maxPoints = input.maxPoints === undefined ? row.max_points : columnMax(input.maxPoints, row.kind);
   const factor = input.groupFactor === undefined ? null : groupFactor(input.groupFactor, row);
   const results = resultCount(db, id);
@@ -487,6 +508,7 @@ function normalizeResult(input, column, scale) {
  */
 export function setResult(db, columnId, username, input) {
   const column = getColumnRow(db, columnId);
+  requireTyped(column);
   const course = getCourse(db, column.course_id);
   const student = requireRosterEntry(db, course, username);
   const { value, points, grade } = normalizeResult(input, column, readScale(db));
@@ -510,6 +532,7 @@ export function setResult(db, columnId, username, input) {
 /** Removes one student's result in one column, if there is one. Answers the row as `setResult` does. */
 export function deleteResult(db, columnId, username) {
   const column = getColumnRow(db, columnId);
+  requireTyped(column);
   const course = getCourse(db, column.course_id);
   const student = requireRosterEntry(db, course, username);
   db.prepare("DELETE FROM manual_entry WHERE assessment_id = ? AND username = ?").run(columnId, student.username);
@@ -681,18 +704,23 @@ function entryFromRow(row, scale) {
   };
 }
 
+/** Whether the schema has the weights of a test's questions (schema 24). */
+function hasWeights(db) {
+  return db.prepare("SELECT 1 FROM pragma_table_info('test_question') WHERE name = 'weight'").get() !== undefined;
+}
+
 /**
  * The online tests of a course that have a sitting, as columns of the
  * category `onlineTests` (exam-online-tests design D3): named by the test,
  * dated by its first sitting's start in Vienna - which decides the semester,
- * also for a later make-up - and out of its number of questions. Their
+ * also for a later make-up - and out of its total weight (pool-quickie D1). Their
  * results are the attempts', so the sheet shows them and never edits them.
  */
 function onlineColumns(db, courseId) {
   return db
     .prepare(
       `SELECT t.*, MIN(s.opens_at) AS first_opens_at,
-         (SELECT COUNT(*) FROM test_question q WHERE q.test_id = t.id) AS questions,
+         (SELECT ${hasWeights(db) ? "COALESCE(SUM(q.weight), 0)" : "COUNT(*)"} FROM test_question q WHERE q.test_id = t.id) AS questions,
          (SELECT COUNT(*) FROM attempt a WHERE a.test_id = t.id AND a.submitted_at IS NOT NULL) AS results
        FROM test t JOIN sitting s ON s.test_id = t.id
        WHERE t.course_id = ?
@@ -800,15 +828,53 @@ function courseEntries(db, course, scale, username = null) {
       ? db.prepare(`${select} ORDER BY a.held_on, a.created_at, a.id`).all(course.id)
       : db.prepare(`${select} AND e.username = ? ORDER BY a.held_on, a.created_at, a.id`).all(course.id, username);
   const raise = groupRaise(db, course.id, scale);
-  const manual = rows.map((row) => {
-    const projectId = columns.get(row.assessment_id).project_id ?? null;
-    const project = columns.get(projectId);
-    return raise(entryFromRow({ ...row, project_id: projectId, project_held_on: project?.held_on, project_name: project?.name }, scale));
-  });
+  // A test on paper's column takes no typed result: its entries are computed from its grades (pool-quickie D5).
+  const paper = paperResults(db, course.id, scale);
+  const computed = new Set([...paper.values()].map(({ test }) => test.assessment_id));
+  const manual = rows
+    .filter((row) => !computed.has(row.assessment_id))
+    .map((row) => {
+      const projectId = columns.get(row.assessment_id).project_id ?? null;
+      const project = columns.get(projectId);
+      return raise(entryFromRow({ ...row, project_id: projectId, project_held_on: project?.held_on, project_name: project?.name }, scale));
+    });
+  for (const { test, rows: results } of paper.values()) {
+    const column = columns.get(test.assessment_id);
+    if (!column) continue;
+    for (const [student, result] of results) {
+      if (result.value === null || (username !== null && student !== username)) continue;
+      manual.push(raise(paperEntry(test, column, student, result.value, scale)));
+    }
+  }
   const online = onlineEntries(db, course.id, scale, username);
   // A stable sort: entries of one date keep the order they had.
-  const all = online.length === 0 ? manual : [...online, ...manual].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const all = online.length === 0 && paper.size === 0 ? manual : [...online, ...manual].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   return all.filter((entry) => kindInUse(course, entry.kind));
+}
+
+/**
+ * A computed result of a test on paper as an entry, like a typed percentage:
+ * its fraction, no points, and the grade the scale gives it. The factor A:B
+ * is applied by `groupRaise` after.
+ */
+function paperEntry(test, column, username, value, scale) {
+  return {
+    id: `paper-${test.id}-${username}`,
+    columnId: column.id,
+    username,
+    kind: column.kind,
+    category: entryCategory[column.kind] ?? null,
+    value,
+    points: null,
+    maxPoints: null,
+    grade: gradeFor(value, scale),
+    date: column.held_on,
+    semesterDate: column.held_on,
+    projectId: null,
+    projectName: null,
+    name: column.name,
+    computed: true,
+  };
 }
 
 // ----------------------------------------------------- overrides and comments

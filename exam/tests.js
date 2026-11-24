@@ -4,10 +4,12 @@
  * written in, and the lists of a course's or a school year's tests.
  *
  * Offline tests (`offline-test`, exam-offline-sittings design D1) are tests of
- * the same table with `kind = 'offline'`: no questions, a duration, up to two
- * handouts and a column of their own in the gradebook. Their sittings open
- * only when a teacher starts them (design D2), and every guard about
- * questions asks for `kind = 'online'`.
+ * the same table with `kind = 'offline'`: a duration, up to two handouts or
+ * pool questions for group A and group B (`offline-test-questions`, never
+ * both), and a column of their own in the gradebook. Their sittings open
+ * only when a teacher starts them (design D2). Every question of a test
+ * carries a weight (pool-quickie design D1) and a group, 'A' for an online
+ * test (design D2).
  *
  * A test holds a copy of its questions with both languages, answers and
  * correct flags, and everything that shows or grades it reads only that copy.
@@ -89,10 +91,15 @@ export function pendingTestsWith(db, questionId, at = now()) {
        JOIN class cl ON cl.id = co.class_id
        WHERE EXISTS (SELECT 1 FROM test_question tq WHERE tq.test_id = t.id AND tq.question_id = ?)
          AND NOT EXISTS (SELECT 1 FROM attempt a WHERE a.test_id = t.id)
-         AND NOT EXISTS (SELECT 1 FROM sitting s WHERE s.test_id = t.id AND s.opens_at <= ?)
+         AND NOT EXISTS (SELECT 1 FROM sitting s WHERE s.test_id = t.id AND s.opens_at <= ?${offlineSittings(db) ? ` AND ${startedCondition("s")}` : ""})
        ORDER BY t.created_at, t.id`
     )
     .all(questionId, at);
+}
+
+/** Whether the schema has offline sittings, started by a teacher (schema 13); the checks of earlier migrations read through here. */
+function offlineSittings(db) {
+  return db.prepare("SELECT 1 FROM pragma_table_info('sitting') WHERE name = 'started_at'").get() !== undefined;
 }
 
 /**
@@ -111,13 +118,15 @@ function testRow(db, id) {
 }
 
 /**
- * The pool questions with `questionIds` for an online test, in that order:
- * every one known, a choice question (`online-test`: an online test holds no
- * free-text question), not retired - unless it is in `keep`, the ones the
- * test already holds - and none twice. A test without a question is refused.
+ * The pool questions with `questionIds` for a test, in that order: every one
+ * known, for an online test a choice question (`online-test`: an online test
+ * holds no free-text question, a test on paper does), not retired - unless it
+ * is in `keep`, the ones the test already holds - and none twice. A test
+ * without a question is refused, unless `empty` allows it (a group of a test
+ * on paper emptied).
  */
-function chosenQuestions(db, questionIds, { keep = [] } = {}) {
-  if (!Array.isArray(questionIds) || questionIds.length === 0) {
+function chosenQuestions(db, questionIds, { keep = [], paper = false, empty = false } = {}) {
+  if (!Array.isArray(questionIds) || (questionIds.length === 0 && !empty)) {
     throw new InvalidInputError("exam.errors.tests.oneQuestion");
   }
   if (!questionIds.every((id) => Number.isInteger(id) && id > 0)) {
@@ -130,7 +139,7 @@ function chosenQuestions(db, questionIds, { keep = [] } = {}) {
   return questionIds.map((id) => {
     const question = read.get(id);
     if (!question) throw new InvalidInputError("exam.errors.tests.noPoolQuestion", { id });
-    if (question.type === "freetext") throw new InvalidInputError("exam.errors.tests.freetextOnline", { name: question.name_de });
+    if (question.type === "freetext" && !paper) throw new InvalidInputError("exam.errors.tests.freetextOnline", { name: question.name_de });
     if (question.retired === 1 && !keep.includes(id)) throw new InvalidInputError("exam.errors.tests.questionRetired", { name: question.name_de });
     return question;
   });
@@ -193,23 +202,25 @@ function copyAnswers(db, testQuestionId, questionId) {
  */
 export function refreshCopy(db, testId, question) {
   if (question.type === "freetext" && testRow(db, testId).kind === "online") return;
-  const row = db.prepare("SELECT id, type FROM test_question WHERE test_id = ? AND question_id = ?").get(testId, question.id);
-  // The model solution only where the question or its copy is a free-text
-  // one, as `snapshot` does; between two choice questions it stays NULL.
-  const solution = question.type === "freetext" || row.type === "freetext";
-  db.prepare(
-    `UPDATE test_question SET type = ?, name_de = ?, name_en = ?, text_de = ?, text_en = ?${solution ? ", solution_de = ?, solution_en = ?" : ""} WHERE id = ?`
-  ).run(
-    question.type,
-    question.name_de,
-    question.name_en,
-    question.text_de,
-    question.text_en,
-    ...(solution ? [question.solution_de ?? null, question.solution_en ?? null] : []),
-    row.id
-  );
-  db.prepare("DELETE FROM test_answer WHERE test_question_id = ?").run(row.id);
-  copyAnswers(db, row.id, question.id);
+  // A test on paper may hold the question in both groups: each copy follows.
+  for (const row of db.prepare("SELECT id, type FROM test_question WHERE test_id = ? AND question_id = ?").all(testId, question.id)) {
+    // The model solution only where the question or its copy is a free-text
+    // one, as `snapshot` does; between two choice questions it stays NULL.
+    const solution = question.type === "freetext" || row.type === "freetext";
+    db.prepare(
+      `UPDATE test_question SET type = ?, name_de = ?, name_en = ?, text_de = ?, text_en = ?${solution ? ", solution_de = ?, solution_en = ?" : ""} WHERE id = ?`
+    ).run(
+      question.type,
+      question.name_de,
+      question.name_en,
+      question.text_de,
+      question.text_en,
+      ...(solution ? [question.solution_de ?? null, question.solution_en ?? null] : []),
+      row.id
+    );
+    db.prepare("DELETE FROM test_answer WHERE test_question_id = ?").run(row.id);
+    copyAnswers(db, row.id, question.id);
+  }
   linkImages(db, testId);
   sweepOrphanImages(db);
 }
@@ -221,7 +232,42 @@ export function refreshCopy(db, testId, question) {
 export function dropFromTest(db, testId, questionId) {
   db.prepare("DELETE FROM test_question WHERE test_id = ? AND question_id = ?").run(testId, questionId);
   db.prepare("DELETE FROM question_usage WHERE test_id = ? AND question_id = ?").run(testId, questionId);
+  settleGroups(db, testId);
   linkImages(db, testId);
+}
+
+/**
+ * A test on paper whose group A has no question left while group B holds
+ * some: group B's questions become group A's (`offline-test-questions`).
+ * Inside a transaction.
+ */
+function settleGroups(db, testId) {
+  if (db.prepare("SELECT 1 FROM test_question WHERE test_id = ? AND handout_group = 'A' LIMIT 1").get(testId)) return;
+  db.prepare("UPDATE test_question SET handout_group = 'A' WHERE test_id = ? AND handout_group = 'B'").run(testId);
+}
+
+/** Whether a test has questions, in either group. */
+export function hasQuestions(db, testId) {
+  return db.prepare("SELECT 1 FROM test_question WHERE test_id = ? LIMIT 1").get(testId) !== undefined;
+}
+
+/**
+ * Whether the test row is a test on paper composed from the pool
+ * (`offline-test-questions`), also when its last question went from the pool.
+ */
+export function isPaper(test) {
+  return test.paper === 1;
+}
+
+/**
+ * Whether an offline test row has two groups: two handouts, or questions for
+ * group B (`offline-test`). The attendance table and the factor A:B follow it.
+ */
+export function hasTwoGroups(db, test) {
+  if (test.kind !== "offline") return false;
+  if (test.handout_b !== null && test.handout_b !== undefined) return true;
+  if (!hasWeights(db)) return false;
+  return db.prepare("SELECT 1 FROM test_question WHERE test_id = ? AND handout_group = 'B' LIMIT 1").get(test.id) !== undefined;
 }
 
 /**
@@ -231,42 +277,89 @@ export function dropFromTest(db, testId, questionId) {
  * meanwhile goes. Inside a transaction.
  */
 export function followPoolIfNotBegun(db, testId, at = now()) {
-  if (testRow(db, testId).kind !== "online" || testBegun(db, testId, at)) return;
+  if (testBegun(db, testId, at)) return;
   const read = db.prepare("SELECT * FROM question WHERE id = ?");
+  const refreshed = new Set();
   for (const row of db.prepare("SELECT id, question_id FROM test_question WHERE test_id = ?").all(testId)) {
     if (row.question_id === null) db.prepare("DELETE FROM test_question WHERE id = ?").run(row.id);
-    else refreshCopy(db, testId, read.get(row.question_id));
+    else if (!refreshed.has(row.question_id)) {
+      refreshed.add(row.question_id);
+      refreshCopy(db, testId, read.get(row.question_id));
+    }
   }
+  settleGroups(db, testId);
   linkImages(db, testId);
   sweepOrphanImages(db);
 }
 
+/** Whether the schema has the weight, the group and the answer lines of a test's question (schema 24). */
+function hasWeights(db) {
+  return db.prepare("SELECT 1 FROM pragma_table_info('test_question') WHERE name = 'weight'").get() !== undefined;
+}
+
 /**
- * Copies `questions` into the test, links their images and records their
- * usage for the test's course. Called inside a transaction.
+ * Copies `questions` into the test as group `group`'s, links their images and
+ * records their usage for the test's course. `settings` maps a pool question
+ * id to the `{ weight, answer_lines }` it keeps from before; a new one
+ * weighs 1 and leaves 6 lines. Called inside a transaction.
  */
-function snapshot(db, test, questions) {
-  // The model solution is named only for a free-text question: a choice
-  // question has none, and is copied the same way at every schema.
-  const insertChoice = db.prepare(
-    `INSERT INTO test_question (test_id, question_id, position, type, name_de, name_en, text_de, text_en)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  );
-  const insertFreetext = () =>
+function snapshot(db, test, questions, { group = "A", settings = new Map() } = {}) {
+  // The model solution is named only for a free-text question, and the
+  // weight, group and answer lines only where the schema has them: the checks
+  // of earlier migrations assemble tests through here.
+  const weights = hasWeights(db);
+  const insert = (freetext) =>
     db.prepare(
-      `INSERT INTO test_question (test_id, question_id, position, type, name_de, name_en, text_de, text_en, solution_de, solution_en)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO test_question (test_id, question_id, position, type, name_de, name_en, text_de, text_en${freetext ? ", solution_de, solution_en" : ""}${weights ? ", weight, handout_group, answer_lines" : ""})
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?${freetext ? ", ?, ?" : ""}${weights ? ", ?, ?, ?" : ""})`
     );
-  const recordUsage = db.prepare("INSERT INTO question_usage (question_id, test_id, course_id, used_on) VALUES (?, ?, ?, ?)");
+  const recordUsage = db.prepare("INSERT OR IGNORE INTO question_usage (question_id, test_id, course_id, used_on) VALUES (?, ?, ?, ?)");
   const usedOn = usageDate(db, test.id);
   questions.forEach((question, index) => {
+    const freetext = question.type === "freetext";
+    const kept = settings.get(question.id) ?? { weight: 1, answer_lines: 6 };
     const columns = [test.id, question.id, index, question.type, question.name_de, question.name_en, question.text_de, question.text_en];
-    const { lastInsertRowid } =
-      question.type === "freetext" ? insertFreetext().run(...columns, question.solution_de, question.solution_en) : insertChoice.run(...columns);
+    if (freetext) columns.push(question.solution_de, question.solution_en);
+    if (weights) columns.push(kept.weight, group, kept.answer_lines);
+    const { lastInsertRowid } = insert(freetext).run(...columns);
     copyAnswers(db, Number(lastInsertRowid), question.id);
     recordUsage.run(question.id, test.id, test.course_id, usedOn);
   });
   linkImages(db, test.id);
+}
+
+/**
+ * The weight and answer lines each pool question of group `group` of a test
+ * holds now, by pool question id: what a new choice of the group's questions
+ * keeps.
+ */
+function settingsOf(db, testId, group) {
+  if (!hasWeights(db)) return new Map();
+  return new Map(
+    db
+      .prepare("SELECT question_id, weight, answer_lines FROM test_question WHERE test_id = ? AND handout_group = ? AND question_id IS NOT NULL")
+      .all(testId, group)
+      .map((row) => [row.question_id, { weight: row.weight, answer_lines: row.answer_lines }])
+  );
+}
+
+/**
+ * Replaces group `group`'s questions of a test not yet begun with a copy of
+ * `questions`, in that order, keeping the weight and answer lines of those it
+ * held. Usage records of questions no longer in the test go. Inside a
+ * transaction.
+ */
+function replaceGroup(db, test, group, questions) {
+  const settings = settingsOf(db, test.id, group);
+  if (hasWeights(db)) db.prepare("DELETE FROM test_question WHERE test_id = ? AND handout_group = ?").run(test.id, group);
+  else db.prepare("DELETE FROM test_question WHERE test_id = ?").run(test.id);
+  db.prepare("DELETE FROM question_usage WHERE test_id = ? AND question_id NOT IN (SELECT question_id FROM test_question WHERE test_id = ? AND question_id IS NOT NULL)").run(
+    test.id,
+    test.id
+  );
+  snapshot(db, test, questions, { group, settings });
+  settleGroups(db, test.id);
+  sweepOrphanImages(db);
 }
 
 /**
@@ -329,8 +422,8 @@ export function updateTest(db, id, input = {}) {
   return inTransaction(db, () => {
     if (questions !== null) {
       if (testStarted(db, id)) throw new ConflictError("exam.errors.tests.writtenQuestionsFixed");
-      dropSnapshot(db, id);
-      snapshot(db, test, questions);
+      // The questions it keeps keep their weights.
+      replaceGroup(db, test, "A", questions);
     }
     db.prepare("UPDATE test SET name = ?, updated_at = ? WHERE id = ?").run(trimmed, now(), id);
     return getTest(db, id);
@@ -348,7 +441,7 @@ export function deleteTest(db, id, { admin = false } = {}) {
     if (testStarted(db, id) && !admin) throw new ConflictError("exam.errors.tests.writtenCannotDelete");
     // An offline test's column goes with it, but never with a result in it (design D9).
     if (test.assessment_id !== null) {
-      if (db.prepare("SELECT 1 FROM manual_entry WHERE assessment_id = ? LIMIT 1").get(test.assessment_id)) {
+      if (db.prepare("SELECT 1 FROM manual_entry WHERE assessment_id = ? LIMIT 1").get(test.assessment_id) || gradeCount(db, id) > 0) {
         throw new ConflictError("exam.errors.tests.offlineHasResults");
       }
       db.prepare("UPDATE test SET assessment_id = NULL WHERE id = ?").run(id);
@@ -409,7 +502,10 @@ export function removeWrittenQuestion(db, testId, testQuestionId, rescore) {
     const unlink = db.prepare("DELETE FROM test_image WHERE test_id = ? AND image_id = ?");
     for (const imageId of shown) if (!stillShown.has(imageId)) unlink.run(testId, imageId);
     sweepOrphanImages(db);
-    const count = db.prepare("SELECT COUNT(*) AS n FROM attempt_question WHERE attempt_id = ?");
+    // `question_count` is the total weight of the questions left in the attempt (pool-quickie design D1).
+    const count = db.prepare(
+      "SELECT COALESCE(SUM(q.weight), 0) AS n FROM attempt_question aq JOIN test_question q ON q.id = aq.test_question_id WHERE aq.attempt_id = ?"
+    );
     const store = db.prepare("UPDATE attempt SET question_count = ?, score = CASE WHEN submitted_at IS NULL THEN NULL ELSE ? END WHERE id = ?");
     for (const attempt of attempts) {
       store.run(count.get(attempt.id).n, attempt.submitted_at === null ? null : rescore(db, attempt.id), attempt.id);
@@ -419,22 +515,70 @@ export function removeWrittenQuestion(db, testId, testQuestionId, rescore) {
   });
 }
 
-/** A test's snapshot: its questions in the teacher's order, each with its answers and correct flags. */
+/**
+ * A test's snapshot: its questions by group, A first, in the teacher's order,
+ * each with its weight, its answer lines, its model solution and its answers
+ * with correct flags.
+ */
 export function testQuestions(db, testId) {
   const answers = db.prepare(
     "SELECT id, position, text_de AS textDe, text_en AS textEn, correct FROM test_answer WHERE test_question_id = ? ORDER BY position"
   );
+  const weights = hasWeights(db);
   return db
     .prepare(
-      `SELECT id, question_id AS questionId, position, type, name_de AS nameDe, name_en AS nameEn,
-         text_de AS textDe, text_en AS textEn
-       FROM test_question WHERE test_id = ? ORDER BY position`
+      `SELECT * FROM test_question WHERE test_id = ? ORDER BY ${weights ? "handout_group, " : ""}position`
     )
     .all(testId)
     .map((question) => ({
-      ...question,
+      id: question.id,
+      questionId: question.question_id,
+      position: question.position,
+      type: question.type,
+      nameDe: question.name_de,
+      nameEn: question.name_en,
+      textDe: question.text_de,
+      textEn: question.text_en,
+      solutionDe: question.solution_de ?? null,
+      solutionEn: question.solution_en ?? null,
+      weight: question.weight ?? 1,
+      group: question.handout_group ?? "A",
+      answerLines: question.answer_lines ?? 6,
       answers: answers.all(question.id).map((answer) => ({ ...answer, correct: answer.correct === 1 })),
     }));
+}
+
+/** A group's total weight from `testQuestions`' rows. */
+function totalWeights(questions) {
+  const totals = { A: 0, B: 0 };
+  for (const question of questions) totals[question.group] += question.weight;
+  return totals;
+}
+
+/**
+ * Sets the weight and, for a free-text question of a test on paper, the
+ * answer lines of the question `testQuestionId` of test `testId`
+ * (pool-quickie design D1, `offline-test-questions`): `weight` a whole number
+ * from 1 to 10, `answerLines` from 1 to 40, either one alone. An online
+ * test's weights lock with its questions, once an attempt has started; a test
+ * on paper's stay changeable after its start, and every result follows on
+ * read. A value out of range is refused, and the stored one kept.
+ */
+export function setQuestionSettings(db, testId, testQuestionId, { weight, answerLines } = {}) {
+  const test = testRow(db, testId);
+  const question = db.prepare("SELECT * FROM test_question WHERE test_id = ? AND id = ?").get(testId, testQuestionId);
+  if (!question) throw new NotFoundError("exam.errors.tests.questionNotInTest");
+  if (weight !== undefined && (!Number.isInteger(weight) || weight < 1 || weight > 10)) throw new InvalidInputError("exam.errors.tests.weight");
+  if (answerLines !== undefined) {
+    if (test.kind !== "offline" || question.type !== "freetext") throw new InvalidInputError("exam.errors.tests.answerLinesFreetext");
+    if (!Number.isInteger(answerLines) || answerLines < 1 || answerLines > 40) throw new InvalidInputError("exam.errors.tests.answerLines");
+  }
+  if (test.kind === "online" && weight !== undefined && testStarted(db, testId)) throw new ConflictError("exam.errors.tests.weightLocked");
+  return inTransaction(db, () => {
+    db.prepare("UPDATE test_question SET weight = ?, answer_lines = ? WHERE id = ?").run(weight ?? question.weight, answerLines ?? question.answer_lines, question.id);
+    db.prepare("UPDATE test SET updated_at = ? WHERE id = ?").run(now(), testId);
+    return getTest(db, testId);
+  });
 }
 
 /**
@@ -552,6 +696,7 @@ export function getTest(db, id) {
   const row = testRow(db, id);
   const course = getCourse(db, row.course_id);
   const { started, submitted } = attemptCounts(db, id);
+  const questions = testQuestions(db, id);
   return {
     id: row.id,
     name: row.name,
@@ -572,7 +717,12 @@ export function getTest(db, id) {
     column: sheetColumn(db, row, course),
     started: started > 0,
     attempts: { started, submitted },
-    questions: testQuestions(db, id),
+    questions,
+    // Each group's total weight; group B's is 0 for an online test and a test on paper with one group.
+    totalWeight: totalWeights(questions),
+    // Whether the test's questions follow the pool still (a test on paper until its first sitting is started).
+    // (The checks of earlier migrations read a test before sittings could be started.)
+    begun: hasWeights(db) ? testBegun(db, id) : started > 0,
     sittings: testSittings(db, id),
     // Who on the roster has written and is no participant of a make-up
     // unless marked as a retake: the list a make-up's form shows (design D5).
@@ -613,6 +763,8 @@ function courseTests(db, courseId) {
     .all(courseId)
     .map(({ handout_a, handout_b, ...test }) => ({
       ...test,
+      // A test on paper composed from the pool lists its number of questions like an online test.
+      paper: isPaper(testRow(db, test.id)),
       handouts: handoutsOf({ handout_a, handout_b }).map(({ group, path, resolves }) => ({ group, path, resolves })),
       sittings: testSittings(db, test.id).map(({ participants, retakes, absent, ...sitting }) => ({ ...sitting, participants: participants.length, retakes: retakes.length })),
       ...attemptCounts(db, test.id),
@@ -960,9 +1112,25 @@ function discardRefusal(db, test, at) {
   return null;
 }
 
-/** How many results discarding deletes: an online test's attempts, an offline test's entries in its column. */
+/**
+ * How many students have a grade for a question of test `testId`: the results
+ * of a test on paper (`offline-test-questions`). 0 before schema 24.
+ */
+export function gradeCount(db, testId) {
+  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'question_grade'").get()) return 0;
+  return db
+    .prepare("SELECT COUNT(DISTINCT g.username) AS n FROM question_grade g JOIN test_question q ON q.id = g.test_question_id WHERE q.test_id = ?")
+    .get(testId).n;
+}
+
+/**
+ * How many results discarding deletes: an online test's attempts, an offline
+ * test's entries in its column, or, for a test with questions, the students
+ * graded on it.
+ */
 function discardCount(db, test) {
   if (test.kind === "offline") {
+    if (isPaper(test)) return gradeCount(db, test.id);
     return test.assessment_id === null ? 0 : db.prepare("SELECT COUNT(*) AS n FROM manual_entry WHERE assessment_id = ?").get(test.assessment_id).n;
   }
   return db.prepare("SELECT COUNT(*) AS n FROM attempt WHERE test_id = ?").get(test.id).n;
@@ -1004,6 +1172,9 @@ export function discardTest(db, id, { attempts } = {}, at = now()) {
     if (test.assessment_id !== null) {
       db.prepare("DELETE FROM result_note WHERE assessment_id = ?").run(test.assessment_id);
       db.prepare("DELETE FROM manual_entry WHERE assessment_id = ?").run(test.assessment_id);
+    }
+    if (gradeCount(db, id) > 0) {
+      db.prepare("DELETE FROM question_grade WHERE test_question_id IN (SELECT id FROM test_question WHERE test_id = ?)").run(id);
     }
     db.prepare("DELETE FROM attempt WHERE test_id = ?").run(id);
     db.prepare("DELETE FROM sitting WHERE test_id = ?").run(id);
@@ -1082,9 +1253,13 @@ function dateInYear(iso, year) {
 
 /** What a test answers beyond the online fields: an offline test's duration, column and handouts. */
 function offlineFields(db, row) {
-  if (row.kind !== "offline") return { handouts: [], variables: [] };
+  if (row.kind !== "offline") return { handouts: [], variables: [], twoGroups: false, paper: false, grades: 0 };
   const column = row.assessment_id === null ? null : db.prepare("SELECT kind FROM assessment WHERE id = ?").get(row.assessment_id);
   return {
+    // A test on paper composed from the pool (`offline-test-questions`), its groups and how many students are graded.
+    paper: isPaper(row),
+    twoGroups: hasTwoGroups(db, row),
+    grades: gradeCount(db, row.id),
     durationS: row.duration_s,
     gradebookKind: column?.kind ?? null,
     assessmentId: row.assessment_id,
@@ -1113,6 +1288,17 @@ function previewSitting(db, testId) {
     db.prepare("SELECT * FROM sitting WHERE test_id = ? ORDER BY opens_at, id LIMIT 1").get(testId) ??
     null
   );
+}
+
+/**
+ * The date a printed sheet of a test on paper carries, as a handout's `DATE`
+ * (pool-quickie design D6): that of `sitting` - started, otherwise planned -
+ * or of the preview's sitting without one; null while the test has no
+ * sitting.
+ */
+export function sheetDate(db, testId, sitting = undefined) {
+  const dated = sitting === undefined ? previewSitting(db, testId) : sitting;
+  return dated ? handoutDate(dated.started_at ?? dated.opens_at) : null;
 }
 
 /**
@@ -1214,10 +1400,12 @@ export function setTestVariables(db, id, values) {
 /**
  * Creates the offline test `name` for a course (design D1, D9): a duration in
  * minutes, the gradebook category it counts in - `test` or `shorttest`, of
- * those the course uses - and optionally its handouts. Its column is created with it, named by the test
- * and dated today until a sitting is planned.
+ * those the course uses - and optionally its handouts, or the pool questions
+ * `questionIds` of its group A instead (`offline-test-questions`). Its column
+ * is created with it, named by the test and dated today until a sitting is
+ * planned.
  */
-export function createOfflineTest(db, courseId, { name, durationMinutes, gradebookKind, handoutA = null, handoutB = null } = {}) {
+export function createOfflineTest(db, courseId, { name, durationMinutes, gradebookKind, handoutA = null, handoutB = null, questionIds } = {}) {
   const course = getCourse(db, courseId);
   const trimmed = normalizeName(name);
   const durationS = offlineDuration(durationMinutes);
@@ -1227,6 +1415,8 @@ export function createOfflineTest(db, courseId, { name, durationMinutes, gradebo
     throw new InvalidInputError("exam.errors.gradebook.categoryNotInUse", { category: entryCategory[gradebookKind] });
   }
   const handouts = nextHandouts({ a: null, b: null }, { handoutA, handoutB });
+  const questions = questionIds === undefined ? null : chosenQuestions(db, questionIds, { paper: true });
+  if (questions !== null && handouts.a !== null) throw new ConflictError("exam.errors.tests.handoutsOrQuestions");
   return inTransaction(db, () => {
     const at = now();
     const column = db
@@ -1238,6 +1428,8 @@ export function createOfflineTest(db, courseId, { name, durationMinutes, gradebo
          VALUES (?, ?, 'offline', ?, ?, ?, ?, ?, ?)`
       )
       .run(courseId, trimmed, durationS, handouts.a, handouts.b, Number(column.lastInsertRowid), at, at);
+    if (questions !== null) db.prepare("UPDATE test SET paper = 1 WHERE id = ?").run(Number(lastInsertRowid));
+    if (questions !== null) snapshot(db, testRow(db, Number(lastInsertRowid)), questions);
     return getTest(db, Number(lastInsertRowid));
   });
 }
@@ -1245,10 +1437,23 @@ export function createOfflineTest(db, courseId, { name, durationMinutes, gradebo
 /**
  * Changes an offline test: its name, which renames its column; its duration,
  * only while none of its sittings has started, which the planned ones take
- * on; and its handouts.
+ * on; its handouts; or the questions `questionIds` of its `group`, A by
+ * default, in that order, only while no sitting has started
+ * (`offline-test-questions`). A test has handouts or questions, never both.
+ * Group A emptied while group B holds questions makes B's questions A's.
  */
-function updateOfflineTest(db, test, { name, durationMinutes, handoutA, handoutB, questionIds } = {}) {
-  if (questionIds !== undefined) throw new ConflictError("exam.errors.tests.offlineNoQuestions");
+function updateOfflineTest(db, test, { name, durationMinutes, handoutA, handoutB, questionIds, group = "A" } = {}) {
+  let questions = null;
+  if (questionIds !== undefined) {
+    if (!handoutGroups.includes(group)) throw new InvalidInputError("exam.errors.tests.handoutGroup");
+    if (test.handout_a !== null) throw new ConflictError("exam.errors.tests.handoutsOrQuestions");
+    // Questions are for a test created on paper from the pool only.
+    if (!isPaper(test)) throw new ConflictError("exam.errors.tests.offlineNoQuestions");
+    const keep = db.prepare("SELECT question_id FROM test_question WHERE test_id = ? AND question_id IS NOT NULL").all(test.id).map((row) => row.question_id);
+    questions = chosenQuestions(db, questionIds, { keep, paper: true, empty: true });
+    if (testBegun(db, test.id)) throw new ConflictError("exam.errors.tests.paperQuestionsFixed");
+  }
+  if ((handoutA || handoutB) && isPaper(test)) throw new ConflictError("exam.errors.tests.handoutsOrQuestions");
   const trimmed = name === undefined ? test.name : normalizeName(name);
   const durationS = durationMinutes === undefined ? test.duration_s : offlineDuration(durationMinutes);
   if (durationS !== test.duration_s && db.prepare("SELECT 1 FROM sitting WHERE test_id = ? AND started_at IS NOT NULL").get(test.id)) {
@@ -1267,6 +1472,7 @@ function updateOfflineTest(db, test, { name, durationMinutes, handoutA, handoutB
     if (test.assessment_id !== null && trimmed !== test.name) {
       db.prepare("UPDATE assessment SET name = ? WHERE id = ?").run(trimmed, test.assessment_id);
     }
+    if (questions !== null) replaceGroup(db, test, group, questions);
     if (durationS !== test.duration_s) {
       for (const sitting of db.prepare("SELECT id, opens_at FROM sitting WHERE test_id = ?").all(test.id)) {
         db.prepare("UPDATE sitting SET duration_s = ?, closes_at = ? WHERE id = ?").run(durationS, plannedClose(sitting.opens_at, durationS), sitting.id);
@@ -1420,6 +1626,10 @@ export function startSitting(db, id, at = now()) {
   const test = testRow(db, row.test_id);
   if (test.kind !== "offline") throw new ConflictError("exam.errors.tests.onlineNoStart");
   requireNotStarted(row);
+  // A test on paper (pool-quickie design D3): its copy is the snapshot from
+  // this start on, since it has begun. One whose questions all went from the
+  // pool cannot start.
+  if (isPaper(test) && !hasQuestions(db, test.id)) throw new ConflictError("exam.errors.tests.noQuestionsToStart");
   const broken = handoutsOf(test).find((handout) => !handout.resolves);
   if (broken) throw new ConflictError("exam.errors.tests.handoutUnresolved", { group: broken.group, path: broken.path });
   const missing = testVariables(db, test, row).filter((variable) => variable.missing).map((variable) => variable.name);
@@ -1449,7 +1659,7 @@ export function setAttendance(db, sittingId, username, { present, group } = {}) 
   if (!participant) throw new NotFoundError("exam.errors.tests.notParticipant");
   if (present !== undefined && typeof present !== "boolean") throw new InvalidInputError("exam.errors.tests.presentFlag");
   if (group !== undefined && !handoutGroups.includes(group)) throw new InvalidInputError("exam.errors.tests.handoutGroup");
-  if (group === "B" && test.handout_b === null) throw new InvalidInputError("exam.errors.tests.noHandoutB");
+  if (group === "B" && !hasTwoGroups(db, test)) throw new InvalidInputError("exam.errors.tests.noHandoutB");
   const nextPresent = present === undefined ? participant.present : present ? 1 : 0;
   const nextGroup = group ?? participant.handout_group;
   inTransaction(db, () => {

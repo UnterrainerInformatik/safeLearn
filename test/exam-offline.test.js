@@ -302,7 +302,7 @@ describe("an offline test", () => {
     assert.deepEqual(renamed.handouts.map((h) => [h.group, h.path]), [["A", "POS/LT1-A.md"], ["B", "POS/LT1-B.md"]]);
     const shifted = updateTest(db, offline.id, { handoutA: null });
     assert.deepEqual(shifted.handouts.map((h) => [h.group, h.path]), [["A", "POS/LT1-B.md"]]);
-    assert.equal(keyOf(() => updateTest(db, offline.id, { questionIds: [1] })), "exam.errors.tests.offlineNoQuestions");
+    assert.equal(keyOf(() => updateTest(db, offline.id, { questionIds: [1] })), "exam.errors.tests.handoutsOrQuestions", "a test with a handout takes no questions");
   });
 
   test("is deleted with its column while the column holds no result, and refused once it does", () => {

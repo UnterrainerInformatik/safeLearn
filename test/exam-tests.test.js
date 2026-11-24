@@ -2189,12 +2189,12 @@ describe("the review of an attempt", () => {
     submitAttempt(db, attemptRow(db, id));
 
     const review = reviewView(db, attemptRow(db, id));
-    assert.deepEqual(Object.keys(review).sort(), ["attempt", "grade", "language", "name", "questionCount", "questions", "score"]);
+    assert.deepEqual(Object.keys(review).sort(), ["attempt", "grade", "language", "name", "questionCount", "questions", "score", "weighted"]);
     assert.deepEqual([review.name, review.language, review.questionCount], ["T", "en", 3]);
     assert.deepEqual(review.questions.map((q) => [q.n, q.text]), writing.questions.map((q) => [q.n, q.text]), "the writing page's order");
     for (const [index, question] of review.questions.entries()) {
       assert.deepEqual(question.answers.map((a) => a.text), writing.questions[index].answers.map((a) => a.text), `answers of ${question.n} in order`);
-      assert.deepEqual(Object.keys(question).sort(), ["answers", "n", "scored", "text", "type"]);
+      assert.deepEqual(Object.keys(question).sort(), ["answers", "n", "scored", "text", "type", "weight"]);
       for (const answer of question.answers) assert.deepEqual(Object.keys(answer).sort(), ["chosen", "correct", "text"], "no token, no id");
     }
     const reviewedMulti = review.questions[multi.n - 1];

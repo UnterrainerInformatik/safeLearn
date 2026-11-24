@@ -48,7 +48,7 @@
 
 import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, linkButton, saveOnChange, t } from "./frame.js";
 import { candidateMark, candidateNote, displayClass, displayPerson } from "./classes.js";
-import { displayStartWindow, displayWindow, handoutPrintControls } from "./tests.js";
+import { displayStartWindow, displayWindow, handoutPrintControls, sheetPrintControls } from "./tests.js";
 import { setTone } from "./row-tone.js";
 
 const stateLabels = {
@@ -207,6 +207,9 @@ class LiveView extends ExamElement {
     this.sitting = snapshot.sitting;
     this.offline = snapshot.kind === "offline";
     this.handouts = snapshot.test.handouts ?? [];
+    // A test on paper prints its sheets instead of handouts; two groups by two handouts or group B's questions.
+    this.paper = snapshot.test.paper === true;
+    this.twoGroups = snapshot.test.twoGroups ?? this.handouts.length > 1;
     this.missingVariables = snapshot.test.missingVariables ?? [];
     this.badge = h("span", { class: "sl-exam-live-badge" });
     this.state = h("span", { class: "sl-exam-quiet sl-exam-live-state", role: "status" });
@@ -546,6 +549,17 @@ class LiveView extends ExamElement {
    * (print-offline-handout design D4); then the variables without a value in red.
    */
   handoutLine() {
+    if (this.paper) {
+      return h(
+        "p",
+        { class: "sl-exam-quiet sl-exam-live-handouts sl-exam-live-sheets" },
+        (this.twoGroups ? ["A", "B"] : ["A"]).flatMap((group, index) => [
+          index ? " · " : null,
+          `${t("exam.paper.sheetLabel", { group })} `,
+          sheetPrintControls(`/exam/sittings/${this.sitting.id}`, group),
+        ])
+      );
+    }
     if (this.handouts.length === 0) return h("p", { class: "sl-exam-quiet sl-exam-live-handouts" }, t("exam.offline.noHandout"));
     return h(
       "p",
@@ -581,7 +595,7 @@ class LiveView extends ExamElement {
 
   /** The teacher's page of an offline sitting: the attendance table under the controls. */
   attendanceView(head) {
-    const groups = this.handouts.length > 1;
+    const groups = this.twoGroups;
     const view = h(
       "div",
       { class: "sl-exam sl-exam-live sl-exam-attendance" },
@@ -634,10 +648,10 @@ class LiveView extends ExamElement {
       );
     const tr = h(
       "tr",
-      { "data-username": username, "data-present": participant.present ? "1" : "0", "data-group": this.handouts.length > 1 ? participant.group : null },
+      { "data-username": username, "data-present": participant.present ? "1" : "0", "data-group": this.twoGroups ? participant.group : null },
       participant.examParticipant ? h("td", candidateMark(), displayPerson(participant), candidateNote(), retakeMark(participant)) : h("td", {}, displayPerson(participant), retakeMark(participant)),
       h("td", {}, h("label", {}, present, " ", participant.present ? t("exam.offline.present") : t("exam.offline.absent"))),
-      this.handouts.length > 1 ? h("td", { class: "sl-exam-actions" }, groupButton("A"), groupButton("B")) : null,
+      this.twoGroups ? h("td", { class: "sl-exam-actions" }, groupButton("A"), groupButton("B")) : null,
       this.noteCell(participant)
     );
     this.rows.set(username, tr);

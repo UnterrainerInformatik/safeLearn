@@ -134,6 +134,10 @@ function filledYear(db) {
   if (db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'test_variable'").get()) {
     db.prepare("INSERT INTO test_variable (test_id, name, value) VALUES (?, 'FRANKLYN_PIN', '4711')").run(quiz.id);
   }
+  // A teacher's grade for a question once the schema has them (024).
+  if (db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'question_grade'").get()) {
+    db.prepare("INSERT INTO question_grade (test_question_id, username, grade, updated_at) SELECT id, 'ben', 2, 'x' FROM test_question WHERE test_id = ? LIMIT 1").run(quiz.id);
+  }
   return { year, klass, course, column, quiz, sitting, attemptId, startedAt };
 }
 
@@ -241,6 +245,43 @@ describe("the migration to free-text questions", () => {
     assert.throws(() => db.prepare("UPDATE question SET type = 'freetext' WHERE id = ?").run(copy.question_id), /CHECK/, "a free-text question has one in both languages");
     db.prepare("UPDATE question SET type = 'freetext', solution_de = '<p>a</p>', solution_en = '<p>a</p>' WHERE id = ?").run(copy.question_id);
     assert.equal(db.prepare("SELECT type FROM test_question WHERE id = ?").get(copy.id).type, copy.type, "the written copy is untouched");
+  });
+});
+
+describe("the migration to weights and questions on paper", () => {
+  test("a database at schema 23 with tests, attempts and a closed year keeps every row, every reference and every closed-year trigger", () => {
+    const dbPath = temporaryPath();
+    const db = new DatabaseSync(dbPath);
+    openDatabases.push(db);
+    db.exec("PRAGMA foreign_keys = ON");
+    migrate(db, dbPath, readMigrations().slice(0, 23));
+    const filled = filledYear(db);
+    setCurrentYear(db, createYear(db, year2027).id);
+    closeYear(db, filled.year.id, summer2027);
+    const tables = ["question", "answer", "image", "question_usage", "test", "test_question", "test_answer", "test_image", "attempt", "attempt_question", "attempt_token", "response"];
+    const rows = (table) => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all().map((row) => ({ ...row }));
+    const before = Object.fromEntries(tables.map((table) => [table, rows(table)]));
+    const schema = (type) => db.prepare("SELECT name FROM sqlite_master WHERE type = ? AND sql IS NOT NULL ORDER BY name").all(type).map((row) => row.name);
+    const triggers = schema("trigger");
+    assert.ok(before.test_question.length > 0 && before.attempt.length > 0, "the fixture holds a written test");
+
+    assert.deepEqual(migrate(db, dbPath, readMigrations().slice(0, 24)), { from: 23, to: 24 });
+    assert.deepEqual(rows("test_question"), before.test_question.map((row) => ({ ...row, weight: 1, handout_group: "A", answer_lines: 6 })), "every copy weighs 1, is in group A and has 6 lines");
+    assert.deepEqual(rows("test"), before.test.map((row) => ({ ...row, paper: 0 })), "no existing test is one on paper");
+    for (const table of tables.filter((table) => table !== "test_question" && table !== "test")) assert.deepEqual(rows(table), before[table], table);
+    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+    const newTriggers = ["question_grade_closed_year_delete", "question_grade_closed_year_insert", "question_grade_closed_year_update"];
+    assert.deepEqual(schema("trigger"), [...triggers, ...newTriggers].sort(), "every trigger is there again, and question_grade has its own");
+
+    const copy = before.test_question[0];
+    refusedAsClosed(() => db.prepare("UPDATE test_question SET weight = 2 WHERE id = ?").run(copy.id), "a closed year's weight");
+    refusedAsClosed(() => db.prepare("UPDATE test_question SET handout_group = 'B' WHERE id = ?").run(copy.id), "its group");
+    refusedAsClosed(() => db.prepare("UPDATE test_question SET answer_lines = 3 WHERE id = ?").run(copy.id), "its answer lines");
+    refusedAsClosed(
+      () => db.prepare("INSERT INTO question_grade (test_question_id, username, grade, updated_at) VALUES (?, ?, 2, 'x')").run(copy.id, before.attempt[0].username),
+      "a grade in a closed year"
+    );
+    assert.throws(() => db.prepare("UPDATE test_question SET weight = 11 WHERE id = ?").run(copy.id), /CHECK|school year closed/);
   });
 });
 

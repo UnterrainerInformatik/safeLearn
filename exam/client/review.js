@@ -56,12 +56,12 @@ class AttemptReview extends ExamElement {
       back,
       h("h2", { class: "sl-exam-review-name" }, review.name),
       h("p", { class: "sl-exam-review-summary" }, t("exam.review.summary", { score: review.score, count: review.questionCount, grade: review.grade })),
-      review.questions.map((question) => this.question(question, review.language))
+      review.questions.map((question) => this.question(question, review.language, review.weighted === true))
     );
   }
 
   /** One question: its number in the reader's language, whether it scored, its text and answers in the course's. */
-  question(question, language) {
+  question(question, language, weighted = false) {
     const scoredText = question.scored ? t("exam.review.scored") : t("exam.review.notScored");
     return h(
       "section",
@@ -71,7 +71,9 @@ class AttemptReview extends ExamElement {
         {},
         h("span", { class: "sl-exam-review-verdict", role: "img", "aria-label": scoredText, title: scoredText }, question.scored ? "✓" : "✗"),
         " ",
-        t("exam.review.question", { n: question.n })
+        t("exam.review.question", { n: question.n }),
+        // A weight beside each question only where the test's questions do not all weigh 1 (pool-quickie D1).
+        weighted ? h("span", { class: "sl-exam-quiet sl-exam-review-weight" }, ` · ${t("exam.paper.weightShown", { weight: question.weight })}`) : null
       ),
       h(
         "div",

@@ -35,6 +35,7 @@ import { registerTestRoutes } from "./routes-tests.js";
 import { registerAttemptRoutes } from "./routes-attempts.js";
 import { registerLiveRoutes } from "./routes-live.js";
 import { registerHandoutRoutes } from "./routes-handout.js";
+import { registerPaperRoutes } from "./routes-paper.js";
 import { handoutAttachmentCheck } from "./handout.js";
 import { openTestsOf, scheduleSweep } from "./attempts.js";
 import { parsePeriods } from "./client/periods.js";
@@ -116,6 +117,7 @@ function buildRouter(db, startPage, periods, retentionYears, renderHandout) {
   registerAttemptRoutes(router, { db, handle, startPage });
   registerLiveRoutes(router, { db, handle, startPage });
   registerHandoutRoutes(router, { db, handle, startPage, renderHandout });
+  registerPaperRoutes(router, { db, handle });
 
   // The module's home page, for teachers: the classes of one school year -
   // the current one unless `?year=` names another - which the bar chooses.

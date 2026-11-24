@@ -369,7 +369,8 @@
         "scaleShape": "Der Notenschlüssel ist eine Schwelle in Prozent für jede der Noten 1 bis 4.",
         "semester": "Ein Semester ist {semesters}.",
         "thresholdOrder": "Die Note {grade} muss unterhalb der Note {better} beginnen.",
-        "thresholdRange": "Die Schwelle der Note {grade} muss ein Prozentsatz über 0 und höchstens 100 sein, mit höchstens einer Nachkommastelle."
+        "thresholdRange": "Die Schwelle der Note {grade} muss ein Prozentsatz über 0 und höchstens 100 sein, mit höchstens einer Nachkommastelle.",
+        "columnComputed": "Diese Spalte wird aus der Korrekturtabelle des Tests berechnet; bewerte die Fragen dort."
       },
       "import": {
         "answerCounts": "Der deutsche Abschnitt hat {german} Antworten ({germanMarks}), der englische {english} ({englishMarks}). Beide brauchen dieselben Antworten in derselben Reihenfolge.",
@@ -524,7 +525,7 @@
         "notTestParticipant": "Diese Person nimmt an keinem Termin dieses Tests teil.",
         "offlineDurationFixed": "Ein Termin wurde schon gestartet; die Dauer bleibt.",
         "offlineHasResults": "Die Notenspalte des Tests enthält Ergebnisse. Bitte zuerst diese löschen.",
-        "offlineNoQuestions": "Ein Offline-Test hat keine Fragen.",
+        "offlineNoQuestions": "Nur ein Test auf Papier, der aus dem Fragen-Pool erstellt wurde, hat Fragen.",
         "offlineNoReschedule": "Ein Offline-Termin wird nicht neu angesetzt; bitte einen Nachtermin planen.",
         "oneQuestion": "Ein Test braucht mindestens eine Frage.",
         "onlineNoAttendance": "Ein Online-Termin hat keine Anwesenheitsliste.",
@@ -552,7 +553,14 @@
         "variableName": "{name} ist kein Variablenname: Großbuchstaben, Ziffern und _, beginnend mit einem Buchstaben.",
         "variableValue": "Der Wert wird abgelehnt: eine Zeile mit höchstens 500 Zeichen, ohne %% und ohne @@@.",
         "writtenCannotDelete": "Dieser Test wurde bereits geschrieben und kann nicht gelöscht werden.",
-        "writtenQuestionsFixed": "Dieser Test wurde bereits geschrieben; seine Fragen können sich nicht mehr ändern."
+        "writtenQuestionsFixed": "Dieser Test wurde bereits geschrieben; seine Fragen können sich nicht mehr ändern.",
+        "handoutsOrQuestions": "Ein Offline-Test hat Handouts oder Fragen aus dem Pool, nie beides.",
+        "paperQuestionsFixed": "Die Fragen eines Tests auf Papier stehen fest, sobald seine erste Sitzung gestartet ist.",
+        "noQuestionsToStart": "Der Test hat keine Fragen: Wähle Fragen für ihn, bevor du die Sitzung startest.",
+        "weight": "Ein Gewicht ist eine ganze Zahl von 1 bis 10.",
+        "weightLocked": "Die Gewichte stehen fest, sobald jemand den Test begonnen hat.",
+        "answerLines": "Der Antwortplatz ist eine ganze Zahl von Zeilen von 1 bis 40.",
+        "answerLinesFreetext": "Nur eine Freitext-Frage eines Tests auf Papier hat einen Antwortplatz."
       },
       "years": {
         "alreadyClosed": "{name} ist bereits abgeschlossen.",
@@ -573,6 +581,13 @@
         "notFound": "Unter {path} gibt es keine Markdown-Datei.",
         "path": "Eine Angabe muss eine Markdown-Datei des Korpus sein.",
         "printVariablesMissing": "Die Angabe wird nicht gedruckt, solange diese Variablen keinen Wert haben: {names}. Bitte auf der Seite des Tests eintragen; DATE ist das Datum eines geplanten Termins."
+      },
+      "paper": {
+        "notPaper": "Dieser Test wurde nicht aus dem Fragen-Pool zusammengestellt.",
+        "gradeRange": "Eine Note ist eine ganze Zahl von 1 bis 5.",
+        "notPresent": "Diese Person war in keiner gestarteten Sitzung des Tests anwesend.",
+        "otherGroup": "Diese Frage gehört nicht zu Gruppe {group}, die für diese Person zählt.",
+        "noGroup": "Diese Gruppe hat der Test nicht."
       }
     },
     "frame": {
@@ -1187,6 +1202,51 @@
       "results": "Ergebnisse",
       "share": "Anteil",
       "title": "Auswertung: {name}"
+    },
+    "paper": {
+      "sheet": {
+        "group": "Gruppe {group}",
+        "question": "Frage {n}",
+        "weight": "Gewicht {weight}",
+        "modelSolution": "Musterlösung",
+        "answerSpace": "Platz für die Antwort",
+        "ticked": "angekreuzt",
+        "box": "Kästchen zum Ankreuzen",
+        "solution": "Lösung",
+        "name": "Name:"
+      },
+      "sheetTitle": "{name} · Bogen {group}",
+      "solutionTitle": "{name} · Lösung {group}",
+      "sheetLabel": "Bogen {group}:",
+      "printSheet": "Bogen drucken",
+      "printSolution": "Lösung drucken",
+      "totalWeight": "Gesamtgewicht {weight}",
+      "weightShown": "Gewicht {weight}",
+      "weightLabel": "Gewicht",
+      "linesLabel": "Antwortzeilen",
+      "chooseQuestions": "Fragen für Gruppe {group} wählen",
+      "chooseFor": "Fragen für Gruppe {group} von {name} ({course})",
+      "saveGroup": "Gruppe {group} speichern",
+      "groupHeading": "Gruppe {group}",
+      "questionsHeading": "Fragen",
+      "noQuestions": "Noch keine Frage.",
+      "freetext": "Freitext",
+      "moveUp": "Nach oben",
+      "moveDown": "Nach unten",
+      "followsNote": "Bis seine erste Sitzung gestartet ist, zeigt und druckt der Test seine Fragen so, wie der Pool sie hält. Fragen für Gruppe B zu wählen macht ihn zu einem Test mit zwei Gruppen.",
+      "fixedNote": "Die erste Sitzung ist gestartet: Die Fragen stehen so fest, wie sie damals waren. Gewichte und Antwortzeilen lassen sich weiter ändern; jedes Ergebnis zieht nach.",
+      "correctionHeading": "Korrektur",
+      "noRows": "Noch niemand war in einer gestarteten Sitzung anwesend.",
+      "sheetQuestion": "Frage {n}",
+      "columnQuestion": "F{n} ×{weight}",
+      "columnResult": "Ergebnis",
+      "factorNote": "Der Faktor A {a} : B {b} gilt; das Ergebnis, als das gezählt wird, steht nach dem Pfeil.",
+      "correctionNote": "Eine Note von 1 bis 5 pro Frage, gespeichert beim Tippen. Eine Note zählt als Mitte ihres Bereichs im Notenschlüssel, das Ergebnis ist ihr gewichteter Mittelwert und erscheint, sobald jede Frage eine Note hat.",
+      "explanation": "Auf Papier geschrieben, aus Fragen des Pools zusammengestellt. Drucke Bogen und Lösung jeder Gruppe, starte die Sitzung und bewerte jede Frage in der Korrekturtabelle; die Spalte im Notenbuch wird daraus berechnet.",
+      "modeLabel": "Art des Tests",
+      "modeOnline": "online",
+      "modePaper": "auf Papier",
+      "openCorrection": "Korrekturtabelle öffnen"
     }
   }
 }

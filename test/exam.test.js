@@ -4997,6 +4997,226 @@ describe("printing an offline test's handout", () => {
   });
 });
 
+describe("weights and a test on paper from the pool", () => {
+  const other = "pq-other-student";
+  let student;
+  let teacher;
+  let course;
+  let questions;
+  let freetextId;
+  let paper;
+  let sitting;
+
+  function database(fn) {
+    const { db } = openDatabase(run.databasePath);
+    try {
+      return fn(db);
+    } finally {
+      db.close();
+    }
+  }
+
+  /** Types `value` into the field at `selector`, replacing its text, and leaves it so it saves. */
+  async function retype(page, selector, value) {
+    await page.waitForSelector(selector, { timeout: 10000 });
+    await page.focus(selector);
+    // A number field's text is not selected by a triple click: everything is selected by keyboard.
+    await page.keyboard.down("Control");
+    await page.keyboard.press("a");
+    await page.keyboard.up("Control");
+    await page.keyboard.type(value);
+    await page.keyboard.press("Tab");
+  }
+
+  before(async () => {
+    student = await sharedSession("student");
+    teacher = await sharedSession("teacher");
+    await setPreferences(student, {});
+    await setPreferences(teacher, {});
+    const fixture = await examFixture(teacher);
+    questions = fixture.questions;
+    for (const entry of (await fetchAs(student, "/exam/api/my/tests")).json?.tests ?? []) {
+      if (entry.attempt) await fetchAs(student, `/exam/api/attempts/${entry.attempt.attemptId}/submit`, { method: "POST" });
+    }
+    const klass = await fetchAs(teacher, `/exam/api/years/${fixture.year.id}/classes`, { method: "POST", body: { name: "9XPQ", students: [student.username, other] } });
+    assert.equal(klass.status, 200, JSON.stringify(klass.json));
+    const created = await fetchAs(teacher, `/exam/api/classes/${klass.json.id}/courses`, { method: "POST", body: { subject: "POS", language: "de" } });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    course = created.json;
+    const free = await fetchAs(teacher, "/exam/api/pool/questions", {
+      method: "POST",
+      body: {
+        categoryId: (await fetchAs(teacher, `/exam/api/pool/questions/${questions[0].id}`)).json.categoryId,
+        type: "freetext",
+        nameDe: "Quickie PUT und PATCH",
+        nameEn: "Quickie PUT and PATCH",
+        textDe: "<p>Erkläre den Unterschied zwischen PUT und PATCH.</p>",
+        textEn: "<p>Explain the difference between PUT and PATCH.</p>",
+        solutionDe: "<p>PUT ersetzt die Ressource, PATCH ändert sie.</p>",
+        solutionEn: "<p>PUT replaces the resource, PATCH changes it.</p>",
+        answers: [],
+      },
+    });
+    assert.equal(free.status, 200, JSON.stringify(free.json));
+    freetextId = free.json.question.id;
+  });
+
+  after(async () => {
+    if (sitting) await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/end`, { method: "POST" });
+  });
+
+  test("a weight set on an online test's page: the page shows the total weight, and the student's points are out of it", async () => {
+    const created = await fetchAs(teacher, `/exam/api/courses/${course.id}/tests`, { method: "POST", body: { name: "Weighted", questionIds: questions.map((q) => q.id) } });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    const test = created.json;
+    const heavy = test.questions.find((question) => question.questionId === questions[1].id);
+    const page = teacher.page;
+    await openPage(page, `/exam/tests/${test.id}`, `.sl-exam-test-questions li[data-question="${heavy.id}"] .sl-exam-question-weight-field`);
+    assert.match(await page.$eval(".sl-exam-test-total-weight", (span) => span.textContent), /\b2\b/, "two questions of weight 1");
+    await retype(page, `li[data-question="${heavy.id}"] .sl-exam-question-weight-field`, "3");
+    await page.waitForFunction(() => /\b4\b/.test(document.querySelector(".sl-exam-test-total-weight").textContent), { timeout: 10000 });
+    assert.equal((await fetchAs(teacher, `/exam/api/tests/${test.id}`)).json.totalWeight.A, 4, "saved as it changed");
+
+    const opened = await fetchAs(teacher, `/exam/api/tests/${test.id}/sittings`, {
+      method: "POST",
+      body: { opensAt: new Date(Date.now() - 60000).toISOString(), closesAt: new Date(Date.now() + 50 * 60000).toISOString(), durationMinutes: 15 },
+    });
+    assert.equal(opened.status, 200, JSON.stringify(opened.json));
+    const writing = (await fetchAs(student, `/exam/api/tests/${test.id}/attempt`, { method: "POST" })).json;
+    assert.equal((await fetchAs(teacher, `/exam/api/tests/${test.id}/questions/${heavy.id}`, { method: "PUT", body: { weight: 1 } })).status, 409, "locked once an attempt has started");
+    // The question of weight 1 right, the one of weight 3 left blank.
+    const right = database((db) =>
+      db
+        .prepare(
+          `SELECT aq.position, t.token FROM attempt_question aq JOIN test_question q ON q.id = aq.test_question_id
+           JOIN test_answer a ON a.test_question_id = q.id AND a.correct = 1 JOIN attempt_token t ON t.attempt_id = aq.attempt_id AND t.test_answer_id = a.id
+           WHERE aq.attempt_id = ? AND q.weight = 1`
+        )
+        .all(writing.attempt)
+    );
+    assert.equal(
+      (await fetchAs(student, `/exam/api/attempts/${writing.attempt}/questions/${right[0].position + 1}`, { method: "PUT", body: { tokens: right.map((row) => row.token) } })).status,
+      200
+    );
+    const result = await fetchAs(student, `/exam/api/attempts/${writing.attempt}/submit`, { method: "POST" });
+    assert.equal(result.status, 200, JSON.stringify(result.json));
+    assert.deepEqual([result.json.score, result.json.questionCount], [1, 4], "the student sees 1/4");
+    await fetchAs(teacher, `/exam/api/sittings/${opened.json.id}/end`, { method: "POST" });
+  });
+
+  test("a test on paper composed in the browser, group B chosen, weights and lines set, printed, started, graded, and computed in the sheet", async () => {
+    const page = teacher.page;
+    // Composed in the question browser with the course chosen: on paper, a free-text and a choice question.
+    await openPage(page, `/exam/pool?course=${course.id}`, `.sl-exam-pool-questions tr[data-question="${questions[0].id}"]`);
+    await page.select(".sl-exam-pool-create select[name=mode]", "paper");
+    await page.waitForSelector(`.sl-exam-pool-questions tr[data-question="${freetextId}"] .sl-exam-pool-box`, { timeout: 10000 });
+    await click(page, `.sl-exam-pool-questions tr[data-question="${freetextId}"] .sl-exam-pool-box`);
+    await click(page, `.sl-exam-pool-questions tr[data-question="${questions[0].id}"] .sl-exam-pool-box`);
+    await page.type(".sl-exam-pool-create input[name=name]", "Quickie REST");
+    await retype(page, ".sl-exam-pool-create input[name=durationMinutes]", "15");
+    await page.select(".sl-exam-pool-create select[name=gradebookKind]", "shorttest");
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(page, ".sl-exam-pool-create button[type=submit]")]);
+    const testId = Number(new URL(page.url()).pathname.split("/").pop());
+    paper = (await fetchAs(teacher, `/exam/api/tests/${testId}`)).json;
+    assert.deepEqual([paper.kind, paper.paper, paper.gradebookKind], ["offline", true, "shorttest"]);
+    assert.deepEqual(paper.questions.map((q) => [q.questionId, q.group]).sort(), [[freetextId, "A"], [questions[0].id, "A"]].sort());
+
+    // Group B: chosen in the browser from the test's page.
+    await openPage(page, `/exam/tests/${testId}`, `.sl-exam-test-paper a.sl-exam-paper-choose[data-group="B"]`);
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(page, `.sl-exam-test-paper a.sl-exam-paper-choose[data-group="B"]`)]);
+    await page.waitForSelector(`.sl-exam-pool-assembly-target[data-group="B"]`, { timeout: 20000 });
+    await page.waitForSelector(`.sl-exam-pool-questions tr[data-question="${questions[1].id}"] .sl-exam-pool-box`, { timeout: 10000 });
+    await click(page, `.sl-exam-pool-questions tr[data-question="${questions[1].id}"] .sl-exam-pool-box`);
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(page, ".sl-exam-pool-target button[type=submit]")]);
+    paper = (await fetchAs(teacher, `/exam/api/tests/${testId}`)).json;
+    assert.equal(paper.twoGroups, true);
+    assert.deepEqual(paper.questions.filter((q) => q.group === "B").map((q) => q.questionId), [questions[1].id]);
+
+    // Weight and answer lines on the test's page.
+    const free = paper.questions.find((q) => q.questionId === freetextId);
+    await openPage(page, `/exam/tests/${testId}`, `.sl-exam-paper-group[data-group="A"] li[data-question="${free.id}"] .sl-exam-question-weight-field`);
+    await retype(page, `li[data-question="${free.id}"] .sl-exam-question-weight-field`, "2");
+    await page.waitForFunction(() => /\b3\b/.test(document.querySelector('[data-total-group="A"]').textContent), { timeout: 10000 });
+    await retype(page, `li[data-question="${free.id}"] .sl-exam-question-lines-field`, "4");
+    await eventually(async () => (await fetchAs(teacher, `/exam/api/tests/${testId}`)).json.questions.find((q) => q.id === free.id).answerLines === 4, "the lines are saved");
+
+    // Sheet and solution of group A, from the buttons, in a document without chrome.
+    const sheetHref = await page.$eval(`.sl-exam-paper-group[data-group="A"] a.sl-exam-sheet-print`, (a) => a.getAttribute("href"));
+    const solutionHref = await page.$eval(`.sl-exam-paper-group[data-group="A"] a.sl-exam-sheet-print-solution`, (a) => a.getAttribute("href"));
+    assert.equal(sheetHref, `/exam/tests/${testId}/sheets/A/print`);
+    await openPage(page, sheetHref, ".sl-paper-sheet");
+    const sheet = await page.evaluate(() => ({
+      text: document.querySelector(".sl-paper-sheet").textContent.replace(/\s+/g, " "),
+      lines: document.querySelectorAll(".sl-paper-line").length,
+      chrome: Boolean(document.querySelector("#topbar, #sidebar, nav, .sl-exam-bar")),
+    }));
+    assert.match(sheet.text, /Quickie REST/);
+    assert.match(sheet.text, /9XPQ/);
+    assert.match(sheet.text, /Gruppe A/);
+    assert.match(sheet.text, /Gewicht 2/);
+    assert.match(sheet.text, /Erkläre den Unterschied zwischen PUT und PATCH/);
+    assert.doesNotMatch(sheet.text, /PUT ersetzt die Ressource/, "no model solution on the sheet");
+    assert.equal(sheet.lines, 4, "four answer lines");
+    assert.equal(sheet.chrome, false);
+    await openPage(page, solutionHref, ".sl-paper-solution");
+    assert.match(await page.$eval(".sl-paper-sheet", (div) => div.textContent), /PUT ersetzt die Ressource/, "the solution shows the model solution");
+
+    // The sitting with the demo student in group A and the other one in group B, started.
+    const planned = await fetchAs(teacher, `/exam/api/tests/${testId}/sittings`, { method: "POST", body: { opensAt: new Date(Date.now() + 10 * 60000).toISOString() } });
+    assert.equal(planned.status, 200, JSON.stringify(planned.json));
+    sitting = planned.json;
+    await openPage(page, `/exam/sittings/${sitting.id}/live`, `.sl-exam-attendance-table tr[data-username="${other}"] .sl-exam-attendance-group[data-group="B"]`);
+    await click(page, `.sl-exam-attendance-table tr[data-username="${other}"] .sl-exam-attendance-group[data-group="B"]`);
+    await page.waitForSelector(`.sl-exam-attendance-table tr[data-username="${other}"][data-group="B"]`, { timeout: 10000 });
+    assert.ok(await page.$(`.sl-exam-live-sheets .sl-exam-sheet-prints[data-group="B"]`), "the sitting's page prints both groups' sheets");
+    assert.equal((await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/start`, { method: "POST" })).status, 200);
+
+    // The student's Exams page: the test with its time, no question.
+    await openPage(student.page, "/exam/my", `[data-sitting="${sitting.id}"]`);
+    const shown = await student.page.$eval("#markdown-content", (content) => content.textContent);
+    assert.match(shown, /Quickie REST/);
+    assert.doesNotMatch(shown, /PUT und PATCH|PUT ersetzt/, "no question reaches the student");
+    const fetched = await fetchAs(student, `/exam/tests/${testId}/sheets/A/print`);
+    assert.ok(fetched.status !== 200 || fetched.servedFrom !== `/exam/tests/${testId}/sheets/A/print`, "the sheet is not served to a student");
+
+    // The correction table: both rows graded.
+    await openPage(page, `/exam/tests/${testId}`, ".sl-exam-correction-table input.sl-exam-grade-cell");
+    const username = student.username.toLowerCase();
+    const fields = await page.$$eval(".sl-exam-correction-table tbody tr", (rows) => rows.map((row) => [row.dataset.username, row.querySelectorAll("input").length]));
+    assert.deepEqual(fields.sort(), [[other, 1], [username, 2]].sort(), "a row per student with their group's questions");
+    const grade = async (user, index, value) => {
+      await retype(page, `.sl-exam-correction-table tr[data-username="${user}"] input.sl-exam-grade-cell[data-col="${index}"]`, value);
+    };
+    const choice = paper.questions.find((q) => q.questionId === questions[0].id);
+    const freeCol = paper.questions.filter((q) => q.group === "A").findIndex((q) => q.id === free.id);
+    await grade(username, freeCol, "1");
+    await grade(username, 1 - freeCol, "5");
+    await grade(other, 0, "2");
+    // (2 × 94 % + 25 %) / 3 = 71 %; group B: 81.5 %.
+    await page.waitForFunction(
+      (user) => /71/.test(document.querySelector(`.sl-exam-correction-table tr[data-username="${user}"] .sl-exam-correction-result`).textContent),
+      { timeout: 10000 },
+      username
+    );
+    assert.ok(choice, "the choice question is graded with a grade too");
+
+    // The sheet's column: computed and read-only.
+    const sheetView = (await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=${new Date().toISOString().slice(0, 10) >= "2027-02-15" ? "ss" : "ws"}`)).json;
+    const column = sheetView.columns.find((candidate) => candidate.testId === testId);
+    assert.deepEqual([column.paper, column.readOnly], [true, true]);
+    const own = sheetView.students.find((row) => row.username === username).results[column.id];
+    assert.ok(Math.abs(own.value - 0.71) < 1e-9, `the field holds 71 %, not ${own.value}`);
+    assert.equal((await fetchAs(teacher, `/exam/api/assessments/${column.id}/results/${username}`, { method: "PUT", body: { percent: 10 } })).status, 409, "the field takes no typed result");
+    await openPage(page, `/exam/courses/${course.id}/gradebook`, `.sl-exam-sheet td[data-column="${column.id}"][data-student="${username}"]`);
+    assert.equal(await page.$(`.sl-exam-sheet input.sl-exam-cell[data-assessment="${column.id}"]`), null, "no field to type into");
+    assert.match(await page.$eval(`.sl-exam-sheet td[data-column="${column.id}"][data-student="${username}"]`, (td) => td.textContent), /71/);
+
+    // The student's result.
+    const results = (await fetchAs(student, "/exam/api/my/results")).json;
+    assert.ok(JSON.stringify(results).includes("Quickie REST"), "the student's results show the test");
+  });
+});
+
 describe("the question editor", () => {
   let student;
   let teacher;
@@ -7115,11 +7335,16 @@ describe("the module's actions", () => {
   test("with a course in the bar, every pool row's box follows the row's choice", async () => {
     const page = teacher.page;
     await openPage(page, `/exam/pool?course=${course.id}`, ".sl-exam-pool-questions tbody tr .sl-exam-pool-box");
-    const state = () => page.$$eval(".sl-exam-pool-questions tbody tr", (rows) => rows.map((row) => [row.getAttribute("aria-selected"), row.querySelector(".sl-exam-pool-box").checked]));
+    // A free-text question of the shared pool has no box for an online test (`offline-test-questions`): only rows with one.
+    const state = () =>
+      page.$$eval(".sl-exam-pool-questions tbody tr", (rows) =>
+        rows.filter((row) => row.querySelector(".sl-exam-pool-box")).map((row) => [row.getAttribute("aria-selected"), row.querySelector(".sl-exam-pool-box").checked])
+      );
     assert.ok((await state()).every(([selected, checked]) => selected === "false" && checked === false));
-    await click(page, ".sl-exam-pool-questions tbody tr:first-child td:nth-child(2)");
+    const first = await page.$eval(".sl-exam-pool-questions tbody tr:has(.sl-exam-pool-box)", (row) => row.dataset.question);
+    await click(page, `.sl-exam-pool-questions tr[data-question="${first}"] td:nth-child(2)`);
     assert.deepEqual((await state())[0], ["true", true], "a click on the row ticks its box");
-    await click(page, ".sl-exam-pool-questions tbody tr:first-child .sl-exam-pool-box");
+    await click(page, `.sl-exam-pool-questions tr[data-question="${first}"] .sl-exam-pool-box`);
     assert.deepEqual((await state())[0], ["false", false], "a click on the box unchooses the row");
     await openPage(page, `/exam/pool`, ".sl-exam-pool-questions tbody tr");
     assert.equal(await page.$$eval(".sl-exam-pool-box", (boxes) => boxes.length), 0, "without a course, no boxes");

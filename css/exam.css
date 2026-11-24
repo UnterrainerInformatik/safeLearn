@@ -3100,3 +3100,125 @@ sl-date-input .sl-date-input-grid button.is-disabled {
 .sl-exam-column-evaluation:focus-visible {
   opacity: 1;
 }
+
+/* A test on paper's printed sheet and solution (`offline-test-questions`,
+   pool-quickie design D6): the head with a line for the name, numbered
+   questions with their weights, a box per answer and ruled lines for a
+   free-text answer. Black on white in print, the page's colours on screen. */
+.sl-paper-sheet {
+  max-width: 48rem;
+  margin: 0 auto;
+}
+
+.sl-paper-header h1 {
+  margin-bottom: 0.25rem;
+}
+
+.sl-paper-meta {
+  margin: 0 0 0.75rem;
+}
+
+.sl-paper-name {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+  margin: 0 0 1.5rem;
+}
+
+.sl-paper-name-line {
+  flex: 1;
+  border-bottom: 1px solid currentColor;
+  min-height: 1.5em;
+}
+
+.sl-paper-questions {
+  padding-left: 0;
+  list-style: none;
+}
+
+.sl-paper-question {
+  margin-bottom: 1.5rem;
+  break-inside: avoid;
+}
+
+.sl-paper-question-head {
+  display: flex;
+  justify-content: space-between;
+  font-weight: bold;
+  border-bottom: 1px solid currentColor;
+  margin-bottom: 0.4rem;
+}
+
+.sl-paper-weight {
+  font-weight: normal;
+}
+
+.sl-paper-answers {
+  list-style: none;
+  padding-left: 0.5rem;
+}
+
+.sl-paper-answers li {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+}
+
+.sl-paper-box {
+  font-size: 1.2em;
+  line-height: 1;
+}
+
+.sl-paper-answers li > div > p {
+  margin: 0.2rem 0;
+}
+
+.sl-paper-line {
+  height: 2em;
+  border-bottom: 1px solid currentColor;
+  opacity: 0.6;
+}
+
+.sl-paper-model {
+  border-left: 3px solid currentColor;
+  padding-left: 0.75rem;
+}
+
+.sl-paper-model-label {
+  font-style: italic;
+  margin: 0;
+}
+
+.sl-paper-ticked {
+  font-weight: bold;
+}
+
+@media print {
+  .sl-paper-sheet {
+    color: #000;
+    background: #fff;
+    max-width: none;
+  }
+}
+
+/* The correction table of a test on paper: the sheet's grade fields. */
+.sl-exam-correction-table .sl-exam-grade-cell {
+  width: 2.5em;
+  text-align: center;
+}
+
+.sl-exam-correction-result {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.sl-exam-paper-settings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.sl-exam-paper-settings .sl-exam-question-weight {
+  margin: 0;
+}

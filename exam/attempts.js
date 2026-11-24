@@ -92,10 +92,16 @@ export function questionScores(db, attemptId) {
   return scores;
 }
 
-/** Scores an attempt: the number of its questions that scored by `questionScores`. */
+/**
+ * Scores an attempt: the sum of the weights of its questions that scored by
+ * `questionScores` (pool-quickie design D1). With every weight at 1 it is the
+ * number of questions that scored.
+ */
 export function scoreAttempt(db, attemptId) {
+  // The whole row: a copy before schema 24 has no weight and counts 1.
+  const weightOf = db.prepare("SELECT * FROM test_question WHERE id = ?");
   let score = 0;
-  for (const scored of questionScores(db, attemptId).values()) score += scored;
+  for (const [questionId, scored] of questionScores(db, attemptId)) score += scored * (weightOf.get(questionId).weight ?? 1);
   return score;
 }
 
@@ -388,14 +394,16 @@ export function startAttempt(db, username, testId, at = now(), { userAgent = nul
   const attemptId = inTransaction(db, () => {
     // The retake's earlier attempt goes with its questions, tokens and answers; the notes stay.
     if (retakeIn) db.prepare("DELETE FROM attempt WHERE id = ?").run(existing.id);
-    const questions = db.prepare("SELECT id FROM test_question WHERE test_id = ? ORDER BY position").all(testId);
+    const questions = db.prepare("SELECT * FROM test_question WHERE test_id = ? ORDER BY position").all(testId);
+    // `question_count` holds the test's total weight (pool-quickie design D1); before schema 24 every question counts 1.
+    const totalWeight = questions.reduce((sum, question) => sum + (question.weight ?? 1), 0);
     const deadline = new Date(Date.parse(at) + sitting.duration_s * 1000).toISOString();
     const { lastInsertRowid } = db
       .prepare(
         `INSERT INTO attempt (test_id, sitting_id, username, started_at, deadline, question_count, device_hash, device_user_agent)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(testId, sitting.id, username, at, deadline, questions.length, hashSecret(secret), keptUserAgent(userAgent));
+      .run(testId, sitting.id, username, at, deadline, totalWeight, hashSecret(secret), keptUserAgent(userAgent));
     const id = Number(lastInsertRowid);
     if (!fullscreen) db.prepare("UPDATE attempt SET fullscreen_unavailable = 1 WHERE id = ?").run(id);
     const placeQuestion = db.prepare("INSERT INTO attempt_question (attempt_id, position, test_question_id) VALUES (?, ?, ?)");
@@ -469,7 +477,11 @@ function requireOpen(row, at) {
   }
 }
 
-/** What a submitted attempt shows its student: points, questions and grade - nothing about the answers. */
+/**
+ * What a submitted attempt shows its student: points out of the total weight
+ * (`questionCount`, the name kept from when every question counted 1) and
+ * grade - nothing about the answers.
+ */
 export function resultView(db, row) {
   const fraction = row.question_count === 0 ? 0 : row.score / row.question_count;
   return { submitted: true, score: row.score, questionCount: row.question_count, grade: gradeFor(fraction, readScale(db)) };
@@ -512,7 +524,7 @@ export function reviewView(db, row) {
   const text = language === "en" ? "text_en" : "text_de";
   const questions = db
     .prepare(
-      `SELECT aq.position, q.id, q.type, q.${text} AS text
+      `SELECT q.*, aq.position AS position, q.${text} AS text
        FROM attempt_question aq JOIN test_question q ON q.id = aq.test_question_id
        WHERE aq.attempt_id = ? ORDER BY aq.position`
     )
@@ -532,9 +544,12 @@ export function reviewView(db, row) {
     score,
     questionCount,
     grade,
+    // A weight is shown beside each question only where they do not all weigh 1.
+    weighted: questions.some((question) => (question.weight ?? 1) !== 1),
     questions: questions.map((question) => ({
       n: question.position + 1,
       type: question.type,
+      weight: question.weight ?? 1,
       text: question.text,
       scored: scores.get(question.id) === 1,
       answers: answersOf.all(row.id, question.id).map((answer) => ({ text: answer.text, chosen: answer.chosen === 1, correct: answer.correct === 1 })),

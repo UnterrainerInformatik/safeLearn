@@ -369,7 +369,8 @@
         "scaleShape": "The scale is one threshold in percent for each of the grades 1 to 4.",
         "semester": "A semester is {semesters}.",
         "thresholdOrder": "Grade {grade} has to start below grade {better}.",
-        "thresholdRange": "The threshold of grade {grade} has to be a percentage above 0 and at most 100, with at most one decimal."
+        "thresholdRange": "The threshold of grade {grade} has to be a percentage above 0 and at most 100, with at most one decimal.",
+        "columnComputed": "This column is computed from the test's correction table; grade the questions there."
       },
       "import": {
         "answerCounts": "The German section has {german} answers ({germanMarks}), the English one {english} ({englishMarks}). Both need the same answers in the same order.",
@@ -524,7 +525,7 @@
         "notTestParticipant": "This student does not take part in any sitting of the test.",
         "offlineDurationFixed": "A sitting has started; the duration stays.",
         "offlineHasResults": "The test's gradebook column holds results. Delete them first.",
-        "offlineNoQuestions": "An offline test has no questions.",
+        "offlineNoQuestions": "Only a test on paper created from the question pool holds questions.",
         "offlineNoReschedule": "An offline sitting is not set again; plan a make-up instead.",
         "oneQuestion": "A test needs at least one question.",
         "onlineNoAttendance": "An online sitting has no attendance table.",
@@ -552,7 +553,14 @@
         "variableName": "{name} is no variable name: capital letters, digits and _, starting with a letter.",
         "variableValue": "The value is refused: one line of at most 500 characters, without %% and without @@@.",
         "writtenCannotDelete": "This test has been written and cannot be deleted.",
-        "writtenQuestionsFixed": "This test has been written; its questions cannot change any more."
+        "writtenQuestionsFixed": "This test has been written; its questions cannot change any more.",
+        "handoutsOrQuestions": "An offline test has handouts or questions from the pool, never both.",
+        "paperQuestionsFixed": "The questions of a test on paper are fixed once its first sitting has started.",
+        "noQuestionsToStart": "The test has no questions: choose questions for it before starting the sitting.",
+        "weight": "A weight is a whole number from 1 to 10.",
+        "weightLocked": "The weights are fixed once a student has started the test.",
+        "answerLines": "The answer space is a whole number of lines from 1 to 40.",
+        "answerLinesFreetext": "Only a free-text question of a test on paper has an answer space."
       },
       "years": {
         "alreadyClosed": "{name} is closed already.",
@@ -573,6 +581,13 @@
         "notFound": "There is no Markdown file at {path}.",
         "path": "A handout has to be a Markdown file of the corpus.",
         "printVariablesMissing": "The handout is not printed while these variables have no value: {names}. Fill them in on the test's page; DATE takes the date of a planned sitting."
+      },
+      "paper": {
+        "notPaper": "This test was not composed from the question pool.",
+        "gradeRange": "A grade is a whole number from 1 to 5.",
+        "notPresent": "This student was not present in a started sitting of the test.",
+        "otherGroup": "This question is not one of group {group}, which counts for this student.",
+        "noGroup": "The test has no such group."
       }
     },
     "frame": {
@@ -1187,6 +1202,51 @@
       "results": "Results",
       "share": "Share",
       "title": "Evaluation: {name}"
+    },
+    "paper": {
+      "sheet": {
+        "group": "Group {group}",
+        "question": "Question {n}",
+        "weight": "Weight {weight}",
+        "modelSolution": "Model solution",
+        "answerSpace": "Space for the answer",
+        "ticked": "ticked",
+        "box": "box to tick",
+        "solution": "Solution",
+        "name": "Name:"
+      },
+      "sheetTitle": "{name} · sheet {group}",
+      "solutionTitle": "{name} · solution {group}",
+      "sheetLabel": "Sheet {group}:",
+      "printSheet": "Print sheet",
+      "printSolution": "Print solution",
+      "totalWeight": "total weight {weight}",
+      "weightShown": "weight {weight}",
+      "weightLabel": "Weight",
+      "linesLabel": "Answer lines",
+      "chooseQuestions": "Choose questions for group {group}",
+      "chooseFor": "Questions for group {group} of {name} ({course})",
+      "saveGroup": "Save group {group}",
+      "groupHeading": "Group {group}",
+      "questionsHeading": "Questions",
+      "noQuestions": "No question yet.",
+      "freetext": "free text",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "followsNote": "Until its first sitting is started, the test shows and prints its questions as the pool holds them. Choosing questions for group B makes it a test with two groups.",
+      "fixedNote": "The first sitting has started: the questions are fixed as they were then. Weights and answer lines can still be changed; every result follows.",
+      "correctionHeading": "Correction",
+      "noRows": "Nobody was present in a started sitting yet.",
+      "sheetQuestion": "question {n}",
+      "columnQuestion": "Q{n} ×{weight}",
+      "columnResult": "Result",
+      "factorNote": "The factor A {a} : B {b} applies; the result it counts as is shown after the arrow.",
+      "correctionNote": "A grade from 1 to 5 per question, saved as you type. A grade counts as the middle of its band on the grading scale, and the result is their weighted mean, shown once every question has a grade.",
+      "explanation": "Written on paper, composed from questions of the pool. Print each group's sheet and solution, start the sitting, and grade every question in the correction table; the gradebook column is computed from it.",
+      "modeLabel": "Kind of test",
+      "modeOnline": "online",
+      "modePaper": "on paper",
+      "openCorrection": "Open correction table"
     }
   }
 }

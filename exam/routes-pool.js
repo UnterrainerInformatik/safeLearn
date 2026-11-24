@@ -72,6 +72,11 @@ export function registerPoolRoutes(router, { db, handle, startPage }) {
       if (typeof req.query.category === "string" && /^[1-9]\d{0,9}$/.test(req.query.category)) params.category = req.query.category;
       // Only the questions not reviewed yet, e.g. right after an import.
       if (req.query.unreviewed === "1") params.unreviewed = "1";
+      // Choosing the questions of one group of a test on paper (pool-quickie design D7).
+      if (typeof req.query.test === "string" && /^[1-9]\d{0,9}$/.test(req.query.test)) {
+        params.test = req.query.test;
+        params.group = req.query.group === "B" ? "B" : "A";
+      }
       res.send(await teacherShell({ db, startPage, req, title: (t) => t("exam.pages.pool"), context, kind: "pool", params, current: "pool" }));
     })
   );

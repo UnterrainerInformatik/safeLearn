@@ -9,7 +9,11 @@
  *   question's row also chooses it for a test - or unchooses it - and the
  *   chosen rows are coloured; they become a new test for that course, or are
  *   added to one of its tests that has not been written yet (`online-test`).
- *   A free-text question has no box there: an online test cannot hold it.
+ *   A new test is created online or on paper (`offline-test-questions`); a
+ *   free-text question has a box only for a test on paper, since an online
+ *   test cannot hold it. Opened from a test on paper's page with
+ *   `data-sl-test` and `data-sl-group`, the browser chooses that group's
+ *   questions instead, starting from the ones it holds (pool-quickie D7).
  *   It leads into the editor (`question-editor`): "Edit" on the preview, and
  *   "New question" always, in the chosen category if there is one; retired
  *   questions are listed, marked, only when asked for. The tree is also where
@@ -45,6 +49,9 @@ function onlineType(type) {
   return type !== "freetext";
 }
 
+/** The offline kinds' labels, as the offline test's form names them. */
+const kindLabels = { test: t("exam.offline.countsAsTest"), shorttest: t("exam.offline.countsAsShortTest") };
+
 /** A date or the day of a timestamp in the reader's format, "–" for none. */
 function displayDate(iso) {
   return iso ? format.date(iso) : "–";
@@ -60,18 +67,33 @@ function storedMarkup(html, className) {
 class PoolView extends ExamElement {
   async load() {
     const courseId = this.params.course;
-    const [tree, course, tests] = await Promise.all([
+    const targetId = this.params.test;
+    const [tree, course, tests, target] = await Promise.all([
       examApi("/pool/categories"),
       courseId ? examApi(`/courses/${courseId}`) : null,
       courseId ? examApi(`/tests?course=${courseId}`) : null,
+      targetId ? examApi(`/tests/${targetId}`) : null,
     ]);
-    return { tree, course, tests: tests ? tests.groups[0].tests.filter((test) => test.started === 0) : [] };
+    const group = tests?.groups[0] ?? null;
+    return {
+      tree,
+      course,
+      // Only an online test not yet written takes questions added here; a test on paper is chosen for by its group.
+      tests: group ? group.tests.filter((test) => test.started === 0 && test.kind === "online") : [],
+      offlineKinds: group?.offlineKinds ?? [],
+      target: target && target.paper ? { test: target, group: this.params.group === "B" ? "B" : "A" } : null,
+    };
   }
 
-  render({ tree, course, tests }) {
+  render({ tree, course, tests, offlineKinds = [], target = null }) {
     this.course = course;
-    this.chosen = new Set();
-    this.assembly = course ? this.assemblyPanel(course, tests) : null;
+    this.target = target;
+    // A test on paper takes free-text questions; the create form's choice or the target decides.
+    this.paperMode = target !== null;
+    // Each listed question's type, to unchoose free-text ones when the form switches to online.
+    this.types = new Map();
+    this.chosen = new Set(target ? target.test.questions.filter((question) => question.group === target.group && question.questionId !== null).map((question) => question.questionId) : []);
+    this.assembly = course ? (target ? this.targetPanel(course, target) : this.assemblyPanel(course, tests, offlineKinds)) : null;
     this.categoryId = this.params.category ? Number(this.params.category) : null;
     this.includeRetired = false;
     this.onlyUnreviewed = this.params.unreviewed === "1";
@@ -187,20 +209,58 @@ class PoolView extends ExamElement {
    * Where ticked questions become a test of the bar's course: a name and
    * "Create test", or one of the course's unwritten tests to add them to.
    */
-  assemblyPanel(course, tests) {
+  assemblyPanel(course, tests, offlineKinds = []) {
     this.count = h("span", { class: "sl-exam-pool-count" }, t("exam.pool.noneChosen"));
     this.message = h("p", { class: "sl-exam-message", role: "status" });
     const name = h("input", { type: "text", name: "name", maxlength: "80", placeholder: t("exam.pool.testName"), "aria-label": t("exam.pool.testName"), required: true });
+    // Online or on paper (`offline-test-questions`); on paper only while the course uses tests or short tests.
+    const mode = h(
+      "select",
+      { name: "mode", class: "sl-exam-pool-mode", "aria-label": t("exam.paper.modeLabel") },
+      h("option", { value: "online" }, t("exam.paper.modeOnline")),
+      offlineKinds.length > 0 ? h("option", { value: "paper" }, t("exam.paper.modePaper")) : null
+    );
+    const minutes = h("input", { type: "number", name: "durationMinutes", min: "1", max: "600", value: "15", class: "sl-exam-number", "aria-label": t("exam.offline.durationLabel") });
+    const kind = h("select", { name: "gradebookKind", "aria-label": t("exam.offline.gradebookKindLabel") }, offlineKinds.map((value) => h("option", { value, selected: value === "shorttest" }, kindLabels[value])));
+    const paperFields = h(
+      "span",
+      { class: "sl-exam-pool-paper-fields", hidden: true },
+      " ",
+      h("label", {}, `${t("exam.offline.durationLabel")} `, minutes),
+      " ",
+      h("label", {}, `${t("exam.offline.gradebookKindLabel")} `, kind)
+    );
+    mode.addEventListener("change", () => {
+      this.paperMode = mode.value === "paper";
+      paperFields.hidden = !this.paperMode;
+      // An online test holds no free-text question: those chosen are unchosen.
+      if (!this.paperMode) for (const id of [...this.chosen]) if (!onlineType(this.types.get(id))) this.chosen.delete(id);
+      this.updateCount();
+      this.refreshList();
+    });
     const create = h(
       "form",
       {
         class: "sl-exam-pool-create",
         onSubmit: (event) => {
           event.preventDefault();
-          this.assemble(() => examApi(`/courses/${course.id}/tests`, { method: "POST", body: { name: name.value, questionIds: [...this.chosen] } }));
+          if (this.paperMode) {
+            this.assemble(() =>
+              examApi(`/courses/${course.id}/offline-tests`, {
+                method: "POST",
+                body: { name: name.value, durationMinutes: Number(minutes.value), gradebookKind: kind.value, questionIds: [...this.chosen] },
+              })
+            );
+          } else {
+            this.assemble(() => examApi(`/courses/${course.id}/tests`, { method: "POST", body: { name: name.value, questionIds: [...this.chosen] } }));
+          }
         },
       },
       name,
+      " ",
+      mode,
+      paperFields,
+      " ",
       h("button", { type: "submit", class: "sl-exam-action sl-exam-action-primary" }, t("exam.pool.createTest"))
     );
     let add = null;
@@ -239,6 +299,52 @@ class PoolView extends ExamElement {
       add,
       this.message
     );
+  }
+
+  /**
+   * Where the ticked questions become group `group`'s of a test on paper
+   * (pool-quickie design D7): the group's questions are ticked from the start,
+   * and saving sets exactly the ticked ones, in the order they were held and
+   * then ticked, and opens the test again.
+   */
+  targetPanel(course, { test, group }) {
+    this.count = h("span", { class: "sl-exam-pool-count" });
+    this.message = h("p", { class: "sl-exam-message", role: "status" });
+    this.updateCount();
+    const held = test.questions.filter((question) => question.group === group).map((question) => question.questionId);
+    const save = h(
+      "form",
+      {
+        class: "sl-exam-pool-target",
+        onSubmit: async (event) => {
+          event.preventDefault();
+          const questionIds = [...held.filter((id) => this.chosen.has(id)), ...[...this.chosen].filter((id) => !held.includes(id))];
+          this.message.textContent = "";
+          try {
+            await examApi(`/tests/${test.id}`, { method: "PUT", body: { questionIds, group } });
+            window.location.assign(`/exam/tests/${test.id}`);
+          } catch (error) {
+            this.message.textContent = error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.pool.testSaveFailed");
+          }
+        },
+      },
+      h("button", { type: "submit", class: "sl-exam-action sl-exam-action-primary" }, t("exam.paper.saveGroup", { group })),
+      " ",
+      linkButton({ label: t("exam.tests.cancel"), href: `/exam/tests/${test.id}`, class: "sl-exam-pool-target-cancel" })
+    );
+    return h(
+      "section",
+      { class: "sl-exam-pool-assembly sl-exam-pool-assembly-target", "aria-label": t("exam.pool.assemble"), "data-test": String(test.id), "data-group": group },
+      h("h2", {}, t("exam.paper.chooseFor", { group, name: test.name, course: `${displayClass(course.className)} ${course.subject}` })),
+      h("p", {}, this.count),
+      save,
+      this.message
+    );
+  }
+
+  /** Whether the row of a question of `type` can be ticked now: a free-text one only for a test on paper. */
+  tickable(type) {
+    return onlineType(type) || this.paperMode;
   }
 
   /** Sends the assembly `request` and opens the test it answers. */
@@ -374,7 +480,7 @@ class PoolView extends ExamElement {
         "tbody",
         {},
         questions.map((question) =>
-          h(
+          (this.types.set(question.id, question.type), h(
             "tr",
             {
               "data-question": String(question.id),
@@ -391,7 +497,7 @@ class PoolView extends ExamElement {
               // bar, choosing or unchoosing the question for the test.
               onClick: (event) => {
                 this.showQuestion(question.id);
-                if (this.course && onlineType(question.type)) this.toggle(question.id, event.currentTarget);
+                if (this.course && this.tickable(question.type)) this.toggle(question.id, event.currentTarget);
               },
             },
             // The row's choice as a box: a click on it reaches the row, which
@@ -401,7 +507,7 @@ class PoolView extends ExamElement {
               ? h(
                   "td",
                   { class: "sl-exam-pool-pick" },
-                  onlineType(question.type)
+                  this.tickable(question.type)
                     ? h("input", { type: "checkbox", class: "sl-exam-pool-box", checked: this.chosen.has(question.id), "aria-label": t("exam.pool.chooseQuestion", { name: question.nameDe }) })
                     : null
                 )
@@ -417,11 +523,11 @@ class PoolView extends ExamElement {
                 { class: "sl-exam-quiet sl-exam-pool-kind" },
                 `${question.category.de.join(" / ")} · ${typeLabels[question.type] ?? question.type}${question.retired ? ` · ${t("exam.pool.retired")}` : ""}`
               ),
-              this.course && !onlineType(question.type) ? h("div", { class: "sl-exam-quiet sl-exam-pool-not-online" }, t("exam.pool.freetextNotOnline")) : null
+              this.course && !this.tickable(question.type) ? h("div", { class: "sl-exam-quiet sl-exam-pool-not-online" }, t("exam.pool.freetextNotOnline")) : null
             ),
             h("td", {}, `${question.uses}×`),
             h("td", {}, displayDate(question.lastUsedOn))
-          )
+          ))
         )
       )
     );

@@ -354,6 +354,51 @@ export function stickyColumns(table) {
   return table;
 }
 
+/**
+ * The sheet's arrow keys for a table of `input.sl-exam-cell` fields marked
+ * `data-row` and `data-col` (gradebook-sheet, pool-quickie design D8): up and
+ * down - Enter like down - to the nearest field of the same column in the
+ * rows above or below, left and right along the row with the cursor at the
+ * value's start or end. The focus leaving a field fires its `change`, which
+ * saves it. Returns the table.
+ */
+export function gridArrowKeys(table) {
+  table.addEventListener("keydown", (event) => {
+    const field = event.target;
+    if (!(field instanceof HTMLInputElement && field.classList.contains("sl-exam-cell"))) return;
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const key = event.key === "Enter" ? "ArrowDown" : event.key;
+    const row = Number(field.dataset.row);
+    const col = Number(field.dataset.col);
+    const { selectionStart: start, selectionEnd: end, value } = field;
+    const whole = start === 0 && end === value.length;
+    const atEnd = whole || (start === end && end === value.length);
+    const atStart = whole || (start === end && start === 0);
+    const fields = [...table.querySelectorAll("input.sl-exam-cell")];
+    const at = (r, c) => fields.find((candidate) => Number(candidate.dataset.row) === r && Number(candidate.dataset.col) === c) ?? null;
+    let next = null;
+    if (key === "ArrowDown" || key === "ArrowUp") {
+      const step = key === "ArrowUp" ? -1 : 1;
+      const rows = [...new Set(fields.map((candidate) => Number(candidate.dataset.row)))].sort((a, b) => a - b);
+      const later = step > 0 ? rows.filter((r) => r > row) : rows.filter((r) => r < row).reverse();
+      for (const r of later) {
+        next = at(r, col);
+        if (next) break;
+      }
+    } else if (key === "ArrowRight" && atEnd) next = at(row, col + 1);
+    else if (key === "ArrowLeft" && atStart) next = at(row, col - 1);
+    else return;
+    event.preventDefault();
+    if (!next) {
+      if (event.key === "Enter") field.saveNow?.();
+      return;
+    }
+    next.focus();
+    next.select();
+  });
+  return table;
+}
+
 /** Fields with a write in flight, for the leave-page prompt. */
 const saving = new Set();
 

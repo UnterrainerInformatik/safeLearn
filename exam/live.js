@@ -16,7 +16,7 @@
 import { EventEmitter } from "node:events";
 
 import { getCourse, NotFoundError, now } from "./classes.js";
-import { sittingTiming, testVariables } from "./tests.js";
+import { hasTwoGroups, isPaper, sittingTiming, testVariables } from "./tests.js";
 import { handoutsOf } from "./handout.js";
 import { browserLabel } from "./user-agent.js";
 import { teacherNoteOf, teacherNotesOf } from "./teacher-notes.js";
@@ -200,7 +200,7 @@ export function liveSilence(db, sittingId, at = now()) {
  */
 export function liveSnapshot(db, sittingId, at = now(), { screen = false } = {}) {
   const sitting = sittingRow(db, sittingId);
-  const test = db.prepare("SELECT id, name, course_id, kind, handout_a, handout_b FROM test WHERE id = ?").get(sitting.test_id);
+  const test = db.prepare("SELECT * FROM test WHERE id = ?").get(sitting.test_id);
   const offline = test.kind === "offline";
   const course = getCourse(db, test.course_id);
   const attempts = new Map(db.prepare("SELECT * FROM attempt WHERE test_id = ?").all(test.id).map((attempt) => [attempt.username, attempt]));
@@ -227,6 +227,9 @@ export function liveSnapshot(db, sittingId, at = now(), { screen = false } = {})
       name: test.name,
       kind: test.kind,
       handouts: offline ? handoutsOf(test) : [],
+      // A test on paper composed from the pool (`offline-test-questions`) and whether it has two groups.
+      paper: offline && isPaper(test),
+      twoGroups: offline && hasTwoGroups(db, test),
       missingVariables: offline ? testVariables(db, test, sitting).filter((variable) => variable.missing).map((variable) => variable.name) : [],
       attempts: attempts.size,
     },
