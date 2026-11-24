@@ -45,3 +45,5 @@ Echter Ablageort: `/mnt/data/source/HTL/safeLearn/AI/memory/`
 - [secureLectures-Inhalt in Nextcloud](securelectures-content-nextcloud.md) — echter Inhalt liegt unter `/mnt/data/nextcloud/secureLectures/`, nicht im `md/` des Repos
 - [Commit+Push nach apply/archive](commit-push-after-apply-archive.md) — nach `/opsx:apply` und `/opsx:archive` immer committen, pushen und gleich nach secureLectures mergen+pushen, ohne zu fragen
 - [Vor Analyse pullen](pull-before-analysis.md) — erst `git fetch`/Stand gegen origin prüfen, Gerald committet von anderen Rechnern; Snapshot beim Session-Start kann veraltet sein
+- [secureLectures-Runner auf runners1](securelectures-runner-on-runners1.md) — Runner-Container `ghar-priv-secure-lectures` liegt auf `runners1`, nicht babylon5; hängender Broker-Listener → Container neu starten
+- [secureLectures-Exam-DB zurückholen](securelectures-exam-db-restore.md) — Exam-Daten liegen in `exam.sqlite` + `exam-backups/` auf babylon5, nicht im save-Repo; Einzelfehler gezielt per UPDATE zurück, nie ganze Datei
