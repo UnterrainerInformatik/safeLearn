@@ -72,11 +72,12 @@ export function personInitials(person) {
  * (`student-photos`, design D3). `person.photo` is the version the payload
  * carries for a session holding `student-images`; without it the initials
  * stand there. The image's `alt` is empty, because the name stands right
- * beside it; hovering or focusing the wrapper shows it at its stored size,
- * which is CSS alone (`.sl-exam-person-photo` in css/exam.css).
+ * beside it; hovering or focusing the wrapper shows it at its stored size
+ * (`enlargePhotos`).
  */
 export function personBadge(person) {
   if (typeof person?.photo === "string" && person.photo.length > 0) {
+    enlargePhotos();
     return h(
       "span",
       { class: "sl-exam-person-photo", tabindex: "0" },
@@ -90,6 +91,71 @@ export function personBadge(person) {
   }
   // Drawn by CSS from the attribute, so a row's text stays the name alone.
   return h("span", { class: "sl-exam-person-initials", "aria-hidden": "true", "data-initials": personInitials(person ?? {}) });
+}
+
+let photoLayer = null;
+
+/**
+ * Shows a hovered or focused photo at its stored size, beside its box
+ * (`student-photos`, design D3). The enlarged image is one element of its
+ * own at the end of the content, placed by the box's position in the
+ * viewport and kept inside it. A layer inside the row cannot do this: the
+ * sheet's sticky name cells each form a stacking context, so the next row
+ * paints over it, and Chrome places a `position: fixed` image without insets
+ * at its static position in document coordinates, so it drifts down by
+ * however far the page is scrolled. Installed once, on the first photo.
+ */
+function enlargePhotos() {
+  if (photoLayer !== null || typeof document === "undefined") return;
+  photoLayer = { image: null, box: null };
+  const gap = 6;
+  const hide = () => {
+    photoLayer.box = null;
+    photoLayer.image?.remove();
+  };
+  const place = () => {
+    const { box, image } = photoLayer;
+    if (box === null || image === null) return;
+    if (!box.isConnected) return hide();
+    const anchor = box.getBoundingClientRect();
+    const width = image.offsetWidth;
+    const height = image.offsetHeight;
+    let left = anchor.right + gap;
+    if (left + width > window.innerWidth - gap) left = Math.max(gap, anchor.left - gap - width);
+    const top = Math.min(Math.max(gap, anchor.top), Math.max(gap, window.innerHeight - gap - height));
+    image.style.left = `${Math.round(left)}px`;
+    image.style.top = `${Math.round(top)}px`;
+  };
+  const show = (box) => {
+    const source = box.querySelector("img");
+    if (source === null) return;
+    photoLayer.box = box;
+    const host = box.closest("#markdown-content") ?? document.body;
+    photoLayer.image ??= Object.assign(document.createElement("img"), { className: "sl-exam-photo-enlarged", alt: "" });
+    const image = photoLayer.image;
+    image.onload = place;
+    if (image.src !== source.src) image.src = source.src;
+    if (image.parentNode !== host) host.append(image);
+    place();
+  };
+  const boxOf = (event) => (event.target instanceof Element ? event.target.closest(".sl-exam-person-photo") : null);
+  document.addEventListener("pointerover", (event) => {
+    const box = boxOf(event);
+    if (box !== null && box !== photoLayer.box) show(box);
+  });
+  document.addEventListener("pointerout", (event) => {
+    const box = boxOf(event);
+    if (box !== null && !box.contains(event.relatedTarget) && document.activeElement !== box) hide();
+  });
+  document.addEventListener("focusin", (event) => {
+    const box = boxOf(event);
+    if (box !== null && box.matches(":focus-visible")) show(box);
+  });
+  document.addEventListener("focusout", (event) => {
+    if (boxOf(event) === photoLayer.box) hide();
+  });
+  window.addEventListener("scroll", place, { capture: true, passive: true });
+  window.addEventListener("resize", place, { passive: true });
 }
 
 /**
@@ -664,9 +730,9 @@ class ClassView extends ExamElement {
     // A Matura candidate of any of the class's courses, with those subjects on hover.
     const subjects = new Map(klass.courses.map((course) => [course.subject.toLowerCase(), course.subject]));
     const nameCell = (entry) => {
-      if (!entry.examParticipantIn?.length) return h("td", {}, displayPerson(entry));
+      if (!entry.examParticipantIn?.length) return h("td", {}, personLabel(entry, { candidate: false }));
       const text = t("exam.participant.candidateIn", { subjects: entry.examParticipantIn.map((subject) => subjects.get(subject) ?? subject).join(", ") });
-      return h("td", candidateMark(text), displayPerson(entry), candidateNote(text));
+      return h("td", candidateMark(text), personLabel(entry, { name: h("span", {}, displayPerson(entry), candidateNote(text)) }));
     };
     const rows = (entries, removable) =>
       entries.map((entry) =>

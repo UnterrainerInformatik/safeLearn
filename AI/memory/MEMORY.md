@@ -48,3 +48,4 @@ Echter Ablageort: `/mnt/data/source/HTL/safeLearn/AI/memory/`
 - [secureLectures-Runner auf runners1](securelectures-runner-on-runners1.md) — Runner-Container `ghar-priv-secure-lectures` liegt auf `runners1`, nicht babylon5; hängender Broker-Listener → Container neu starten
 - [secureLectures-Exam-DB zurückholen](securelectures-exam-db-restore.md) — Exam-Daten liegen in `exam.sqlite` + `exam-backups/` auf babylon5, nicht im save-Repo; Einzelfehler gezielt per UPDATE zurück, nie ganze Datei
 - [AD hat keine Fotos](ad-no-student-photos.md) — 0 von 2.261 Konten mit thumbnailPhoto/jpegPhoto (2026-11-27, Gegenprobe objectGUID); Outlook-Bilder sind Exchange Online und von Schülern änderbar
+- [secureLectures-URL](securelectures-url-htl-dev.md) — Instanz läuft unter https://htl.dev, Login über auth.htl-leonding.ac.at/realms/unterrainer

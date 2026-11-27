@@ -44,7 +44,8 @@ import {
   isKnownTeacher,
   searchPeople,
 } from "./roster-source.js";
-import { requireTeacher, teacherPage } from "./gate.js";
+import { holdsStudentImages, requireTeacher, teacherPage } from "./gate.js";
+import { withPhotoVersions } from "./photos.js";
 import { teacherShell } from "./bar.js";
 import { directoryServiceConfigured, heldDirectoryPeople } from "../middlewares/directory-service.js";
 import { rosterWithParticipations } from "./participants.js";
@@ -146,10 +147,13 @@ export function registerClassRoutes(router, { db, handle, startPage, retentionYe
     const students = resolveStudents(req.body?.students ?? [], people);
     return createClass(db, yearId, { name: req.body?.name, students });
   });
-  // The roster says who is a Matura candidate in which of the class's courses (exam-participant-role D5).
-  api("get", "/classes/:id", (req) => {
+  // The roster says who is a Matura candidate in which of the class's courses
+  // (exam-participant-role D5), and for a session holding `student-images`
+  // each entry's photo version (student-photos D2).
+  api("get", "/classes/:id", async (req) => {
     const klass = getClass(db, idParam(req.params.id));
-    return { ...klass, roster: rosterWithParticipations(db, klass) };
+    const roster = rosterWithParticipations(db, klass);
+    return { ...klass, roster: (await holdsStudentImages(req)) ? withPhotoVersions(db, roster) : roster };
   });
   api("put", "/classes/:id", (req) => renameClass(db, idParam(req.params.id), req.body ?? {}));
   api("delete", "/classes/:id", (req) => deleteClass(db, idParam(req.params.id)));

@@ -2794,8 +2794,8 @@ sl-date-input .sl-date-input-grid button.is-disabled {
 /* A person in a list (`student-photos`, design D3): the photo or the initials
    in the same box, then the name. The box keeps the photo's 134 x 200 ratio;
    its height is `--sl-exam-photo-height`, set per place. Hovering or focusing
-   a photo lifts the same image out of the box at its stored size, beside it,
-   above the neighbouring cells; it closes when the pointer or focus leaves. */
+   a photo shows it at its stored size beside the box, above the neighbouring
+   cells; it closes when the pointer or focus leaves. */
 #markdown-content {
   --sl-exam-photo-height: 2.2em;
   --sl-exam-initials-bg: #e4e7eb;
@@ -2857,18 +2857,21 @@ sl-date-input .sl-date-input-grid button.is-disabled {
   border-radius: 3px;
 }
 
-/* Fixed without insets keeps the image at its place in the row (its static
-   position) while it leaves every scrolling container's clip, which a
-   sideways-scrolling sheet would otherwise cut it to. */
-#markdown-content .sl-exam-person-photo:hover img,
-#markdown-content .sl-exam-person-photo:focus-visible img {
+/* The enlarged photo: one element at the end of the content, outside every
+   row's stacking context and scrolling clip, placed by the script beside the
+   hovered or focused box and kept inside the viewport (`enlargePhotos` in
+   exam/client/classes.js). */
+#markdown-content .sl-exam-photo-enlarged {
   position: fixed;
-  margin-left: calc(var(--sl-exam-photo-height) * 0.67 + 6px);
-  z-index: 30;
+  z-index: 1000;
+  display: block;
   width: auto;
   height: auto;
-  object-fit: contain;
+  max-width: none;
+  margin: 0;
+  border-radius: 3px;
   box-shadow: 0 4px 16px var(--sl-exam-photo-shadow);
+  pointer-events: none;
 }
 
 /* The heading of a student's page carries a larger photo. */
@@ -2879,7 +2882,8 @@ sl-date-input .sl-date-input-grid button.is-disabled {
 
 @media print {
   #markdown-content .sl-exam-person-photo,
-  #markdown-content .sl-exam-person-initials {
+  #markdown-content .sl-exam-person-initials,
+  #markdown-content .sl-exam-photo-enlarged {
     display: none;
   }
 }

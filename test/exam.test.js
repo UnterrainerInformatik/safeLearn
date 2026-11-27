@@ -5226,6 +5226,7 @@ describe("students' photos", () => {
   let sitting;
   let testId;
   let scratch;
+  let classId;
 
   before(async () => {
     student = await sharedSession("student");
@@ -5237,6 +5238,7 @@ describe("students' photos", () => {
     const fixture = await examFixture(teacher);
     const klass = await fetchAs(teacher, `/exam/api/years/${fixture.year.id}/classes`, { method: "POST", body: { name: "9XPH", students: [student.username, other] } });
     assert.equal(klass.status, 200, JSON.stringify(klass.json));
+    classId = klass.json.id;
     const created = await fetchAs(teacher, `/exam/api/classes/${klass.json.id}/courses`, { method: "POST", body: { subject: "POS", language: "de" } });
     assert.equal(created.status, 200, JSON.stringify(created.json));
     course = created.json;
@@ -5286,16 +5288,51 @@ describe("students' photos", () => {
       return img && img.complete && img.naturalWidth === 134;
     }, { timeout: 20000 }, username);
     assert.ok(await page.$(".sl-exam-sheet .sl-exam-person-initials[data-initials]"), "the student without a photo shows initials");
+    // A teacher enlarges a photo: its stored size beside the box, outside the
+    // row (whose sticky name cell would let the next row paint over it), inside
+    // the viewport, and still beside the box once the page is scrolled.
+    const enlargedBeside = () =>
+      page.$eval(".sl-exam-sheet .sl-exam-person-photo", (box) => {
+        const image = document.querySelector(".sl-exam-photo-enlarged");
+        if (!image?.isConnected || !image.complete) return null;
+        const anchor = box.getBoundingClientRect();
+        const shown = image.getBoundingClientRect();
+        return {
+          size: [Math.round(shown.width), Math.round(shown.height)],
+          outsideRow: image.closest("td, th, tr") === null,
+          inViewport: shown.top >= 0 && shown.bottom <= window.innerHeight && shown.left >= 0 && shown.right <= window.innerWidth,
+          beside: Math.abs(shown.left - (anchor.right + 6)) <= 1 || Math.abs(shown.right - (anchor.left - 6)) <= 1,
+          level: Math.abs(shown.top - Math.min(Math.max(6, anchor.top), window.innerHeight - 6 - shown.height)) <= 1,
+        };
+      });
+    await page.evaluate(() => {
+      document.documentElement.style.minHeight = "300vh";
+      window.scrollTo(0, 0);
+    });
     await page.hover(".sl-exam-sheet .sl-exam-person-photo");
-    const enlarged = await page.$eval(".sl-exam-sheet .sl-exam-person-photo img", (img) => [getComputedStyle(img).position, getComputedStyle(img).width, getComputedStyle(img).height]);
-    assert.deepEqual(enlarged, ["fixed", "134px", "200px"], "A teacher enlarges a photo: its stored size, above the sheet's scrolling");
+    await page.waitForFunction(() => document.querySelector(".sl-exam-photo-enlarged")?.complete, { timeout: 10000 });
+    const atTop = await enlargedBeside();
+    assert.deepEqual(atTop, { size: [134, 200], outsideRow: true, inViewport: true, beside: true, level: true }, "A teacher enlarges a photo: its stored size, beside the box, above the rows");
     await page.mouse.move(0, 0);
+    assert.equal(await page.$(".sl-exam-photo-enlarged"), null, "the enlarged photo closes when the pointer leaves");
+    await page.evaluate(() => window.scrollTo(0, 150));
+    await page.hover(".sl-exam-sheet .sl-exam-person-photo");
+    assert.ok((await page.evaluate(() => window.scrollY)) > 0, "the page stays scrolled while hovering");
+    assert.deepEqual(await enlargedBeside(), atTop, "scrolled, the enlarged photo stays beside the box");
+    await page.mouse.move(0, 0);
+    await page.evaluate(() => {
+      document.documentElement.style.minHeight = "";
+      window.scrollTo(0, 0);
+    });
 
     // The live view of the offline sitting, with its attendance and group controls, and the correction table.
     await openPage(page, `/exam/sittings/${sitting.id}/live`, `.sl-exam-attendance-table tr[data-username="${username}"] .sl-exam-person-photo img`);
     assert.ok(await page.$(`.sl-exam-attendance-table tr[data-username="${username}"] .sl-exam-attendance-present`), "beside the attendance control");
     assert.ok(await page.$(`.sl-exam-attendance-table tr[data-username="${other}"] .sl-exam-person-initials`));
     await openPage(page, `/exam/tests/${testId}`, `.sl-exam-correction-table tr[data-username="${username}"] th .sl-exam-person-photo img`);
+    // The class's roster, photo and initials beside the names.
+    await openPage(page, `/exam/classes/${classId}`, `.sl-exam-roster .sl-exam-person-photo img[src*="/exam/photos/${username}?"]`);
+    assert.ok(await page.$(".sl-exam-roster .sl-exam-person-initials[data-initials]"), "the roster's student without a photo shows initials");
   });
 
   test("a teacher without the role sees initials and asks for no photo; a student gets 403 for every photo", async () => {
@@ -5307,6 +5344,7 @@ describe("students' photos", () => {
       await openPage(teacher.page, `/exam/courses/${course.id}/gradebook`, ".sl-exam-sheet .sl-exam-person-initials");
       await openPage(teacher.page, `/exam/sittings/${sitting.id}/live`, `.sl-exam-attendance-table tr[data-username="${username}"] .sl-exam-person-initials`);
       await openPage(teacher.page, `/exam/tests/${testId}`, `.sl-exam-correction-table tr[data-username="${username}"] th .sl-exam-person-initials`);
+      await openPage(teacher.page, `/exam/classes/${classId}`, ".sl-exam-roster .sl-exam-person-initials");
     } finally {
       teacher.page.off("request", record);
     }
@@ -5314,6 +5352,8 @@ describe("students' photos", () => {
     assert.deepEqual(asked.filter((url) => url.includes("/exam/photos/")), [], "the browser requests no photo");
     const sheet = (await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=ws`)).json;
     assert.ok(sheet.students.every((row) => !("photo" in row)), "the payload says for no row that a photo exists");
+    const roster = (await fetchAs(teacher, `/exam/api/classes/${classId}`)).json.roster;
+    assert.ok(roster.length > 0 && roster.every((row) => !("photo" in row)), "nor does the class's roster");
     assert.equal((await fetchAs(teacher, `/exam/photos/${username}`)).status, 403, "a teacher without the role");
     assert.equal((await fetchAs(student, `/exam/photos/${username}`)).status, 403, "a student, their own photo included");
     assert.equal((await fetchAs(student, `/exam/photos/${other}`)).status, 403);
