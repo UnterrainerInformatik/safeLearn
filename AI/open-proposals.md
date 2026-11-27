@@ -15,3 +15,11 @@ Dazu am 2026-09-13 beobachtet: **manuell ausgelöste Syncs setzen `lastSync` nic
 # Gradebook
 
 # Exam
+
+## Sitzplan zum Zurechtziehen
+Gerald will später einen **Sitzplan pro Klasse**, den sich der Lehrer zurechtzieht: Karten mit Foto und Name, die man auf einem Raster verschiebt. Er ist schlecht mit Namen, und der Sitzplan soll ihm helfen, sie sich zu merken. Baut auf `student-photos` auf (Change angelegt am 2026-11-27): dessen gemeinsames Personen-Element (`personLabel`, Foto 134 × 200 oder Initialen) ist schon als Karte gedacht.
+
+Zu klären:
+- Pro Klasse oder pro Kurs (Fach)? Pro Raum? Hat ein Kurs mehrere Pläne (Theorie, Labor)?
+- Soll die Gruppe A/B einer Offline-Sitzung aus dem Sitzplan folgen, zum Beispiel abwechselnd nach Sitzplatz, damit Nachbarn nie dieselbe Gruppe haben?
+- Darf der Plan gedruckt werden (Aufsicht durch eine andere Lehrkraft)? Dann gälte für den Druck dieselbe Regel wie für die Fotos: nur für Lehrer.
