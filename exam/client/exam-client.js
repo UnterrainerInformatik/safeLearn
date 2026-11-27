@@ -24,6 +24,7 @@ import "./tests.js";
 import "./attempt.js";
 import "./review.js";
 import "./live.js";
+import "./photos.js";
 
 export { ExamElement, defineExamElement, examApi } from "./frame.js";
 

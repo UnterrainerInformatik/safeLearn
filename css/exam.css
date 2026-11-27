@@ -2791,6 +2791,113 @@ sl-date-input .sl-date-input-grid button.is-disabled {
   font-weight: 600;
 }
 
+/* A person in a list (`student-photos`, design D3): the photo or the initials
+   in the same box, then the name. The box keeps the photo's 134 x 200 ratio;
+   its height is `--sl-exam-photo-height`, set per place. Hovering or focusing
+   a photo lifts the same image out of the box at its stored size, beside it,
+   above the neighbouring cells; it closes when the pointer or focus leaves. */
+#markdown-content {
+  --sl-exam-photo-height: 2.2em;
+  --sl-exam-initials-bg: #e4e7eb;
+  --sl-exam-initials-fg: #3d4651;
+  --sl-exam-photo-shadow: rgba(0, 0, 0, 0.35);
+}
+
+#markdown-content.dark-mode {
+  --sl-exam-initials-bg: #3a4049;
+  --sl-exam-initials-fg: #d5dbe2;
+  --sl-exam-photo-shadow: rgba(0, 0, 0, 0.7);
+}
+
+#markdown-content .sl-exam-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  vertical-align: middle;
+}
+
+#markdown-content .sl-exam-person-photo,
+#markdown-content .sl-exam-person-initials {
+  position: relative;
+  flex: none;
+  box-sizing: border-box;
+  width: calc(var(--sl-exam-photo-height) * 0.67);
+  height: var(--sl-exam-photo-height);
+  border-radius: 3px;
+}
+
+#markdown-content .sl-exam-person-initials {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--sl-exam-initials-bg);
+  color: var(--sl-exam-initials-fg);
+  font-size: calc(var(--sl-exam-photo-height) * 0.3);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
+#markdown-content .sl-exam-person-initials::before {
+  content: attr(data-initials);
+}
+
+#markdown-content .sl-exam-person-photo {
+  display: inline-block;
+  outline-offset: 2px;
+}
+
+#markdown-content .sl-exam-person-photo img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  margin: 0;
+  object-fit: cover;
+  border-radius: 3px;
+}
+
+/* Fixed without insets keeps the image at its place in the row (its static
+   position) while it leaves every scrolling container's clip, which a
+   sideways-scrolling sheet would otherwise cut it to. */
+#markdown-content .sl-exam-person-photo:hover img,
+#markdown-content .sl-exam-person-photo:focus-visible img {
+  position: fixed;
+  margin-left: calc(var(--sl-exam-photo-height) * 0.67 + 6px);
+  z-index: 30;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  box-shadow: 0 4px 16px var(--sl-exam-photo-shadow);
+}
+
+/* The heading of a student's page carries a larger photo. */
+#markdown-content h1 .sl-exam-person {
+  --sl-exam-photo-height: 1.6em;
+  gap: 0.4em;
+}
+
+@media print {
+  #markdown-content .sl-exam-person-photo,
+  #markdown-content .sl-exam-person-initials {
+    display: none;
+  }
+}
+
+/* The photo import page: a small preview per photo in the matching lists. */
+#markdown-content .sl-exam-photos-preview {
+  display: block;
+  width: auto;
+  height: 3em;
+  max-width: none;
+  margin: 0;
+  border-radius: 3px;
+}
+
+#markdown-content .sl-exam-photos-table td {
+  vertical-align: middle;
+}
+
 /* The gradebook's toggle beside the name: a module button, narrow, in the
    candidates' colours while pressed. */
 #markdown-content .sl-exam-action.sl-exam-participant-toggle {

@@ -50,7 +50,7 @@ Username and password are identical for every account, the way `student`/`studen
 
 ### Client roles
 
-On the client `safeLearn`, under *Roles*: `admin`, `teacher`, `examParticipant`, `4AHIF`, `4BHIF`, `5BHIF`, and — for the synthetic accounts described further down — `student`, `students`, `teachers`.
+On the client `safeLearn`, under *Roles*: `admin`, `teacher`, `examParticipant`, `student-images`, `4AHIF`, `4BHIF`, `5BHIF`, and — for the synthetic accounts described further down — `student`, `students`, `teachers`.
 
 Capitalization does not matter, `hasRoles` compares everything trimmed and lowercased — against the role set the request resolved once, as a set membership rather than a lookup of its own — but the class roles are conventionally written in capitals.
 
@@ -70,7 +70,7 @@ These are what a school's directory actually produces: a teacher with classes, a
 | --- | --- | --- | --- | --- |
 | `student` | Stu | Dent | *(none)* | The ordinary pupil. Addressable only by display name, which is what `@@@ Stu Dent` demonstrates. |
 | `teacher` | Tea | Cher | `teacher`, `examParticipant`, `4AHIF`, `Gerald Unterrainer` | Everything teacher-facing, the exam view, and a class role. The role named after a person demonstrates that a client role may carry a display name. |
-| `admin` | Ad | Min | `teacher`, `admin` | The `@@@ admin` block, the admin short-circuit, and that the teacher-view downgrade takes both away. |
+| `admin` | Ad | Min | `teacher`, `admin`, `student-images` | The `@@@ admin` block, the admin short-circuit, and that the teacher-view downgrade takes both away. With `student-images` (since 2026-11-27) it is the teacher who sees students' photos and imports them (`student-photos`); `teacher` deliberately lacks the role, so the harness's two teacher logins show both sides without a third. |
 | `student5b` | Fuenf | Bhif | `5BHIF` | `@@@ 5bhif` and `md/test-fileperms-4bhif-5bhif-2ahif.md` from the permitted side, in the tree and by direct path. |
 | `student4b` | Vier | Bhif | `4BHIF` | Isolates the 2099 window. The only entry naming this session in that directive is `4bhif[2099-…]`, so the block must stay hidden — the same block is granted to `4ahif` by an entry without a window. |
 

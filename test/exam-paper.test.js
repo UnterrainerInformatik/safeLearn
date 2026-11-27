@@ -482,7 +482,11 @@ describe("the printed sheet and the routes", () => {
     const test = createOfflineTest(db, course.id, { name: "Quickie REST", durationMinutes: 15, gradebookKind: "shorttest", questionIds: [free, byName["Methoden de"], byName["Wahr de"]] });
     setQuestionSettings(db, test.id, copyOf(getTest(db, test.id), byName["Methoden de"]).id, { weight: 2 });
     updateTest(db, test.id, { group: "B", questionIds: [byName["Status de"]] });
-    createSitting(db, test.id, { opensAt: "2026-11-25T08:00:00.000Z" });
+    // Tomorrow, since a planned window has to end in the future.
+    const opensAt = new Date(Date.now() + 86400000);
+    opensAt.setUTCHours(8, 0, 0, 0);
+    const printedDate = `${String(opensAt.getUTCDate()).padStart(2, "0")}.${String(opensAt.getUTCMonth() + 1).padStart(2, "0")}.${opensAt.getUTCFullYear()}`;
+    createSitting(db, test.id, { opensAt: opensAt.toISOString() });
     global.fetch = async () => ({ ok: true, json: async () => ({ attributes: { config: [JSON.stringify({ vt: 1 })] } }) });
     const app = express();
     app.use(express.json());
@@ -509,7 +513,7 @@ describe("the printed sheet and the routes", () => {
       };
       const sheet = await ask(`/tests/${test.id}/sheets/A/print`);
       assert.equal(sheet.status, 200, "Printing group A");
-      for (const part of ["Quickie REST", "4AHIF", "25.11.2026", "Gruppe A", "Name:", "Frage 1", "Gewicht 2", "Erkläre PUT und PATCH.", "☐"]) assert.ok(sheet.text.includes(part), `the sheet holds ${part}`);
+      for (const part of ["Quickie REST", "4AHIF", printedDate, "Gruppe A", "Name:", "Frage 1", "Gewicht 2", "Erkläre PUT und PATCH.", "☐"]) assert.ok(sheet.text.includes(part), `the sheet holds ${part}`);
       assert.equal((sheet.text.match(/class="sl-paper-line"/g) ?? []).length, 6, "six empty lines under the free-text question");
       assert.ok(!sheet.text.includes("MUSTERLÖSUNG") && !sheet.text.includes("☒"), "no solution on the sheet");
       assert.ok(!sheet.text.includes("sl-exam-bar"), "no element of the module around it");

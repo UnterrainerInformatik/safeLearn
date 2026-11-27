@@ -16,6 +16,7 @@ import { semesterToday } from "./gradebook.js";
 import { semesters } from "./grading.js";
 import { embedPlaceholder, wrapInPage } from "../obsidian.js";
 import { i18nOf } from "../i18n/server.js";
+import { actsAsAdmin, holdsStudentImages } from "./gate.js";
 
 function semesterLabels(t) {
   return { ws: t("exam.bar.winterSemester"), ss: t("exam.bar.wholeYear") };
@@ -123,10 +124,12 @@ function pageButton({ name, label, href, current }) {
 /**
  * The bar's markup for `context`, as `barState` resolves it. `current` names
  * the page shown when it is one of the bar's buttons (`pool`, `tests`,
- * `scale`); the
+ * `scale`, `photos`); the
  * bar's choices then stay on that page. `t` speaks the reader's language.
+ * `photos` offers the photo import, to a session `requirePhotoAdmin` lets
+ * through (student-photos design D4).
  */
-export function renderBar(db, context, current, t) {
+export function renderBar(db, context, current, t, { photos = false } = {}) {
   const { years, year, classes, klass, courses, course, semester } = barState(db, context);
   const shownSemester = semester ?? (course ? semesterToday(course.year) : null);
   const query = contextQuery({ year, klass, course });
@@ -175,6 +178,7 @@ export function renderBar(db, context, current, t) {
       ${pageButton({ name: "pool", label: t("exam.bar.pool"), href: `/exam/pool${query}`, current })}
       ${pageButton({ name: "tests", label: t("exam.bar.tests"), href: `/exam/tests${query}`, current })}
       ${pageButton({ name: "scale", label: t("exam.bar.scale"), href: `/exam/scale${query}`, current })}
+      ${photos ? pageButton({ name: "photos", label: t("exam.bar.photos"), href: "/exam/photos", current }) : ""}
     </span>
   </nav>`;
 }
@@ -188,8 +192,9 @@ export function renderBar(db, context, current, t) {
 export async function teacherShell({ db, startPage, req, title, context, kind, params, current = null }) {
   const { t } = await i18nOf(req);
   const heading = typeof title === "function" ? title(t) : title;
+  const [images, admin] = await Promise.all([holdsStudentImages(req), actsAsAdmin(req)]);
   const body = `
-    ${renderBar(db, context, current, t)}
+    ${renderBar(db, context, current, t, { photos: images && admin })}
     <h1>${escapeHtml(heading)}</h1>
     ${embedPlaceholder(kind, params, t("app.embed.loading"))}`;
   return wrapInPage(body, startPage(), req, { title: heading, wide: true });

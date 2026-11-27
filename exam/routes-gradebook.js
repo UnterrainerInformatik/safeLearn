@@ -28,7 +28,8 @@ import {
 } from "./gradebook.js";
 import { getCourse, InvalidInputError, NotFoundError } from "./classes.js";
 import { semesters } from "./grading.js";
-import { identityOf, requireTeacher, teacherPage } from "./gate.js";
+import { holdsStudentImages, identityOf, requireTeacher, teacherPage } from "./gate.js";
+import { withPhotoVersions } from "./photos.js";
 import { contextFromQuery, teacherShell } from "./bar.js";
 import { courseAttempt, reviewView } from "./attempts.js";
 import { flagParticipant, participantHolders, participantSetup, setParticipant } from "./participants.js";
@@ -80,23 +81,28 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
   });
 
   // Both answers mark the course's Matura candidates (exam-participant-role D5).
-  api("get", "/courses/:id/gradebook", (req) => {
+  // Each row carries its photo's version for a session holding
+  // `student-images`, and no such field at all for any other (student-photos D2).
+  api("get", "/courses/:id/gradebook", async (req) => {
     const id = idParam(req.params.id);
     const overview = courseOverview(db, id, semesterParam(req.query.semester, getCourse(db, id)));
     const holders = participantHolders(overview.course);
+    const images = await holdsStudentImages(req);
+    const photos = (rows) => (images ? withPhotoVersions(db, rows) : rows);
     return {
       ...overview,
       participants: participantSetup(overview.course),
-      students: overview.students.map((row) => flagParticipant(row, holders)),
-      left: overview.left.map((row) => flagParticipant(row, holders)),
+      students: photos(overview.students.map((row) => flagParticipant(row, holders))),
+      left: photos(overview.left.map((row) => flagParticipant(row, holders))),
     };
   });
-  api("get", "/courses/:id/students/:username", (req) => {
+  api("get", "/courses/:id/students/:username", async (req) => {
     const record = studentRecord(db, idParam(req.params.id), req.params.username);
     const holders = participantHolders(record.course);
+    const student = flagParticipant(record.student, holders);
     return {
       ...record,
-      student: flagParticipant(record.student, holders),
+      student: (await holdsStudentImages(req)) ? withPhotoVersions(db, [student])[0] : student,
       previous: flagParticipant(record.previous, holders),
       next: flagParticipant(record.next, holders),
     };

@@ -11,7 +11,8 @@
  */
 
 import { NotFoundError } from "./classes.js";
-import { requireTeacher, teacherPage } from "./gate.js";
+import { holdsStudentImages, requireTeacher, teacherPage } from "./gate.js";
+import { withPhotoVersions } from "./photos.js";
 import { readScale } from "./gradebook.js";
 import { correctionTable, setQuestionGrade } from "./paper-grades.js";
 import { getTest, hasTwoGroups, isPaper, setQuestionSettings, sheetDate } from "./tests.js";
@@ -92,7 +93,11 @@ export function registerPaperRoutes(router, { db, handle }) {
     return setQuestionSettings(db, idParam(req.params.id), idParam(req.params.testQuestion), { weight, answerLines });
   });
   // The correction table of a test on paper, and one grade of it; `grade` null removes it.
-  api("get", "/tests/:id/grades", (req) => correctionTable(db, idParam(req.params.id), readScale(db)));
+  // Each row carries its photo's version only for a session holding `student-images` (student-photos D2).
+  api("get", "/tests/:id/grades", async (req) => {
+    const table = correctionTable(db, idParam(req.params.id), readScale(db));
+    return (await holdsStudentImages(req)) ? { ...table, rows: withPhotoVersions(db, table.rows) } : table;
+  });
   api("put", "/tests/:id/grades/:testQuestion/:username", (req) =>
     setQuestionGrade(db, idParam(req.params.id), idParam(req.params.testQuestion), req.params.username, req.body?.grade ?? null, readScale(db))
   );

@@ -31,7 +31,7 @@
 
 import { parseTime } from "../../i18n/format.js";
 import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, gridArrowKeys, h, linkButton, markRows, readOnlyFor, saveOnChange, t } from "./frame.js";
-import { displayClass, personName } from "./classes.js";
+import { displayClass, personLabel, personName } from "./classes.js";
 import { openCreatorOf } from "./bar.js";
 import { defaultLength, defaultOffset, defaultPeriods, defaultStart, matchPlan, matchStart, matchWindow, nextWeekday, periodTimes, planFor, startWindowFor, viennaInstant, viennaLocal } from "./periods.js";
 import { pickHandout } from "./handout-picker.js";
@@ -1331,7 +1331,7 @@ Object.assign(TestDetail.prototype, {
           return h(
             "tr",
             { "data-username": row.username, "data-group": group },
-            h("th", { scope: "row" }, personName(row)),
+            h("th", { scope: "row" }, personLabel(row)),
             questions.map((question, c) => {
               const field = h("input", {
                 type: "text",

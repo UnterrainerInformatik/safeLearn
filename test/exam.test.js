@@ -5217,6 +5217,114 @@ describe("weights and a test on paper from the pool", () => {
   });
 });
 
+describe("students' photos", () => {
+  const other = "ph-other-student";
+  let student;
+  let teacher;
+  let admin;
+  let course;
+  let sitting;
+  let testId;
+  let scratch;
+
+  before(async () => {
+    student = await sharedSession("student");
+    teacher = await sharedSession("teacher");
+    // The demo account holding `student-images`, and an admin (docs-development.md).
+    admin = await sharedSession("admin");
+    for (const session of [student, teacher, admin]) await setPreferences(session, {});
+    scratch = mkdtempSync(path.join(os.tmpdir(), "safelearn-photos-"));
+    const fixture = await examFixture(teacher);
+    const klass = await fetchAs(teacher, `/exam/api/years/${fixture.year.id}/classes`, { method: "POST", body: { name: "9XPH", students: [student.username, other] } });
+    assert.equal(klass.status, 200, JSON.stringify(klass.json));
+    const created = await fetchAs(teacher, `/exam/api/classes/${klass.json.id}/courses`, { method: "POST", body: { subject: "POS", language: "de" } });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    course = created.json;
+    const paper = await fetchAs(teacher, `/exam/api/courses/${course.id}/offline-tests`, {
+      method: "POST",
+      body: { name: "Photo quickie", durationMinutes: 15, gradebookKind: "shorttest", questionIds: [fixture.questions[0].id] },
+    });
+    assert.equal(paper.status, 200, JSON.stringify(paper.json));
+    testId = paper.json.id;
+    const planned = await fetchAs(teacher, `/exam/api/tests/${testId}/sittings`, { method: "POST", body: { opensAt: new Date(Date.now() + 10 * 60000).toISOString() } });
+    assert.equal(planned.status, 200, JSON.stringify(planned.json));
+    sitting = planned.json;
+    assert.equal((await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/start`, { method: "POST" })).status, 200);
+  });
+
+  after(async () => {
+    if (sitting) await fetchAs(teacher, `/exam/api/sittings/${sitting.id}/end`, { method: "POST" });
+    // The run's database is shared by every group: no photo stays behind.
+    const held = await fetchAs(admin, "/exam/api/photos/summary");
+    if (held.json?.total) await fetchAs(admin, "/exam/api/photos/delete", { method: "POST", body: { scope: "all", expected: held.json.total } });
+    if (scratch) rmSync(scratch, { recursive: true, force: true });
+  });
+
+  test("an admin with student-images imports a generated photo; the lists show it, and the initials where there is none", async () => {
+    const username = student.username.toLowerCase();
+    const page = admin.page;
+    // A generated picture, no real person: one file named after the username,
+    // and an export of a person the directory does not know.
+    writeFileSync(path.join(scratch, `${username}.png`), tallPng(134, 200));
+    const unknown = { format: "safelearn-student-photos", version: 1, source: "webuntis", exportedAt: new Date().toISOString(), students: [{ class: "9XPH", familyName: "Nobody", givenName: "Known", sourceId: "1", image: `data:image/png;base64,${tallPng(134, 200).toString("base64")}` }] };
+    writeFileSync(path.join(scratch, "export.json"), JSON.stringify(unknown));
+    await openPage(page, "/exam/photos", ".sl-exam-photos input[type=file]");
+    assert.ok(await page.$('.sl-exam-bar a[data-page="photos"][aria-current="page"]'), "the module bar offers the page to this session");
+    const input = await page.$(".sl-exam-photos input[type=file]");
+    await input.uploadFile(path.join(scratch, `${username}.png`), path.join(scratch, "export.json"));
+    await page.waitForSelector(".sl-exam-photos-store", { timeout: 20000 });
+    const lists = await page.$$eval(".sl-exam-photos-matching h3", (headings) => headings.map((heading) => heading.textContent));
+    assert.deepEqual(lists.map((text) => Number(text.match(/\d+/)[0])), [1, 0, 1], "matched, ambiguous, unmatched");
+    await click(page, ".sl-exam-photos-store");
+    await page.waitForSelector(".sl-exam-photos-stored", { timeout: 20000 });
+    assert.match(await page.$eval(".sl-exam-photos-stored", (p) => p.textContent), /\b1\b/, "the page reports one photo stored");
+
+    // The sheet: the photo before the name, the initials for the unknown username.
+    await openPage(page, `/exam/courses/${course.id}/gradebook`, `.sl-exam-sheet tr .sl-exam-person-photo img`);
+    await page.waitForFunction((user) => {
+      const img = [...document.querySelectorAll(".sl-exam-sheet .sl-exam-person-photo img")].find((candidate) => candidate.src.includes(`/exam/photos/${user}?`));
+      return img && img.complete && img.naturalWidth === 134;
+    }, { timeout: 20000 }, username);
+    assert.ok(await page.$(".sl-exam-sheet .sl-exam-person-initials[data-initials]"), "the student without a photo shows initials");
+    await page.hover(".sl-exam-sheet .sl-exam-person-photo");
+    const enlarged = await page.$eval(".sl-exam-sheet .sl-exam-person-photo img", (img) => [getComputedStyle(img).position, getComputedStyle(img).width, getComputedStyle(img).height]);
+    assert.deepEqual(enlarged, ["fixed", "134px", "200px"], "A teacher enlarges a photo: its stored size, above the sheet's scrolling");
+    await page.mouse.move(0, 0);
+
+    // The live view of the offline sitting, with its attendance and group controls, and the correction table.
+    await openPage(page, `/exam/sittings/${sitting.id}/live`, `.sl-exam-attendance-table tr[data-username="${username}"] .sl-exam-person-photo img`);
+    assert.ok(await page.$(`.sl-exam-attendance-table tr[data-username="${username}"] .sl-exam-attendance-present`), "beside the attendance control");
+    assert.ok(await page.$(`.sl-exam-attendance-table tr[data-username="${other}"] .sl-exam-person-initials`));
+    await openPage(page, `/exam/tests/${testId}`, `.sl-exam-correction-table tr[data-username="${username}"] th .sl-exam-person-photo img`);
+  });
+
+  test("a teacher without the role sees initials and asks for no photo; a student gets 403 for every photo", async () => {
+    const username = student.username.toLowerCase();
+    const asked = [];
+    const record = (request) => asked.push(request.url());
+    teacher.page.on("request", record);
+    try {
+      await openPage(teacher.page, `/exam/courses/${course.id}/gradebook`, ".sl-exam-sheet .sl-exam-person-initials");
+      await openPage(teacher.page, `/exam/sittings/${sitting.id}/live`, `.sl-exam-attendance-table tr[data-username="${username}"] .sl-exam-person-initials`);
+      await openPage(teacher.page, `/exam/tests/${testId}`, `.sl-exam-correction-table tr[data-username="${username}"] th .sl-exam-person-initials`);
+    } finally {
+      teacher.page.off("request", record);
+    }
+    assert.equal(await teacher.page.$(".sl-exam-person-photo"), null, "no photo in the list");
+    assert.deepEqual(asked.filter((url) => url.includes("/exam/photos/")), [], "the browser requests no photo");
+    const sheet = (await fetchAs(teacher, `/exam/api/courses/${course.id}/gradebook?semester=ws`)).json;
+    assert.ok(sheet.students.every((row) => !("photo" in row)), "the payload says for no row that a photo exists");
+    assert.equal((await fetchAs(teacher, `/exam/photos/${username}`)).status, 403, "a teacher without the role");
+    assert.equal((await fetchAs(student, `/exam/photos/${username}`)).status, 403, "a student, their own photo included");
+    assert.equal((await fetchAs(student, `/exam/photos/${other}`)).status, 403);
+    const page = await fetchAs(teacher, "/exam/photos");
+    assert.ok(page.status === 404 || page.servedFrom !== "/exam/photos", "the import page is not there for a teacher");
+    assert.equal((await fetchAs(teacher, "/exam/api/photos/summary")).status, 403);
+    await openPage(teacher.page, `/exam/courses/${course.id}`, ".sl-exam-bar");
+    assert.equal(await teacher.page.$('.sl-exam-bar a[data-page="photos"]'), null, "the bar offers a teacher no import");
+  });
+});
+
 describe("the question editor", () => {
   let student;
   let teacher;

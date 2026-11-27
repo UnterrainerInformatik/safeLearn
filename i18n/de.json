@@ -130,7 +130,8 @@
       "tests": "Tests",
       "wholeYear": "Ganzes Jahr",
       "winterSemester": "Wintersemester",
-      "year": "Schuljahr"
+      "year": "Schuljahr",
+      "photos": "Fotos"
     },
     "categories": {
       "backToPool": "Zurück zum Fragenpool",
@@ -588,6 +589,20 @@
         "notPresent": "Diese Person war in keiner gestarteten Sitzung des Tests anwesend.",
         "otherGroup": "Diese Frage gehört nicht zu Gruppe {group}, die für diese Person zählt.",
         "noGroup": "Diese Gruppe hat der Test nicht."
+      },
+      "photos": {
+        "notAnImage": "Die Datei ist kein JPEG- oder PNG-Bild.",
+        "tooLarge": "Ein Foto darf höchstens {kb} KB groß sein.",
+        "tooWide": "Ein Foto darf an der längeren Seite höchstens {px} Pixel haben.",
+        "username": "Das ist kein Benutzername.",
+        "noStudent": "Das Verzeichnis kennt keinen Schüler {username}; es wurde kein Foto gespeichert.",
+        "expected": "Die Anzahl der zu löschenden Fotos fehlt.",
+        "directoryNotReady": "Das Verzeichnis ist noch nicht geladen. Bitte gleich noch einmal versuchen.",
+        "className": "Das ist keine Klasse.",
+        "scope": "Unbekannte Art des Löschens.",
+        "countChanged_one": "Inzwischen ist es {count} Foto. Es wurde nichts gelöscht; bitte die Zahl prüfen und erneut löschen.",
+        "countChanged_other": "Inzwischen sind es {count} Fotos. Es wurde nichts gelöscht; bitte die Zahl prüfen und erneut löschen.",
+        "entries": "Die Liste der zuzuordnenden Fotos ist fehlerhaft oder länger als {limit}."
       }
     },
     "frame": {
@@ -870,7 +885,8 @@
       "solution": "{name} – Lösung",
       "student": "Schüler",
       "tests": "Tests",
-      "tryTest": "Ausprobieren: {name}"
+      "tryTest": "Ausprobieren: {name}",
+      "photos": "Schülerfotos"
     },
     "participant": {
       "candidate": "Tritt zur Matura an",
@@ -1257,6 +1273,57 @@
       "modeOnline": "online",
       "modePaper": "auf Papier",
       "openCorrection": "Korrekturtabelle öffnen"
+    },
+    "photos": {
+      "explained": "Fotos erscheinen neben den Namen im Notenblatt, in der Live-Ansicht und in der Korrekturtabelle, nur für Benutzer mit der Rolle student-images. Importiert wird die Exportdatei des WebUntis-Werkzeugs (tools/webuntis-photos.md) oder Bilddateien, die nach dem Benutzernamen benannt sind.",
+      "importHeading": "Importieren",
+      "files": "Exportdatei oder Bilddateien",
+      "chooseFiles": "Exportdatei oder JPEG-/PNG-Dateien wählen oder hier ablegen: ",
+      "reading": "Wird gelesen und zugeordnet…",
+      "nothingRead": "Aus diesen Dateien konnte kein Foto gelesen werden.",
+      "matchFailed": "Die Fotos konnten nicht zugeordnet werden. Bitte noch einmal versuchen.",
+      "unreadable_one": "{count} Foto konnte nicht gelesen werden und bleibt weg.",
+      "unreadable_other": "{count} Fotos konnten nicht gelesen werden und bleiben weg.",
+      "matchedHeading": "Zugeordnet: {count}",
+      "ambiguousHeading": "Mehrdeutig: {count}",
+      "ambiguousExplained": "Diese passen zu mehr als einer Person. Die richtige wählen oder niemanden.",
+      "unmatchedHeading": "Niemandem zugeordnet: {count}",
+      "unmatchedExplained": "Diese passen zu keinem Schüler des Verzeichnisses und werden nicht gespeichert.",
+      "source": "Aus der Datei",
+      "person": "Person",
+      "storeFor": "Für {person} speichern",
+      "pickFor": "Person für {source}",
+      "pickNobody": "Niemand",
+      "store_one": "{count} Foto speichern",
+      "store_other": "{count} Fotos speichern",
+      "storing": "Wird gespeichert… {done} von {count}",
+      "storeFailed": "konnte nicht gespeichert werden",
+      "stored_one": "{count} Foto gespeichert.",
+      "stored_other": "{count} Fotos gespeichert.",
+      "heldHeading": "Gespeicherte Fotos",
+      "summaryFailed": "Die gespeicherten Fotos konnten nicht geladen werden.",
+      "directoryLoading": "Das Verzeichnis wird noch geladen; die Fotos pro Klasse und jene ohne Person folgen, sobald es da ist.",
+      "directoryUnavailable": "Diese Instanz hat kein Verzeichnis, daher können Fotos weder zugeordnet noch pro Klasse gezählt werden.",
+      "total_one": "Das Modul hält {count} Foto.",
+      "total_other": "Das Modul hält {count} Fotos.",
+      "class": "Klasse",
+      "photos": "Fotos",
+      "deleteClass": "Löschen",
+      "deleteClassArmed_one": "{count} Foto der {name} löschen?",
+      "deleteClassArmed_other": "{count} Fotos der {name} löschen?",
+      "withoutPerson_one": "{count} Foto hat keine Person mehr im Verzeichnis.",
+      "withoutPerson_other": "{count} Fotos haben keine Person mehr im Verzeichnis.",
+      "showUsernames": "Benutzernamen zeigen",
+      "deleteWithout": "Fotos ohne Person löschen",
+      "deleteWithoutArmed_one": "{count} Foto ohne Person löschen?",
+      "deleteWithoutArmed_other": "{count} Fotos ohne Person löschen?",
+      "deleteAll": "Alle Fotos löschen",
+      "deleteAllArmed_one": "Das eine gespeicherte Foto löschen?",
+      "deleteAllArmed_other": "Alle {count} Fotos löschen?",
+      "deleted_one": "{count} Foto gelöscht.",
+      "deleted_other": "{count} Fotos gelöscht.",
+      "deleteFailed": "Die Fotos konnten nicht gelöscht werden. Bitte noch einmal versuchen.",
+      "backupsNote": "Ein gelöschtes Foto wird ab sofort nicht mehr gezeigt. Die Sicherungen des Moduls enthalten es noch, bis sie ausgetauscht werden."
     }
   }
 }

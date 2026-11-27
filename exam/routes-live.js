@@ -23,7 +23,8 @@ import { listen, liveParticipant, liveSilence, liveSnapshot, notifyNote } from "
 import { setTeacherNote, sittingsOfTest } from "./teacher-notes.js";
 import { flagParticipant, participantHolders } from "./participants.js";
 import { NotFoundError } from "./classes.js";
-import { requireTeacher, sessionNow, teacherPage } from "./gate.js";
+import { holdsStudentImages, requireTeacher, sessionNow, teacherPage } from "./gate.js";
+import { withPhotoVersions } from "./photos.js";
 import { teacherShell } from "./bar.js";
 import { openEventStream } from "../event-stream.js";
 import { embedPlaceholder } from "../obsidian.js";
@@ -45,11 +46,17 @@ const heartbeatMs = 25000;
 // without a heartbeat (exam-hidden-page-signals design D3/D5).
 const silenceMs = 5000;
 
-/** A snapshot with the course's Matura candidates marked (exam-participant-role D5). */
-function markedSnapshot(db, sittingId, at, options) {
+/**
+ * A snapshot with the course's Matura candidates marked (exam-participant-role
+ * D5), and with each participant's photo version when `photos` says the
+ * session holds `student-images` (student-photos D2). The class's screen
+ * shows no names, so it gets no photos either.
+ */
+function markedSnapshot(db, sittingId, at, options = {}, photos = false) {
   const snapshot = liveSnapshot(db, sittingId, at, options);
   const holders = participantHolders(snapshot.course);
-  return { ...snapshot, participants: snapshot.participants.map((participant) => flagParticipant(participant, holders)) };
+  const participants = snapshot.participants.map((participant) => flagParticipant(participant, holders));
+  return { ...snapshot, participants: photos && !options.screen ? withPhotoVersions(db, participants) : participants };
 }
 
 export function registerLiveRoutes(router, { db, handle, startPage }) {
@@ -57,7 +64,7 @@ export function registerLiveRoutes(router, { db, handle, startPage }) {
     "/api/sittings/:id/live",
     requireTeacher,
     handle(async (req, res) => {
-      res.json(markedSnapshot(db, idParam(req.params.id), undefined, { screen: req.query.screen === "1" }));
+      res.json(markedSnapshot(db, idParam(req.params.id), undefined, { screen: req.query.screen === "1" }, await holdsStudentImages(req)));
     })
   );
 
@@ -79,7 +86,9 @@ export function registerLiveRoutes(router, { db, handle, startPage }) {
     requireTeacher,
     handle(async (req, res) => {
       const sittingId = idParam(req.params.id);
-      const snapshot = markedSnapshot(db, sittingId);
+      // Decided once for the stream; a stream that lost the teacher's session ends below anyway.
+      const photos = await holdsStudentImages(req);
+      const snapshot = markedSnapshot(db, sittingId, undefined, {}, photos);
       let stop = () => {};
       let heartbeat = null;
       let silence = null;
@@ -130,6 +139,8 @@ export function registerLiveRoutes(router, { db, handle, startPage }) {
           }
           const at = new Date().toISOString();
           const snapshot = liveSnapshot(db, sittingId, at);
+          const flagged = (participant) => flagParticipant(participant, participantHolders(snapshot.course));
+          const shown = (participant) => (photos ? withPhotoVersions(db, [participant])[0] : participant);
           stream.send("change", {
             type: event.type,
             serverTime: at,
@@ -138,7 +149,7 @@ export function registerLiveRoutes(router, { db, handle, startPage }) {
             participant:
               event.username === null
                 ? null
-                : flagParticipant(liveParticipant(db, sittingId, event.username, at), participantHolders(snapshot.course)),
+                : shown(flagged(liveParticipant(db, sittingId, event.username, at))),
           });
         })
       );

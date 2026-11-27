@@ -24,7 +24,7 @@ import { accountFromCookies } from "./reader-preferences.js";
 
 /**
  * The names that belong to a role and to nothing else. The display name is
- * merged into the same flat set as the roles, so these five have to be kept out
+ * merged into the same flat set as the roles, so these six have to be kept out
  * of it: only the identity provider or the LDAP claim may hand them out. Both
  * plural spellings are listed, because a name has to be refused before the
  * canonicalization below folds `teachers` into `teacher`.
@@ -35,6 +35,9 @@ const namesReservedForRoles = new Set([
   "teachers",
   "student",
   "students",
+  // Decides alone who sees students' photos (student-photos design D2), so a
+  // display name must not stand in for it either.
+  "student-images",
 ]);
 
 /**

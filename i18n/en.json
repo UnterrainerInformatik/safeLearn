@@ -130,7 +130,8 @@
       "tests": "Tests",
       "wholeYear": "Whole year",
       "winterSemester": "Winter semester",
-      "year": "Year"
+      "year": "Year",
+      "photos": "Photos"
     },
     "categories": {
       "backToPool": "Back to the pool",
@@ -588,6 +589,20 @@
         "notPresent": "This student was not present in a started sitting of the test.",
         "otherGroup": "This question is not one of group {group}, which counts for this student.",
         "noGroup": "The test has no such group."
+      },
+      "photos": {
+        "notAnImage": "The file is not a JPEG or PNG image.",
+        "tooLarge": "A photo may have at most {kb} KB.",
+        "tooWide": "A photo may be at most {px} pixels on its longer side.",
+        "username": "That is not a username.",
+        "noStudent": "The directory holds no student {username}; no photo was stored.",
+        "expected": "The number of photos to delete is missing.",
+        "directoryNotReady": "The directory is not loaded yet. Please try again in a moment.",
+        "className": "That is not a class.",
+        "scope": "Unknown kind of deletion.",
+        "countChanged_one": "Meanwhile it is {count} photo. Nothing was deleted; check the number and delete again.",
+        "countChanged_other": "Meanwhile it is {count} photos. Nothing was deleted; check the number and delete again.",
+        "entries": "The list of photos to match is malformed or longer than {limit}."
       }
     },
     "frame": {
@@ -870,7 +885,8 @@
       "solution": "{name} – Solution",
       "student": "Student",
       "tests": "Tests",
-      "tryTest": "Try: {name}"
+      "tryTest": "Try: {name}",
+      "photos": "Student photos"
     },
     "participant": {
       "candidate": "Matura candidate",
@@ -1257,6 +1273,57 @@
       "modeOnline": "online",
       "modePaper": "on paper",
       "openCorrection": "Open correction table"
+    },
+    "photos": {
+      "explained": "Photos are shown beside the names in the gradebook, the live view and the correction table, only to users with the role student-images. Import the export file of the WebUntis tool (tools/webuntis-photos.md) or image files named after usernames.",
+      "importHeading": "Import",
+      "files": "Export file or image files",
+      "chooseFiles": "Choose the export file or JPEG/PNG files, or drop them here: ",
+      "reading": "Reading and matching…",
+      "nothingRead": "No photo could be read from these files.",
+      "matchFailed": "The photos could not be matched. Please try again.",
+      "unreadable_one": "{count} photo could not be read and is left out.",
+      "unreadable_other": "{count} photos could not be read and are left out.",
+      "matchedHeading": "Matched: {count}",
+      "ambiguousHeading": "Ambiguous: {count}",
+      "ambiguousExplained": "These fit more than one person. Pick the right one, or nobody.",
+      "unmatchedHeading": "Matched nobody: {count}",
+      "unmatchedExplained": "These fit no student of the directory and are not stored.",
+      "source": "From the file",
+      "person": "Person",
+      "storeFor": "Store for {person}",
+      "pickFor": "Person for {source}",
+      "pickNobody": "Nobody",
+      "store_one": "Store {count} photo",
+      "store_other": "Store {count} photos",
+      "storing": "Storing… {done} of {count}",
+      "storeFailed": "could not be stored",
+      "stored_one": "{count} photo stored.",
+      "stored_other": "{count} photos stored.",
+      "heldHeading": "Photos held",
+      "summaryFailed": "The photos held could not be loaded.",
+      "directoryLoading": "The directory is still loading; the photos per class and those without a person follow once it is there.",
+      "directoryUnavailable": "This instance has no directory, so photos can neither be matched nor counted per class.",
+      "total_one": "The module holds {count} photo.",
+      "total_other": "The module holds {count} photos.",
+      "class": "Class",
+      "photos": "Photos",
+      "deleteClass": "Delete",
+      "deleteClassArmed_one": "Delete {count} photo of {name}?",
+      "deleteClassArmed_other": "Delete {count} photos of {name}?",
+      "withoutPerson_one": "{count} photo has no person in the directory any more.",
+      "withoutPerson_other": "{count} photos have no person in the directory any more.",
+      "showUsernames": "Show their usernames",
+      "deleteWithout": "Delete photos without a person",
+      "deleteWithoutArmed_one": "Delete {count} photo without a person?",
+      "deleteWithoutArmed_other": "Delete {count} photos without a person?",
+      "deleteAll": "Delete all photos",
+      "deleteAllArmed_one": "Delete the one photo held?",
+      "deleteAllArmed_other": "Delete all {count} photos?",
+      "deleted_one": "{count} photo deleted.",
+      "deleted_other": "{count} photos deleted.",
+      "deleteFailed": "The photos could not be deleted. Please try again.",
+      "backupsNote": "A deleted photo is no longer shown from that moment on. The module's backups still hold it until they rotate."
     }
   }
 }

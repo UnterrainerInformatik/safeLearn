@@ -9,6 +9,7 @@
  */
 
 import { hasSomeRoles, identityOf } from "../utils.js";
+import { getPermissionContext } from "../permission-context.js";
 
 // The identity rule lives beside `hasSomeRoles`, so the admin pages share it
 // without depending on this module (teacher-admin-pages, design D1).
@@ -26,6 +27,23 @@ export function actsAsTeacher(req) {
  */
 export function actsAsAdmin(req) {
   return hasSomeRoles(req, ["admin"], true);
+}
+
+/** The client role that lets a session see students' photos (`student-images`). */
+export const studentImagesRole = "student-images";
+
+/**
+ * Whether the session holds the client role `student-images` (student-photos
+ * design D2). Read from the full role set - the merged client roles and
+ * directory groups - and not through `hasSomeRoles`, which lets an admin pass
+ * every role check: here the role alone decides, an admin without it sees no
+ * photo. The student-view downgrade is not applied: every page that shows a
+ * photo is a teacher's page, which the downgrade closes already.
+ */
+export async function holdsStudentImages(req) {
+  if (!identityOf(req)) return false;
+  const context = await getPermissionContext(req);
+  return context.full.roles.has(studentImagesRole);
 }
 
 function refuse(req, res) {
@@ -56,6 +74,42 @@ export function requireAdmin(req, res, next) {
     .then(([teacher, admin]) => {
       if (teacher && admin && identityOf(req)) next();
       else refuse(req, res);
+    })
+    .catch(next);
+}
+
+/**
+ * Lets a request through only when it holds `student-images`; refused with
+ * 403 otherwise, before a byte of a photo is read.
+ */
+export function requireStudentImages(req, res, next) {
+  holdsStudentImages(req)
+    .then((holds) => {
+      if (holds) next();
+      else refuse(req, res);
+    })
+    .catch(next);
+}
+
+/**
+ * Lets a request through only when it holds `student-images` and acts as a
+ * teacher and an admin: the photo import and its deletions. 403 otherwise.
+ */
+export function requirePhotoAdmin(req, res, next) {
+  Promise.all([holdsStudentImages(req), actsAsTeacher(req), actsAsAdmin(req)])
+    .then(([holds, teacher, admin]) => {
+      if (holds && teacher && admin) next();
+      else refuse(req, res);
+    })
+    .catch(next);
+}
+
+/** The import page's gate: anyone but `requirePhotoAdmin`'s sessions lands where a path with nothing behind it lands. */
+export function photoAdminPage(req, res, next) {
+  Promise.all([holdsStudentImages(req), actsAsTeacher(req), actsAsAdmin(req)])
+    .then(([holds, teacher, admin]) => {
+      if (holds && teacher && admin) next();
+      else next("router");
     })
     .catch(next);
 }

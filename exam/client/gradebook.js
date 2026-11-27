@@ -17,7 +17,7 @@ import { parseNumber as parseTyped } from "../../i18n/format.js";
 import { viennaLocal } from "./periods.js";
 import { gradeTone, setTone } from "./row-tone.js";
 import { evaluationButton } from "./evaluation.js";
-import { act, candidateNote, directoryNotice, displayClass, displayPerson, messageLine, personName } from "./classes.js";
+import { act, candidateNote, directoryNotice, displayClass, displayPerson, messageLine, personLabel, personName } from "./classes.js";
 import { confirmButton, defineExamElement, ExamElement, examApi, format, h, linkButton, markRows, readOnlyFor, saveOnChange, stickyColumns, t } from "./frame.js";
 
 const categories = ["onlineTests", "manualTests", "shortTests", "presentations", "projects", "participation", "homework"];
@@ -580,13 +580,15 @@ class GradebookView extends ExamElement {
       overrideCell = h("td", { title: row.comment ?? "" }, row.override === null ? "" : String(row.override), row.comment ? [" ", this.commentToggle(row)] : "");
     }
 
-    const nameCell = h("td", {}, h("a", { href: `/exam/courses/${course.id}/students/${encodeURIComponent(row.username)}?semester=${semester}` }, displayPerson(row)));
+    // The photo or initials before the name (`student-photos`); the cell carries the candidate's marking.
+    const nameLink = h("a", { href: `/exam/courses/${course.id}/students/${encodeURIComponent(row.username)}?semester=${semester}` }, displayPerson(row));
+    const nameCell = h("td", {}, personLabel(row, { name: nameLink }));
     const markName = (held) => {
       nameCell.classList.toggle("sl-exam-participant", held);
       if (held) nameCell.title = t("exam.participant.candidate");
       else nameCell.removeAttribute("title");
       nameCell.querySelector(".sl-exam-visually-hidden")?.remove();
-      if (held) nameCell.firstChild.append(candidateNote());
+      if (held) nameLink.append(candidateNote());
     };
     markName(row.examParticipant === true);
 
@@ -1129,7 +1131,7 @@ class GradebookStudent extends ExamElement {
     const { course, student } = record;
     const heading = document.querySelector("#markdown-content h1");
     if (heading) {
-      heading.textContent = `${displayPerson(student)} – ${courseTitle(course)}`;
+      heading.replaceChildren(personLabel(student, { name: `${displayPerson(student)} – ${courseTitle(course)}` }));
       // A Matura candidate's name stands out here too (`exam-participant-role`).
       heading.classList.toggle("sl-exam-participant", student.examParticipant === true);
       if (student.examParticipant) heading.append(candidateNote());

@@ -60,6 +60,48 @@ export function personName(person, candidate = person?.examParticipant === true)
   return candidate ? h("span", candidateMark(), displayPerson(person), candidateNote()) : displayPerson(person);
 }
 
+/** The initials of a person's family and given name, family first as the lists write them; from the username without names. */
+export function personInitials(person) {
+  const first = (value) => (typeof value === "string" ? [...value.trim()][0] ?? "" : "");
+  const initials = `${first(person.familyName)}${first(person.givenName)}`;
+  return (initials || (person.username ?? "").slice(0, 2)).toUpperCase();
+}
+
+/**
+ * The person's photo, or their initials in the same place and size
+ * (`student-photos`, design D3). `person.photo` is the version the payload
+ * carries for a session holding `student-images`; without it the initials
+ * stand there. The image's `alt` is empty, because the name stands right
+ * beside it; hovering or focusing the wrapper shows it at its stored size,
+ * which is CSS alone (`.sl-exam-person-photo` in css/exam.css).
+ */
+export function personBadge(person) {
+  if (typeof person?.photo === "string" && person.photo.length > 0) {
+    return h(
+      "span",
+      { class: "sl-exam-person-photo", tabindex: "0" },
+      h("img", {
+        src: `/exam/photos/${encodeURIComponent(person.username)}?v=${encodeURIComponent(person.photo)}`,
+        alt: "",
+        loading: "lazy",
+        decoding: "async",
+      })
+    );
+  }
+  // Drawn by CSS from the attribute, so a row's text stays the name alone.
+  return h("span", { class: "sl-exam-person-initials", "aria-hidden": "true", "data-initials": personInitials(person ?? {}) });
+}
+
+/**
+ * A person in a list: the photo or initials, then the name as `personName`
+ * writes it, a Matura candidate's marking included. `name` replaces the name
+ * where the place draws its own - a link, or a heading's text; `candidate`
+ * false leaves the marking to the place, where its cell carries it.
+ */
+export function personLabel(person, { candidate = person?.examParticipant === true, name = null } = {}) {
+  return h("span", { class: "sl-exam-person" }, personBadge(person), h("span", { class: "sl-exam-person-name" }, name ?? personName(person, candidate)));
+}
+
 export function displayDate(iso) {
   return iso ? format.date(iso) : "";
 }

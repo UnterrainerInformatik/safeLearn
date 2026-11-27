@@ -47,7 +47,7 @@
  */
 
 import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, linkButton, saveOnChange, t } from "./frame.js";
-import { candidateMark, candidateNote, displayClass, displayPerson } from "./classes.js";
+import { candidateMark, candidateNote, displayClass, displayPerson, personLabel } from "./classes.js";
 import { displayOfflineWindow, displayStartWindow, handoutPrintControls, sheetPrintControls } from "./tests.js";
 import { setTone } from "./row-tone.js";
 
@@ -650,13 +650,23 @@ class LiveView extends ExamElement {
     const tr = h(
       "tr",
       { "data-username": username, "data-present": participant.present ? "1" : "0", "data-group": this.twoGroups ? participant.group : null },
-      participant.examParticipant ? h("td", candidateMark(), displayPerson(participant), candidateNote(), retakeMark(participant)) : h("td", {}, displayPerson(participant), retakeMark(participant)),
+      this.nameCell(participant),
       h("td", {}, h("label", {}, present, " ", participant.present ? t("exam.offline.present") : t("exam.offline.absent"))),
       this.twoGroups ? h("td", { class: "sl-exam-actions" }, groupButton("A"), groupButton("B")) : null,
       this.noteCell(participant)
     );
     this.rows.set(username, tr);
     return tr;
+  }
+
+  /**
+   * A participant's name cell: the photo or initials before the name
+   * (`student-photos`), a Matura candidate of the course standing out
+   * (`exam-participant-role`), and a retake marked.
+   */
+  nameCell(participant) {
+    const name = [personLabel(participant, { candidate: false, name: [displayPerson(participant), participant.examParticipant ? candidateNote() : null] }), retakeMark(participant)];
+    return participant.examParticipant ? h("td", candidateMark(), name) : h("td", {}, name);
   }
 
   /** Draws a whole snapshot. */
@@ -698,7 +708,7 @@ class LiveView extends ExamElement {
       "tr",
       { "data-username": username, "data-status": participant.status },
       // A Matura candidate of the course stands out (`exam-participant-role`); the class's screen shows no names at all.
-      participant.examParticipant ? h("td", candidateMark(), displayPerson(participant), candidateNote(), retakeMark(participant)) : h("td", {}, displayPerson(participant), retakeMark(participant)),
+      this.nameCell(participant),
       h("td", { class: "sl-exam-live-status" }, statusLabels[participant.status]()),
       h("td", { class: "sl-exam-live-left" }, participant.remainingMs === null ? "" : clock(participant.remainingMs)),
       this.focusCell(participant),
