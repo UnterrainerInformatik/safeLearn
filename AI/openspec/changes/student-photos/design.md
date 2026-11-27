@@ -37,11 +37,13 @@ A table `student_photo (username TEXT PRIMARY KEY, image BLOB NOT NULL, mime TEX
 
 *Alternative:* a directory `data/student-photos/<username>.jpg`. That would mean a second thing to back up, a path-traversal surface built from usernames, and files that outlive a deleted row. Rejected.
 
-### D2: One photo route behind `requireTeacher`, with a version in the URL
+### D2: One photo route behind the role `student-images`, with a version in the URL
 
-`GET /exam/photos/:username?v=<version>` answers the image with `Cache-Control: private, max-age=31536000, immutable`. Without a photo it answers `404`. For a student or a teacher in student view it answers `403`, which `requireTeacher` already does, because it applies the student-view downgrade. The version is `imported_at` reduced to a short token.
+`GET /exam/photos/:username?v=<version>` answers the image with `Cache-Control: private, max-age=31536000, immutable`. Without a photo it answers `404`. The version is `imported_at` reduced to a short token.
 
-The three list payloads get a field `photo` per row: the version, or `null`. It is filled by a `LEFT JOIN student_photo` on the username in the queries that already build the rows (`exam/live.js` row mapping, the gradebook sheet's rows, `exam/paper-grades.js`). It is never the image itself.
+The gate is a new `holdsStudentImages(req)` in `exam/gate.js`. It asks whether the permission context's **full** role set (`context.full.roles`, the merged Keycloak client roles and LDAP groups) holds `student-images`. It does **not** go through `hasSomeRoles`, because that lets an admin pass every role check (`view.isAdmin`), and Gerald's rule is that only the role decides. The student-view downgrade is not applied: the role is not a teacher role, and every page that shows photos is a teacher page anyway, which the downgrade already closes. Without the role the route answers `403`. The import routes additionally require `actsAsAdmin`. The client role lives on the instance's Keycloak client: `safeLearn` in the demo realm, the instance's own client in secureLectures.
+
+The three list payloads get a field `photo` per row: the version, or `null`. It is filled by a `LEFT JOIN student_photo` on the username in the queries that already build the rows (`exam/live.js` row mapping, the gradebook sheet's rows, `exam/paper-grades.js`). It is never the image itself. For a session without `student-images` the field is left out of every row, so the payload does not even reveal which students have a photo.
 
 *Why:* with the version in the URL, a replaced photo has a new URL and the browser fetches it again (spec: "A photo is replaced"). Every other view is answered from the browser cache without a request, and a `null` row asks for nothing. That keeps a sheet of 30 students from making 30 requests on every reload.
 
@@ -57,7 +59,7 @@ The places in Context switch from `displayPerson`/`personName` to it where a row
 
 ### D4: The import matches in the browser's preview, and the server stores only what was confirmed
 
-The page `/exam/photos` (admin only, `actsAsAdmin`; any other session gets the module's "nothing here" answer) works in three steps:
+The page `/exam/photos` (`actsAsAdmin` and `holdsStudentImages`; any other session gets the module's "nothing here" answer) works in three steps:
 
 1. **Read**: the browser reads the export file (JSON) or the chosen image files. It scales each image with a canvas to at most 600 px on the longer side, re-encoding as JPEG only when it scaled.
 2. **Match**: `POST /exam/photos/match` sends only the metadata, never images: `[{key, file, class, familyName, givenName}]`. The server matches against `heldDirectoryPeople()`. A file name equal to a username wins. Otherwise it compares normalised class, family name and given names: lowercase, NFD with accents stripped, given names as a set. Teachers are never candidates, the rule `roster-source.js` already applies. The answer is `matched`/`ambiguous` (with candidates)/`unmatched` per key.

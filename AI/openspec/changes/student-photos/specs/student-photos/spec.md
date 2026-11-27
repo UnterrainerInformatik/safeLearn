@@ -23,33 +23,43 @@ The exam module SHALL store at most one photo per directory username, in its own
 - **WHEN** an upload named `mmuster.jpg` carries bytes that are no JPEG or PNG image
 - **THEN** the server answers `400` and stores nothing for `mmuster`
 
-### Requirement: Only a session acting as a teacher receives a photo
+### Requirement: Only a session holding the client role `student-images` receives a photo
 
-A photo SHALL be served only through the module's photo route, and only to a session that acts as a teacher or admin after the student-view downgrade. Every other session, a teacher in student view included, SHALL receive `403` with no image data. A username without a photo SHALL be answered with `404`. The photo SHALL be sent with caching that keeps it private to the browser: shared caches never store it. No photo SHALL be reachable as a static file.
+A photo SHALL be served only through the module's photo route, and only to a session whose roles hold the client role `student-images` of the instance's Keycloak client. The role alone SHALL decide. Being a teacher or an admin SHALL NOT be enough: the usual rule that an admin passes every role check SHALL NOT apply here. Every other session SHALL receive `403` with no image data. A username without a photo SHALL be answered with `404`. The photo SHALL be sent with caching that keeps it private to the browser: shared caches never store it. No photo SHALL be reachable as a static file.
 
-#### Scenario: A teacher requests a photo
+#### Scenario: A teacher with the role requests a photo
 
-- **WHEN** a session acting as a teacher requests the photo of `mmuster`, who has one
+- **WHEN** a session holding `student-images` requests the photo of `mmuster`, who has one
 - **THEN** the answer is `200` with the image and a `Cache-Control` that includes `private`
+
+#### Scenario: A teacher without the role requests a photo
+
+- **WHEN** a session acting as a teacher but not holding `student-images` requests a photo
+- **THEN** the answer is `403` and carries no image data
+
+#### Scenario: An admin without the role requests a photo
+
+- **WHEN** a session holding `admin` but not `student-images` requests a photo
+- **THEN** the answer is `403`
 
 #### Scenario: A student requests a photo
 
-- **WHEN** a session acting as a student requests the photo of any username, their own included
-- **THEN** the answer is `403` and carries no image data
-
-#### Scenario: A teacher in student view requests a photo
-
-- **WHEN** a teacher who has switched to the student view requests a photo
+- **WHEN** a session without `student-images` requests the photo of any username, their own included
 - **THEN** the answer is `403`
 
 #### Scenario: A student without a photo
 
-- **WHEN** a session acting as a teacher requests the photo of a username that has none
+- **WHEN** a session holding `student-images` requests the photo of a username that has none
 - **THEN** the answer is `404`
 
 ### Requirement: The photo appears beside the name in the module's lists
 
-Where the module lists students for a teacher, each row SHALL show the student's photo before their name, at a size that fits the row, and SHALL show the initials of the family and given name in the same place and size when the student has no photo. The places SHALL be: the gradebook sheet's name column, the heading of a student's page in the gradebook, the live view of an online and of an offline sitting (including the participant list where attendance and group A/B are set), and the correction table of a test on paper. Hovering or focusing a photo SHALL show it at its stored size. A Matura candidate's marking SHALL stay as it is, beside the photo. The payload of each of these lists SHALL carry, per row, whether a photo exists and a value that changes when it is replaced, so the browser requests only existing photos and requests a replaced one again.
+Where the module lists students for a session holding `student-images`, each row SHALL show the student's photo before their name, at a size that fits the row, and SHALL show the initials of the family and given name in the same place and size when the student has no photo. The places SHALL be: the gradebook sheet's name column, the heading of a student's page in the gradebook, the live view of an online and of an offline sitting (including the participant list where attendance and group A/B are set), and the correction table of a test on paper. Hovering or focusing a photo SHALL show it at its stored size. A Matura candidate's marking SHALL stay as it is, beside the photo. The payload of each of these lists SHALL carry, per row, whether a photo exists and a value that changes when it is replaced, so the browser requests only existing photos and requests a replaced one again. For a session without `student-images` that value SHALL be absent for every row, and the rows SHALL show the initials.
+
+#### Scenario: A teacher without the role opens the sheet
+
+- **WHEN** a teacher not holding `student-images` opens the gradebook sheet of a course with photos
+- **THEN** every row shows initials, the payload says for no row that a photo exists, and the browser requests no photo
 
 #### Scenario: The sheet of a class with photos
 
@@ -74,7 +84,7 @@ Where the module lists students for a teacher, each row SHALL show the student's
 
 ### Requirement: An admin imports photos and confirms the matching before anything is stored
 
-The module SHALL offer an import page to a session acting as an admin, and to nobody else. It SHALL accept either the export file of the WebUntis tool or a set of JPEG or PNG files. Image files SHALL be scaled down in the browser to at most 600 px on their longer side before upload. The page SHALL match every photo to a directory person who is not a teacher:
+The module SHALL offer an import page to a session that acts as an admin **and** holds `student-images`, and to nobody else. It SHALL accept either the export file of the WebUntis tool or a set of JPEG or PNG files. Image files SHALL be scaled down in the browser to at most 600 px on their longer side before upload. The page SHALL match every photo to a directory person who is not a teacher:
 
 - a file whose name without extension equals a directory username SHALL match that username;
 - otherwise the class, family name and given name SHALL match a directory person of that class, ignoring case, accents and the order of several given names.
@@ -105,7 +115,12 @@ Before storing anything, the page SHALL show three lists: what matched one perso
 
 #### Scenario: A teacher who is no admin
 
-- **WHEN** a session acting as a teacher but not as an admin opens the import page or calls its routes
+- **WHEN** a session holding `student-images` but not acting as an admin opens the import page or calls its routes
+- **THEN** the page is answered as a path with nothing behind it, and the routes answer `403`
+
+#### Scenario: An admin without the role
+
+- **WHEN** a session acting as an admin but not holding `student-images` opens the import page or calls its routes
 - **THEN** the page is answered as a path with nothing behind it, and the routes answer `403`
 
 #### Scenario: A teacher in the directory
