@@ -76,10 +76,14 @@
     return { sourceId, familyName: lines[0] ?? "", givenName: lines[1] ?? "" };
   }
 
-  /** A same-origin JSON request; with the session's bearer token when the API asks for one. */
+  /**
+   * A same-origin JSON request; asked again with the session's bearer token
+   * when it fails without one. WebUntis's REST API answers a request without
+   * the token 404, not 401.
+   */
   async function fetchJson(url) {
     let response = await fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" } });
-    if (response.status === 401 || response.status === 403) {
+    if (!response.ok) {
       const token = await fetch(`${origin}/WebUntis/api/token/new`, { credentials: "same-origin" }).then((answer) => (answer.ok ? answer.text() : null));
       if (!token) return null;
       response = await fetch(url, { credentials: "same-origin", headers: { Accept: "application/json", Authorization: `Bearer ${token}` } });
