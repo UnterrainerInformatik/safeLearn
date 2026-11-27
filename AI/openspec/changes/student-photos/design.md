@@ -84,7 +84,16 @@ At 134 × 200 a class of 30 is about 200 KB, and all of a teacher's classes are 
 
 `tools/webuntis-photos.js` is plain browser JavaScript. The teacher opens WebUntis, opens the developer console and pastes the script. It reads the class register pages the teacher can open, fetches `image.do` for each student with the session cookie the tab already has (same origin, `credentials: "same-origin"`), and offers the export file as a download through a Blob URL. It sends nothing anywhere but to WebUntis.
 
-How the tool finds the classes and the student list is settled by the first task (`tasks.md` 1.1). That task inspects `classregpage.do` and its requests for structure only (element and key names, no values) and picks the most stable source. The tool gets its own short `tools/webuntis-photos.md`, which also says it depends on undocumented pages.
+**Where the students come from (task 1.1, settled on 2026-11-27 with Gerald logged in, structure only):**
+
+- Opening a lesson's class register loads `classregpage.do?ttid=…`, which renders in a frame at `/WebUntis/embedded.do`. Its student list is DOM, not JSON. Every student is a `div.studentCard__container` (with `CRSWAbsent` added for an absent student). It holds `div.studentCard__imageColumn > div.studentCard__image > div.grupetWidgetImageLoader > img[src*="image.do?cat=5&id=<untis id>"]`.
+- The card's text is two lines: **family name, then given name**.
+- The lesson's class comes from the JSON `calendar-entry/detail` loaded just before it (`calendarEntries[0].klasses[].shortName`).
+- Checked against the realm on 4BHIF and 5AHIF: 54 of 54 cards matched exactly one directory person in the class's OU with family name first, with no ambiguous and no unmatched card. The order "given name first" matched none.
+
+So the tool reads `.studentCard__container` cards in the register frame: the `id` from the image's URL, the two text lines as family and given name, the class from the lesson. It then fetches `image.do` itself, so it does not rely on what the page happened to load. It works per lesson, so a class is exported by opening one of its lessons. A class without a lesson in the visible week cannot be read until it has one: that is how WebUntis offers the register, not a limit of the tool. The tool gets its own short `tools/webuntis-photos.md`, which also says it depends on undocumented pages.
+
+A first export of 4BHIF and 5AHIF exists outside the repo at `~/webuntis-photos/export-2026-11-27.json` (54 students, 326 KB) on Gerald's workstation, for testing the import in secureLectures.
 
 *Alternative:* a Puppeteer script like the probe of 2026-11-27, which opens its own browser where the teacher logs in. That is more robust to drive, but needs Node and a checkout of the repo. Kept as a fallback if the console script turns out to need navigation that a pasted script cannot do.
 
@@ -109,6 +118,3 @@ Photos whose username the held directory no longer contains are *listed* on the 
 2. Deploy to safeLearn (the demo instance) and run the import with an export from the demo realm's test accounts (pictures generated for them, no real students).
 3. Merge into secureLectures. Gerald runs the export tool in his WebUntis session and imports his classes there.
 
-## Open Questions
-
-- The exact class register request the tool reads the students from is settled by task 1.1. It changes only the tool, not the specs or the import.

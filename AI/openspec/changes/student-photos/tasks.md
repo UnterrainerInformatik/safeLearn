@@ -1,6 +1,6 @@
 ## 1. The WebUntis source
 
-- [ ] 1.1 With Gerald logged into WebUntis in a probe browser (like the probe of 2026-11-27, logging patterns only), inspect `classregpage.do` and its requests **for structure only** (element and key names, never values). Find where the student list with WebUntis ids and names comes from, and how the classes a teacher can open are listed. Pick the most stable source and record it in design.md D6 (closes its Open Question). Delete the probe's browser profile afterwards
+- [x] 1.1 With Gerald logged into WebUntis in a probe browser (like the probe of 2026-11-27, logging patterns only), inspect `classregpage.do` and its requests **for structure only** (element and key names, never values). Find where the student list with WebUntis ids and names comes from, and how the classes a teacher can open are listed. Pick the most stable source and record it in design.md D6 (closes its Open Question). Delete the probe's browser profile afterwards. Done 2026-11-27: the `studentCard` cards of the register frame, family name first, 54/54 matched; profile deleted
 - [ ] 1.2 `tools/webuntis-photos.js`: the console script of design D6. Pick classes, read students, fetch `image.do` with the session, report per class the number found and without a photo, and download the export of design D5. It sends nothing but to WebUntis. `tools/webuntis-photos.md`: how to run it, what it relies on. Verify "Exporting one class" with Gerald on one of his classes, checking only the counts
 
 ## 2. Data and server
