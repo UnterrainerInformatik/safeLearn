@@ -16,6 +16,8 @@
  */
 
 import {
+  copyTargets,
+  copyTest,
   createOfflineTest,
   createSitting,
   createTest,
@@ -40,7 +42,7 @@ import { correctShares, deleteAttempt, previewView, releaseAttempt, scoreAttempt
 import { notify, notifySittings } from "./live.js";
 import { embedPlaceholder, wrapInPage, wrapInReveal } from "../obsidian.js";
 import { i18nOf } from "../i18n/server.js";
-import { NotFoundError, visibleRecord } from "./classes.js";
+import { InvalidInputError, NotFoundError, visibleRecord } from "./classes.js";
 import { actsAsAdmin, classScope, requireAdmin, requireTeacher, teacherPage } from "./gate.js";
 import { contextFromQuery, teacherShell } from "./bar.js";
 
@@ -120,6 +122,17 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
   api("post", "/courses/:id/offline-tests", async (req) => createOfflineTest(db, await seen(req, "course", req.params.id), req.body ?? {}));
   api("get", "/tests/:id", async (req) => getTest(db, await seen(req, "test", req.params.id)));
   api("put", "/tests/:id", async (req) => updateTest(db, await seen(req, "test", req.params.id), req.body ?? {}));
+  // Copying a test into a course (`test-copy`, copy-test-to-course design D3):
+  // the courses it can go to, and the copy. Source and target are both
+  // looked up in the request's scope, so a class the teacher is not entered
+  // in answers 404 either way.
+  api("get", "/tests/:id/copy-targets", async (req) => copyTargets(db, await seen(req, "test", req.params.id), await classScope(db, req)));
+  api("post", "/tests/:id/copy", async (req) => {
+    const { courseId, name, gradebookKind } = req.body ?? {};
+    const sourceId = await seen(req, "test", req.params.id);
+    if (!Number.isInteger(courseId) || courseId < 1) throw new InvalidInputError("exam.errors.tests.copyCourse");
+    return copyTest(db, sourceId, await seen(req, "course", String(courseId)), { name, gradebookKind });
+  });
   // The values of an offline test's handout variables (`exam-handout`), in every state of the test.
   api("put", "/tests/:id/variables", async (req) => setTestVariables(db, await seen(req, "test", req.params.id), req.body?.values));
   // Each write of a sitting tells the students' streams of open tests.

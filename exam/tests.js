@@ -37,6 +37,7 @@ import {
   InvalidInputError,
   listClasses,
   listCourses,
+  listYears,
   NotFoundError,
   now,
   rosterOf,
@@ -393,18 +394,158 @@ export function refreshUsageDate(db, testId) {
  * in that order, with a snapshot of each.
  */
 export function createTest(db, courseId, { name, questionIds } = {}) {
-  getCourse(db, courseId);
+  const course = getCourse(db, courseId);
   const trimmed = normalizeName(name);
   const questions = chosenQuestions(db, questionIds);
   return inTransaction(db, () => {
-    const at = now();
-    const { lastInsertRowid } = db
-      .prepare("INSERT INTO test (course_id, name, created_at, updated_at) VALUES (?, ?, ?, ?)")
-      .run(courseId, trimmed, at, at);
-    const test = testRow(db, Number(lastInsertRowid));
+    const test = insertTest(db, course, trimmed);
     snapshot(db, test, questions);
     return getTest(db, test.id);
   });
+}
+
+/**
+ * Inserts the row of a new test `name` for `course` and answers it: an online
+ * test, or with `offline` - `{ durationS, handouts: { a, b }, gradebookKind,
+ * paper }` - an offline one with its column in the gradebook, named by the
+ * test and dated today until a sitting is planned. What creating a test and
+ * copying one share (copy-test-to-course design D1). Inside a transaction.
+ */
+function insertTest(db, course, name, offline = null) {
+  const at = now();
+  if (offline === null) {
+    const { lastInsertRowid } = db.prepare("INSERT INTO test (course_id, name, created_at, updated_at) VALUES (?, ?, ?, ?)").run(course.id, name, at, at);
+    return testRow(db, Number(lastInsertRowid));
+  }
+  const column = db
+    .prepare("INSERT INTO assessment (course_id, kind, name, held_on, max_points, created_at) VALUES (?, ?, ?, ?, NULL, ?)")
+    .run(course.id, offline.gradebookKind, name, dateInYear(at, course.year), at);
+  const { lastInsertRowid } = db
+    .prepare(
+      `INSERT INTO test (course_id, name, kind, duration_s, handout_a, handout_b, assessment_id, created_at, updated_at)
+       VALUES (?, ?, 'offline', ?, ?, ?, ?, ?, ?)`
+    )
+    .run(course.id, name, offline.durationS, offline.handouts.a, offline.handouts.b, Number(column.lastInsertRowid), at, at);
+  if (offline.paper) db.prepare("UPDATE test SET paper = 1 WHERE id = ?").run(Number(lastInsertRowid));
+  return testRow(db, Number(lastInsertRowid));
+}
+
+/**
+ * Refuses a gradebook kind an offline test of `course` cannot count as: one
+ * of `test` and `shorttest`, of a category the course uses
+ * (gradebook-presentations-projects design D4).
+ */
+function checkGradebookKind(course, gradebookKind) {
+  if (!offlineColumnKinds.includes(gradebookKind)) throw new InvalidInputError("exam.errors.tests.gradebookKind");
+  if (!course.categoriesInUse.includes(entryCategory[gradebookKind])) {
+    throw new InvalidInputError("exam.errors.gradebook.categoryNotInUse", { category: entryCategory[gradebookKind] });
+  }
+}
+
+/**
+ * Copies the test `sourceId` into the course `targetCourseId` as a new test
+ * `name` that has not begun (`test-copy`, copy-test-to-course design D1): per
+ * group, the source's pool questions in its order, as the pool holds them
+ * now, each with its weight and answer lines; for an offline test also its
+ * duration, its handouts and the handout variables a teacher set, and a
+ * column of `gradebookKind` in the target course. A question the pool no
+ * longer holds, a retired one and, for an online test, a free-text one is
+ * left out and named in `leftOut` (`{ name, reason }`, reason `deleted`,
+ * `retired` or `freetext`). An emptied group A takes group B's questions.
+ * Refused, with nothing written, for a target in a closed school year, and
+ * when the source had questions and none is left (design D2, D3). The source
+ * does not change.
+ */
+export function copyTest(db, sourceId, targetCourseId, { name, gradebookKind } = {}) {
+  const source = testRow(db, sourceId);
+  const course = getCourse(db, targetCourseId);
+  if (course.year.closed) throw new ConflictError("exam.errors.years.closed");
+  const trimmed = normalizeName(name);
+  const offline = source.kind === "offline";
+  if (offline) {
+    // A course that uses neither category takes no offline test, and the refusal says so.
+    if (!offlineColumnKinds.some((kind) => course.categoriesInUse.includes(entryCategory[kind]))) throw new InvalidInputError("exam.errors.tests.copyNoCategory");
+    checkGradebookKind(course, gradebookKind);
+  }
+  const paper = isPaper(source);
+  const read = db.prepare("SELECT * FROM question WHERE id = ?");
+  const leftOut = new Map();
+  const leaveOut = (row, question, reason) => {
+    // Once per question, also when a test on paper holds it in both groups.
+    const key = row.question_id === null ? `deleted:${row.name_de}` : String(row.question_id);
+    if (!leftOut.has(key)) leftOut.set(key, { name: question?.name_de ?? row.name_de, reason });
+  };
+  const rows = db.prepare("SELECT id, question_id, name_de, weight, answer_lines FROM test_question WHERE test_id = ? AND handout_group = ? ORDER BY position, id");
+  const groups = handoutGroups.map((group) => {
+    const questions = [];
+    const settings = new Map();
+    for (const row of rows.all(source.id, group)) {
+      const question = row.question_id === null ? undefined : read.get(row.question_id);
+      if (!question) leaveOut(row, null, "deleted");
+      else if (question.retired === 1) leaveOut(row, question, "retired");
+      else if (question.type === "freetext" && !paper) leaveOut(row, question, "freetext");
+      else if (!settings.has(question.id)) {
+        questions.push(question);
+        settings.set(question.id, { weight: row.weight, answer_lines: row.answer_lines });
+      }
+    }
+    return { questions, settings };
+  });
+  const [a, b] = groups[0].questions.length === 0 ? [groups[1], { questions: [], settings: new Map() }] : groups;
+  const names = [...leftOut.values()].map((entry) => entry.name);
+  if (a.questions.length === 0 && hasQuestions(db, source.id)) {
+    throw new ConflictError("exam.errors.tests.copyNothingLeft", { names: names.join(", ") });
+  }
+  return inTransaction(db, () => {
+    const test = insertTest(
+      db,
+      course,
+      trimmed,
+      offline ? { durationS: source.duration_s, handouts: { a: source.handout_a, b: source.handout_b }, gradebookKind, paper } : null
+    );
+    snapshot(db, test, a.questions, { group: "A", settings: a.settings });
+    if (b.questions.length > 0) snapshot(db, test, b.questions, { group: "B", settings: b.settings });
+    if (offline) {
+      db.prepare("INSERT INTO test_variable (test_id, name, value) SELECT ?, name, value FROM test_variable WHERE test_id = ?").run(test.id, source.id);
+    }
+    return { ...getTest(db, test.id), leftOut: [...leftOut.values()] };
+  });
+}
+
+/**
+ * The courses a test can be copied into (`test-copy`, copy-test-to-course
+ * design D3): those of every class `visible` sees, in the school years not
+ * closed, newest year first, grouped by year and class. Each course says the
+ * categories it uses and the gradebook kinds an offline copy can count as.
+ */
+export function copyTargets(db, sourceId, visible = null) {
+  const source = testRow(db, sourceId);
+  const years = listYears(db)
+    .filter((year) => !year.closed)
+    .reverse()
+    .map((year) => ({
+      id: year.id,
+      name: year.name,
+      current: year.current,
+      classes: listClasses(db, year.id, visible)
+        .map((klass) => ({
+          id: klass.id,
+          name: klass.name,
+          courses: listCourses(db, klass.id).map((course) => {
+            const inUse = categoriesInUse(course);
+            return {
+              id: course.id,
+              subject: course.subject,
+              language: course.language,
+              categoriesInUse: inUse,
+              offlineKinds: offlineColumnKinds.filter((gradebookKind) => inUse.includes(entryCategory[gradebookKind])),
+            };
+          }),
+        }))
+        .filter((klass) => klass.courses.length > 0),
+    }))
+    .filter((year) => year.classes.length > 0);
+  return { sourceCourseId: source.course_id, kind: source.kind, years };
 }
 
 /**
@@ -1412,28 +1553,14 @@ export function createOfflineTest(db, courseId, { name, durationMinutes, gradebo
   const course = getCourse(db, courseId);
   const trimmed = normalizeName(name);
   const durationS = offlineDuration(durationMinutes);
-  if (!offlineColumnKinds.includes(gradebookKind)) throw new InvalidInputError("exam.errors.tests.gradebookKind");
-  // Only a category the course uses (gradebook-presentations-projects design D4).
-  if (!course.categoriesInUse.includes(entryCategory[gradebookKind])) {
-    throw new InvalidInputError("exam.errors.gradebook.categoryNotInUse", { category: entryCategory[gradebookKind] });
-  }
+  checkGradebookKind(course, gradebookKind);
   const handouts = nextHandouts({ a: null, b: null }, { handoutA, handoutB });
   const questions = questionIds === undefined ? null : chosenQuestions(db, questionIds, { paper: true });
   if (questions !== null && handouts.a !== null) throw new ConflictError("exam.errors.tests.handoutsOrQuestions");
   return inTransaction(db, () => {
-    const at = now();
-    const column = db
-      .prepare("INSERT INTO assessment (course_id, kind, name, held_on, max_points, created_at) VALUES (?, ?, ?, ?, NULL, ?)")
-      .run(courseId, gradebookKind, trimmed, dateInYear(at, course.year), at);
-    const { lastInsertRowid } = db
-      .prepare(
-        `INSERT INTO test (course_id, name, kind, duration_s, handout_a, handout_b, assessment_id, created_at, updated_at)
-         VALUES (?, ?, 'offline', ?, ?, ?, ?, ?, ?)`
-      )
-      .run(courseId, trimmed, durationS, handouts.a, handouts.b, Number(column.lastInsertRowid), at, at);
-    if (questions !== null) db.prepare("UPDATE test SET paper = 1 WHERE id = ?").run(Number(lastInsertRowid));
-    if (questions !== null) snapshot(db, testRow(db, Number(lastInsertRowid)), questions);
-    return getTest(db, Number(lastInsertRowid));
+    const test = insertTest(db, course, trimmed, { durationS, handouts, gradebookKind, paper: questions !== null });
+    if (questions !== null) snapshot(db, test, questions);
+    return getTest(db, test.id);
   });
 }
 

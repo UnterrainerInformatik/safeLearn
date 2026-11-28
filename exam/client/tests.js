@@ -428,6 +428,115 @@ function refusal(error) {
   return error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.frame.saveFailed");
 }
 
+/** Where a copy's page learns which questions were left out (copy-test-to-course design D2). */
+const leftOutKey = "sl-exam-copy-left-out";
+
+/** The course the bar has chosen on this page, or null. */
+function barCourse() {
+  const value = document.querySelector('.sl-exam-bar select[data-position="course"]')?.value;
+  return value ? Number(value) : null;
+}
+
+/**
+ * The form that copies `test` into a course (`test-copy`, design D4): the
+ * target among `targets.years` - preset to the bar's course when it is
+ * another one, otherwise to the test's own -, the new name, and for an
+ * offline test the gradebook category of those the target uses, preset to
+ * the test's. The copy's page opens after, naming what was left out once.
+ */
+function copyForm(test, targets, close) {
+  const courses = new Map();
+  for (const year of targets.years) for (const klass of year.classes) for (const course of klass.courses) courses.set(course.id, course);
+  const message = h("p", { class: "sl-exam-message", role: "status" });
+  if (courses.size === 0) {
+    return h("div", { class: "sl-exam-test-copy-form" }, h("p", {}, t("exam.tests.copyNoTargets")), h("p", {}, button({ label: t("exam.tests.cancel"), action: close })));
+  }
+  const target = h(
+    "select",
+    { name: "courseId", class: "sl-exam-test-copy-target" },
+    targets.years.map((year) =>
+      year.classes.map((klass) =>
+        h(
+          "optgroup",
+          { label: `${year.name} · ${displayClass(klass.name)}` },
+          klass.courses.map((course) => h("option", { value: String(course.id) }, `${displayClass(klass.name)} ${course.subject}`))
+        )
+      )
+    )
+  );
+  const chosen = barCourse();
+  const preset = chosen !== null && chosen !== test.course.id && courses.has(chosen) ? chosen : courses.has(test.course.id) ? test.course.id : null;
+  if (preset !== null) target.value = String(preset);
+  const name = h("input", { type: "text", name: "name", value: test.name, maxlength: "80", required: true, class: "sl-exam-test-copy-name" });
+  const offline = test.kind === "offline";
+  const labels = { test: t("exam.offline.countsAsTest"), shorttest: t("exam.offline.countsAsShortTest") };
+  const kind = h("select", { name: "gradebookKind", class: "sl-exam-test-copy-kind" });
+  const kindNote = h("span", { class: "sl-exam-message" });
+  const submit = h("button", { type: "submit", class: "sl-exam-primary" }, t("exam.tests.copySubmit"));
+  // The categories follow the target: only those it uses, the test's own when it is one of them.
+  const drawKinds = () => {
+    if (!offline) return;
+    const kinds = courses.get(Number(target.value))?.offlineKinds ?? [];
+    const previous = kind.value || test.gradebookKind;
+    kind.replaceChildren(...kinds.map((value) => h("option", { value }, labels[value])));
+    if (kinds.includes(previous)) kind.value = previous;
+    kind.hidden = kinds.length === 0;
+    kindNote.textContent = kinds.length === 0 ? t("exam.errors.tests.copyNoCategory") : "";
+    submit.disabled = kinds.length === 0;
+  };
+  target.addEventListener("change", drawKinds);
+  drawKinds();
+  return h(
+    "form",
+    {
+      class: "sl-exam-test-copy-form",
+      onSubmit: async (event) => {
+        event.preventDefault();
+        const body = { courseId: Number(target.value), name: name.value };
+        if (offline) body.gradebookKind = kind.value;
+        try {
+          const copy = await examApi(`/tests/${test.id}/copy`, { method: "POST", body });
+          try {
+            if (copy.leftOut?.length > 0) window.sessionStorage.setItem(leftOutKey, JSON.stringify({ test: copy.id, leftOut: copy.leftOut }));
+          } catch {
+            // Without session storage the copy's page names nothing.
+          }
+          // The copy's page has its course chosen in the bar.
+          window.location.assign(`/exam/tests/${copy.id}`);
+        } catch (error) {
+          message.textContent = refusal(error);
+        }
+      },
+    },
+    h("h3", {}, t("exam.tests.copyHeading")),
+    h("label", {}, `${t("exam.tests.copyTarget")} `, target),
+    " ",
+    h("label", {}, `${t("exam.tests.nameLabel")} `, name),
+    offline ? [" ", h("label", {}, `${t("exam.offline.gradebookKindLabel")} `, kind, kindNote)] : null,
+    h("p", {}, submit, " ", h("button", { type: "button", class: "sl-exam-action", onClick: close }, t("exam.tests.cancel"))),
+    message
+  );
+}
+
+/** The questions left out of the copy just made, shown once on its page (copy-test-to-course design D2). */
+function leftOutNotice(test) {
+  let stored = null;
+  try {
+    stored = JSON.parse(window.sessionStorage.getItem(leftOutKey) ?? "null");
+    if (stored?.test === test.id) window.sessionStorage.removeItem(leftOutKey);
+  } catch {
+    return null;
+  }
+  if (stored?.test !== test.id || !Array.isArray(stored.leftOut) || stored.leftOut.length === 0) return null;
+  const reasons = { deleted: t("exam.tests.copyReasonDeleted"), retired: t("exam.tests.copyReasonRetired"), freetext: t("exam.tests.copyReasonFreetext") };
+  return h(
+    "div",
+    { class: "sl-exam-test-copy-left-out", role: "status" },
+    h("p", {}, t("exam.tests.copyLeftOut", { count: stored.leftOut.length })),
+    h("ul", {}, stored.leftOut.map((entry) => h("li", {}, `${entry.name} – ${reasons[entry.reason] ?? entry.reason}`)))
+  );
+}
+
 /** One test for its teacher. */
 class TestDetail extends ExamElement {
   async load() {
@@ -511,6 +620,24 @@ class TestDetail extends ExamElement {
     );
   }
 
+  /**
+   * The test page's "Copy to a course" (`test-copy`, copy-test-to-course
+   * design D4), in every state of the test and in a closed year too: it opens
+   * the form below it with the courses the server offers.
+   */
+  copySection(test) {
+    const slot = h("div", { class: "sl-exam-test-copy-slot" });
+    const open = async () => {
+      try {
+        const targets = await examApi(`/tests/${test.id}/copy-targets`);
+        slot.replaceChildren(copyForm(test, targets, () => slot.replaceChildren()));
+      } catch (error) {
+        slot.replaceChildren(h("p", { class: "sl-exam-message", role: "status" }, refusal(error)));
+      }
+    };
+    return h("div", { class: "sl-exam-test-copy-row", "data-sl-reads": "" }, h("p", {}, button({ label: t("exam.tests.copy"), class: "sl-exam-test-copy", action: open })), slot);
+  }
+
   render(test) {
     this.test = test;
     this.message = h("p", { class: "sl-exam-message", role: "status" });
@@ -539,6 +666,7 @@ class TestDetail extends ExamElement {
         this.evaluationAction(test)
       ),
       h("p", { class: "sl-exam-quiet" }, `${t("exam.tests.tryAsStudentNote")} ${t("exam.tests.boardSolutionNote")}`),
+      leftOutNotice(test),
       this.renameForm(test),
       this.message,
       this.sittingsSection(test),
@@ -661,6 +789,7 @@ class TestDetail extends ExamElement {
       h("h2", {}, t("exam.tests.sittingsHeading")),
       list,
       this.discardSection(test),
+      this.copySection(test),
       this.sittingForm
     );
   }
@@ -1412,6 +1541,7 @@ Object.assign(TestDetail.prototype, {
       ),
       h("p", { class: "sl-exam-quiet" }, test.paper ? t("exam.paper.explanation") : t("exam.offline.explanation")),
       test.column === null ? null : h("p", { class: "sl-exam-actions sl-exam-test-actions" }, this.evaluationAction(test)),
+      leftOutNotice(test),
       this.offlineForm(test),
       this.message,
       test.paper ? this.paperSection(test) : this.handoutsSection(test),
@@ -1607,7 +1737,7 @@ Object.assign(TestDetail.prototype, {
           );
     this.sittingForm = h("div", { class: "sl-exam-sitting-form" });
     this.drawOfflineForm(test, null);
-    return h("section", { class: "sl-exam-test-sittings-section" }, h("h2", {}, t("exam.tests.sittingsHeading")), list, this.discardSection(test), this.sittingForm);
+    return h("section", { class: "sl-exam-test-sittings-section" }, h("h2", {}, t("exam.tests.sittingsHeading")), list, this.discardSection(test), this.copySection(test), this.sittingForm);
   },
 
   /**

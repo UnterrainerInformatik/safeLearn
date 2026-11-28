@@ -579,7 +579,10 @@
         "weight": "Ein Gewicht ist eine ganze Zahl von 1 bis 10.",
         "weightLocked": "Die Gewichte stehen fest, sobald jemand den Test begonnen hat.",
         "answerLines": "Der Antwortplatz ist eine ganze Zahl von Zeilen von 1 bis 40.",
-        "answerLinesFreetext": "Nur eine Freitext-Frage eines Tests auf Papier hat einen Antwortplatz."
+        "answerLinesFreetext": "Nur eine Freitext-Frage eines Tests auf Papier hat einen Antwortplatz.",
+        "copyNothingLeft": "Keine Frage dieses Tests kann mehr kopiert werden: {names}.",
+        "copyNoCategory": "Dieser Kurs gewichtet Tests und Kurztests mit 0 % und nimmt daher keinen Offline-Test auf.",
+        "copyCourse": "Wähle den Kurs, in den der Test kopiert werden soll."
       },
       "years": {
         "alreadyClosed": "{name} ist bereits abgeschlossen.",
@@ -1018,6 +1021,16 @@
       "columnSittings": "Termine",
       "columnSubmitted": "Abgegeben",
       "columnTest": "Test",
+      "copy": "Für einen Kurs kopieren",
+      "copyHeading": "Für einen Kurs kopieren",
+      "copyLeftOut_one": "Eine Frage konnte nicht kopiert werden und wurde ausgelassen:",
+      "copyLeftOut_other": "{count} Fragen konnten nicht kopiert werden und wurden ausgelassen:",
+      "copyNoTargets": "Es gibt keinen Kurs in einem offenen Schuljahr, in den dieser Test kopiert werden kann.",
+      "copyReasonDeleted": "nicht mehr im Pool",
+      "copyReasonFreetext": "eine Freitextfrage, die ein Online-Test nicht enthalten kann",
+      "copyReasonRetired": "außer Dienst gestellt",
+      "copySubmit": "Kopieren",
+      "copyTarget": "Kurs",
       "correct": "richtig",
       "date": "Datum",
       "delete": "Löschen",

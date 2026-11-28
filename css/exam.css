@@ -1317,6 +1317,35 @@ a.sl-exam-button.sl-exam-open:hover,
   font: inherit;
 }
 
+/* Copying a test into a course (`test-copy`): the form under its button, laid
+   out like a sitting's, and the copy's note on what was left out. */
+.sl-exam-test-copy-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 34em;
+}
+
+.sl-exam-test-copy-form h3,
+.sl-exam-test-copy-form p {
+  margin: 0;
+}
+
+.sl-exam-test-copy-form input,
+.sl-exam-test-copy-form select {
+  font: inherit;
+}
+
+.sl-exam-test-copy-left-out {
+  padding: 6px 10px;
+  border-left: 4px solid currentColor;
+}
+
+.sl-exam-test-copy-left-out p,
+.sl-exam-test-copy-left-out ul {
+  margin: 0;
+}
+
 /* The window of a sitting with the school's periods: date and periods, or
    the clock times, with the button that switches between them. */
 .sl-exam-sitting-window {

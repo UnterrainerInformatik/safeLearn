@@ -8871,3 +8871,337 @@ describe("the module bar chooses a single choice", () => {
     assert.deepEqual(await chosen(page), ["9XPS", "PSA"]);
   });
 });
+
+describe("copying a test into a course", () => {
+  // A username the directory does not know: the classes need someone on their rosters.
+  const pupil = "ct-pupil";
+  let admin;
+  let student;
+  let teacher;
+  let categoryId;
+  let year;
+  let sourceCourse;
+  let targetCourse;
+  let tls;
+  let leaky;
+  const openSittings = [];
+  const ids = {};
+
+  function database(fn) {
+    const { db } = openDatabase(run.databasePath);
+    try {
+      return fn(db);
+    } finally {
+      db.close();
+    }
+  }
+
+  /** A new choice question of the checks' category named `name`. */
+  async function newQuestion(name, overrides = {}) {
+    const created = await fetchAs(teacher, "/exam/api/pool/questions", {
+      method: "POST",
+      body: {
+        categoryId,
+        type: "multichoice",
+        nameDe: name,
+        nameEn: name,
+        textDe: `<p>${name}: was ist richtig?</p>`,
+        textEn: `<p>${name}: what is right?</p>`,
+        answers: [
+          { textDe: "<p>das</p>", textEn: "<p>this</p>", correct: true },
+          { textDe: "<p>jenes</p>", textEn: "<p>that</p>", correct: false },
+        ],
+        ...overrides,
+      },
+    });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    return created.json.question.id;
+  }
+
+  /** A course `subject` of a new class `name` of `yearId`, the teacher entered in it unless `as` is the admin. */
+  async function courseOf(yearId, name, subject, { as = null, weights } = {}) {
+    const klass = as ? await fetchAs(as, `/exam/api/years/${yearId}/classes`, { method: "POST", body: { name, students: [pupil] } }) : await createClassFor(teacher, yearId, { name, students: [pupil] });
+    assert.equal(klass.status, 200, JSON.stringify(klass.json));
+    const created = await fetchAs(as ?? teacher, `/exam/api/classes/${klass.json.id}/courses`, { method: "POST", body: { subject, language: "de", ...(weights ? { weights } : {}) } });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    return created.json;
+  }
+
+  async function onlineTest(courseId, name, questionIds) {
+    const created = await fetchAs(teacher, `/exam/api/courses/${courseId}/tests`, { method: "POST", body: { name, questionIds } });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    return created.json;
+  }
+
+  /** Opens a sitting of the online test `testId` now, so the test has begun. */
+  async function opened(testId) {
+    const sitting = await fetchAs(teacher, `/exam/api/tests/${testId}/sittings`, {
+      method: "POST",
+      body: { opensAt: new Date(Date.now() - 60000).toISOString(), closesAt: new Date(Date.now() + 50 * 60000).toISOString(), durationMinutes: 15 },
+    });
+    assert.equal(sitting.status, 200, JSON.stringify(sitting.json));
+    openSittings.push(sitting.json.id);
+    return sitting.json;
+  }
+
+  const copy = (as, testId, body) => fetchAs(as, `/exam/api/tests/${testId}/copy`, { method: "POST", body });
+  const testsOf = (courseId) => database((db) => db.prepare("SELECT COUNT(*) AS n FROM test WHERE course_id = ?").get(courseId).n);
+  const columnsOf = (courseId) => database((db) => db.prepare("SELECT COUNT(*) AS n FROM assessment WHERE course_id = ?").get(courseId).n);
+  const usageOf = async (questionId) => (await fetchAs(teacher, `/exam/api/pool/questions/${questionId}`)).json.usage;
+
+  before(async () => {
+    admin = await sharedSession("admin");
+    student = await sharedSession("student");
+    teacher = await sharedSession("teacher");
+    await setPreferences(teacher, {});
+    const fixture = await examFixture(teacher);
+    year = fixture.year;
+    categoryId = (await fetchAs(teacher, `/exam/api/pool/questions/${fixture.questions[0].id}`)).json.categoryId;
+    for (const name of ["one", "two", "three", "four", "five", "retired", "deleted", "freetext", "gone", "goneToo", "promoted"]) {
+      ids[name] = await newQuestion(`Kopie ${name}`);
+    }
+    ids.free = await newQuestion("Kopie Freitext", { type: "freetext", solutionDe: "<p>So.</p>", solutionEn: "<p>So.</p>", answers: [] });
+    sourceCourse = await courseOf(year.id, "9XCC", "NVS");
+    targetCourse = await courseOf(year.id, "9XCA", "NVS");
+  });
+
+  after(async () => {
+    for (const sittingId of openSittings) await fetchAs(teacher, `/exam/api/sittings/${sittingId}/end`, { method: "POST" });
+  });
+
+  test("an online test copied: order and weights kept, the pool's current text, usage for the target, and the source unchanged", async () => {
+    tls = await onlineTest(sourceCourse.id, "TLS", [ids.one, ids.two, ids.three]);
+    const heavy = tls.questions.find((q) => q.questionId === ids.two);
+    assert.equal((await fetchAs(teacher, `/exam/api/tests/${tls.id}/questions/${heavy.id}`, { method: "PUT", body: { weight: 3 } })).status, 200);
+    await opened(tls.id);
+    // Corrected in the pool after the source began: the source keeps its version.
+    database((db) => db.prepare("UPDATE question SET text_de = '<p>Korrigiert</p>' WHERE id = ?").run(ids.one));
+    const before = (await fetchAs(teacher, `/exam/api/tests/${tls.id}`)).json;
+
+    const copied = await copy(teacher, tls.id, { courseId: targetCourse.id, name: "TLS" });
+    assert.equal(copied.status, 200, JSON.stringify(copied.json));
+    const made = copied.json;
+    assert.deepEqual([made.kind, made.course.id, made.name, made.sittings.length, made.begun, made.started], ["online", targetCourse.id, "TLS", 0, false, false]);
+    assert.deepEqual(made.questions.map((q) => [q.questionId, q.weight]), [[ids.one, 1], [ids.two, 3], [ids.three, 1]], "order and weights");
+    assert.equal(made.questions[0].textDe, "<p>Korrigiert</p>", "the pool's text, not the source's snapshot");
+    assert.deepEqual(made.leftOut, []);
+
+    const after = (await fetchAs(teacher, `/exam/api/tests/${tls.id}`)).json;
+    assert.deepEqual(after.questions, before.questions, "the source's snapshot stays");
+    assert.notEqual(after.questions[0].textDe, "<p>Korrigiert</p>");
+    assert.deepEqual(after.sittings.map((s) => s.id), before.sittings.map((s) => s.id), "its sittings stay");
+    const usage = await usageOf(ids.one);
+    assert.ok(usage.some((u) => u.testId === tls.id && u.courseId === sourceCourse.id), "the source's use stays");
+    assert.ok(usage.some((u) => u.testId === made.id && u.courseId === targetCourse.id), "the copy's use is recorded for the target");
+
+    // The same course gives a second variant.
+    const variant = await copy(teacher, tls.id, { courseId: sourceCourse.id, name: "TLS B" });
+    assert.equal(variant.status, 200, JSON.stringify(variant.json));
+    assert.equal(variant.json.course.id, sourceCourse.id);
+  });
+
+  test("a test on paper copied keeps its groups, weights and answer lines, and gets a column in the target", async () => {
+    const created = await fetchAs(teacher, `/exam/api/courses/${sourceCourse.id}/offline-tests`, {
+      method: "POST",
+      body: { name: "Quickie REST", durationMinutes: 15, gradebookKind: "shorttest", questionIds: [ids.one, ids.free, ids.two] },
+    });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    const paper = created.json;
+    const byId = (id) => paper.questions.find((q) => q.questionId === id);
+    assert.equal((await fetchAs(teacher, `/exam/api/tests/${paper.id}/questions/${byId(ids.free).id}`, { method: "PUT", body: { weight: 3, answerLines: 10 } })).status, 200);
+    const withB = await fetchAs(teacher, `/exam/api/tests/${paper.id}`, { method: "PUT", body: { questionIds: [ids.four, ids.five, ids.one], group: "B" } });
+    assert.equal(withB.status, 200, JSON.stringify(withB.json));
+
+    const copied = await copy(teacher, paper.id, { courseId: targetCourse.id, name: "Quickie REST 9a", gradebookKind: "test" });
+    assert.equal(copied.status, 200, JSON.stringify(copied.json));
+    const made = copied.json;
+    assert.deepEqual([made.kind, made.paper, made.twoGroups, made.gradebookKind, made.durationS], ["offline", true, true, "test", 900]);
+    const group = (g) => made.questions.filter((q) => q.group === g).map((q) => [q.questionId, q.weight, q.type === "freetext" ? q.answerLines : null]);
+    assert.deepEqual(group("A"), [[ids.one, 1, null], [ids.free, 3, 10], [ids.two, 1, null]]);
+    assert.deepEqual(group("B"), [[ids.four, 1, null], [ids.five, 1, null], [ids.one, 1, null]], "group B, a question in both groups in both");
+    const column = database((db) => db.prepare("SELECT course_id, kind, name FROM assessment WHERE id = ?").get(made.assessmentId));
+    assert.deepEqual({ ...column }, { course_id: targetCourse.id, kind: "test", name: "Quickie REST 9a" });
+    assert.notEqual(made.assessmentId, paper.assessmentId);
+    assert.equal((await fetchAs(teacher, `/exam/api/tests/${paper.id}`)).json.gradebookKind, "shorttest", "the source keeps its column");
+  });
+
+  test("an offline test with handouts copied keeps its handouts, duration and variables, and can be planned", async () => {
+    const created = await fetchAs(teacher, `/exam/api/courses/${sourceCourse.id}/offline-tests`, {
+      method: "POST",
+      body: { name: "Long test", durationMinutes: 100, gradebookKind: "test", handoutA: "test-exam-variables-handout.md", handoutB: "test-exam-handout-b.md" },
+    });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    const source = created.json;
+    assert.equal((await fetchAs(teacher, `/exam/api/tests/${source.id}/variables`, { method: "PUT", body: { values: { FRANKLYN_PIN: "E07" } } })).status, 200);
+
+    const copied = await copy(teacher, source.id, { courseId: targetCourse.id, name: "Long test", gradebookKind: "test" });
+    assert.equal(copied.status, 200, JSON.stringify(copied.json));
+    const made = copied.json;
+    assert.deepEqual(made.handouts.map((h) => [h.group, h.path]), source.handouts.map((h) => [h.group, h.path]));
+    assert.equal(made.durationS, 6000);
+    assert.equal(made.variables.find((v) => v.name === "FRANKLYN_PIN").value, "E07");
+    assert.equal(made.variables.find((v) => v.name === "CLASS").value, "9XCA", "the module fills CLASS for the copy's class");
+    assert.equal(database((db) => db.prepare("SELECT course_id FROM assessment WHERE id = ?").get(made.assessmentId).course_id), targetCourse.id);
+    const planned = await fetchAs(teacher, `/exam/api/tests/${made.id}/sittings`, { method: "POST", body: { opensAt: new Date(Date.now() + 24 * 3600000).toISOString() } });
+    assert.equal(planned.status, 200, JSON.stringify(planned.json));
+  });
+
+  test("a retired, a deleted and a question become free-text are left out and named; an emptied group A takes group B's", async () => {
+    leaky = await onlineTest(sourceCourse.id, "Leaky", [ids.retired, ids.three, ids.deleted, ids.freetext]);
+    const paper = (
+      await fetchAs(teacher, `/exam/api/courses/${sourceCourse.id}/offline-tests`, {
+        method: "POST",
+        body: { name: "Promoted", durationMinutes: 20, gradebookKind: "test", questionIds: [ids.retired] },
+      })
+    ).json;
+    assert.equal((await fetchAs(teacher, `/exam/api/tests/${paper.id}`, { method: "PUT", body: { questionIds: [ids.promoted], group: "B" } })).status, 200);
+    await opened(leaky.id);
+    assert.equal((await fetchAs(teacher, `/exam/api/pool/questions/${ids.retired}/retire`, { method: "POST" })).status, 200);
+    assert.equal((await fetchAs(teacher, `/exam/api/pool/questions/${ids.deleted}`, { method: "DELETE" })).status, 200);
+    database((db) => {
+      db.prepare("UPDATE question SET type = 'freetext', solution_de = '<p>So.</p>', solution_en = '<p>So.</p>' WHERE id = ?").run(ids.freetext);
+      db.prepare("DELETE FROM answer WHERE question_id = ?").run(ids.freetext);
+    });
+
+    const copied = await copy(teacher, leaky.id, { courseId: targetCourse.id, name: "Leaky" });
+    assert.equal(copied.status, 200, JSON.stringify(copied.json));
+    assert.deepEqual(copied.json.questions.map((q) => q.questionId), [ids.three]);
+    assert.deepEqual(
+      copied.json.leftOut,
+      [
+        { name: "Kopie retired", reason: "retired" },
+        { name: "Kopie deleted", reason: "deleted" },
+        { name: "Kopie freetext", reason: "freetext" },
+      ]
+    );
+
+    const promoted = await copy(teacher, paper.id, { courseId: targetCourse.id, name: "Promoted", gradebookKind: "test" });
+    assert.equal(promoted.status, 200, JSON.stringify(promoted.json));
+    assert.deepEqual(promoted.json.questions.map((q) => [q.questionId, q.group]), [[ids.promoted, "A"]], "group B's question is group A's now");
+    assert.equal(promoted.json.twoGroups, false);
+    assert.deepEqual(promoted.json.leftOut, [{ name: "Kopie retired", reason: "retired" }]);
+  });
+
+  test("a test with no question left is refused with their names, and nothing is created", async () => {
+    const online = await onlineTest(sourceCourse.id, "Gone", [ids.gone]);
+    await opened(online.id);
+    const paper = (
+      await fetchAs(teacher, `/exam/api/courses/${sourceCourse.id}/offline-tests`, { method: "POST", body: { name: "Gone too", durationMinutes: 20, gradebookKind: "test", questionIds: [ids.goneToo] } })
+    ).json;
+    const sitting = await fetchAs(teacher, `/exam/api/tests/${paper.id}/sittings`, { method: "POST", body: { opensAt: new Date(Date.now() + 60000).toISOString() } });
+    assert.equal(sitting.status, 200, JSON.stringify(sitting.json));
+    assert.equal((await fetchAs(teacher, `/exam/api/sittings/${sitting.json.id}/start`, { method: "POST" })).status, 200);
+    openSittings.push(sitting.json.id);
+    for (const id of [ids.gone, ids.goneToo]) assert.equal((await fetchAs(teacher, `/exam/api/pool/questions/${id}`, { method: "DELETE" })).status, 200);
+
+    const [tests, columns] = [testsOf(targetCourse.id), columnsOf(targetCourse.id)];
+    const refused = await copy(teacher, online.id, { courseId: targetCourse.id, name: "Gone" });
+    assert.equal(refused.status, 409);
+    assert.match(refused.json.error, /Kopie gone/);
+    const refusedPaper = await copy(teacher, paper.id, { courseId: targetCourse.id, name: "Gone too", gradebookKind: "test" });
+    assert.equal(refusedPaper.status, 409);
+    assert.match(refusedPaper.json.error, /Kopie goneToo/);
+    assert.deepEqual([testsOf(targetCourse.id), columnsOf(targetCourse.id)], [tests, columns], "no test and no column");
+  });
+
+  test("copying stays in the session's classes and open years, is a teacher's, and offers only the categories the target uses", async () => {
+    // A class the teacher is not entered in: neither a target nor a source.
+    const foreign = await courseOf(year.id, "9XCZ", "NVS", { as: admin });
+    const before = testsOf(foreign.id);
+    assert.equal((await copy(teacher, tls.id, { courseId: foreign.id, name: "TLS" })).status, 404);
+    assert.equal(testsOf(foreign.id), before);
+    const foreignTest = await fetchAs(admin, `/exam/api/courses/${foreign.id}/tests`, { method: "POST", body: { name: "Foreign", questionIds: [ids.one] } });
+    assert.equal(foreignTest.status, 200, JSON.stringify(foreignTest.json));
+    assert.equal((await copy(teacher, foreignTest.json.id, { courseId: targetCourse.id, name: "Foreign" })).status, 404);
+    assert.equal((await fetchAs(teacher, `/exam/api/tests/${foreignTest.json.id}/copy-targets`)).status, 404);
+    const targets = (await fetchAs(teacher, `/exam/api/tests/${tls.id}/copy-targets`)).json;
+    const offered = targets.years.flatMap((y) => y.classes.flatMap((c) => c.courses.map((course) => course.id)));
+    assert.ok(offered.includes(sourceCourse.id) && offered.includes(targetCourse.id), "the source's own course and the other one");
+    assert.ok(!offered.includes(foreign.id), "not a course of a class the teacher is not entered in");
+
+    // A closed year: its test is copied into the current year, and none of its courses is a target.
+    const past = (await fetchAs(teacher, "/exam/api/years", { method: "POST", body: { name: "2017/18", startsOn: "2017-09-04", summerStartsOn: "2018-02-12", endsOn: "2018-06-29" } })).json;
+    const pastCourse = await courseOf(past.id, "4XCO", "NVS");
+    const old = await onlineTest(pastCourse.id, "Old", [ids.one]);
+    assert.equal((await fetchAs(teacher, `/exam/api/years/${past.id}/close`, { method: "POST" })).status, 200);
+    const fromClosed = await copy(teacher, old.id, { courseId: targetCourse.id, name: "Old" });
+    assert.equal(fromClosed.status, 200, JSON.stringify(fromClosed.json));
+    assert.equal((await fetchAs(teacher, `/exam/api/tests/${old.id}`)).json.name, "Old");
+    const intoClosed = await copy(teacher, tls.id, { courseId: pastCourse.id, name: "TLS" });
+    assert.equal(intoClosed.status, 409);
+    assert.match(intoClosed.json.error, /school year is closed/);
+    assert.ok(!(await fetchAs(teacher, `/exam/api/tests/${old.id}/copy-targets`)).json.years.some((y) => y.id === past.id), "a closed year is offered no more");
+
+    // A student.
+    const count = testsOf(targetCourse.id);
+    assert.equal((await copy(student, tls.id, { courseId: targetCourse.id, name: "TLS" })).status, 403);
+    assert.equal((await fetchAs(student, `/exam/api/tests/${tls.id}/copy-targets`)).status, 403);
+    assert.equal(testsOf(targetCourse.id), count);
+
+    // A target that weighs short tests at 0 %, and one that weighs both at 0 %.
+    const short = (
+      await fetchAs(teacher, `/exam/api/courses/${sourceCourse.id}/offline-tests`, { method: "POST", body: { name: "Short", durationMinutes: 20, gradebookKind: "shorttest", handoutA: "test-exam-handout.md" } })
+    ).json;
+    const testsOnly = await courseOf(year.id, "9XCT", "NVS", { weights: { onlineTests: 40, manualTests: 30, shortTests: 0, presentations: 0, projects: 0, participation: 15, homework: 15 } });
+    const neither = await courseOf(year.id, "9XCN", "NVS", { weights: { onlineTests: 70, manualTests: 0, shortTests: 0, presentations: 0, projects: 0, participation: 15, homework: 15 } });
+    const listed = (await fetchAs(teacher, `/exam/api/tests/${short.id}/copy-targets`)).json.years.flatMap((y) => y.classes.flatMap((c) => c.courses));
+    assert.deepEqual(listed.find((c) => c.id === testsOnly.id).offlineKinds, ["test"]);
+    assert.deepEqual(listed.find((c) => c.id === neither.id).offlineKinds, []);
+    const wrongKind = await copy(teacher, short.id, { courseId: testsOnly.id, name: "Short", gradebookKind: "shorttest" });
+    assert.equal(wrongKind.status, 400);
+    assert.match(wrongKind.json.error, /0 %/);
+    const noKind = await copy(teacher, short.id, { courseId: neither.id, name: "Short", gradebookKind: "test" });
+    assert.equal(noKind.status, 400);
+    assert.match(noKind.json.error, /takes no offline test/);
+    assert.deepEqual([testsOf(testsOnly.id), testsOf(neither.id), columnsOf(testsOnly.id), columnsOf(neither.id)], [0, 0, 0, 0]);
+    assert.equal((await copy(teacher, short.id, { courseId: testsOnly.id, name: "Short", gradebookKind: "test" })).status, 200);
+  });
+  test("in the browser: a teacher copies a test that has begun to another course, lands on the copy with that course in the bar, changes it and plans a sitting; what was left out is named once", async () => {
+    const page = teacher.page;
+    const target = ".sl-exam-test-copy-form select[name=courseId]";
+    await openPage(page, `/exam/tests/${tls.id}`, ".sl-exam-test-copy");
+    await click(page, ".sl-exam-test-copy");
+    await page.waitForSelector(target, { timeout: 10000 });
+    assert.equal(await page.$eval(target, (select) => select.value), String(sourceCourse.id), "preset to the test's own course");
+    assert.equal(await page.$eval(".sl-exam-test-copy-form input[name=name]", (input) => input.value), "TLS", "the name preset");
+    await page.select(target, String(targetCourse.id));
+    await page.$eval(".sl-exam-test-copy-form input[name=name]", (input) => (input.value = ""));
+    await page.type(".sl-exam-test-copy-form input[name=name]", "TLS 9a");
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(page, ".sl-exam-test-copy-form button[type=submit]")]);
+    const copyId = Number(new URL(page.url()).pathname.split("/").pop());
+    assert.notEqual(copyId, tls.id);
+    await page.waitForSelector(".sl-exam-test-questions .sl-exam-test-remove", { timeout: 20000 });
+    assert.equal(await page.$eval('.sl-exam-bar select[data-position="course"]', (select) => select.value), String(targetCourse.id), "the target course chosen in the bar");
+    assert.equal(await page.$(".sl-exam-test-copy-left-out"), null, "nothing was left out");
+
+    const copied = (await fetchAs(teacher, `/exam/api/tests/${copyId}`)).json;
+    assert.deepEqual([copied.name, copied.course.id, copied.questions.length], ["TLS 9a", targetCourse.id, 3]);
+    const first = copied.questions[0];
+    const remove = `.sl-exam-test-questions > li[data-question="${first.id}"] .sl-exam-test-remove`;
+    await click(page, remove);
+    await click(page, remove);
+    await page.waitForFunction(() => document.querySelectorAll(".sl-exam-test-questions > li").length === 2, { timeout: 10000 });
+    const planned = await fetchAs(teacher, `/exam/api/tests/${copyId}/sittings`, {
+      method: "POST",
+      body: { opensAt: new Date(Date.now() + 24 * 3600000).toISOString(), closesAt: new Date(Date.now() + 25 * 3600000).toISOString(), durationMinutes: 15 },
+    });
+    assert.equal(planned.status, 200, JSON.stringify(planned.json));
+    assert.equal((await fetchAs(teacher, `/exam/api/tests/${tls.id}`)).json.questions.length, 3, "the source is unchanged");
+    const usage = await usageOf(first.questionId);
+    assert.ok(usage.some((u) => u.testId === tls.id), "the removed question's usage lists the source");
+    assert.ok(!usage.some((u) => u.testId === copyId), "but not the copy");
+
+    // The questions left out are named on the copy's page, once.
+    await openPage(page, `/exam/tests/${leaky.id}`, ".sl-exam-test-copy");
+    await click(page, ".sl-exam-test-copy");
+    await page.waitForSelector(target, { timeout: 10000 });
+    await page.select(target, String(targetCourse.id));
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(page, ".sl-exam-test-copy-form button[type=submit]")]);
+    await page.waitForSelector(".sl-exam-test-copy-left-out li", { timeout: 20000 });
+    const named = await page.$$eval(".sl-exam-test-copy-left-out li", (items) => items.map((li) => li.textContent));
+    assert.equal(named.length, 3);
+    for (const name of ["Kopie retired", "Kopie deleted", "Kopie freetext"]) assert.ok(named.some((line) => line.includes(name)), `${name} is named`);
+    await openPage(page, page.url(), ".sl-exam-test-questions");
+    assert.equal(await page.$(".sl-exam-test-copy-left-out"), null, "once only");
+  });
+});

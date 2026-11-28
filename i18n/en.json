@@ -579,7 +579,10 @@
         "weight": "A weight is a whole number from 1 to 10.",
         "weightLocked": "The weights are fixed once a student has started the test.",
         "answerLines": "The answer space is a whole number of lines from 1 to 40.",
-        "answerLinesFreetext": "Only a free-text question of a test on paper has an answer space."
+        "answerLinesFreetext": "Only a free-text question of a test on paper has an answer space.",
+        "copyNothingLeft": "No question of this test can be copied any more: {names}.",
+        "copyNoCategory": "This course weighs both tests and short tests at 0 %, so it takes no offline test.",
+        "copyCourse": "Choose the course to copy the test into."
       },
       "years": {
         "alreadyClosed": "{name} is closed already.",
@@ -1018,6 +1021,16 @@
       "columnSittings": "Sittings",
       "columnSubmitted": "Submitted",
       "columnTest": "Test",
+      "copy": "Copy to a course",
+      "copyHeading": "Copy to a course",
+      "copyLeftOut_one": "One question could not be copied and was left out:",
+      "copyLeftOut_other": "{count} questions could not be copied and were left out:",
+      "copyNoTargets": "There is no course in an open school year to copy this test into.",
+      "copyReasonDeleted": "no longer in the pool",
+      "copyReasonFreetext": "a free-text question, which an online test cannot hold",
+      "copyReasonRetired": "retired",
+      "copySubmit": "Copy",
+      "copyTarget": "Course",
       "correct": "correct",
       "date": "Date",
       "delete": "Delete",
