@@ -6,9 +6,9 @@
  * the image.
  */
 
-import { categoryTree, getQuestion, listQuestions, readImage, studentMaySeeImage } from "./pool.js";
+import { categoryTree, getQuestion, listQuestions, readImage, scopedQuestion, studentMaySeeImage } from "./pool.js";
 import { NotFoundError } from "./classes.js";
-import { actsAsTeacher, identityOf, requireTeacher, teacherPage } from "./gate.js";
+import { actsAsTeacher, classScope, identityOf, requireTeacher, teacherPage } from "./gate.js";
 import { contextFromQuery, teacherShell } from "./bar.js";
 
 /** A record id from the path or query; anything but a positive integer names nothing. */
@@ -37,7 +37,8 @@ export function registerPoolRoutes(router, { db, handle, startPage }) {
       onlyUnreviewed: req.query.unreviewed === "1",
     })
   );
-  api("get", "/pool/questions/:id", (req) => getQuestion(db, idParam(req.params.id)));
+  // Its usage names only tests of the classes the session sees (class-bound-teachers D9).
+  api("get", "/pool/questions/:id", async (req) => scopedQuestion(db, getQuestion(db, idParam(req.params.id)), await classScope(db, req)));
 
   // An image of a question. A session that may not see it is refused the same
   // way whether the image exists or not, so the route tells a student nothing

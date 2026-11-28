@@ -26,6 +26,11 @@ Anyone who has even one of these roles assigned will be able to view the documen
 * Documents that are hidden for a viewer will not be visible in the directory-tree on the left as well.
 * If a directory on the left has only files invisible to the viewer, then the entry of that directory will be invisible as well.
 
+### The exam module's classes
+Inside the exam module ([docs-exam-module.md](docs-exam-module.md#who-sees-which-class)) the role `teacher` is not enough to see a class: a teacher sees only the classes an admin entered them in, and everything under those classes. Everything else of the module answers them as a record that does not exist. A session acting as an admin sees every class. Creating, renaming and deleting a class, entering and removing its teachers and the year change's class step are an admin's. The content's own directives are not affected: a page marked `@@@ 4bhif` is still shown to every teacher.
+
+Students' photos need the client role `student-images` **and** a class the session sees whose roster holds the student; an admin with the role sees every photo, an admin without it none. One consequence is accepted on purpose: a teacher entered in a class may add any directory student to its roster, and from then on sees that student's photo, because the student now belongs to their class. The class page shows its roster and its teachers to everyone who sees the class, so a wrong entry is noticed.
+
 ### Attachments
 Images, PDFs and every other file a page embeds or links (`![[name]]`, `[[name]]`, `![](path)`, `[text](path)`, a raw `<img src>`) follow the places they are used in. There is no directive for an attachment itself.
 * An attachment is as visible as its **most visible** reference. One that sits on a teacher page, in a `@@@ 4bhif` block and on an unrestricted page is served to everyone; one that sits only on the teacher page is served to teachers only. A reference counts where the reader may see it right now: inside a closed time window, in the private variant without the variant view on, or in a teacher block while a teacher is in the student view, it counts for nobody.

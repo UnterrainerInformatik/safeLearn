@@ -5,15 +5,17 @@
  * - `year-new`: a new school year (in the bar's dialog)
  * - `class-new`: a new class, its roster ticked from the directory's checklist
  *   (in the bar's dialog)
- * - `class`: one class's roster during the year, and its courses
+ * - `class`: one class's teachers, its roster during the year, and its courses
  * - `course-new`: a new course of a class (in the bar's dialog)
  * - `course`: one course's language and config sheet
  *
  * Every change goes through the API, which decides again on the server; these
- * elements only draw what it answers.
+ * elements only draw what it answers. What only an admin may do - creating,
+ * renaming and deleting a class, the year change's class step, the class's
+ * teachers (`class-teachers`) - is offered only while `/me` says admin.
  */
 
-import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, format, h, linkButton, markRows, readOnlyFor, saveOnChange, stickyColumns, t } from "./frame.js";
+import { button, confirmButton, defineExamElement, ExamApiError, ExamElement, examApi, examMe, format, h, linkButton, markRows, readOnlyFor, saveOnChange, stickyColumns, t } from "./frame.js";
 import { openCreatorOf } from "./bar.js";
 import { viennaLocal } from "./periods.js";
 import "./date-input.js";
@@ -295,15 +297,16 @@ function nextYearSuggestion(years) {
 
 class ClassesHome extends ExamElement {
   async load() {
-    const { years, current } = await examApi("/years");
+    const [{ years, current }, me] = await Promise.all([examApi("/years"), examMe()]);
     const selected = years.find((year) => String(year.id) === this.params.year) ?? current ?? years.at(-1) ?? null;
     const classes = selected ? await examApi(`/years/${selected.id}/classes`) : [];
-    const next = selected && !selected.closed ? await examApi(`/years/${selected.id}/next-classes`) : null;
+    // Starting the next year creates classes: an admin's (class-bound-teachers, task 3.3).
+    const next = me.admin && selected && !selected.closed ? await examApi(`/years/${selected.id}/next-classes`) : null;
     const retention = selected?.current ? await examApi("/retention") : null;
-    return { selected, classes, next, retention };
+    return { selected, classes, next, retention, admin: me.admin };
   }
 
-  render({ selected, classes, next, retention }) {
+  render({ selected, classes, next, retention, admin }) {
     if (!selected) {
       return h(
         "div",
@@ -329,17 +332,38 @@ class ClassesHome extends ExamElement {
           h(
             "table",
             { class: "sl-exam-table sl-exam-classes" },
-            h("thead", {}, h("tr", {}, h("th", {}, t("exam.bar.class")), h("th", {}, t("exam.classes.students")), h("th", {}, t("exam.classes.courses")))),
+            h(
+              "thead",
+              {},
+              h(
+                "tr",
+                {},
+                h("th", {}, t("exam.bar.class")),
+                h("th", {}, t("exam.classes.students")),
+                h("th", {}, t("exam.classes.courses")),
+                admin ? h("th", {}, t("exam.classes.teachers")) : null
+              )
+            ),
             h(
               "tbody",
               {},
+              // For an admin the server lists the classes without teachers first (class-bound-teachers D8).
               classes.map((klass) =>
                 h(
                   "tr",
-                  {},
+                  { class: admin && klass.teacherCount === 0 ? "sl-exam-no-teachers" : null },
                   h("td", {}, h("a", { href: `/exam/classes/${klass.id}` }, displayClass(klass.name))),
                   h("td", {}, String(klass.students)),
-                  h("td", {}, String(klass.courses))
+                  h("td", {}, String(klass.courses)),
+                  admin
+                    ? h(
+                        "td",
+                        { class: "sl-exam-teacher-count" },
+                        klass.teacherCount === 0
+                          ? h("span", { class: "sl-exam-no-teachers-mark" }, t("exam.classes.noTeachers"))
+                          : t("exam.classes.teacherCount", { count: klass.teacherCount })
+                      )
+                    : null
                 )
               )
             )
@@ -476,6 +500,10 @@ class ClassesHome extends ExamElement {
     };
     const lastYear = proposal.people.filter((person) => person.lastYear).map(entry);
     const newcomers = proposal.people.filter((person) => !person.lastYear).map(entry);
+    // Last year's teachers ticked, the directory's other teachers beside them (class-bound-teachers, task 5.5).
+    const teachers = proposal.teachers ?? [];
+    const lastTeachers = teachers.filter((teacher) => teacher.lastYear).map(entry);
+    const otherTeachers = teachers.filter((teacher) => !teacher.lastYear).map(entry);
     const courses = proposal.courses.map((course) => ({
       course,
       tick: h("input", { type: "checkbox", value: String(course.id), checked: true, "aria-label": course.subject }),
@@ -487,6 +515,7 @@ class ClassesHome extends ExamElement {
           body: {
             from: proposal.from.id,
             students: [...lastYear, ...newcomers].filter(({ tick }) => tick.checked).map(({ tick }) => tick.value),
+            teachers: [...lastTeachers, ...otherTeachers].filter(({ tick }) => tick.checked).map(({ tick }) => tick.value),
             courses: courses.filter(({ tick }) => tick.checked).map(({ course }) => course.id),
           },
         });
@@ -504,6 +533,18 @@ class ClassesHome extends ExamElement {
         h("div", {},
           h("h4", {}, t("exam.years.directoryOthers", { name: displayClass(proposal.name), count: newcomers.length })),
           newcomers.length ? h("ul", { class: "sl-exam-checklist sl-exam-next-new" }, newcomers.map(({ item }) => item)) : h("p", { class: "sl-exam-quiet" }, t("exam.years.directoryNoOthers"))
+        )
+      ),
+      h("div", { class: "sl-exam-next-lists sl-exam-next-teachers" },
+        h("div", {},
+          h("h4", {}, t("exam.years.lastYearTeachers", { from: displayClass(proposal.from.name), count: lastTeachers.length })),
+          lastTeachers.length ? h("ul", { class: "sl-exam-checklist sl-exam-next-last-teachers" }, lastTeachers.map(({ item }) => item)) : h("p", { class: "sl-exam-quiet" }, t("exam.classes.noTeachersEntered"))
+        ),
+        h("div", {},
+          h("h4", {}, t("exam.years.otherTeachers", { count: otherTeachers.length })),
+          otherTeachers.length
+            ? h("details", {}, h("summary", {}, t("exam.years.showOtherTeachers")), h("ul", { class: "sl-exam-checklist sl-exam-checklist-long sl-exam-next-other-teachers" }, otherTeachers.map(({ item }) => item)))
+            : h("p", { class: "sl-exam-quiet" }, t("exam.years.noOtherTeachers"))
         )
       ),
       courses.length
@@ -613,13 +654,13 @@ function checklist(people, className = "sl-exam-checklist") {
 class ClassNew extends ExamElement {
   async load() {
     const yearId = this.params.year;
-    const [{ years }, directory] = await Promise.all([examApi("/years"), examApi("/directory/classes")]);
+    const [{ years }, directory, teachers] = await Promise.all([examApi("/years"), examApi("/directory/classes"), examApi("/directory/teachers")]);
     const year = years.find((candidate) => String(candidate.id) === yearId);
     if (!year) throw new ExamApiError(404);
-    return { year, directory };
+    return { year, directory, teachers };
   }
 
-  render({ year, directory }) {
+  render({ year, directory, teachers }) {
     const line = messageLine();
     const notice = directoryNotice(directory.state);
     const names = h("datalist", { id: "sl-exam-class-names" }, (directory.classes ?? []).map((name) => h("option", { value: displayClass(name) })));
@@ -646,6 +687,9 @@ class ClassNew extends ExamElement {
         );
       });
 
+    // The teachers to enter in the class, nobody ticked (`class-teachers`).
+    const teacherList = checklist(teachers.teachers ?? [], "sl-exam-checklist sl-exam-checklist-long sl-exam-class-new-teachers");
+
     const extra = h("input", { placeholder: t("exam.classes.usernamePlaceholder"), "aria-label": t("exam.classes.addByUsernameLabel") });
     const addExtra = () => {
       const username = extra.value.trim().toLowerCase();
@@ -658,7 +702,7 @@ class ClassNew extends ExamElement {
       act(event.target, line, async () => {
         const klass = await examApi(`/years/${year.id}/classes`, {
           method: "POST",
-          body: { name: nameInput.value, students: list.ticked() },
+          body: { name: nameInput.value, students: list.ticked(), teachers: teacherList.ticked() },
         });
         window.location.assign(`/exam/classes/${klass.id}`);
       });
@@ -671,6 +715,8 @@ class ClassNew extends ExamElement {
       h("p", {}, h("label", {}, t("exam.bar.class"), " ", nameInput), names, " ", h("button", { type: "button", class: "sl-exam-action", onclick: showMembers }, t("exam.classes.showMembers"))),
       members,
       h("p", {}, extra, " ", h("button", { type: "button", class: "sl-exam-action", onclick: addExtra }, t("exam.classes.addByUsername"))),
+      h("h3", {}, t("exam.classes.teachers")),
+      teachers.ready ? teacherList : h("p", { class: "sl-exam-quiet" }, directoryNotice(teachers.state) ?? t("exam.classes.directoryLoading")),
       h("p", {}, h("button", { type: "button", class: "sl-exam-primary", onclick: create }, t("exam.classes.createClass"))),
       line
     ));
@@ -681,12 +727,15 @@ class ClassNew extends ExamElement {
 
 class ClassView extends ExamElement {
   async load() {
-    const klass = await examApi(`/classes/${encodeURIComponent(this.params.class)}`);
-    const directory = await examApi(`/directory/classes/${encodeURIComponent(klass.name)}`);
-    return { klass, directory };
+    const [klass, me] = await Promise.all([examApi(`/classes/${encodeURIComponent(this.params.class)}`), examMe()]);
+    const [directory, teachers] = await Promise.all([
+      examApi(`/directory/classes/${encodeURIComponent(klass.name)}`),
+      me.admin ? examApi("/directory/teachers") : null,
+    ]);
+    return { klass, directory, admin: me.admin, teachers };
   }
 
-  render({ klass, directory }) {
+  render({ klass, directory, admin, teachers }) {
     const heading = document.querySelector("#markdown-content h1");
     if (heading) heading.textContent = t("exam.classes.classHeading", { name: displayClass(klass.name), year: klass.year.name });
     const head = recordActions({
@@ -704,7 +753,80 @@ class ClassView extends ExamElement {
       },
     });
     this.roster = this.rosterSection(klass);
-    return readOnlyFor(klass.year, h("div", { class: "sl-exam" }, head, this.roster, this.addSection(klass, directory), this.courseSection(klass)));
+    // Renaming and deleting a class are an admin's (`exam-record-maintenance`).
+    const page = readOnlyFor(klass.year, h("div", { class: "sl-exam" }, admin ? head : null, this.roster, this.addSection(klass, directory), this.courseSection(klass)));
+    // The teachers' list is no record of the year: an admin keeps it in a closed year too (class-bound-teachers D1).
+    page.insertBefore(this.teacherSection(klass, admin, teachers), this.roster);
+    return page;
+  }
+
+  /**
+   * The teachers entered in the class (`class-teachers`), for everyone who
+   * sees it; for an admin with a remove button each and a picker of the
+   * directory's other teachers. Outside the closed year's read-only marking.
+   */
+  teacherSection(klass, admin, directory) {
+    const line = messageLine();
+    const entered = new Set(klass.teachers.map((teacher) => teacher.username));
+    const change = (request) => (event) =>
+      act(event.target, line, async () => {
+        await request();
+        await this.reload();
+      });
+    const items = klass.teachers.map((teacher) =>
+      h(
+        "li",
+        { "data-username": teacher.username },
+        displayPerson(teacher),
+        " ",
+        h("span", { class: "sl-exam-quiet" }, teacher.username),
+        admin
+          ? [
+              " ",
+              confirmButton({
+                class: "sl-exam-teacher-remove",
+                label: t("exam.classes.remove"),
+                armed: t("exam.classes.removeTeacherArmed", { name: displayPerson(teacher) }),
+                action: change(() => examApi(`/classes/${klass.id}/teachers/${encodeURIComponent(teacher.username)}`, { method: "DELETE" })),
+              }),
+            ]
+          : null
+      )
+    );
+    let picker = null;
+    if (admin) {
+      const offered = (directory?.teachers ?? []).filter((teacher) => !entered.has(teacher.username));
+      const select = h(
+        "select",
+        { class: "sl-exam-teacher-picker", "aria-label": t("exam.classes.teacherPickerLabel") },
+        h("option", { value: "" }, "–"),
+        offered.map((teacher) => h("option", { value: teacher.username }, `${displayPerson(teacher)} (${teacher.username})`))
+      );
+      picker = directory?.ready
+        ? h(
+            "p",
+            {},
+            select,
+            " ",
+            button({
+              label: t("exam.classes.enterTeacher"),
+              class: "sl-exam-teacher-add",
+              action: (event) => {
+                if (!select.value) return;
+                change(() => examApi(`/classes/${klass.id}/teachers`, { method: "POST", body: { username: select.value } }))(event);
+              },
+            })
+          )
+        : h("p", { class: "sl-exam-quiet" }, directoryNotice(directory?.state) ?? t("exam.classes.directoryLoading"));
+    }
+    return h(
+      "section",
+      { class: "sl-exam-class-teachers", "data-sl-reads": "" },
+      h("h2", {}, t("exam.classes.teachers")),
+      items.length ? h("ul", { class: "sl-exam-teacher-list" }, items) : h("p", { class: "sl-exam-quiet" }, t("exam.classes.noTeachersEntered")),
+      picker,
+      line
+    );
   }
 
   rosterSection(klass) {

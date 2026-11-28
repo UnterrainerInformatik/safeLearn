@@ -6,6 +6,10 @@
  * there for it (`gate.js`). A student has exactly one route of their own,
  * `GET /api/my/results`, which answers about the session's own identity and
  * takes no username, so no request can name somebody else.
+ *
+ * Every route naming a course or a column asks the request's scope first
+ * (`class-teachers`): a course of a class the teacher is not entered in is
+ * answered as one that does not exist.
  */
 
 import {
@@ -26,9 +30,9 @@ import {
   updateColumn,
   updateScale,
 } from "./gradebook.js";
-import { getCourse, InvalidInputError, NotFoundError } from "./classes.js";
+import { getCourse, InvalidInputError, NotFoundError, seesClass, visibleRecord } from "./classes.js";
 import { semesters } from "./grading.js";
-import { holdsStudentImages, identityOf, requireTeacher, teacherPage } from "./gate.js";
+import { classScope, holdsStudentImages, identityOf, requireTeacher, teacherPage } from "./gate.js";
 import { withPhotoVersions } from "./photos.js";
 import { contextFromQuery, teacherShell } from "./bar.js";
 import { courseAttempt, reviewView } from "./attempts.js";
@@ -63,6 +67,8 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
         res.json(await fn(req));
       })
     );
+  // The id of a record of `kind` from the path, refused as missing outside the request's scope.
+  const seen = async (req, kind, value) => visibleRecord(db, await classScope(db, req), kind, idParam(value));
 
   // ------------------------------------------------------------------ scale
 
@@ -73,10 +79,12 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
 
   // A course by the names a page's block gives it: class, subject and,
   // optionally, the school year's name. The current year otherwise.
-  api("get", "/course-lookup", (req) => {
+  // A course the session does not see is answered as one there is not, so an
+  // embedded element renders as for a missing course (class-bound-teachers, task 2.5).
+  api("get", "/course-lookup", async (req) => {
     const yearName = typeof req.query.year === "string" && req.query.year ? req.query.year : null;
     const course = findCourse(db, { className: req.query.class, subject: req.query.subject, yearName });
-    if (!course) throw new NotFoundError("exam.errors.noSuchCourse");
+    if (!course || !seesClass(await classScope(db, req), course.classId)) throw new NotFoundError("exam.errors.noSuchCourse");
     return course;
   });
 
@@ -84,7 +92,7 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
   // Each row carries its photo's version for a session holding
   // `student-images`, and no such field at all for any other (student-photos D2).
   api("get", "/courses/:id/gradebook", async (req) => {
-    const id = idParam(req.params.id);
+    const id = await seen(req, "course", req.params.id);
     const overview = courseOverview(db, id, semesterParam(req.query.semester, getCourse(db, id)));
     const holders = participantHolders(overview.course);
     const images = await holdsStudentImages(req);
@@ -97,7 +105,7 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
     };
   });
   api("get", "/courses/:id/students/:username", async (req) => {
-    const record = studentRecord(db, idParam(req.params.id), req.params.username);
+    const record = studentRecord(db, await seen(req, "course", req.params.id), req.params.username);
     const holders = participantHolders(record.course);
     const student = flagParticipant(record.student, holders);
     return {
@@ -109,16 +117,16 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
   });
   // The review of a student's submitted online-test attempt, for grading: open
   // to the teacher as soon as it is submitted (exam-attempt-review design D3).
-  api("get", "/courses/:id/students/:username/attempts/:attempt", (req) =>
-    reviewView(db, courseAttempt(db, idParam(req.params.id), req.params.username, idParam(req.params.attempt)))
+  api("get", "/courses/:id/students/:username/attempts/:attempt", async (req) =>
+    reviewView(db, courseAttempt(db, await seen(req, "course", req.params.id), req.params.username, idParam(req.params.attempt)))
   );
   // Grants or withdraws the course's exam-participant role; the role's name
   // comes from the course, never from the request (exam-participant-role D3).
-  api("put", "/courses/:id/participants/:username", (req) =>
-    setParticipant(db, idParam(req.params.id), req.params.username, req.body?.held)
+  api("put", "/courses/:id/participants/:username", async (req) =>
+    setParticipant(db, await seen(req, "course", req.params.id), req.params.username, req.body?.held)
   );
-  api("put", "/courses/:id/grades/:username/:semester", (req) =>
-    setSemesterGrade(db, idParam(req.params.id), req.params.username, req.params.semester, req.body ?? {})
+  api("put", "/courses/:id/grades/:username/:semester", async (req) =>
+    setSemesterGrade(db, await seen(req, "course", req.params.id), req.params.username, req.params.semester, req.body ?? {})
   );
 
   // ------------------------------------------------- columns and their cells
@@ -126,28 +134,28 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
   // One request per field: a cell is written on its own and answers the
   // student's recomputed row, so writes of a teacher tabbing quickly through a
   // row cannot undo each other (design.md, D3).
-  api("post", "/courses/:id/assessments", (req) => createColumn(db, idParam(req.params.id), req.body ?? {}));
-  api("put", "/assessments/:id", (req) => updateColumn(db, idParam(req.params.id), req.body ?? {}));
-  api("delete", "/assessments/:id", (req) => deleteColumn(db, idParam(req.params.id)));
-  api("put", "/assessments/:id/results/:username", (req) =>
-    setResult(db, idParam(req.params.id), req.params.username, req.body ?? {})
+  api("post", "/courses/:id/assessments", async (req) => createColumn(db, await seen(req, "course", req.params.id), req.body ?? {}));
+  api("put", "/assessments/:id", async (req) => updateColumn(db, await seen(req, "assessment", req.params.id), req.body ?? {}));
+  api("delete", "/assessments/:id", async (req) => deleteColumn(db, await seen(req, "assessment", req.params.id)));
+  api("put", "/assessments/:id/results/:username", async (req) =>
+    setResult(db, await seen(req, "assessment", req.params.id), req.params.username, req.body ?? {})
   );
-  api("delete", "/assessments/:id/results/:username", (req) =>
-    deleteResult(db, idParam(req.params.id), req.params.username)
+  api("delete", "/assessments/:id/results/:username", async (req) =>
+    deleteResult(db, await seen(req, "assessment", req.params.id), req.params.username)
   );
   // A cell's note, beside its result and written on its own (gradebook-result-notes
   // D2). `:column` is the sheet's column id: a number, or `test-<id>` for an
   // online test. Answers `{ note }`, since a note changes no proposal.
-  api("put", "/courses/:id/notes/:column/:username", (req) =>
-    setNote(db, idParam(req.params.id), req.params.column, req.params.username, req.body?.text ?? null)
+  api("put", "/courses/:id/notes/:column/:username", async (req) =>
+    setNote(db, await seen(req, "course", req.params.id), req.params.column, req.params.username, req.body?.text ?? null)
   );
-  api("delete", "/courses/:id/notes/:column/:username", (req) =>
-    deleteNote(db, idParam(req.params.id), req.params.column, req.params.username)
+  api("delete", "/courses/:id/notes/:column/:username", async (req) =>
+    deleteNote(db, await seen(req, "course", req.params.id), req.params.column, req.params.username)
   );
 
   // One test column's evaluation for its class (`test-evaluation`, design D2):
   // a teacher's only, like the sheet. `:column` is the sheet's column key.
-  api("get", "/courses/:id/columns/:column/evaluation", (req) => evaluateColumn(db, idParam(req.params.id), req.params.column));
+  api("get", "/courses/:id/columns/:column/evaluation", async (req) => evaluateColumn(db, await seen(req, "course", req.params.id), req.params.column));
 
   // ---------------------------------------------------- a student's own view
 
@@ -167,19 +175,19 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
       path,
       teacherPage,
       handle(async (req, res) => {
-        const { kind, params, context, current = null } = element(req);
+        const { kind, params, context, current = null } = await element(req);
         res.send(await teacherShell({ db, startPage, req, title, context, kind, params, current }));
       })
     );
 
-  page("/courses/:id/gradebook", (t) => t("exam.pages.gradebook"), (req) => {
-    const courseId = idParam(req.params.id);
+  page("/courses/:id/gradebook", (t) => t("exam.pages.gradebook"), async (req) => {
+    const courseId = await seen(req, "course", req.params.id);
     // A page asking for no semester, or for one there is not, shows the one running now.
     const semester = semesters.includes(req.query.semester) ? req.query.semester : semesterToday(getCourse(db, courseId).year);
     return { kind: "gradebook", params: { course: String(courseId), semester, page: "1" }, context: { courseId, semester } };
   });
-  page("/courses/:id/students/:username", (t) => t("exam.pages.student"), (req) => {
-    const courseId = idParam(req.params.id);
+  page("/courses/:id/students/:username", (t) => t("exam.pages.student"), async (req) => {
+    const courseId = await seen(req, "course", req.params.id);
     // The semester the teacher came from, kept on the way to the neighbours and back.
     const semester = semesters.includes(req.query.semester) ? req.query.semester : null;
     return {
@@ -188,8 +196,8 @@ export function registerGradebookRoutes(router, { db, handle, startPage }) {
       context: semester ? { courseId, semester } : { courseId },
     };
   });
-  page("/courses/:id/students/:username/attempts/:attempt", (t) => t("exam.pages.attemptReview"), (req) => {
-    const courseId = idParam(req.params.id);
+  page("/courses/:id/students/:username/attempts/:attempt", (t) => t("exam.pages.attemptReview"), async (req) => {
+    const courseId = await seen(req, "course", req.params.id);
     return {
       kind: "attempt-review",
       params: { course: String(courseId), student: String(req.params.username).toLowerCase(), attempt: String(idParam(req.params.attempt)) },

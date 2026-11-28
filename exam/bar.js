@@ -11,12 +11,12 @@
  * creation dialogs.
  */
 
-import { currentYear, getClass, getCourse, getYear, listClasses, listCourses, listYears } from "./classes.js";
+import { currentYear, getClass, getCourse, getYear, listClasses, listCourses, listYears, visibleRecord } from "./classes.js";
 import { semesterToday } from "./gradebook.js";
 import { semesters } from "./grading.js";
 import { embedPlaceholder, wrapInPage } from "../obsidian.js";
 import { i18nOf } from "../i18n/server.js";
-import { actsAsAdmin, holdsStudentImages } from "./gate.js";
+import { actsAsAdmin, classScope, holdsStudentImages } from "./gate.js";
 
 function semesterLabels(t) {
   return { ws: t("exam.bar.winterSemester"), ss: t("exam.bar.wholeYear") };
@@ -37,16 +37,20 @@ function escapeHtml(text) {
  * follows from the positions to its right (a course's class and year); the
  * current school year is chosen when nothing else is. Positions to the right
  * of what the page names stay empty.
+ *
+ * `scope` is the request's (`classScope`): the class position offers only the
+ * classes it sees, and a page naming a class or a course outside it is not
+ * found, as one naming a record there is none of (`class-teachers`).
  */
-export function barState(db, { yearId = null, classId = null, courseId = null, semester = null } = {}) {
-  const course = courseId === null ? null : getCourse(db, courseId);
-  const klass = course ? getClass(db, course.classId) : classId === null ? null : getClass(db, classId);
+export function barState(db, { yearId = null, classId = null, courseId = null, semester = null } = {}, scope = null) {
+  const course = courseId === null ? null : getCourse(db, visibleRecord(db, scope, "course", courseId));
+  const klass = course ? getClass(db, course.classId) : classId === null ? null : getClass(db, visibleRecord(db, scope, "class", classId));
   const years = listYears(db);
   const year = klass ? klass.year : yearId !== null ? getYear(db, yearId) : (currentYear(db) ?? years.at(-1) ?? null);
   return {
     years,
     year,
-    classes: year ? listClasses(db, year.id) : [],
+    classes: year ? listClasses(db, year.id, scope) : [],
     klass,
     courses: klass ? listCourses(db, klass.id) : [],
     course,
@@ -78,9 +82,9 @@ function keptInClass(db, classId, course) {
  * What a choice of year `yearId` keeps: the class of the same name as the one
  * chosen now and, in it, the course of the same subject.
  */
-function keptInYear(db, yearId, klass, course) {
+function keptInYear(db, yearId, klass, course, scope) {
   if (!klass) return {};
-  const match = listClasses(db, yearId).find((candidate) => sameName(candidate.name, klass.name));
+  const match = listClasses(db, yearId, scope).find((candidate) => sameName(candidate.name, klass.name));
   return match ? { class: match.id, ...keptInClass(db, match.id, course) } : {};
 }
 
@@ -127,10 +131,12 @@ function pageButton({ name, label, href, current }) {
  * `scale`, `photos`); the
  * bar's choices then stay on that page. `t` speaks the reader's language.
  * `photos` offers the photo import, to a session `requirePhotoAdmin` lets
- * through (student-photos design D4).
+ * through (student-photos design D4). `scope` is the request's class scope,
+ * and `admin` whether it acts as an admin, the only one offered a new class
+ * (class-bound-teachers, task 5.2).
  */
-export function renderBar(db, context, current, t, { photos = false } = {}) {
-  const { years, year, classes, klass, courses, course, semester } = barState(db, context);
+export function renderBar(db, context, current, t, { photos = false, scope = null, admin = false } = {}) {
+  const { years, year, classes, klass, courses, course, semester } = barState(db, context, scope);
   const shownSemester = semester ?? (course ? semesterToday(course.year) : null);
   const query = contextQuery({ year, klass, course });
   return `<nav class="sl-exam-bar" aria-label="${escapeHtml(t("app.topbar.examModule"))}"
@@ -142,7 +148,7 @@ export function renderBar(db, context, current, t, { photos = false } = {}) {
       choices: years.map((candidate) => ({
         value: String(candidate.id),
         label: candidate.current ? t("exam.bar.currentYear", { name: candidate.name }) : candidate.name,
-        keep: keptInYear(db, candidate.id, klass, course),
+        keep: keptInYear(db, candidate.id, klass, course, scope),
       })),
       chosen: year ? String(year.id) : null,
       enabled: years.length > 0,
@@ -155,7 +161,7 @@ export function renderBar(db, context, current, t, { photos = false } = {}) {
       choices: classes.map((candidate) => ({ value: String(candidate.id), label: candidate.name.toUpperCase(), keep: keptInClass(db, candidate.id, course) })),
       chosen: klass ? String(klass.id) : null,
       enabled: year !== null,
-      create: { title: t("exam.bar.newClass"), offered: year !== null },
+      create: admin ? { title: t("exam.bar.newClass"), offered: year !== null } : undefined,
     })}
     ${position({
       name: "course",
@@ -192,9 +198,9 @@ export function renderBar(db, context, current, t, { photos = false } = {}) {
 export async function teacherShell({ db, startPage, req, title, context, kind, params, current = null }) {
   const { t } = await i18nOf(req);
   const heading = typeof title === "function" ? title(t) : title;
-  const [images, admin] = await Promise.all([holdsStudentImages(req), actsAsAdmin(req)]);
+  const [images, admin, scope] = await Promise.all([holdsStudentImages(req), actsAsAdmin(req), classScope(db, req)]);
   const body = `
-    ${renderBar(db, context, current, t, { photos: images && admin })}
+    ${renderBar(db, context, current, t, { photos: images && admin, scope, admin })}
     <h1>${escapeHtml(heading)}</h1>
     ${embedPlaceholder(kind, params, t("app.embed.loading"))}`;
   return wrapInPage(body, startPage(), req, { title: heading, wide: true });
@@ -203,7 +209,8 @@ export async function teacherShell({ db, startPage, req, title, context, kind, p
 /**
  * The bar's context named by a page's query - `course`, `class` or `year`, an
  * id each - for the pages the bar's buttons open. An id that is not one names
- * nothing; a record there is none of is refused by `barState`.
+ * nothing; a record there is none of, or one outside the request's scope, is
+ * refused by `barState`.
  */
 export function contextFromQuery(query) {
   const id = (value) => (typeof value === "string" && /^[1-9]\d{0,9}$/.test(value) ? Number(value) : null);

@@ -46,6 +46,34 @@ export async function holdsStudentImages(req) {
   return context.full.roles.has(studentImagesRole);
 }
 
+/** The scope of a session that sees every class: an admin's (class-bound-teachers D2). */
+export const everyClass = Object.freeze({ all: true, classIds: null });
+
+const scopes = new WeakMap();
+
+/**
+ * Which classes the request sees (`class-teachers`, class-bound-teachers D2):
+ * `everyClass` for a session acting as an admin, otherwise
+ * `{ all: false, classIds }` with the ids of the classes its username is
+ * entered in. Resolved once per request and kept on it, so every lookup and
+ * every list of the request asks the same answer; the next request asks the
+ * database anew, so an entry takes effect without a new login.
+ */
+export function classScope(db, req) {
+  if (!scopes.has(req)) {
+    scopes.set(
+      req,
+      actsAsAdmin(req).then((admin) => {
+        if (admin) return everyClass;
+        const username = identityOf(req);
+        const rows = username ? db.prepare("SELECT class_id FROM class_teacher WHERE username = ?").all(username.toLowerCase()) : [];
+        return Object.freeze({ all: false, classIds: new Set(rows.map((row) => row.class_id)) });
+      })
+    );
+  }
+  return scopes.get(req);
+}
+
 function refuse(req, res) {
   res.status(403).json({ error: "Forbidden" });
 }

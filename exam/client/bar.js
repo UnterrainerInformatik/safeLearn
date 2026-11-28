@@ -4,6 +4,12 @@
  * it, and opens the creation dialogs, each holding the element that creates
  * the record. The element navigates to the new record once it exists, and that
  * page's bar has it chosen.
+ *
+ * A class or course position with nothing chosen and exactly one choice is
+ * chosen at once, as if the teacher had chosen it (class-bound-teachers D7):
+ * on the module's start page, and on a page reached by choosing a year or a
+ * class in the bar. A page reached any other way - a position's link, an
+ * emptied position, a link on a page - stays as it is.
  */
 
 import { elementFor, h, t } from "./frame.js";
@@ -111,6 +117,71 @@ function keptDestination(option, { semester, current }) {
   return null;
 }
 
+/**
+ * The key under which a page learns that it was reached by choosing a year
+ * or a class in the bar, or by the bar choosing a single choice for the
+ * teacher: only then, and on the module's start page, does it choose a
+ * single choice in turn (class-bound-teachers D7).
+ */
+const cascadeKey = "sl-exam-bar-cascade";
+
+/** The address of the page shown, as a destination names it. */
+function here() {
+  return `${window.location.pathname}${window.location.search}`;
+}
+
+/** The address `target` names, as `here()` would read it there. */
+function addressOf(target) {
+  const url = new URL(target, window.location.href);
+  return `${url.pathname}${url.search}`;
+}
+
+/** Tells the page at `target` that it may go on choosing for the teacher. */
+function cascadeTo(target) {
+  try {
+    window.sessionStorage.setItem(cascadeKey, addressOf(target));
+  } catch {
+    // Without session storage only the start page chooses.
+  }
+}
+
+/** Whether this page was reached by a choice of year or class, or by the bar's own; asked once. */
+function reachedByChoice() {
+  try {
+    const reached = window.sessionStorage.getItem(cascadeKey) === here();
+    window.sessionStorage.removeItem(cascadeKey);
+    return reached;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether the module's start page is shown as the start: `/exam/` without a
+ * year named. Following the year position's link names one, so that
+ * overview stays.
+ */
+function isModuleStart() {
+  return (window.location.pathname === "/exam/" || window.location.pathname === "/exam") && window.location.search === "";
+}
+
+/**
+ * The class or the course position, the first from the left, that has
+ * nothing chosen and offers exactly one choice, with that choice; null when
+ * there is none. Never the semester position, and never on a page whose
+ * choices do not follow the address (the photo import).
+ */
+export function singleChoice(bar) {
+  if (bar.dataset.current === "photos") return null;
+  for (const position of ["class", "course"]) {
+    const select = bar.querySelector(`select[data-position="${position}"]`);
+    if (!select || select.disabled || select.value !== "") continue;
+    const choices = [...select.options].filter((option) => option.value !== "");
+    return choices.length === 1 ? { position, value: choices[0].value } : null;
+  }
+  return null;
+}
+
 export function connectBar(bar) {
   publishBottom(bar);
   bar.addEventListener("change", (event) => {
@@ -118,10 +189,24 @@ export function connectBar(bar) {
     if (!select) return;
     const target =
       keptDestination(select.selectedOptions[0], bar.dataset) ?? destination(select.dataset.position, select.value, bar.dataset);
-    if (target) window.location.assign(target);
+    if (!target) return;
+    // A year or a class chosen lets the page it opens choose a single choice to its right;
+    // emptying a position, or choosing a course, is the teacher's last word.
+    if (select.value !== "" && (select.dataset.position === "year" || select.dataset.position === "class")) cascadeTo(target);
+    window.location.assign(target);
   });
   bar.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-create]");
     if (button && !button.disabled) openCreator(bar, button.dataset.create);
   });
+  // A position with a single choice is chosen at once, one position after the other.
+  const reached = reachedByChoice();
+  if (!reached && !isModuleStart()) return;
+  const single = singleChoice(bar);
+  if (!single) return;
+  const target = destination(single.position, single.value, bar.dataset);
+  // A page that would lead to itself again chooses nothing.
+  if (!target || addressOf(target) === here()) return;
+  cascadeTo(target);
+  window.location.replace(target);
 }

@@ -65,6 +65,23 @@
   opacity: 0.6;
 }
 
+/* A class nobody is entered in, on an admin's overview of a year
+   (class-bound-teachers D8): listed first, its count marked in the danger
+   colour, so the admin sees at once where teachers are missing. */
+.sl-exam-no-teachers-mark {
+  color: #b42318;
+  font-weight: 600;
+}
+
+#markdown-content.dark-mode .sl-exam-no-teachers-mark {
+  color: #ff7b72;
+}
+
+.sl-exam-teacher-list {
+  list-style: none;
+  padding-left: 0;
+}
+
 .sl-exam-checklist {
   list-style: none;
   padding-left: 0;

@@ -7,11 +7,13 @@
  *
  * Every one of them is a teacher's: the API refuses any other session with
  * 403, and the print pages are behind `teacherPage`, which a teacher in
- * student view does not pass - nothing of a sheet reaches a student.
+ * student view does not pass - nothing of a sheet reaches a student. A test of
+ * a class the teacher is not entered in is answered as one that does not
+ * exist (`class-teachers`).
  */
 
-import { NotFoundError } from "./classes.js";
-import { holdsStudentImages, requireTeacher, teacherPage } from "./gate.js";
+import { NotFoundError, visibleRecord } from "./classes.js";
+import { classScope, holdsStudentImages, requireTeacher, teacherPage } from "./gate.js";
 import { withPhotoVersions } from "./photos.js";
 import { readScale } from "./gradebook.js";
 import { correctionTable, setQuestionGrade } from "./paper-grades.js";
@@ -86,20 +88,22 @@ export function registerPaperRoutes(router, { db, handle }) {
         res.json(await fn(req));
       })
     );
+  // The id of a record of `kind` from the path, refused as missing outside the request's scope.
+  const seen = async (req, kind, value) => visibleRecord(db, await classScope(db, req), kind, idParam(value));
 
   // A question's weight (every test) and answer lines (a free-text question on paper).
-  api("put", "/tests/:id/questions/:testQuestion", (req) => {
+  api("put", "/tests/:id/questions/:testQuestion", async (req) => {
     const { weight, answerLines } = req.body ?? {};
-    return setQuestionSettings(db, idParam(req.params.id), idParam(req.params.testQuestion), { weight, answerLines });
+    return setQuestionSettings(db, await seen(req, "test", req.params.id), idParam(req.params.testQuestion), { weight, answerLines });
   });
   // The correction table of a test on paper, and one grade of it; `grade` null removes it.
   // Each row carries its photo's version only for a session holding `student-images` (student-photos D2).
   api("get", "/tests/:id/grades", async (req) => {
-    const table = correctionTable(db, idParam(req.params.id), readScale(db));
+    const table = correctionTable(db, await seen(req, "test", req.params.id), readScale(db));
     return (await holdsStudentImages(req)) ? { ...table, rows: withPhotoVersions(db, table.rows) } : table;
   });
-  api("put", "/tests/:id/grades/:testQuestion/:username", (req) =>
-    setQuestionGrade(db, idParam(req.params.id), idParam(req.params.testQuestion), req.params.username, req.body?.grade ?? null, readScale(db))
+  api("put", "/tests/:id/grades/:testQuestion/:username", async (req) =>
+    setQuestionGrade(db, await seen(req, "test", req.params.id), idParam(req.params.testQuestion), req.params.username, req.body?.grade ?? null, readScale(db))
   );
 
   /**
@@ -131,7 +135,7 @@ export function registerPaperRoutes(router, { db, handle }) {
       `/tests/:id/sheets/:group/${suffix}`,
       teacherPage,
       handle(async (req, res) => {
-        await printed(req, res, { testId: idParam(req.params.id), group: req.params.group, sitting: undefined, solution });
+        await printed(req, res, { testId: await seen(req, "test", req.params.id), group: req.params.group, sitting: undefined, solution });
       })
     );
     // From a sitting's page: that sitting's date, so a make-up prints its own day.
@@ -139,7 +143,7 @@ export function registerPaperRoutes(router, { db, handle }) {
       `/sittings/:id/sheets/:group/${suffix}`,
       teacherPage,
       handle(async (req, res) => {
-        const sitting = db.prepare("SELECT * FROM sitting WHERE id = ?").get(idParam(req.params.id));
+        const sitting = db.prepare("SELECT * FROM sitting WHERE id = ?").get(await seen(req, "sitting", req.params.id));
         if (!sitting) throw new NotFoundError("exam.errors.tests.noSitting");
         await printed(req, res, { testId: sitting.test_id, group: req.params.group, sitting, solution });
       })

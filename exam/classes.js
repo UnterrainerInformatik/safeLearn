@@ -8,9 +8,11 @@
  * whom a class's checklist offers.
  */
 
+import { EventEmitter } from "node:events";
+
 import { i18nFor } from "../i18n/server.js";
 import { viennaLocal } from "./client/periods.js";
-import { classCandidates, isKnownTeacher } from "./roster-source.js";
+import { classCandidates, findPerson, isKnownTeacher, isTeacher } from "./roster-source.js";
 import { refreshClassMakeups } from "./makeups.js";
 
 const { t: englishT, format: englishFormat } = i18nFor("en", "de-AT");
@@ -365,18 +367,28 @@ function classFromRow(row) {
   };
 }
 
-/** The classes of a school year, with how many attend and how many courses each has. */
-export function listClasses(db, yearId) {
+/**
+ * The classes of a school year that `scope` sees, with how many attend and how
+ * many courses each has. With `teachers`, for an admin's overview (design D8),
+ * each also says how many teachers are entered in it, and the classes without
+ * any come first.
+ */
+export function listClasses(db, yearId, scope = null, { teachers = false } = {}) {
   getYear(db, yearId);
-  return db
+  const filter = scopeSql(scope, "c.id");
+  const classes = db
     .prepare(
       `SELECT c.*,
          (SELECT COUNT(*) FROM roster_entry r WHERE r.class_id = c.id AND r.left_at IS NULL) AS students,
          (SELECT COUNT(*) FROM course k WHERE k.class_id = c.id) AS courses
-       FROM class c WHERE c.school_year_id = ? ORDER BY c.name`
+       FROM class c WHERE c.school_year_id = ?${filter.sql} ORDER BY c.name`
     )
-    .all(yearId)
+    .all(yearId, ...filter.params)
     .map(classFromRow);
+  if (!teachers) return classes;
+  const counts = teacherCounts(db, classes.map((klass) => klass.id));
+  const counted = classes.map((klass) => ({ ...klass, teacherCount: counts.get(klass.id) }));
+  return [...counted.filter((klass) => klass.teacherCount === 0), ...counted.filter((klass) => klass.teacherCount > 0)];
 }
 
 /**
@@ -406,18 +418,20 @@ export function getClass(db, id) {
   const row = db.prepare("SELECT * FROM class WHERE id = ?").get(id);
   if (!row) throw new NotFoundError("exam.errors.classes.noClass", { id });
   const year = getYear(db, row.school_year_id);
-  return { ...classFromRow(row), year, roster: rosterOf(db, id), courses: listCourses(db, id) };
+  return { ...classFromRow(row), year, roster: rosterOf(db, id), courses: listCourses(db, id), teachers: listClassTeachers(db, id) };
 }
 
 /**
- * Creates a class for a school year with the people the teacher ticked as its
+ * Creates a class for a school year with the people the admin ticked as its
  * roster - and only those. Nobody is added because the directory lists them;
- * the caller passes exactly the ticked ones.
+ * the caller passes exactly the ticked ones. `teachers` are the usernames to
+ * enter in it, checked against the directory `directory` (`enterTeacher`).
  */
-export function createClass(db, yearId, { name, students = [] } = {}) {
+export function createClass(db, yearId, { name, students = [], teachers = [], directory = null } = {}) {
   getYear(db, yearId);
   const normalized = normalizeClassName(name);
   if (!Array.isArray(students)) throw new InvalidInputError("exam.errors.classes.rosterList");
+  if (!Array.isArray(teachers)) throw new InvalidInputError("exam.errors.classes.teacherList");
   const people = students.map(normalizePerson);
   try {
     return inTransaction(db, () => {
@@ -433,6 +447,8 @@ export function createClass(db, yearId, { name, students = [] } = {}) {
         upsertStudent(db, person);
         enter.run(classId, person.username, joinedAt);
       }
+      // The teachers the admin confirmed, each checked against the directory (`class-teachers`).
+      for (const teacher of teachers) enterTeacher(db, classId, teacher, directory);
       return getClass(db, classId);
     });
   } catch (error) {
@@ -459,7 +475,10 @@ export function renameClass(db, id, { name } = {}) {
   return klass.name === normalized ? klass : getClass(db, id);
 }
 
-/** Deletes a class that has no courses, with its roster; the students' records stay. */
+/**
+ * Deletes a class that has no courses, with its roster and - through the
+ * foreign key's cascade - its teacher entries; the students' records stay.
+ */
 export function deleteClass(db, id) {
   const klass = getClass(db, id);
   if (klass.courses.length > 0) {
@@ -469,7 +488,189 @@ export function deleteClass(db, id) {
     db.prepare("DELETE FROM roster_entry WHERE class_id = ?").run(id);
     db.prepare("DELETE FROM class WHERE id = ?").run(id);
   });
+  publishAccessChange({ classId: id, username: null });
   return { deleted: id, yearId: klass.year.id };
+}
+
+// ------------------------------------------------------ the class's teachers
+
+/**
+ * Who may look at a class changed: `{ classId, username }` when a teacher was
+ * removed from it, `{ classId, username: null }` when the class was deleted
+ * (class-bound-teachers D5). The live streams listen and drop what the
+ * change closes. Internal to the process; nothing of it reaches a client.
+ */
+const accessChanges = new EventEmitter();
+accessChanges.setMaxListeners(0);
+
+/** Calls `listener` with every access change; answers the function that stops it. */
+export function onClassAccessChange(listener) {
+  accessChanges.on("change", listener);
+  return () => accessChanges.off("change", listener);
+}
+
+function publishAccessChange(change) {
+  accessChanges.emit("change", change);
+}
+
+/** A teacher's username as the list stores it: trimmed and lowercased. */
+function teacherKey(username) {
+  const key = typeof username === "string" ? username.trim().toLowerCase() : "";
+  if (!/^[^\s/]{1,128}$/.test(key)) throw new InvalidInputError("exam.errors.classes.teacherUsername");
+  return key;
+}
+
+/**
+ * The teachers entered in a class (`class-teachers`), by name where the
+ * directory (`people`, null while it holds nothing) knows them, then by
+ * username.
+ */
+export function listClassTeachers(db, classId, people = null) {
+  if (!hasClassTeachers(db)) return [];
+  return db
+    .prepare("SELECT username FROM class_teacher WHERE class_id = ? ORDER BY username")
+    .all(classId)
+    .map(({ username }) => {
+      const person = findPerson(people, username);
+      return { username, givenName: person?.firstName ?? null, familyName: person?.lastName ?? null };
+    })
+    .sort(
+      (a, b) =>
+        (a.familyName ?? a.username).localeCompare(b.familyName ?? b.username, "de", { sensitivity: "base" }) ||
+        (a.givenName ?? "").localeCompare(b.givenName ?? "", "de", { sensitivity: "base" }) ||
+        a.username.localeCompare(b.username)
+    );
+}
+
+/**
+ * Enters the directory teacher `username` in a class. Only a person the
+ * directory (`people`) holds as a teacher is entered; anybody else - a
+ * student, a username nobody has - is refused, and so is any entry while the
+ * directory holds nothing to decide by. Allowed in a closed year: the list is
+ * no record of the year (design D1). Entering someone entered already
+ * changes nothing.
+ */
+export function enterTeacher(db, classId, username, people) {
+  getClass(db, classId);
+  const key = teacherKey(username);
+  if (!people) throw new ConflictError("exam.errors.classes.directoryNotReady");
+  const person = findPerson(people, key);
+  if (!person || !isTeacher(person)) throw new InvalidInputError("exam.errors.classes.notATeacher", { username: key });
+  db.prepare("INSERT OR IGNORE INTO class_teacher (class_id, username) VALUES (?, ?)").run(classId, key);
+  return listClassTeachers(db, classId, people);
+}
+
+/** Removes a teacher from a class; their open live views of it are closed (design D5). */
+export function removeTeacher(db, classId, username, people = null) {
+  getClass(db, classId);
+  const key = teacherKey(username);
+  const { changes } = db.prepare("DELETE FROM class_teacher WHERE class_id = ? AND username = ?").run(classId, key);
+  if (changes === 0) throw new NotFoundError("exam.errors.classes.notEntered", { username: key });
+  publishAccessChange({ classId, username: key });
+  return listClassTeachers(db, classId, people);
+}
+
+/** Whether the schema has the teachers' list (schema 26); the checks of earlier migrations read through here. */
+function hasClassTeachers(db) {
+  return db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'class_teacher'").get() !== undefined;
+}
+
+/** How many teachers are entered in each class of `classIds`, as a map; 0 for none. */
+function teacherCounts(db, classIds) {
+  const counts = new Map(classIds.map((id) => [id, 0]));
+  if (classIds.length === 0) return counts;
+  const rows = db
+    .prepare(`SELECT class_id, COUNT(*) AS n FROM class_teacher WHERE class_id IN (${classIds.map(() => "?").join(", ")}) GROUP BY class_id`)
+    .all(...classIds);
+  for (const row of rows) counts.set(row.class_id, row.n);
+  return counts;
+}
+
+/**
+ * The directory's teachers, by name, for the admin to pick from: everyone the
+ * directory (`people`) holds as a teacher. Empty while it holds nothing.
+ */
+export function directoryTeachers(people) {
+  if (!people) return [];
+  return people
+    .filter(isTeacher)
+    .map((person) => ({ username: person.username, givenName: person.firstName ?? "", familyName: person.lastName ?? "" }))
+    .sort(
+      (a, b) =>
+        a.familyName.localeCompare(b.familyName, "de", { sensitivity: "base" }) ||
+        a.givenName.localeCompare(b.givenName, "de", { sensitivity: "base" }) ||
+        a.username.localeCompare(b.username)
+    );
+}
+
+// ------------------------------------------------------------- the scope
+
+/**
+ * Whether a session with `scope` (`classScope` in `gate.js`) sees the class
+ * `classId`. A scope that is not given sees every class: the module's own
+ * reads, not a request's.
+ */
+export function seesClass(scope, classId) {
+  if (!scope || scope.all) return true;
+  return classId !== null && classId !== undefined && scope.classIds.has(classId);
+}
+
+/**
+ * The one SQL filter every list of a request goes through (design D2):
+ * `{ sql, params }` restricting `column`, a class id, to the classes `scope`
+ * sees - nothing for a scope of every class, and no row at all for a scope
+ * of none. Used as `WHERE ... ${filter.sql}` with `...filter.params`.
+ */
+export function scopeSql(scope, column) {
+  if (!scope || scope.all) return { sql: "", params: [] };
+  const ids = [...scope.classIds];
+  if (ids.length === 0) return { sql: " AND 0", params: [] };
+  return { sql: ` AND ${column} IN (${ids.map(() => "?").join(", ")})`, params: ids };
+}
+
+/**
+ * What each kind of record a route names resolves its class by, along the
+ * chain attempt → sitting → test → course → class, and the refusal the
+ * loader of that kind answers a missing id with - an invisible record is
+ * answered with the same (design D3).
+ */
+const recordKinds = {
+  class: { sql: "SELECT id AS class_id FROM class WHERE id = ?", missing: (id) => new NotFoundError("exam.errors.classes.noClass", { id }) },
+  course: { sql: "SELECT class_id FROM course WHERE id = ?", missing: (id) => new NotFoundError("exam.errors.classes.noCourse", { id }) },
+  assessment: {
+    sql: "SELECT k.class_id FROM assessment a JOIN course k ON k.id = a.course_id WHERE a.id = ?",
+    missing: (id) => new NotFoundError("exam.errors.gradebook.noColumn", { id }),
+  },
+  test: { sql: "SELECT k.class_id FROM test t JOIN course k ON k.id = t.course_id WHERE t.id = ?", missing: () => new NotFoundError("exam.errors.tests.noTest") },
+  sitting: {
+    sql: "SELECT k.class_id FROM sitting s JOIN test t ON t.id = s.test_id JOIN course k ON k.id = t.course_id WHERE s.id = ?",
+    missing: () => new NotFoundError("exam.errors.tests.noSitting"),
+  },
+  attempt: {
+    sql: "SELECT k.class_id FROM attempt a JOIN test t ON t.id = a.test_id JOIN course k ON k.id = t.course_id WHERE a.id = ?",
+    missing: () => new NotFoundError("exam.errors.attempts.noAttempt"),
+  },
+};
+
+/** The class a record of `kind` with the id `id` belongs to, or null when there is no such record. */
+export function classOfRecord(db, kind, id) {
+  const entry = recordKinds[kind];
+  if (!entry) throw new Error(`Unknown record kind ${kind}`);
+  return db.prepare(entry.sql).get(id)?.class_id ?? null;
+}
+
+/**
+ * Refuses a record of `kind` the scope does not see exactly as its loader
+ * refuses one that does not exist: the same `NotFoundError`, so a page is a
+ * path with nothing behind it and an API call a 404 that cannot be told from
+ * a missing id (design D2, D3). A record that does not exist passes, and its
+ * loader refuses it as before. Answers `id`.
+ */
+export function visibleRecord(db, scope, kind, id) {
+  if (!scope || scope.all) return id;
+  const classId = classOfRecord(db, kind, id);
+  if (classId !== null && !seesClass(scope, classId)) throw recordKinds[kind].missing(id);
+  return id;
 }
 
 /**
@@ -751,8 +952,11 @@ export function successorName(name) {
  * and whether it exists in `yearId` already; last year's roster - those who
  * did not leave - and the directory's current members of the successor
  * (`people`, null while the directory holds nothing), each person flagged
- * whether they were on last year's roster; and the class's courses to copy.
- * A known teacher is never offered. Reading a closed year is allowed.
+ * whether they were on last year's roster; the class's courses to copy; and
+ * its teachers (class-bound-teachers, task 3.3): last year's, flagged
+ * `lastYear` to be offered ticked, then the directory's other teachers. A
+ * known teacher is never offered for the roster. Reading a closed year is
+ * allowed.
  */
 export function nextYearProposal(db, yearId, people) {
   const year = getYear(db, yearId);
@@ -778,17 +982,24 @@ export function nextYearProposal(db, yearId, people) {
         ? directory.candidates.filter((person) => !onLastRoster.has(person.username)).map((person) => ({ ...person, lastYear: false }))
         : [];
       const courses = listCourses(db, row.id).map((course) => ({ id: course.id, subject: course.subject, language: course.language }));
-      return { ...proposal, people: [...lastRoster, ...newcomers], courses };
+      const lastTeachers = listClassTeachers(db, row.id, people).map((teacher) => ({ ...teacher, lastYear: true }));
+      const enteredLastYear = new Set(lastTeachers.map((teacher) => teacher.username));
+      const otherTeachers = directoryTeachers(people)
+        .filter((teacher) => !enteredLastYear.has(teacher.username))
+        .map((teacher) => ({ ...teacher, lastYear: false }));
+      return { ...proposal, people: [...lastRoster, ...newcomers], courses, teachers: [...lastTeachers, ...otherTeachers] };
     });
   return { year, previous, classes };
 }
 
 /**
  * Creates the successor of last year's class `from` in the year `yearId`, with
- * the people the teacher ticked (`students`, as `createClass` takes them) and
- * copies of the courses `courseIds` of `from`, all in one transaction.
+ * the people the admin ticked (`students`, as `createClass` takes them), the
+ * teachers confirmed for it (`teachers`, usernames checked against
+ * `directory`) and copies of the courses `courseIds` of `from`, all in one
+ * transaction. Last year's class keeps its own teachers.
  */
-export function createNextClass(db, yearId, { from, students = [], courseIds = [] } = {}) {
+export function createNextClass(db, yearId, { from, students = [], teachers = [], directory = null, courseIds = [] } = {}) {
   const year = getYear(db, yearId);
   const source = Number.isInteger(from) ? db.prepare("SELECT * FROM class WHERE id = ?").get(from) : undefined;
   if (!source) throw new NotFoundError("exam.errors.classes.noClass", { id: from });
@@ -802,7 +1013,7 @@ export function createNextClass(db, yearId, { from, students = [], courseIds = [
   const own = new Set(listCourses(db, source.id).map((course) => course.id));
   if (!courseIds.every((id) => own.has(id))) throw new InvalidInputError("exam.errors.years.courseList");
   return inTransaction(db, () => {
-    const klass = createClass(db, yearId, { name, students });
+    const klass = createClass(db, yearId, { name, students, teachers, directory });
     for (const courseId of courseIds) copyCourse(db, courseId, klass.id);
     return getClass(db, klass.id);
   });

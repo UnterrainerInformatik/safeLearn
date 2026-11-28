@@ -5,12 +5,17 @@
  * deletions - for a session that holds the role **and** acts as an admin.
  * Every refusal is a 403 before a byte of a photo is read or written; the
  * page is not there for anyone else at all (`gate.js`).
+ *
+ * The photo route asks the role **and** the request's class scope
+ * (class-bound-teachers D4): a session that is no admin receives a photo only
+ * of a student on the roster of a class it sees - a roster entry marked as
+ * left counts - and a 404 for anybody else, as for a student without a photo.
  */
 
 import express from "express";
 
-import { InvalidInputError } from "./classes.js";
-import { identityOf, photoAdminPage, requirePhotoAdmin, requireStudentImages } from "./gate.js";
+import { InvalidInputError, scopeSql } from "./classes.js";
+import { classScope, identityOf, photoAdminPage, requirePhotoAdmin, requireStudentImages } from "./gate.js";
 import { teacherShell } from "./bar.js";
 import { deletePhotos, matchPhotos, photoLimitBytes, photoSummary, photoUsername, readPhoto, storePhoto } from "./photos.js";
 import { isKnownTeacher, findPerson } from "./roster-source.js";
@@ -61,7 +66,12 @@ export function registerPhotoRoutes(router, { db, handle, startPage, directory =
     "/photos/:username",
     requireStudentImages,
     handle(async (req, res) => {
-      const photo = readPhoto(db, req.params.username);
+      const scope = await classScope(db, req);
+      const username = photoUsername(req.params.username);
+      const filter = scopeSql(scope, "r.class_id");
+      const onVisibleRoster =
+        scope.all || (username !== null && db.prepare(`SELECT 1 FROM roster_entry r WHERE r.username = ?${filter.sql} LIMIT 1`).get(username, ...filter.params) !== undefined);
+      const photo = onVisibleRoster ? readPhoto(db, req.params.username) : null;
       if (!photo) {
         res.status(404).set("Cache-Control", "private, no-store").end();
         return;

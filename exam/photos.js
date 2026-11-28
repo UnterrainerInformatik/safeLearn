@@ -9,6 +9,7 @@
  */
 
 import { ConflictError, InvalidInputError, inTransaction, now } from "./classes.js";
+import { isTeacher } from "./roster-source.js";
 
 /** The largest photo stored, in bytes, and the longest side, in pixels. */
 export const photoLimitBytes = 256 * 1024;
@@ -234,10 +235,6 @@ export function normalizedName(value) {
 /** Several given names as a set, so their order does not matter. */
 function givenNameKey(value) {
   return [...new Set(normalizedName(value).split(" ").filter(Boolean))].sort().join(" ");
-}
-
-function isTeacher(person) {
-  return Boolean(person.roles.teacher || person.roles.admin);
 }
 
 function shown(person, className) {

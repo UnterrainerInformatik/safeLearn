@@ -8,6 +8,11 @@
  * one, deleting an attempt, rescheduling a sitting that has some - is an
  * admin's alone; only discarding a whole test, so it can be written again
  * from the start, is a teacher's too.
+ *
+ * Every route naming a course, a test, a sitting or an attempt asks the
+ * request's scope first (`class-teachers`): one of a class the teacher is not
+ * entered in is answered as one that does not exist, and the list of tests
+ * holds only the classes the teacher sees.
  */
 
 import {
@@ -35,8 +40,8 @@ import { correctShares, deleteAttempt, previewView, releaseAttempt, scoreAttempt
 import { notify, notifySittings } from "./live.js";
 import { embedPlaceholder, wrapInPage, wrapInReveal } from "../obsidian.js";
 import { i18nOf } from "../i18n/server.js";
-import { NotFoundError } from "./classes.js";
-import { actsAsAdmin, requireAdmin, requireTeacher, teacherPage } from "./gate.js";
+import { NotFoundError, visibleRecord } from "./classes.js";
+import { actsAsAdmin, classScope, requireAdmin, requireTeacher, teacherPage } from "./gate.js";
 import { contextFromQuery, teacherShell } from "./bar.js";
 
 /** A record id from the path; anything but a positive integer names nothing. */
@@ -106,49 +111,51 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
         res.json(await fn(req));
       })
     );
+  // The id of a record of `kind` from the path, refused as missing outside the request's scope.
+  const seen = async (req, kind, value) => visibleRecord(db, await classScope(db, req), kind, idParam(value));
 
-  api("get", "/tests", (req) => listTests(db, contextFromQuery(req.query)));
-  api("post", "/courses/:id/tests", (req) => createTest(db, idParam(req.params.id), req.body ?? {}));
+  api("get", "/tests", async (req) => listTests(db, contextFromQuery(req.query), await classScope(db, req)));
+  api("post", "/courses/:id/tests", async (req) => createTest(db, await seen(req, "course", req.params.id), req.body ?? {}));
   // An offline test (`offline-test`): no questions, a duration, a gradebook category and its handouts.
-  api("post", "/courses/:id/offline-tests", (req) => createOfflineTest(db, idParam(req.params.id), req.body ?? {}));
-  api("get", "/tests/:id", (req) => getTest(db, idParam(req.params.id)));
-  api("put", "/tests/:id", (req) => updateTest(db, idParam(req.params.id), req.body ?? {}));
+  api("post", "/courses/:id/offline-tests", async (req) => createOfflineTest(db, await seen(req, "course", req.params.id), req.body ?? {}));
+  api("get", "/tests/:id", async (req) => getTest(db, await seen(req, "test", req.params.id)));
+  api("put", "/tests/:id", async (req) => updateTest(db, await seen(req, "test", req.params.id), req.body ?? {}));
   // The values of an offline test's handout variables (`exam-handout`), in every state of the test.
-  api("put", "/tests/:id/variables", (req) => setTestVariables(db, idParam(req.params.id), req.body?.values));
+  api("put", "/tests/:id/variables", async (req) => setTestVariables(db, await seen(req, "test", req.params.id), req.body?.values));
   // Each write of a sitting tells the students' streams of open tests.
   const announced = (answer) => {
     notifySittings();
     return answer;
   };
-  api("delete", "/tests/:id", async (req) => announced(deleteTest(db, idParam(req.params.id), { admin: await actsAsAdmin(req) })));
-  api("post", "/tests/:id/sittings", (req) => announced(createSitting(db, idParam(req.params.id), req.body ?? {})));
-  api("put", "/sittings/:id", (req) => announced(updateSitting(db, idParam(req.params.id), req.body ?? {})));
-  api("delete", "/sittings/:id", (req) => announced(deleteSitting(db, idParam(req.params.id))));
+  api("delete", "/tests/:id", async (req) => announced(deleteTest(db, await seen(req, "test", req.params.id), { admin: await actsAsAdmin(req) })));
+  api("post", "/tests/:id/sittings", async (req) => announced(createSitting(db, await seen(req, "test", req.params.id), req.body ?? {})));
+  api("put", "/sittings/:id", async (req) => announced(updateSitting(db, await seen(req, "sitting", req.params.id), req.body ?? {})));
+  api("delete", "/sittings/:id", async (req) => announced(deleteSitting(db, await seen(req, "sitting", req.params.id))));
   // Ending and extending also reach the sitting's live view.
   const announcedLive = (sitting) => {
     notify(sitting.id, "window", null);
     return announced(sitting);
   };
-  api("post", "/sittings/:id/end", (req) => announcedLive(endSitting(db, idParam(req.params.id))));
+  api("post", "/sittings/:id/end", async (req) => announcedLive(endSitting(db, await seen(req, "sitting", req.params.id))));
   // Starting an offline sitting opens its window for everyone on it (exam-offline-sittings design D2).
-  api("post", "/sittings/:id/start", (req) => announcedLive(startSitting(db, idParam(req.params.id))));
+  api("post", "/sittings/:id/start", async (req) => announcedLive(startSitting(db, await seen(req, "sitting", req.params.id))));
   // A row of an offline sitting's attendance table. It reaches the sitting's
   // pages and the student's open tests at once (design D3).
-  api("put", "/sittings/:id/participants/:username", (req) => {
-    const sittingId = idParam(req.params.id);
+  api("put", "/sittings/:id/participants/:username", async (req) => {
+    const sittingId = await seen(req, "sitting", req.params.id);
     const participant = setAttendance(db, sittingId, req.params.username, req.body ?? {});
     notify(sittingId, "attendance", participant.username);
     return participant;
   });
   // An offline sitting's single extension; an online one extends its start
   // window or its running attempts' writing time (sitting-start-window D4).
-  api("post", "/sittings/:id/extend", (req) => announcedLive(extendSitting(db, idParam(req.params.id), req.body ?? {})));
-  api("post", "/sittings/:id/extend-start", (req) => announcedLive(extendStartWindow(db, idParam(req.params.id), req.body ?? {})));
-  api("post", "/sittings/:id/extend-writing", (req) => announcedLive(extendWritingTime(db, idParam(req.params.id), req.body ?? {})));
+  api("post", "/sittings/:id/extend", async (req) => announcedLive(extendSitting(db, await seen(req, "sitting", req.params.id), req.body ?? {})));
+  api("post", "/sittings/:id/extend-start", async (req) => announcedLive(extendStartWindow(db, await seen(req, "sitting", req.params.id), req.body ?? {})));
+  api("post", "/sittings/:id/extend-writing", async (req) => announcedLive(extendWritingTime(db, await seen(req, "sitting", req.params.id), req.body ?? {})));
   // Rescheduling deletes the sitting's attempts - an admin's alone once there
   // are any; an open live view drops their rows.
   api("post", "/sittings/:id/reschedule", async (req) => {
-    const { deleted, ...sitting } = rescheduleSitting(db, idParam(req.params.id), req.body ?? {}, { admin: await actsAsAdmin(req) });
+    const { deleted, ...sitting } = rescheduleSitting(db, await seen(req, "sitting", req.params.id), req.body ?? {}, { admin: await actsAsAdmin(req) });
     for (const username of deleted) notify(sitting.id, "deleted", username);
     return announcedLive(sitting);
   });
@@ -156,13 +163,13 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
   // D4), online or offline, open or over, is a teacher's: every attempt, entered
   // result and sitting goes, the students' pages and the former sittings' live
   // views are told. `attempts` confirms the number of results that go.
-  api("post", "/tests/:id/discard", (req) => {
-    const { discardedSittingId, discardedSittingIds, ...test } = discardTest(db, idParam(req.params.id), req.body ?? {});
+  api("post", "/tests/:id/discard", async (req) => {
+    const { discardedSittingId, discardedSittingIds, ...test } = discardTest(db, await seen(req, "test", req.params.id), req.body ?? {});
     for (const sittingId of discardedSittingIds) notify(sittingId, "discarded", null, { testId: test.id });
     return announced(test);
   });
-  api("post", "/attempts/:id/release", (req) => releaseAttempt(db, idParam(req.params.id)));
-  api("get", "/tests/:id/preview", (req) => previewView(db, idParam(req.params.id)));
+  api("post", "/attempts/:id/release", async (req) => releaseAttempt(db, await seen(req, "attempt", req.params.id)));
+  api("get", "/tests/:id/preview", async (req) => previewView(db, await seen(req, "test", req.params.id)));
   const adminApi = (method, path, fn) =>
     router[method](
       `/api${path}`,
@@ -171,10 +178,10 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
         res.json(await fn(req));
       })
     );
-  adminApi("delete", "/tests/:id/questions/:testQuestion", (req) =>
-    announced(removeWrittenQuestion(db, idParam(req.params.id), idParam(req.params.testQuestion), scoreAttempt))
+  adminApi("delete", "/tests/:id/questions/:testQuestion", async (req) =>
+    announced(removeWrittenQuestion(db, await seen(req, "test", req.params.id), idParam(req.params.testQuestion), scoreAttempt))
   );
-  adminApi("delete", "/attempts/:id", (req) => announced(deleteAttempt(db, idParam(req.params.id))));
+  adminApi("delete", "/attempts/:id", async (req) => announced(deleteAttempt(db, await seen(req, "attempt", req.params.id))));
 
   // The list the bar's "Online tests" button opens: the chosen course's tests,
   // the chosen class's when no course is chosen, or the school year's.
@@ -195,7 +202,7 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
     "/tests/:id",
     teacherPage,
     handle(async (req, res) => {
-      const test = getTest(db, idParam(req.params.id));
+      const test = getTest(db, await seen(req, "test", req.params.id));
       res.send(
         await teacherShell({
           db,
@@ -217,7 +224,7 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
     "/tests/:id/solution",
     teacherPage,
     handle(async (req, res) => {
-      const test = getTest(db, idParam(req.params.id));
+      const test = getTest(db, await seen(req, "test", req.params.id));
       const slides = solutionSlides(test, correctShares(db, test.id));
       const { t } = await i18nOf(req);
       res.send(await wrapInReveal(slides, req, { title: t("exam.pages.solution", { name: test.name }) }));
@@ -232,7 +239,7 @@ export function registerTestRoutes(router, { db, handle, startPage }) {
     "/tests/:id/preview",
     teacherPage,
     handle(async (req, res) => {
-      const test = getTest(db, idParam(req.params.id));
+      const test = getTest(db, await seen(req, "test", req.params.id));
       const { t } = await i18nOf(req);
       const title = t("exam.pages.tryTest", { name: test.name });
       const body = `

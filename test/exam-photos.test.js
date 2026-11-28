@@ -6,7 +6,7 @@
  * accents and the order of given names, two people with the same name, an
  * unknown person, a teacher), the summary per class, the photos without a
  * person and the three deletions with their confirmed number; the photo route
- * for the role `student-images` alone - a teacher, an admin and a student
+ * for the role `student-images` and a class the session sees - a teacher, an admin and a student
  * without it refused, a teacher in student view with it served - with private
  * caching, a 404 without a photo; the import routes for the role and an
  * admin together; and the version per row in the gradebook sheet, the
@@ -31,6 +31,7 @@ import { checkPhoto, deletePhotos, matchPhotos, photoSummary, readPhoto, storePh
 import { registerPhotoRoutes } from "../exam/routes-photos.js";
 import { init } from "../exam/index.js";
 import { createQuestion } from "../exam/pool-edit.js";
+import { enterTeacher } from "./exam-fixtures.js";
 
 const temporaryDirs = [];
 const openDatabases = [];
@@ -226,6 +227,12 @@ describe("the photo routes", () => {
       res.status(status).json({ error: error.message });
     });
     storePhoto(db, "mmuster", jpeg(134, 200), "admin1");
+    // `someone` is entered in 5ahif, whose roster holds mmuster and abrunner, who has no photo;
+    // kkern is on the roster of 4bhif only, and `stranger` is entered in no class (class-bound-teachers D4).
+    const year = createYear(db, { name: "2026/27", startsOn: "2026-09-07", summerStartsOn: "2027-02-15", endsOn: "2027-07-02" });
+    const own = createClass(db, year.id, { name: "5ahif", students: [{ username: "mmuster" }, { username: "abrunner" }] });
+    createClass(db, year.id, { name: "4bhif", students: [{ username: "kkern" }] });
+    enterTeacher(db, own.id, "someone");
     const saved = global.fetch;
     global.fetch = preferencesFetch(saved);
     const app = await serve(router);
@@ -235,7 +242,7 @@ describe("the photo routes", () => {
         return { status: answer.status, headers: answer.headers, bytes: Buffer.from(await answer.arrayBuffer()) };
       };
       const granted = await ask("/photos/mmuster?v=1", "teacher,student-images");
-      assert.equal(granted.status, 200, "A teacher with the role requests a photo");
+      assert.equal(granted.status, 200, "A teacher with the role requests a photo of their own class");
       assert.ok(granted.headers.get("cache-control").includes("private"));
       assert.ok(granted.headers.get("cache-control").includes("immutable"));
       assert.equal(granted.headers.get("content-type"), "image/jpeg");
@@ -250,7 +257,14 @@ describe("the photo routes", () => {
         assert.ok(!refused.bytes.includes(jpeg(134, 200)), `${scenario}: no image data`);
       }
       assert.equal((await ask("/photos/mmuster", "student", {}, "mmuster")).status, 403, "their own photo included");
-      assert.equal((await ask("/photos/kkern", "teacher,student-images")).status, 404, "A student without a photo");
+      assert.equal((await ask("/photos/abrunner", "teacher,student-images")).status, 404, "A student of their own class without a photo");
+      const foreign = await ask("/photos/mmuster", "teacher,student-images", {}, "stranger");
+      assert.equal(foreign.status, 404, "A teacher with the role requests a photo of another class");
+      assert.ok(!foreign.bytes.includes(jpeg(134, 200)), "no image data for another class");
+      assert.equal((await ask("/photos/mmuster", "teacher,admin,student-images", {}, "stranger")).status, 200, "An admin with the role requests any photo, entered in no class");
+      assert.equal((await ask("/photos/mmuster", "teacher,admin", {}, "stranger")).status, 403, "An admin without the role is still refused");
+      db.prepare("UPDATE roster_entry SET left_at = ? WHERE username = 'mmuster'").run("2026-11-28T08:00:00.000Z");
+      assert.equal((await ask("/photos/mmuster", "teacher,student-images")).status, 200, "a roster entry marked as left counts");
       assert.equal((await ask("/photos/mmuster", "teacher,student-images", { headers: { "X-View": "student" } })).status, 200, "a teacher in student view holding the role: the role alone decides");
       assert.equal((await ask("/photos/mmuster", "teacher", { headers: { "X-View": "student" } })).status, 403, "a teacher in student view without it");
       const admin = "teacher,admin,student-images";
@@ -273,6 +287,7 @@ describe("the photo routes", () => {
       const matched = JSON.parse((await match(admin)).bytes.toString());
       assert.deepEqual(matched.matched.map(({ person: found }) => found.username), ["kkern"]);
       assert.equal((await put("kkern", admin)).status, 200, "an admin with the role stores");
+      assert.equal((await ask("/photos/kkern", "teacher,admin,student-images")).status, 200, "the stored photo, to an admin");
       assert.equal(readPhoto(db, "kkern").importedBy, "someone");
       assert.equal((await put("kkern", admin, Buffer.from("not an image"))).status, 400, "A file that is not an image is refused");
       assert.equal((await put("tlehrer", admin)).status, 400, "no photo for a teacher");
@@ -281,7 +296,7 @@ describe("the photo routes", () => {
       assert.deepEqual([summary.directory, summary.total], ["ready", 2]);
       const deleted = await ask("/api/photos/delete", admin, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scope: "class", className: "4bhif", expected: 1 }) });
       assert.equal(deleted.status, 200);
-      assert.equal((await ask("/photos/kkern", "teacher,student-images")).status, 404, "a deleted photo is no longer served");
+      assert.equal((await ask("/photos/kkern", "teacher,student-images")).status, 404, "kkern is of another class than someone's");
     } finally {
       await app.close();
       global.fetch = saved;
@@ -301,6 +316,7 @@ describe("the lists carry a version per row", () => {
     openDatabases.push(db);
     const year = createYear(db, { name: "2026/27", startsOn: "2026-09-07", summerStartsOn: "2027-02-15", endsOn: "2027-07-02" });
     const klass = createClass(db, year.id, { name: "5ahif", students: [{ username: "mmuster" }, { username: "kkern" }] });
+    enterTeacher(db, klass.id);
     const course = createCourse(db, klass.id, { subject: "POS", language: "de" });
     const column = createColumn(db, course.id, { kind: "test", name: "SA1", date: "2026-11-03", maxPoints: 24 });
     setResult(db, column.id, "mmuster", { points: 17 });

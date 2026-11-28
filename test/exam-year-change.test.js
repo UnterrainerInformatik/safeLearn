@@ -185,8 +185,15 @@ function tablesOfAYear(db) {
     reaches.set(table, found);
     return found;
   };
-  return tables.filter((table) => table !== "school_year" && leadsToYear(table)).sort();
+  return tables.filter((table) => table !== "school_year" && !accessControlTables.includes(table) && leadsToYear(table)).sort();
 }
+
+/**
+ * Tables with a path to `school_year` that decide who may look at a year's
+ * records rather than holding one, and so stay writable in a closed year
+ * (class-bound-teachers design D1).
+ */
+const accessControlTables = ["class_teacher"];
 
 describe("the migration to the year change", () => {
   test("a database at schema 9 with a gradebook, a pool and tests migrates with every proposal unchanged", () => {

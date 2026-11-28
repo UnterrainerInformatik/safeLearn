@@ -574,16 +574,22 @@ class PoolView extends ExamElement {
         )
       )
     );
-    const usage =
+    // Tests of classes the teacher does not see are counted, never named (class-bound-teachers D9).
+    const elsewhere = question.usesElsewhere ?? 0;
+    const usage = [
       question.usage.length === 0
-        ? h("p", { class: "sl-exam-quiet" }, t("exam.pool.notUsed"))
+        ? elsewhere === 0
+          ? h("p", { class: "sl-exam-quiet" }, t("exam.pool.notUsed"))
+          : null
         : h(
             "ul",
             { class: "sl-exam-pool-usage" },
             question.usage.map((use) =>
               h("li", {}, `${displayClass(use.className)} ${use.subject} (${use.yearName}), ${displayDate(use.usedOn)}`)
             )
-          );
+          ),
+      elsewhere > 0 ? h("p", { class: "sl-exam-quiet sl-exam-pool-usage-elsewhere" }, t("exam.pool.usedElsewhere", { count: elsewhere })) : null,
+    ];
     this.preview.replaceChildren(
       h(
         "article",
@@ -619,7 +625,7 @@ class PoolView extends ExamElement {
               )
             ),
         h("h3", {}, t("exam.pool.usedTimes", { count: question.uses })),
-        usage
+        ...usage
       )
     );
   }

@@ -214,7 +214,15 @@
       "yearDates": "{start} – {end}, Sommersemester ab {summer}",
       "yearGrade": "Jahresnote",
       "yearHeading": "Schuljahr {name}",
-      "yearSentence": "Schuljahr {name}."
+      "yearSentence": "Schuljahr {name}.",
+      "teachers": "Lehrkräfte",
+      "noTeachers": "Keine Lehrkraft",
+      "teacherCount_one": "{count} Lehrkraft",
+      "teacherCount_other": "{count} Lehrkräfte",
+      "noTeachersEntered": "In dieser Klasse ist keine Lehrkraft eingetragen.",
+      "removeTeacherArmed": "Noch einmal klicken, um {name} aus dieser Klasse zu entfernen",
+      "teacherPickerLabel": "Einzutragende Lehrkraft",
+      "enterTeacher": "Lehrkraft eintragen"
     },
     "common": {
       "cancel": "Abbrechen",
@@ -277,7 +285,9 @@
         "multichoiceset": "Mehrere richtige Antworten"
       },
       "typeLabel": "Art",
-      "writtenKeepVersion": "Bereits geschriebene Tests behalten ihre Fassung."
+      "writtenKeepVersion": "Bereits geschriebene Tests behalten ihre Fassung.",
+      "otherTests_one": "{count} Test einer Klasse, die du nicht siehst",
+      "otherTests_other": "{count} Tests von Klassen, die du nicht siehst"
     },
     "errors": {
       "attempts": {
@@ -331,7 +341,12 @@
         "yearIsCurrent": "{name} ist das aktuelle Schuljahr und kann nicht gelöscht werden.",
         "yearName": "Ein Schuljahr wird wie „2026/27“ benannt, nach den beiden Kalenderjahren, die es umfasst.",
         "yearOrder": "Das Schuljahr muss vor seinem Sommersemester beginnen und dieses vor dem Ende des Schuljahres.",
-        "yearStartFormat": "Der Beginn muss ein Datum der Form JJJJ-MM-TT sein."
+        "yearStartFormat": "Der Beginn muss ein Datum der Form JJJJ-MM-TT sein.",
+        "teacherUsername": "Eine Lehrkraft wird mit ihrem Benutzernamen im Verzeichnis angegeben.",
+        "teacherList": "Die Lehrkräfte müssen eine Liste von Benutzernamen sein.",
+        "directoryNotReady": "Das Verzeichnis ist noch nicht verfügbar, daher kann keine Lehrkraft eingetragen werden. Bitte gleich noch einmal versuchen.",
+        "notATeacher": "{username} ist laut Verzeichnis keine Lehrkraft.",
+        "notEntered": "{username} ist in dieser Klasse nicht eingetragen."
       },
       "failed": "Das Prüfungsmodul konnte diese Anfrage nicht beantworten.",
       "gradebook": {
@@ -960,7 +975,9 @@
       "typeFilter": "Typ",
       "used": "Verwendet",
       "usedTimes": "{count}× verwendet",
-      "wrong": "falsch"
+      "wrong": "falsch",
+      "usedElsewhere_one": "Außerdem in {count} Test einer Klasse verwendet, die du nicht siehst.",
+      "usedElsewhere_other": "Außerdem in {count} Tests von Klassen verwendet, die du nicht siehst."
     },
     "records": {
       "cancel": "Abbrechen",
@@ -1098,7 +1115,11 @@
       "nextExists": "{from} →",
       "nextHeading_one": "Aus {previous}: {count} Klasse anzulegen",
       "nextHeading_other": "Aus {previous}: {count} Klassen anzulegen",
-      "nextNone": "{from}: Auf diese Klasse folgt keine."
+      "nextNone": "{from}: Auf diese Klasse folgt keine.",
+      "lastYearTeachers": "Lehrkräfte von {from} im letzten Jahr ({count})",
+      "otherTeachers": "Weitere Lehrkräfte laut Verzeichnis ({count})",
+      "showOtherTeachers": "Anzeigen",
+      "noOtherTeachers": "Sonst niemand."
     },
     "retention": {
       "attempts_one": "{count} Online-Test-Versuch",

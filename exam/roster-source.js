@@ -15,8 +15,13 @@
 /** A role value that names a class: a year digit and letters, like `5ahif`. */
 const classValue = /^[1-9][a-z]{1,8}$/;
 
-function isTeacher(person) {
-  return Boolean(person.roles.teacher || person.roles.admin);
+/**
+ * Whether a directory person is a teacher: they hold the role `teacher` or
+ * `admin`. The one place that decides it, for the roster's checklist, the
+ * photo import and the teachers entered in a class (class-bound-teachers D6).
+ */
+export function isTeacher(person) {
+  return Boolean(person?.roles?.teacher || person?.roles?.admin);
 }
 
 function byName(a, b) {

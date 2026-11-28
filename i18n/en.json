@@ -214,7 +214,15 @@
       "yearDates": "{start} – {end}, summer semester from {summer}",
       "yearGrade": "Year grade",
       "yearHeading": "School year {name}",
-      "yearSentence": "School year {name}."
+      "yearSentence": "School year {name}.",
+      "teachers": "Teachers",
+      "noTeachers": "No teacher",
+      "teacherCount_one": "{count} teacher",
+      "teacherCount_other": "{count} teachers",
+      "noTeachersEntered": "No teacher is entered in this class.",
+      "removeTeacherArmed": "Click again to remove {name} from this class",
+      "teacherPickerLabel": "Teacher to enter",
+      "enterTeacher": "Enter teacher"
     },
     "common": {
       "cancel": "Cancel",
@@ -277,7 +285,9 @@
         "multichoiceset": "Several correct answers"
       },
       "typeLabel": "Type",
-      "writtenKeepVersion": "Tests already written keep their version."
+      "writtenKeepVersion": "Tests already written keep their version.",
+      "otherTests_one": "{count} test of a class you do not see",
+      "otherTests_other": "{count} tests of classes you do not see"
     },
     "errors": {
       "attempts": {
@@ -331,7 +341,12 @@
         "yearIsCurrent": "{name} is the current school year and cannot be deleted.",
         "yearName": "A school year is named like \"2026/27\", by the two calendar years it spans.",
         "yearOrder": "The school year has to start before its summer semester, and that before its end.",
-        "yearStartFormat": "The start has to be a date of the form YYYY-MM-DD."
+        "yearStartFormat": "The start has to be a date of the form YYYY-MM-DD.",
+        "teacherUsername": "A teacher is named by their directory username.",
+        "teacherList": "The teachers have to be a list of usernames.",
+        "directoryNotReady": "The directory is not available yet, so no teacher can be entered. Try again in a moment.",
+        "notATeacher": "{username} is no teacher in the directory.",
+        "notEntered": "{username} is not entered in this class."
       },
       "failed": "The exam module could not answer this request.",
       "gradebook": {
@@ -960,7 +975,9 @@
       "typeFilter": "Type",
       "used": "Used",
       "usedTimes": "Used {count}×",
-      "wrong": "wrong"
+      "wrong": "wrong",
+      "usedElsewhere_one": "Also used in {count} test of a class you do not see.",
+      "usedElsewhere_other": "Also used in {count} tests of classes you do not see."
     },
     "records": {
       "cancel": "Cancel",
@@ -1098,7 +1115,11 @@
       "nextExists": "{from} →",
       "nextHeading_one": "From {previous}: {count} class to create",
       "nextHeading_other": "From {previous}: {count} classes to create",
-      "nextNone": "{from}: no class follows it."
+      "nextNone": "{from}: no class follows it.",
+      "lastYearTeachers": "Teachers of last year's {from} ({count})",
+      "otherTeachers": "Other teachers in the directory ({count})",
+      "showOtherTeachers": "Show",
+      "noOtherTeachers": "Nobody else."
     },
     "retention": {
       "attempts_one": "{count} online-test attempt",

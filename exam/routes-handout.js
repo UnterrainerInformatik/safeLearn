@@ -9,11 +9,13 @@
  * open, participant, present, group, resolving path - before the file is
  * read, and every refusal lands where a path with nothing behind it lands, so
  * it names neither the file nor the reason. The teacher's pages are behind
- * `teacherPage`, which a teacher in student view does not pass.
+ * `teacherPage`, which a teacher in student view does not pass, and a test of a
+ * class the teacher is not entered in is answered as one without a handout
+ * (`class-teachers`).
  */
 
-import { ConflictError, getCourse, NotFoundError } from "./classes.js";
-import { identityOf, requireTeacher, teacherPage } from "./gate.js";
+import { ConflictError, getCourse, NotFoundError, visibleRecord } from "./classes.js";
+import { classScope, identityOf, requireTeacher, teacherPage } from "./gate.js";
 import { corpusFiles, handoutResolves, hasSolution, servableHandout } from "./handout.js";
 import { printBlockers, variablesFor } from "./tests.js";
 import { embedPlaceholder, wrapAsDocument, wrapInPage } from "../obsidian.js";
@@ -40,6 +42,9 @@ function handoutOfTest(db, testId, group) {
 }
 
 export function registerHandoutRoutes(router, { db, handle, startPage, renderHandout }) {
+  // The id of a record of `kind` from the path, refused as missing outside the request's scope.
+  const seen = async (req, kind, value) => visibleRecord(db, await classScope(db, req), kind, idParam(value));
+
   /**
    * Renders a handout, a file that could not be read answered as not found:
    * it was removed between the check and the read.
@@ -78,7 +83,7 @@ export function registerHandoutRoutes(router, { db, handle, startPage, renderHan
     "/tests/:id/handouts/:group/preview",
     teacherPage,
     handle(async (req, res) => {
-      const { test, path: corpusPath } = teacherHandout(db, req.params.id, req.params.group);
+      const { test, path: corpusPath } = teacherHandout(db, String(await seen(req, "test", req.params.id)), req.params.group);
       const html = await rendered(corpusPath, req, { variantPrivate: false, optional: false, vars: variablesFor(db, test.id) });
       const { t } = await i18nOf(req);
       const body = `<div class="sl-exam-handout">${html}</div>`;
@@ -93,7 +98,7 @@ export function registerHandoutRoutes(router, { db, handle, startPage, renderHan
     "/tests/:id/handouts/:group/solution",
     teacherPage,
     handle(async (req, res) => {
-      const { test, path: corpusPath } = teacherHandout(db, req.params.id, req.params.group);
+      const { test, path: corpusPath } = teacherHandout(db, String(await seen(req, "test", req.params.id)), req.params.group);
       const html = await rendered(corpusPath, req, { variantPrivate: true, optional: true, vars: variablesFor(db, test.id) });
       const { t } = await i18nOf(req);
       const body = `<div class="sl-exam-handout sl-exam-handout-solution-page">${html}</div>`;
@@ -134,7 +139,7 @@ export function registerHandoutRoutes(router, { db, handle, startPage, renderHan
       `/tests/:id/handouts/:group/${suffix}`,
       teacherPage,
       handle(async (req, res) => {
-        const { test, path: corpusPath } = teacherHandout(db, req.params.id, req.params.group);
+        const { test, path: corpusPath } = teacherHandout(db, String(await seen(req, "test", req.params.id)), req.params.group);
         await printed(req, res, { test, corpusPath, group: req.params.group, sitting: undefined, solution });
       })
     );
@@ -143,7 +148,7 @@ export function registerHandoutRoutes(router, { db, handle, startPage, renderHan
       `/sittings/:id/handouts/:group/${suffix}`,
       teacherPage,
       handle(async (req, res) => {
-        const { sitting, test, path: corpusPath } = sittingHandout(req.params.id, req.params.group);
+        const { sitting, test, path: corpusPath } = sittingHandout(String(await seen(req, "sitting", req.params.id)), req.params.group);
         await printed(req, res, { test, corpusPath, group: req.params.group, sitting, solution });
       })
     );
@@ -155,7 +160,7 @@ export function registerHandoutRoutes(router, { db, handle, startPage, renderHan
     "/api/courses/:id/handout-files",
     requireTeacher,
     handle(async (req, res) => {
-      const course = getCourse(db, idParam(req.params.id));
+      const course = getCourse(db, await seen(req, "course", req.params.id));
       res.json({ files: corpusFiles(course.className) });
     })
   );

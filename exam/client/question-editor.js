@@ -155,7 +155,15 @@ class QuestionEditor extends ExamElement {
 
   /** The tests not yet begun that hold the stored question, as a reader names them. */
   pendingNames() {
-    return this.stored.pendingTests.map((test) => `${test.name} (${displayClass(test.className)} ${test.subject})`).join(", ");
+    // Tests of classes the teacher does not see are counted, never named (class-bound-teachers D9).
+    const named = this.stored.pendingTests.map((test) => `${test.name} (${displayClass(test.className)} ${test.subject})`);
+    const elsewhere = this.stored.pendingElsewhere ?? 0;
+    return [...named, ...(elsewhere > 0 ? [t("exam.editor.otherTests", { count: elsewhere })] : [])].join(", ");
+  }
+
+  /** How many tests not yet begun hold the stored question, those the teacher does not see included. */
+  pendingCount() {
+    return (this.stored?.pendingTests.length ?? 0) + (this.stored?.pendingElsewhere ?? 0);
   }
 
   /**
@@ -165,13 +173,13 @@ class QuestionEditor extends ExamElement {
    */
   drawReach() {
     const stored = this.stored;
-    const pending = stored?.pendingTests ?? [];
-    const begun = (stored?.usage.length ?? 0) > pending.length;
+    const pending = this.pendingCount();
+    const begun = (stored?.usage.length ?? 0) + (stored?.usesElsewhere ?? 0) > pending;
     this.reach.replaceChildren(
-      pending.length > 0 ? h("p", { "data-reach": "pending" }, t("exam.editor.pendingTests", { tests: this.pendingNames() })) : null,
+      pending > 0 ? h("p", { "data-reach": "pending" }, t("exam.editor.pendingTests", { tests: this.pendingNames() })) : null,
       begun ? h("p", { "data-reach": "written" }, t("exam.editor.writtenKeepVersion")) : null
     );
-    this.reach.hidden = pending.length === 0 && !begun;
+    this.reach.hidden = pending === 0 && !begun;
   }
 
   /** The delete button, its confirmation naming the tests the question is taken out of. */
@@ -179,7 +187,7 @@ class QuestionEditor extends ExamElement {
     return confirmButton({
       "data-action": "delete",
       label: t("exam.categories.delete"),
-      armed: this.stored.pendingTests.length > 0 ? t("exam.editor.deleteArmedTests", { tests: this.pendingNames() }) : t("exam.editor.deleteArmedNoTests"),
+      armed: this.pendingCount() > 0 ? t("exam.editor.deleteArmedTests", { tests: this.pendingNames() }) : t("exam.editor.deleteArmedNoTests"),
       action: () => this.remove(),
     });
   }
@@ -381,7 +389,7 @@ class QuestionEditor extends ExamElement {
   async remove() {
     this.message.replaceChildren();
     try {
-      await examApi(`/pool/questions/${this.stored.id}`, { method: "DELETE", body: { tests: this.stored.pendingTests.length } });
+      await examApi(`/pool/questions/${this.stored.id}`, { method: "DELETE", body: { tests: this.pendingCount() } });
       window.location.assign(this.backAddress());
     } catch (error) {
       this.message.replaceChildren(h("p", { class: "sl-embed-error" }, error instanceof ExamApiError && error.status < 500 ? error.message : t("exam.editor.deleteFailed")));

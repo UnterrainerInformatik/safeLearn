@@ -47,6 +47,7 @@ import { openTestsOf, reviewView, scoreAttempt, startAttempt, submitAttempt } fr
 import { correctionTable, setQuestionGrade } from "../exam/paper-grades.js";
 import { liveSnapshot } from "../exam/live.js";
 import { init } from "../exam/index.js";
+import { enterTeacher } from "./exam-fixtures.js";
 
 const temporaryDirs = [];
 const openDatabases = [];
@@ -478,6 +479,7 @@ describe("the printed sheet and the routes", () => {
     }).question.id;
     const year = createYear(db, { name: "2026/27", startsOn: "2026-09-07", summerStartsOn: "2027-02-15", endsOn: "2027-07-02" });
     const klass = createClass(db, year.id, { name: "4ahif", students: [{ username: "anna" }, { username: "ben" }] });
+    enterTeacher(db, klass.id);
     const course = createCourse(db, klass.id, { subject: "POS", language: "de" });
     const test = createOfflineTest(db, course.id, { name: "Quickie REST", durationMinutes: 15, gradebookKind: "shorttest", questionIds: [free, byName["Methoden de"], byName["Wahr de"]] });
     setQuestionSettings(db, test.id, copyOf(getTest(db, test.id), byName["Methoden de"]).id, { weight: 2 });

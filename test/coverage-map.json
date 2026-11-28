@@ -648,7 +648,7 @@
       "corpus": []
     },
     "test/exam-photos.test.js": {
-      "what": "Students' photos (student-photos) unit by unit and through the module's routes, without a browser: the header check of JPEG (SOI and the frame's size) and PNG (IHDR) - a GIF, an SVG, a JPEG without a frame, more than 600 px and more than 256 KB refused, 600 px allowed - storing for a student without one and a second import replacing the first with a new version; the matching against a directory of its own by a file named after a username, by class and names regardless of case, accents and the order of given names, two students with the same name as ambiguous with both, an unknown person, a student of another class and a teacher (by name and by file name) as unmatched, a key twice refused and nothing matched without a directory; the summary per class, the photos without a person (none without a directory), and deleting those, one class's and all, each refused when the confirmed number no longer fits. The photo route: 200 with private, immutable caching for a session holding student-images, a teacher in student view with it included; 403 without image data for a teacher, an admin and a student without it, their own photo included, and a teacher in student view without it; 404 without a photo and after a deletion. The import routes (match, store, summary, delete) and the page refused to a teacher with the role who is no admin, to an admin without the role and to an admin in student view; an admin with the role matches and stores, an image refused by its bytes, no photo for a teacher or a username the directory does not hold. The version per row in the gradebook sheet, the student page, the live view of an offline sitting and the correction table for a session holding the role, null without a photo, none on the class's screen, no payload with image data, no row with the field for a teacher without the role, and a replaced photo changing it everywhere.",
+      "what": "Students' photos (student-photos) unit by unit and through the module's routes, without a browser: the header check of JPEG (SOI and the frame's size) and PNG (IHDR) - a GIF, an SVG, a JPEG without a frame, more than 600 px and more than 256 KB refused, 600 px allowed - storing for a student without one and a second import replacing the first with a new version; the matching against a directory of its own by a file named after a username, by class and names regardless of case, accents and the order of given names, two students with the same name as ambiguous with both, an unknown person, a student of another class and a teacher (by name and by file name) as unmatched, a key twice refused and nothing matched without a directory; the summary per class, the photos without a person (none without a directory), and deleting those, one class's and all, each refused when the confirmed number no longer fits. The photo route: 200 with private, immutable caching for a session holding student-images that is entered in a class with the student on its roster, a teacher in student view with it included and a roster entry marked as left counting; 404 for a teacher with the role entered in no such class, and 200 for an admin with the role entered in none; 403 without image data for a teacher, an admin and a student without it, their own photo included, and a teacher in student view without it; 404 without a photo and after a deletion. The import routes (match, store, summary, delete) and the page refused to a teacher with the role who is no admin, to an admin without the role and to an admin in student view; an admin with the role matches and stores, an image refused by its bytes, no photo for a teacher or a username the directory does not hold. The version per row in the gradebook sheet, the student page, the live view of an offline sitting and the correction table for a session holding the role, null without a photo, none on the class's screen, no payload with image data, no row with the field for a teacher without the role, and a replaced photo changing it everywhere.",
       "guards": [
         "exam/photos.js",
         "exam/routes-photos.js",
@@ -660,6 +660,32 @@
         "exam/routes-paper.js",
         "exam/index.js",
         "permission-context.js"
+      ],
+      "corpus": []
+    },
+    "test/exam-class-scope.test.js": {
+      "what": "The teachers entered in a class (class-teachers) through the module's whole router, without a browser. Every route the router registers, walked as a teacher entered in another class with student-images: a route naming the foreign class, course, column, test, sitting or attempt answers 403 or 404, no stream of it opens, and no answer of any route - lists, overviews, the bar of every page, the list of all tests, the course lookup, the question pool's usage - names the foreign class, its subject, its test or its student (the directory's own routes and the student's own pages excepted); a route whose parameter the walk cannot fill in fails it; the bar's query pages and lists for the foreign class are not found; nothing of the foreign class changes. The question's usage shows the own test and counts the foreign one; an admin sees both. The lists that carry a photo version (class roster, sheet, student page, live view, correction table) carry it only for the own class's rows, and the photo route serves the own class's photo and not the foreign one's. Creating a class, renaming, deleting it, entering and removing its teachers, the teacher picker and both year-change routes answer 403 to a teacher, entered or not; an admin creates a class with teachers ticked, a student or an unknown username is refused with 400, entering and removing count from the teacher's next request, the list is by family name, renaming keeps it and deleting the class removes it. An admin's overview counts teachers and lists classes without any first; a teacher sees only their classes and no count. The year change offers last year's teachers ticked beside the directory's others and enters only the confirmed ones, last year's class keeping its own; a closed year's class takes a new teacher and loses one while its roster stays read-only, and the teachers' list has no closed-year trigger. Removing a teacher closes their open live view of the class once, while removing another teacher or another class's does not, and reconnecting is not found.",
+      "guards": [
+        "exam/gate.js",
+        "exam/classes.js",
+        "exam/migrations/026-class-teachers.sql",
+        "exam/routes-classes.js",
+        "exam/routes-gradebook.js",
+        "exam/routes-tests.js",
+        "exam/routes-live.js",
+        "exam/routes-paper.js",
+        "exam/routes-handout.js",
+        "exam/routes-pool.js",
+        "exam/routes-pool-edit.js",
+        "exam/routes-photos.js",
+        "exam/routes-attempts.js",
+        "exam/routes-pool-import.js",
+        "exam/bar.js",
+        "exam/pool.js",
+        "exam/tests.js",
+        "exam/index.js",
+        "exam/roster-source.js",
+        "test/exam-fixtures.js"
       ],
       "corpus": []
     },

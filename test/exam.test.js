@@ -38,6 +38,7 @@ import { openDatabase } from "../exam/db.js";
 import { importPool, poolImported } from "../exam/pool-import.js";
 import { purgeUploads } from "../exam/pool-edit.js";
 import { viennaInstant, viennaLocal } from "../exam/client/periods.js";
+import { enterTeacher } from "./exam-fixtures.js";
 
 const run = useExamModule();
 keepEvidenceOnFailure(import.meta.filename, { beforeEach, afterEach });
@@ -89,6 +90,37 @@ async function fetchAs(session, reference, { method = "GET", body } = {}) {
     }
     return { status: response.status, servedFrom: new URL(response.url).pathname, redirected: response.redirected, json };
   }, `${applicationUrl}${reference}`, method, body);
+}
+
+/**
+ * Enters `username` in the class `classId` (`class-teachers`), beside the
+ * instance, in the run's database: the shared teacher sees only the classes
+ * they are entered in, and the directory need not know them.
+ */
+function seedTeacher(classId, username) {
+  const { db } = openDatabase(run.databasePath);
+  try {
+    enterTeacher(db, classId, username.toLowerCase());
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Creates a class as the shared admin - creating a class is an admin's - and
+ * enters `teacher` in it, so the checks of a teacher go on as before. Answers
+ * what the creating request answered.
+ */
+async function createClassFor(teacher, yearId, body) {
+  const admin = await sharedSession("admin");
+  const created = await fetchAs(admin, `/exam/api/years/${yearId}/classes`, { method: "POST", body });
+  if (created.status === 200) seedTeacher(created.json.id, teacher.username);
+  return created;
+}
+
+/** Deletes a class as the shared admin, deleting a class being an admin's. */
+async function deleteClassAsAdmin(classId) {
+  return fetchAs(await sharedSession("admin"), `/exam/api/classes/${classId}`, { method: "DELETE" });
 }
 
 // A 1×1 PNG.
@@ -150,10 +182,7 @@ async function examFixture(teacher) {
   let gbClass = (await fetchAs(teacher, `/exam/api/years/${year.id}/classes`)).json.find((c) => c.name === "9xgb");
   if (!gbClass) {
     const student = await sharedSession("student");
-    const created = await fetchAs(teacher, `/exam/api/years/${year.id}/classes`, {
-      method: "POST",
-      body: { name: "9XGB", students: [student.username, gbOther] },
-    });
+    const created = await createClassFor(teacher, year.id, { name: "9XGB", students: [student.username, gbOther] });
     assert.equal(created.status, 200, JSON.stringify(created.json));
     gbClass = created.json;
   }
@@ -458,10 +487,7 @@ describe("classes and courses", () => {
     }
     assert.ok(name, `one of ${classes.join(", ")} should have a member who is not a teacher`);
 
-    const created = await fetchAs(teacher, `/exam/api/years/${year.id}/classes`, {
-      method: "POST",
-      body: { name: name.toUpperCase(), students: candidates.map((c) => c.username) },
-    });
+    const created = await createClassFor(teacher, year.id, { name: name.toUpperCase(), students: candidates.map((c) => c.username) });
     assert.equal(created.status, 200, JSON.stringify(created.json));
     klass = created.json;
     assert.equal(klass.name, name);
@@ -1724,7 +1750,7 @@ describe("the module bar", () => {
     await setPreferences(student, {});
     await setPreferences(teacher, {});
     ({ year, gbClass, course } = await examFixture(teacher));
-    const created = await fetchAs(teacher, `/exam/api/years/${year.id}/classes`, { method: "POST", body: { name: "9XBAR", students: [] } });
+    const created = await createClassFor(teacher, year.id, { name: "9XBAR", students: [] });
     assert.equal(created.status, 200, JSON.stringify(created.json));
     spare = created.json;
   });
@@ -1744,7 +1770,8 @@ describe("the module bar", () => {
     await open(`/exam/courses/${course.id}/gradebook?semester=ws`);
     assert.deepEqual(await bar(teacher.page), {
       year: { chosen: `${year.name} (current)`, link: `/exam/?year=${year.id}`, create: true },
-      class: { chosen: "9XGB", link: `/exam/classes/${gbClass.id}`, create: true },
+      // Creating a class is an admin's: a teacher's class position offers none (class-bound-teachers).
+      class: { chosen: "9XGB", link: `/exam/classes/${gbClass.id}`, create: null },
       course: { chosen: "GB", link: `/exam/courses/${course.id}`, create: true },
       gradebook: { chosen: "Winter semester", link: `/exam/courses/${course.id}/gradebook?semester=ws`, create: null },
     });
@@ -1753,6 +1780,9 @@ describe("the module bar", () => {
     const home = await bar(teacher.page);
     assert.equal(home.year.chosen, `${year.name} (current)`, "the current school year when nothing else is chosen");
     assert.deepEqual([home.class.chosen, home.course.create], [null, false], "no course is offered without a class");
+    const admin = await sharedSession("admin");
+    await openPage(admin.page, "/exam/", ".sl-exam-bar");
+    assert.equal((await bar(admin.page)).class.create, true, "an admin is offered a new class");
   });
 
   test("the buttons to the pool and the tests are on every teacher page and keep what the bar has chosen", async () => {
@@ -1878,7 +1908,7 @@ describe("the module bar", () => {
     await choose("class", String(gbClass.id));
     assert.equal(`${new URL(teacher.page.url()).pathname}${new URL(teacher.page.url()).search}`, `/exam/pool?course=${course.id}`, "the pool stays open, for GB");
 
-    const created = await fetchAs(teacher, `/exam/api/years/${year.id}/classes`, { method: "POST", body: { name: "9XBAR2", students: [] } });
+    const created = await createClassFor(teacher, year.id, { name: "9XBAR2", students: [] });
     assert.equal(created.status, 200, JSON.stringify(created.json));
     await open(`/exam/courses/${kept.json.id}`);
     await choose("class", String(created.json.id));
@@ -4234,7 +4264,7 @@ describe("Matura candidates", () => {
     await setPreferences(teacher, {});
     username = student.username.toLowerCase();
     const { year, questions } = await examFixture(teacher);
-    const created = await fetchAs(teacher, `/exam/api/years/${year.id}/classes`, { method: "POST", body: { name: "5XMC", students: [username, other] } });
+    const created = await createClassFor(teacher, year.id, { name: "5XMC", students: [username, other] });
     assert.equal(created.status, 200, JSON.stringify(created.json));
     klass = created.json;
     course = (await fetchAs(teacher, `/exam/api/classes/${klass.id}/courses`, { method: "POST", body: { subject: "MC", language: "de" } })).json;
@@ -4268,7 +4298,7 @@ describe("Matura candidates", () => {
     if (otherCourse) await setHeld(teacher, false, username, otherCourse);
     if (written) await fetchAs(teacher, `/exam/api/tests/${written.id}`, { method: "DELETE" });
     for (const target of [course, otherCourse]) if (target) await fetchAs(teacher, `/exam/api/courses/${target.id}`, { method: "DELETE" });
-    if (klass) await fetchAs(teacher, `/exam/api/classes/${klass.id}`, { method: "DELETE" });
+    if (klass) await deleteClassAsAdmin(klass.id);
   });
 
   test("the role's name comes from the subject, and nobody holds it to begin with", async () => {
@@ -4355,7 +4385,7 @@ describe("Matura candidates", () => {
 
   test("below the fifth year nobody is a candidate: no toggle, and a grant is refused", async () => {
     const year = (await fetchAs(teacher, "/exam/api/years")).json.current;
-    const lower = (await fetchAs(teacher, `/exam/api/years/${year.id}/classes`, { method: "POST", body: { name: "4XMC", students: [username, other] } })).json;
+    const lower = (await createClassFor(teacher, year.id, { name: "4XMC", students: [username, other] })).json;
     try {
       const lowerCourse = (await fetchAs(teacher, `/exam/api/classes/${lower.id}/courses`, { method: "POST", body: { subject: "MC", language: "de" } })).json;
       try {
@@ -4370,7 +4400,7 @@ describe("Matura candidates", () => {
         await fetchAs(teacher, `/exam/api/courses/${lowerCourse.id}`, { method: "DELETE" });
       }
     } finally {
-      await fetchAs(teacher, `/exam/api/classes/${lower.id}`, { method: "DELETE" });
+      await deleteClassAsAdmin(lower.id);
     }
   });
 });
@@ -4429,7 +4459,7 @@ describe("offline tests and their handouts", () => {
     for (const entry of (await fetchAs(student, "/exam/api/my/tests")).json?.tests ?? []) {
       if (entry.attempt) await fetchAs(student, `/exam/api/attempts/${entry.attempt.attemptId}/submit`, { method: "POST" });
     }
-    const klass = await fetchAs(teacher, `/exam/api/years/${year.id}/classes`, { method: "POST", body: { name: "9XOF", students: [student.username, other] } });
+    const klass = await createClassFor(teacher, year.id, { name: "9XOF", students: [student.username, other] });
     assert.equal(klass.status, 200, JSON.stringify(klass.json));
     const created = await fetchAs(teacher, `/exam/api/classes/${klass.json.id}/courses`, { method: "POST", body: { subject: "POS", language: "de" } });
     assert.equal(created.status, 200, JSON.stringify(created.json));
@@ -4799,7 +4829,7 @@ describe("an offline test's handout variables", () => {
     for (const entry of (await fetchAs(student, "/exam/api/my/tests")).json?.tests ?? []) {
       if (entry.attempt) await fetchAs(student, `/exam/api/attempts/${entry.attempt.attemptId}/submit`, { method: "POST" });
     }
-    const klass = await fetchAs(teacher, `/exam/api/years/${year.id}/classes`, { method: "POST", body: { name: "9XVAR", students: [student.username] } });
+    const klass = await createClassFor(teacher, year.id, { name: "9XVAR", students: [student.username] });
     assert.equal(klass.status, 200, JSON.stringify(klass.json));
     const created = await fetchAs(teacher, `/exam/api/classes/${klass.json.id}/courses`, { method: "POST", body: { subject: "POS", language: "de" } });
     assert.equal(created.status, 200, JSON.stringify(created.json));
@@ -4905,7 +4935,7 @@ describe("printing an offline test's handout", () => {
     for (const entry of (await fetchAs(student, "/exam/api/my/tests")).json?.tests ?? []) {
       if (entry.attempt) await fetchAs(student, `/exam/api/attempts/${entry.attempt.attemptId}/submit`, { method: "POST" });
     }
-    const klass = await fetchAs(teacher, `/exam/api/years/${year.id}/classes`, { method: "POST", body: { name: "9XPRT", students: [student.username] } });
+    const klass = await createClassFor(teacher, year.id, { name: "9XPRT", students: [student.username] });
     assert.equal(klass.status, 200, JSON.stringify(klass.json));
     const created = await fetchAs(teacher, `/exam/api/classes/${klass.json.id}/courses`, { method: "POST", body: { subject: "POS", language: "de" } });
     assert.equal(created.status, 200, JSON.stringify(created.json));
@@ -5038,7 +5068,7 @@ describe("weights and a test on paper from the pool", () => {
     for (const entry of (await fetchAs(student, "/exam/api/my/tests")).json?.tests ?? []) {
       if (entry.attempt) await fetchAs(student, `/exam/api/attempts/${entry.attempt.attemptId}/submit`, { method: "POST" });
     }
-    const klass = await fetchAs(teacher, `/exam/api/years/${fixture.year.id}/classes`, { method: "POST", body: { name: "9XPQ", students: [student.username, other] } });
+    const klass = await createClassFor(teacher, fixture.year.id, { name: "9XPQ", students: [student.username, other] });
     assert.equal(klass.status, 200, JSON.stringify(klass.json));
     const created = await fetchAs(teacher, `/exam/api/classes/${klass.json.id}/courses`, { method: "POST", body: { subject: "POS", language: "de" } });
     assert.equal(created.status, 200, JSON.stringify(created.json));
@@ -5236,7 +5266,7 @@ describe("students' photos", () => {
     for (const session of [student, teacher, admin]) await setPreferences(session, {});
     scratch = mkdtempSync(path.join(os.tmpdir(), "safelearn-photos-"));
     const fixture = await examFixture(teacher);
-    const klass = await fetchAs(teacher, `/exam/api/years/${fixture.year.id}/classes`, { method: "POST", body: { name: "9XPH", students: [student.username, other] } });
+    const klass = await createClassFor(teacher, fixture.year.id, { name: "9XPH", students: [student.username, other] });
     assert.equal(klass.status, 200, JSON.stringify(klass.json));
     classId = klass.json.id;
     const created = await fetchAs(teacher, `/exam/api/classes/${klass.json.id}/courses`, { method: "POST", body: { subject: "POS", language: "de" } });
@@ -7493,7 +7523,8 @@ describe("the module's actions", () => {
     ).json;
     const pages = [
       ["/exam/", ".sl-exam-actions"],
-      [`/exam/classes/${gbClass.id}`, ".sl-exam-actions"],
+      // A teacher's class page has no rename or delete (an admin's); its roster's buttons are measured.
+      [`/exam/classes/${gbClass.id}`, ".sl-exam-course-add"],
       [`/exam/pool?course=${course.id}`, ".sl-exam-pool-questions tbody tr"],
       [`/exam/pool/questions/${questions[0].id}`, ".sl-exam-editor-back"],
       ["/exam/pool/import", ".sl-exam-import-format"],
@@ -8074,7 +8105,7 @@ describe("the module's actions", () => {
 
   test("an empty roster's gradebook leads to the class's roster", async () => {
     const year = (await fetchAs(teacher, "/exam/api/years")).json.current;
-    const klass = (await fetchAs(teacher, `/exam/api/years/${year.id}/classes`, { method: "POST", body: { name: "9xempty", students: [] } })).json;
+    const klass = (await createClassFor(teacher, year.id, { name: "9xempty", students: [] })).json;
     const empty = (await fetchAs(teacher, `/exam/api/classes/${klass.id}/courses`, { method: "POST", body: { subject: "LEER" } })).json;
     const page = teacher.page;
     try {
@@ -8083,7 +8114,8 @@ describe("the module's actions", () => {
       assert.equal(new URL(page.url()).pathname, `/exam/classes/${klass.id}`);
     } finally {
       assert.equal((await fetchAs(teacher, `/exam/api/courses/${empty.id}`, { method: "DELETE" })).status, 200);
-      assert.equal((await fetchAs(teacher, `/exam/api/classes/${klass.id}`, { method: "DELETE" })).status, 200, "a class without courses goes");
+      assert.equal((await fetchAs(teacher, `/exam/api/classes/${klass.id}`, { method: "DELETE" })).status, 403, "deleting a class is an admin's");
+      assert.equal((await deleteClassAsAdmin(klass.id)).status, 200, "a class without courses goes");
     }
   });
 
@@ -8383,7 +8415,7 @@ describe("the year change", () => {
     const { questions } = await examFixture(teacher);
     // A year long over, with a class, a course and a column with results.
     past = (await fetchAs(teacher, "/exam/api/years", { method: "POST", body: { name: "2020/21", startsOn: "2020-09-07", summerStartsOn: "2021-02-15", endsOn: "2021-07-02" } })).json;
-    pastClass = (await fetchAs(teacher, `/exam/api/years/${past.id}/classes`, { method: "POST", body: { name: "3YCHIF", students: [stays, leaves] } })).json;
+    pastClass = (await createClassFor(teacher, past.id, { name: "3YCHIF", students: [stays, leaves] })).json;
     pastCourse = (await fetchAs(teacher, `/exam/api/classes/${pastClass.id}/courses`, { method: "POST", body: { subject: "WMC", language: "en", winterShare: 40 } })).json;
     column = (await fetchAs(teacher, `/exam/api/courses/${pastCourse.id}/assessments`, { method: "POST", body: { kind: "test", name: "Final", date: "2021-05-03", maxPoints: 20 } })).json;
     for (const [username, points] of [[stays, 15], [leaves, 9]]) {
@@ -8488,23 +8520,31 @@ describe("the year change", () => {
 
   test("the next year offers the class one level up with last year's roster ticked", async () => {
     const next = (await fetchAs(teacher, "/exam/api/years", { method: "POST", body: { name: "2021/22", startsOn: "2021-09-06", summerStartsOn: "2022-02-14", endsOn: "2022-07-01" } })).json;
-    const proposal = (await fetchAs(teacher, `/exam/api/years/${next.id}/next-classes`)).json;
+    // Starting the next year creates classes: an admin's (class-bound-teachers, task 3.3).
+    assert.equal((await fetchAs(teacher, `/exam/api/years/${next.id}/next-classes`)).status, 403, "a teacher is offered no year change");
+    const admin = await sharedSession("admin");
+    const proposal = (await fetchAs(admin, `/exam/api/years/${next.id}/next-classes`)).json;
     assert.equal(proposal.previous.id, past.id);
     const offered = proposal.classes.find((entry) => entry.from.id === pastClass.id);
     assert.equal(offered.name, "4ychif");
     assert.deepEqual(offered.people.filter((person) => person.lastYear).map((person) => person.username).sort(), [leaves, stays]);
+    const teacherName = teacher.username.toLowerCase();
+    assert.deepEqual(offered.teachers.filter((entry) => entry.lastYear).map((entry) => entry.username), [teacherName], "last year's teacher is offered ticked");
 
-    const page = teacher.page;
+    const page = admin.page;
     await openPage(page, `/exam/?year=${next.id}`, "#markdown-content");
     const section = `.sl-exam-next-class[data-from="3ychif"]`;
     await page.waitForSelector(section, { timeout: 20000 });
     const shown = await page.$$eval(`${section} .sl-exam-next-last input`, (boxes) => boxes.map((box) => [box.value, box.checked]));
     assert.deepEqual(shown.sort(), [[leaves, true], [stays, true]], "last year's roster is ticked");
+    const teachersShown = await page.$$eval(`${section} .sl-exam-next-last-teachers input`, (boxes) => boxes.map((box) => [box.value, box.checked]));
+    assert.deepEqual(teachersShown, [[teacherName, true]], "and last year's teacher beside it");
     // The leaver is unticked; WMC is ticked for copying.
     await click(page, `${section} input[value="${leaves}"]`);
     await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(page, `${section} .sl-exam-next-create`)]);
     const classId = Number(new URL(page.url()).pathname.split("/").pop());
     const created = (await fetchAs(teacher, `/exam/api/classes/${classId}`)).json;
+    assert.deepEqual(created.teachers.map((entry) => entry.username), [teacherName], "the confirmed teacher is entered and sees the new class");
     assert.equal(created.name, "4ychif");
     assert.equal(created.year.id, next.id);
     assert.deepEqual(created.roster.map((entry) => entry.username), [stays], "only the ticked one is on the roster");
@@ -8516,7 +8556,7 @@ describe("the year change", () => {
   test("the leavers' records are removed only after the confirmation, and only those reported", async () => {
     // Who is on a roster of the current year has not left, however old their records.
     const current = (await fetchAs(teacher, "/exam/api/years")).json.current;
-    const kept = await fetchAs(teacher, `/exam/api/years/${current.id}/classes`, { method: "POST", body: { name: "9YCHIF", students: [stays] } });
+    const kept = await createClassFor(teacher, current.id, { name: "9YCHIF", students: [stays] });
     assert.equal(kept.status, 200, JSON.stringify(kept.json));
     const report = (await fetchAs(teacher, "/exam/api/retention")).json;
     assert.equal(report.years, 2);
@@ -8546,5 +8586,117 @@ describe("the year change", () => {
     assert.deepEqual(sheet.students.map((row) => [row.username, row.results[column.id]?.points]), [[stays, 15]], "the column keeps the other result");
     assert.match(applicationOutput(), /Removed the records of \d+ student\(s\) who left: \d+ result/, "the log records counts");
     assert.ok(!applicationOutput().includes(leaves), "and no name");
+  });
+});
+
+// The bar choosing a single choice for the teacher (`exam-navigation`,
+// class-bound-teachers D7). The shared teacher is entered in many classes by
+// now; this group enters them in only its own for a while, and gives the
+// others back afterwards.
+describe("the module bar chooses a single choice", () => {
+  let teacher;
+  let year;
+  let single;
+  let second;
+  let saved = [];
+  const teacherName = () => teacher.username.toLowerCase();
+
+  /** Enters the teacher in exactly `classIds`, in the run's database. */
+  function enteredIn(classIds) {
+    const { db } = openDatabase(run.databasePath);
+    try {
+      db.prepare("DELETE FROM class_teacher WHERE username = ?").run(teacherName());
+      for (const classId of classIds) enterTeacher(db, classId, teacherName());
+    } finally {
+      db.close();
+    }
+  }
+
+  /** The address the page settles on: the same for a second and a half. */
+  async function settled(page) {
+    let last = null;
+    for (;;) {
+      const now = `${new URL(page.url()).pathname}${new URL(page.url()).search}`;
+      if (now === last) return now;
+      last = now;
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+  }
+
+  /** What the bar shows chosen in the class and the course position. */
+  function chosen(page) {
+    return page.evaluate(() =>
+      ["class", "course"].map((position) => {
+        const select = document.querySelector(`.sl-exam-bar select[data-position="${position}"]`);
+        return select?.value ? select.selectedOptions[0].textContent : null;
+      })
+    );
+  }
+
+  before(async () => {
+    teacher = await sharedSession("teacher");
+    await setPreferences(teacher, {});
+    ({ year } = await examFixture(teacher));
+    const { db } = openDatabase(run.databasePath);
+    try {
+      saved = db.prepare("SELECT class_id FROM class_teacher WHERE username = ?").all(teacherName()).map((row) => row.class_id);
+    } finally {
+      db.close();
+    }
+    single = (await createClassFor(teacher, year.id, { name: "9XPS", students: [] })).json;
+    second = (await createClassFor(teacher, year.id, { name: "9XPT", students: [] })).json;
+    await fetchAs(teacher, `/exam/api/classes/${single.id}/courses`, { method: "POST", body: { subject: "PSA", language: "de" } });
+  });
+
+  after(async () => {
+    if (!teacher) return;
+    enteredIn(saved);
+    for (const klass of [single, second]) {
+      if (!klass) continue;
+      const courses = (await fetchAs(await sharedSession("admin"), `/exam/api/classes/${klass.id}`)).json?.courses ?? [];
+      for (const course of courses) await fetchAs(await sharedSession("admin"), `/exam/api/courses/${course.id}`, { method: "DELETE" });
+      await deleteClassAsAdmin(klass.id);
+    }
+  });
+
+  test("a teacher with one class and one course lands on the course's config sheet; the class position's link stays on the class", async () => {
+    enteredIn([single.id]);
+    const course = (await fetchAs(teacher, `/exam/api/classes/${single.id}`)).json.courses[0];
+    const page = teacher.page;
+    // Waits for the page the bar leads on to, not for the start page it leaves.
+    await openPage(page, "/exam/", "sl-exam-course .sl-exam-course-gradebook");
+    assert.equal(await settled(page), `/exam/courses/${course.id}`, "the config sheet of PSA 9XPS is open");
+    assert.deepEqual(await chosen(page), ["9XPS", "PSA"]);
+    await page.waitForSelector(".sl-exam-bar-position[data-position='class'] a", { visible: true, timeout: 20000 });
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(page, ".sl-exam-bar-position[data-position='class'] a")]);
+    assert.equal(await settled(page), `/exam/classes/${single.id}`, "Back to the class overview: it stays open");
+    assert.deepEqual(await chosen(page), ["9XPS", null]);
+  });
+
+  test("a teacher with one class and several courses lands on the class page with no course chosen", async () => {
+    enteredIn([single.id]);
+    const extra = (await fetchAs(teacher, `/exam/api/classes/${single.id}/courses`, { method: "POST", body: { subject: "PSB", language: "de" } })).json;
+    try {
+      const page = teacher.page;
+      // Waits for the page the bar leads on to, not for the start page it leaves.
+    await openPage(page, "/exam/", "sl-exam-class .sl-exam-course-add");
+      assert.equal(await settled(page), `/exam/classes/${single.id}`);
+      assert.deepEqual(await chosen(page), ["9XPS", null]);
+    } finally {
+      await fetchAs(teacher, `/exam/api/courses/${extra.id}`, { method: "DELETE" });
+    }
+  });
+
+  test("a teacher with several classes stays on the year's overview with no class chosen", async () => {
+    enteredIn([single.id, second.id]);
+    const page = teacher.page;
+    // Waits for the page the bar leads on to, not for the start page it leaves.
+    await openPage(page, "/exam/", "sl-exam-classes-home .sl-exam-year-actions");
+    assert.equal(await settled(page), "/exam/");
+    assert.deepEqual(await chosen(page), [null, null]);
+    // Choosing the class with one course in the bar carries on to it.
+    const course = (await fetchAs(teacher, `/exam/api/classes/${single.id}`)).json.courses[0];
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), page.select(".sl-exam-bar select[data-position='class']", String(single.id))]);
+    assert.equal(await settled(page), `/exam/courses/${course.id}`, "switching class carries on to its single course");
   });
 });

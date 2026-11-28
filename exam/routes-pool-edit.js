@@ -21,9 +21,9 @@ import {
   updateCategory,
   uploadLimitBytes,
 } from "./pool-edit.js";
-import { getQuestion } from "./pool.js";
+import { getQuestion, scopedQuestion } from "./pool.js";
 import { NotFoundError } from "./classes.js";
-import { identityOf, requireTeacher, teacherPage } from "./gate.js";
+import { classScope, identityOf, requireTeacher, teacherPage } from "./gate.js";
 import { contextFromQuery, teacherShell } from "./bar.js";
 import { i18nOf } from "../i18n/server.js";
 
@@ -53,12 +53,18 @@ function rawImage(req, res, next) {
 }
 
 export function registerPoolEditRoutes(router, { db, handle, startPage }) {
+  // A question in an answer - as it is, or as `{ question }` - names only tests
+  // of the classes the session sees (class-bound-teachers D9).
   const api = (method, path, fn) =>
     router[method](
       `/api${path}`,
       requireTeacher,
       handle(async (req, res) => {
-        res.json(await fn(req));
+        const answer = await fn(req);
+        const scope = await classScope(db, req);
+        if (answer && Array.isArray(answer.usage)) res.json(scopedQuestion(db, answer, scope));
+        else if (answer?.question && Array.isArray(answer.question.usage)) res.json({ ...answer, question: scopedQuestion(db, answer.question, scope) });
+        else res.json(answer);
       })
     );
 

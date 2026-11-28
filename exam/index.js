@@ -85,7 +85,7 @@ function refusalStatus(error) {
   return null;
 }
 
-function buildRouter(db, startPage, periods, retentionYears, renderHandout) {
+function buildRouter(db, startPage, periods, retentionYears, renderHandout, directory) {
   const router = express.Router();
 
   // The module's client: its directory and nothing beside it. Mounted here, so
@@ -109,7 +109,9 @@ function buildRouter(db, startPage, periods, retentionYears, renderHandout) {
     })
   );
 
-  registerClassRoutes(router, { db, handle, startPage, retentionYears });
+  // `directory` is the checks' own, for the routes that ask the directory; the held one otherwise.
+  const held = directory ? { directory } : {};
+  registerClassRoutes(router, { db, handle, startPage, retentionYears, ...held });
   registerGradebookRoutes(router, { db, handle, startPage });
   registerPoolRoutes(router, { db, handle, startPage });
   registerPoolEditRoutes(router, { db, handle, startPage });
@@ -119,7 +121,7 @@ function buildRouter(db, startPage, periods, retentionYears, renderHandout) {
   registerLiveRoutes(router, { db, handle, startPage });
   registerHandoutRoutes(router, { db, handle, startPage, renderHandout });
   registerPaperRoutes(router, { db, handle });
-  registerPhotoRoutes(router, { db, handle, startPage });
+  registerPhotoRoutes(router, { db, handle, startPage, ...held });
 
   // The module's home page, for teachers: the classes of one school year -
   // the current one unless `?year=` names another - which the bar chooses.
@@ -191,9 +193,10 @@ function buildRouter(db, startPage, periods, retentionYears, renderHandout) {
 /**
  * `startPage` is `app.js`'s own resolver, for the page frame's "Home" link;
  * `renderHandout` its rendering of a corpus file as an exam handout
- * (`exam-handout`).
+ * (`exam-handout`). `directory`, for the checks only, stands in for what the
+ * directory service holds: a function answering `{ people, state }`.
  */
-export async function init({ startPage, renderHandout }) {
+export async function init({ startPage, renderHandout, directory = null }) {
   // The school's periods, checked before anything is opened: a value nobody
   // can read would otherwise fall back to clock times unnoticed.
   let periods;
@@ -233,7 +236,7 @@ export async function init({ startPage, renderHandout }) {
   scheduleSweep(db);
   return {
     active: true,
-    router: buildRouter(db, startPage, periods, retentionYears, renderHandout),
+    router: buildRouter(db, startPage, periods, retentionYears, renderHandout, directory),
     embedHandlers: buildEmbedHandlers(),
     clientScript,
     // Whether the session has a test open for it right now, for the colour of

@@ -57,6 +57,7 @@ import { Marked } from "marked";
 import { fillVariables, preParse, scanFiles, wrapAsDocument } from "../obsidian.js";
 import { sanitizeHtml } from "../sanitize.js";
 import { getPermissionContext, handoutViews } from "../permission-context.js";
+import { enterTeacher } from "./exam-fixtures.js";
 
 const temporaryDirs = [];
 const openDatabases = [];
@@ -927,6 +928,7 @@ describe("a handout's variables", () => {
     const { course } = (() => {
       const year = createYear(db, { name: "2026/27", startsOn: "2026-09-07", summerStartsOn: "2027-02-15", endsOn: "2027-07-02" });
       const klass = createClass(db, year.id, { name: "4bhif", students: [{ username: "anna" }, { username: "ben" }, { username: "cara" }] });
+      enterTeacher(db, klass.id);
       return { course: createCourse(db, klass.id, { subject: "POS", language: "de" }) };
     })();
     const test = withVariables(db, course, { handoutB: null });
@@ -1010,6 +1012,7 @@ describe("a handout's variables", () => {
     openDatabases.push(db);
     const year = createYear(db, { name: "2026/27", startsOn: "2026-09-07", summerStartsOn: "2027-02-15", endsOn: "2027-07-02" });
     const klass = createClass(db, year.id, { name: "4bhif", students: [{ username: "anna" }, { username: "ben" }, { username: "cara" }] });
+    enterTeacher(db, klass.id);
     const course = createCourse(db, klass.id, { subject: "POS", language: "de" });
     const test = withVariables(db, course);
     const plain = withVariables(db, course, { name: "Plain", handoutA: "POS/Open.md", handoutB: null });

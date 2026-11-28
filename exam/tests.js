@@ -40,6 +40,7 @@ import {
   NotFoundError,
   now,
   rosterOf,
+  visibleRecord,
 } from "./classes.js";
 import { viennaLocal } from "./client/periods.js";
 import { finalizeDue } from "./attempts.js";
@@ -776,19 +777,20 @@ function courseTests(db, courseId) {
  * the courses of the class when `classId` is, otherwise every course of the
  * school year - `yearId`, or the current one.
  */
-function coursesInScope(db, { yearId = null, classId = null, courseId = null }) {
+function coursesInScope(db, { yearId = null, classId = null, courseId = null }, visible = null) {
   if (courseId !== null) {
-    const course = getCourse(db, courseId);
+    const course = getCourse(db, visibleRecord(db, visible, "course", courseId));
     return { scope: "course", year: course.year, courses: [course] };
   }
   if (classId !== null) {
     // A class chosen without a course: that class's courses only.
-    const klass = getClass(db, classId);
+    const klass = getClass(db, visibleRecord(db, visible, "class", classId));
     return { scope: "class", year: klass.year, klass, courses: klass.courses.map((course) => ({ ...course, className: klass.name })) };
   }
   const year = yearId !== null ? getYear(db, yearId) : currentYear(db);
   if (!year) return { scope: "year", year: null, courses: [] };
-  const courses = listClasses(db, year.id).flatMap((klass) =>
+  // A school year's: only the classes the session sees (`class-teachers`).
+  const courses = listClasses(db, year.id, visible).flatMap((klass) =>
     listCourses(db, klass.id).map((course) => ({ ...course, className: klass.name }))
   );
   return { scope: "year", year, courses };
@@ -799,10 +801,11 @@ function coursesInScope(db, { yearId = null, classId = null, courseId = null }) 
  * in class order: `{ scope, year, groups: [{ courseId, classId, className,
  * subject, language, offlineKinds, tests }] }`. `offlineKinds` are the
  * gradebook kinds a new offline test of the course can count as: those of
- * the categories it uses.
+ * the categories it uses. `visible` is the request's class scope: a course or
+ * class outside it is not found, and a year lists only the classes in it.
  */
-export function listTests(db, scope = {}) {
-  const { scope: kind, year, klass, courses } = coursesInScope(db, scope);
+export function listTests(db, scope = {}, visible = null) {
+  const { scope: kind, year, klass, courses } = coursesInScope(db, scope, visible);
   return {
     scope: kind,
     year: year ? { id: year.id, name: year.name } : null,

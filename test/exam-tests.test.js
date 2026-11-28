@@ -74,6 +74,7 @@ import { deleteQuestion, saveQuestion } from "../exam/pool-edit.js";
 import { listen, liveParticipant, liveSnapshot } from "../exam/live.js";
 import { setTeacherNote, teacherNoteOf } from "../exam/teacher-notes.js";
 import { browserLabel, parseUserAgent } from "../exam/user-agent.js";
+import { enterTeacher } from "./exam-fixtures.js";
 
 const temporaryDirs = [];
 const openDatabases = [];
@@ -129,6 +130,8 @@ function seeded(db = freshDatabase()) {
   importPool(db, poolXml("de"), poolXml("en"));
   const year = createYear(db, { name: "2026/27", startsOn: "2026-09-07", summerStartsOn: "2027-02-15", endsOn: "2027-07-02" });
   const klass = createClass(db, year.id, { name: "4bhif", students: [{ username: "anna" }, { username: "ben" }] });
+  // The teacher the route checks ask as sees the class (`class-teachers`).
+  enterTeacher(db, klass.id);
   const course = createCourse(db, klass.id, { subject: "WMC", language: "en" });
   const questions = listQuestions(db);
   const byName = Object.fromEntries(questions.map((q) => [q.nameDe, q.id]));

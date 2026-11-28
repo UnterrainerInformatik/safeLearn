@@ -16,14 +16,20 @@
  * not to one sitting, and reaches every open live view of the test as a
  * `note` change. The snapshot for the view for the class (`?screen=1`)
  * carries no note.
+ *
+ * A sitting of a class the teacher is not entered in is answered as one that
+ * does not exist (`class-teachers`), its stream included, which checks when it
+ * opens. Removing the teacher from the class, or deleting the class, closes
+ * their open streams of it (class-bound-teachers D5); the view reconnects and
+ * is not found.
  */
 
 import { getSitting } from "./tests.js";
 import { listen, liveParticipant, liveSilence, liveSnapshot, notifyNote } from "./live.js";
 import { setTeacherNote, sittingsOfTest } from "./teacher-notes.js";
 import { flagParticipant, participantHolders } from "./participants.js";
-import { NotFoundError } from "./classes.js";
-import { holdsStudentImages, requireTeacher, sessionNow, teacherPage } from "./gate.js";
+import { classOfRecord, NotFoundError, onClassAccessChange, visibleRecord } from "./classes.js";
+import { actsAsAdmin, classScope, holdsStudentImages, identityOf, requireTeacher, sessionNow, teacherPage } from "./gate.js";
 import { withPhotoVersions } from "./photos.js";
 import { teacherShell } from "./bar.js";
 import { openEventStream } from "../event-stream.js";
@@ -60,11 +66,14 @@ function markedSnapshot(db, sittingId, at, options = {}, photos = false) {
 }
 
 export function registerLiveRoutes(router, { db, handle, startPage }) {
+  // The id of a record of `kind` from the path, refused as missing outside the request's scope.
+  const seen = async (req, kind, value) => visibleRecord(db, await classScope(db, req), kind, idParam(value));
+
   router.get(
     "/api/sittings/:id/live",
     requireTeacher,
     handle(async (req, res) => {
-      res.json(markedSnapshot(db, idParam(req.params.id), undefined, { screen: req.query.screen === "1" }, await holdsStudentImages(req)));
+      res.json(markedSnapshot(db, await seen(req, "sitting", req.params.id), undefined, { screen: req.query.screen === "1" }, await holdsStudentImages(req)));
     })
   );
 
@@ -74,7 +83,7 @@ export function registerLiveRoutes(router, { db, handle, startPage }) {
     "/api/tests/:testId/teacher-notes/:username",
     requireTeacher,
     handle(async (req, res) => {
-      const testId = idParam(req.params.testId);
+      const testId = await seen(req, "test", req.params.testId);
       const stored = setTeacherNote(db, testId, req.params.username, req.body?.text ?? null);
       notifyNote(sittingsOfTest(db, testId), stored.username);
       res.json(stored);
@@ -85,11 +94,16 @@ export function registerLiveRoutes(router, { db, handle, startPage }) {
     "/api/sittings/:id/events",
     requireTeacher,
     handle(async (req, res) => {
-      const sittingId = idParam(req.params.id);
+      const sittingId = await seen(req, "sitting", req.params.id);
       // Decided once for the stream; a stream that lost the teacher's session ends below anyway.
       const photos = await holdsStudentImages(req);
       const snapshot = markedSnapshot(db, sittingId, undefined, {}, photos);
+      // The class the stream is about, and whether an admin opened it, who sees every class.
+      const classId = classOfRecord(db, "sitting", sittingId);
+      const admin = await actsAsAdmin(req);
+      const username = identityOf(req);
       let stop = () => {};
+      let stopAccess = () => {};
       let heartbeat = null;
       let silence = null;
       const stream = openEventStream(req, res, {
@@ -97,11 +111,20 @@ export function registerLiveRoutes(router, { db, handle, startPage }) {
         headers: { "X-Accel-Buffering": "no" },
         onClose: () => {
           stop();
+          stopAccess();
           clearInterval(heartbeat);
           clearInterval(silence);
         },
       });
       stream.send("snapshot", snapshot);
+      // The teacher was removed from the class, or the class was deleted: the
+      // stream ends at once, as for a session that no longer acts as a teacher.
+      stopAccess = onClassAccessChange((change) => {
+        if (stream.closed || admin || change.classId !== classId) return;
+        if (change.username !== null && change.username !== username) return;
+        stream.send("refused", { reason: "The session no longer sees this class." });
+        stream.close();
+      });
 
       // One check at a time, in the order the changes happened.
       let queue = Promise.resolve();
@@ -171,7 +194,7 @@ export function registerLiveRoutes(router, { db, handle, startPage }) {
     "/sittings/:id/live",
     teacherPage,
     handle(async (req, res) => {
-      const sitting = getSitting(db, idParam(req.params.id));
+      const sitting = getSitting(db, await seen(req, "sitting", req.params.id));
       res.send(
         await teacherShell({
           db,
@@ -195,7 +218,7 @@ export function registerLiveRoutes(router, { db, handle, startPage }) {
     "/sittings/:id/screen",
     teacherPage,
     handle(async (req, res) => {
-      const sitting = getSitting(db, idParam(req.params.id));
+      const sitting = getSitting(db, await seen(req, "sitting", req.params.id));
       const title = escapeHtml(sitting.testName);
       const { t, lang, loc } = await i18nOf(req);
       res.send(`<!DOCTYPE html>

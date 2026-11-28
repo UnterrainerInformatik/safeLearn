@@ -11,7 +11,7 @@
  * rather than through an index.
  */
 
-import { NotFoundError } from "./classes.js";
+import { NotFoundError, seesClass } from "./classes.js";
 import { reviewOpenCondition } from "./attempts.js";
 import { pendingTestsWith } from "./tests.js";
 
@@ -181,7 +181,7 @@ export function getQuestion(db, id) {
   const usage = db
     .prepare(
       `SELECT u.test_id AS testId, u.used_on AS usedOn, co.id AS courseId, co.subject,
-         cl.name AS className, y.name AS yearName
+         cl.id AS classId, cl.name AS className, y.name AS yearName
        FROM question_usage u
        JOIN course co ON co.id = u.course_id
        JOIN class cl ON cl.id = co.class_id
@@ -199,6 +199,28 @@ export function getQuestion(db, id) {
     usage,
     uses: usage.length,
     pendingTests: pendingTestsWith(db, id),
+  };
+}
+
+/**
+ * A question as `getQuestion` answers it, for a session that sees only the
+ * classes of `scope` (class-bound-teachers D9): its usage and its tests not
+ * yet begun list only tests of those classes, and `usesElsewhere` and
+ * `pendingElsewhere` count the others, so the edit rules keep their numbers
+ * without naming another class. `uses` stays the count of every use. A scope
+ * of every class gets the question as it is, with both counts 0.
+ */
+export function scopedQuestion(db, question, scope) {
+  if (!question || !Array.isArray(question.usage)) return question;
+  const classOfTest = (testId) => db.prepare("SELECT k.class_id FROM test t JOIN course k ON k.id = t.course_id WHERE t.id = ?").get(testId)?.class_id ?? null;
+  const usage = question.usage.filter((use) => seesClass(scope, use.classId));
+  const pendingTests = question.pendingTests.filter((test) => seesClass(scope, classOfTest(test.id)));
+  return {
+    ...question,
+    usage,
+    usesElsewhere: question.usage.length - usage.length,
+    pendingTests,
+    pendingElsewhere: question.pendingTests.length - pendingTests.length,
   };
 }
 
