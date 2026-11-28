@@ -222,7 +222,10 @@
       "noTeachersEntered": "No teacher is entered in this class.",
       "removeTeacherArmed": "Click again to remove {name} from this class",
       "teacherPickerLabel": "Teacher to enter",
-      "enterTeacher": "Enter teacher"
+      "enterTeacher": "Enter teacher",
+      "teacherFilterPlaceholder": "Name or username, e.g. gru lei",
+      "teacherFilterLabel": "Filter teachers",
+      "teacherFilterNone": "No teacher matches."
     },
     "common": {
       "cancel": "Cancel",

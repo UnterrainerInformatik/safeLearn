@@ -8589,6 +8589,153 @@ describe("the year change", () => {
   });
 });
 
+// Finding a teacher by typing parts of the name (`class-teachers`,
+// teacher-search-and-class-switch): the matching rule in the page, the class
+// page's matches, and a new class's checklist. The demo realm's teachers are
+// whoever it holds, so the checks type pieces of a teacher they read from it.
+describe("finding a teacher by name", () => {
+  let admin;
+  let year;
+  let teachers;
+  const made = [];
+
+  /** The directory's teachers once it holds them, as the admin's picker gets them. */
+  async function directoryTeachers() {
+    const deadline = Date.now() + 90000;
+    for (;;) {
+      const answer = await fetchAs(admin, "/exam/api/directory/teachers");
+      assert.equal(answer.status, 200, JSON.stringify(answer.json));
+      if (answer.json.ready) return answer.json.teachers;
+      assert.ok(Date.now() < deadline, "the directory should be loaded within 90 s");
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+  }
+
+  /** Pieces of `person`'s name to type, given name first: `franz gru` for `Gruber-Leitner Franz`. */
+  function piecesOf(person) {
+    const pieces = [person.givenName, person.familyName].filter(Boolean).map((name) => name.slice(0, 3));
+    return pieces.length ? pieces.join(" ") : person.username;
+  }
+
+  /** The usernames of the rows the filter shows in `list`. */
+  function shown(page, list) {
+    return page.evaluate((list) => [...document.querySelectorAll(`${list} li`)].filter((item) => !item.hidden).map((item) => item.dataset.username ?? item.querySelector("input")?.value), list);
+  }
+
+  /** Types `text` into the filter field `field`, after emptying it. */
+  async function typeInto(page, field, text) {
+    await page.$eval(field, (input) => {
+      input.value = "";
+      input.dispatchEvent(new Event("input"));
+    });
+    await page.type(field, text);
+  }
+
+  before(async () => {
+    admin = await sharedSession("admin");
+    await setPreferences(admin, {});
+    ({ year } = await examFixture(await sharedSession("teacher")));
+    teachers = await directoryTeachers();
+    assert.ok(teachers.length >= 2, "the demo realm holds two teachers or more");
+  });
+
+  after(async () => {
+    for (const klass of made) await deleteClassAsAdmin(klass.id);
+  });
+
+  test("the matching rule: every piece in the name or username, in any order, case and accents aside", async () => {
+    // A named year's overview: the start page could lead on to a single class while the check runs.
+    await openPage(admin.page, `/exam/?year=${year.id}`, ".sl-exam-bar");
+    const answers = await admin.page.evaluate(async () => {
+      const { matchesPerson } = await import("/exam/assets/classes.js");
+      const franz = { familyName: "Gruber-Leitner", givenName: "Franz", username: "fgruberl" };
+      const anna = { familyName: "Gruber", givenName: "Anna", username: "agruber" };
+      const eva = { familyName: "Holler", givenName: "Eva", username: "eholler" };
+      const marlene = { familyName: "Höller", givenName: "Marlene", username: "mhoeller" };
+      return {
+        "gru lei": [matchesPerson(franz, "gru lei"), matchesPerson(anna, "gru lei")],
+        "franz gru": matchesPerson(franz, "franz gru"),
+        "HÖLL": [matchesPerson(eva, "HÖLL"), matchesPerson(marlene, "holl")],
+        "username": matchesPerson(anna, "AGRU"),
+        "empty": matchesPerson(anna, "   "),
+        "xyz": [franz, anna, eva].some((person) => matchesPerson(person, "xyz")),
+        "username only": matchesPerson({ username: "tdent" }, "den"),
+      };
+    });
+    assert.deepEqual(answers, {
+      "gru lei": [true, false],
+      "franz gru": true,
+      "HÖLL": [true, true],
+      "username": true,
+      "empty": true,
+      "xyz": false,
+      "username only": true,
+    });
+  });
+
+  test("an admin types pieces of a name on the class page, enters the match, and it is listed and no longer offered", async () => {
+    const klass = (await fetchAs(admin, `/exam/api/years/${year.id}/classes`, { method: "POST", body: { name: "9XTF", students: [] } })).json;
+    assert.ok(klass?.id, "the class exists");
+    made.push(klass);
+    const wanted = teachers.find((person) => person.givenName && person.familyName) ?? teachers[0];
+    const page = admin.page;
+    await openPage(page, `/exam/classes/${klass.id}`, "sl-exam-class .sl-exam-teacher-filter");
+    assert.deepEqual(await shown(page, ".sl-exam-teacher-matches"), [], "nothing is offered before typing");
+
+    await typeInto(page, ".sl-exam-teacher-filter", piecesOf(wanted));
+    const matches = await shown(page, ".sl-exam-teacher-matches");
+    assert.ok(matches.includes(wanted.username), `${piecesOf(wanted)} finds ${wanted.username}, among ${matches.join(", ")}`);
+    assert.ok(matches.every((username) => teachers.some((person) => person.username === username)), "only the directory's teachers are offered");
+
+    await typeInto(page, ".sl-exam-teacher-filter", "zzqxj");
+    await page.waitForSelector(".sl-exam-teacher-none:not([hidden])", { visible: true, timeout: 5000 });
+    assert.deepEqual(await shown(page, ".sl-exam-teacher-matches"), [], "nobody matches, and the page says so");
+
+    await typeInto(page, ".sl-exam-teacher-filter", piecesOf(wanted));
+    await click(page, `.sl-exam-teacher-matches li[data-username="${wanted.username}"] .sl-exam-teacher-add`);
+    await page.waitForSelector(`.sl-exam-teacher-list li[data-username="${wanted.username}"]`, { timeout: 20000 });
+    assert.deepEqual((await fetchAs(admin, `/exam/api/classes/${klass.id}`)).json.teachers.map((entry) => entry.username), [wanted.username], "the teacher is entered");
+    assert.equal(await page.$eval(".sl-exam-teacher-filter", (input) => input.value), piecesOf(wanted), "what was typed stays after entering");
+    assert.ok(!(await shown(page, ".sl-exam-teacher-matches")).includes(wanted.username), "the entered teacher is no longer offered");
+    assert.equal(await page.$(`.sl-exam-teacher-matches li[data-username="${wanted.username}"]`), null);
+  });
+
+  test("a teacher ticked for a new class and then hidden by the filter is entered on create", async () => {
+    const ticked = teachers[0];
+    const other = teachers.find((person) => person !== ticked && !matchesHere(ticked, person.username));
+    assert.ok(other, `a teacher whose username does not find ${ticked.username}`);
+    const page = admin.page;
+    await openPage(page, `/exam/?year=${year.id}`, '.sl-exam-bar button[data-create="class"]');
+    await click(page, '.sl-exam-bar button[data-create="class"]');
+    await page.waitForSelector("dialog[open] .sl-exam-class-new-teachers", { timeout: 20000 });
+    await page.type("dialog[open] input[name=name]", "9XTN");
+    await click(page, `dialog[open] .sl-exam-class-new-teachers input[value="${ticked.username}"]`);
+    await typeInto(page, "dialog[open] .sl-exam-teacher-filter", other.username);
+    assert.ok(!(await shown(page, "dialog[open] .sl-exam-class-new-teachers")).includes(ticked.username), `typing ${other.username} hides ${ticked.username}`);
+    assert.ok((await shown(page, "dialog[open] .sl-exam-class-new-teachers")).includes(other.username));
+    assert.equal(await page.$eval(`dialog[open] .sl-exam-class-new-teachers input[value="${ticked.username}"]`, (box) => box.checked), true, "the hidden teacher stays ticked");
+
+    await typeInto(page, "dialog[open] .sl-exam-teacher-filter", "zzqxj");
+    await page.waitForSelector("dialog[open] .sl-exam-teacher-none:not([hidden])", { visible: true, timeout: 5000 });
+    assert.deepEqual(await page.$$eval("dialog[open] .sl-exam-class-new-teachers input:checked", (boxes) => boxes.map((box) => box.value)), [ticked.username], "nobody is ticked or unticked by the filter");
+    await typeInto(page, "dialog[open] .sl-exam-teacher-filter", other.username);
+
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), click(page, "dialog[open] .sl-exam-primary")]);
+    const id = new URL(page.url()).pathname.split("/").pop();
+    const created = (await fetchAs(admin, `/exam/api/classes/${id}`)).json;
+    made.push(created);
+    assert.equal(created.name, "9xtn");
+    assert.deepEqual(created.teachers.map((entry) => entry.username), [ticked.username], "the ticked teacher hidden by the filter is entered");
+  });
+
+  /** Whether `person` would show for the typed `query`, as the page decides (kept in step with `matchesPerson`). */
+  function matchesHere(person, query) {
+    const fold = (text) => String(text ?? "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+    const haystack = fold([person.familyName, person.givenName, person.username].filter(Boolean).join(" "));
+    return fold(query).split(/\s+/).filter(Boolean).every((piece) => haystack.includes(piece));
+  }
+});
+
 // The bar choosing a single choice for the teacher (`exam-navigation`,
 // class-bound-teachers D7). The shared teacher is entered in many classes by
 // now; this group enters them in only its own for a while, and gives the
@@ -8694,9 +8841,33 @@ describe("the module bar chooses a single choice", () => {
     await openPage(page, "/exam/", "sl-exam-classes-home .sl-exam-year-actions");
     assert.equal(await settled(page), "/exam/");
     assert.deepEqual(await chosen(page), [null, null]);
-    // Choosing the class with one course in the bar carries on to it.
-    const course = (await fetchAs(teacher, `/exam/api/classes/${single.id}`)).json.courses[0];
+    // A class the teacher chooses in the bar stays open, even with a single course (teacher-search-and-class-switch D5).
     await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), page.select(".sl-exam-bar select[data-position='class']", String(single.id))]);
-    assert.equal(await settled(page), `/exam/courses/${course.id}`, "switching class carries on to its single course");
+    assert.equal(await settled(page), `/exam/classes/${single.id}`, "choosing the class with one course stays on its class page");
+    assert.deepEqual(await chosen(page), ["9XPS", null]);
+  });
+
+  test("switching the class on a class page stays on the chosen class's page, even with a single course", async () => {
+    enteredIn([single.id, second.id]);
+    const page = teacher.page;
+    await openPage(page, `/exam/classes/${second.id}`, "sl-exam-class .sl-exam-course-add");
+    assert.equal(await settled(page), `/exam/classes/${second.id}`);
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), page.select(".sl-exam-bar select[data-position='class']", String(single.id))]);
+    assert.equal(await settled(page), `/exam/classes/${single.id}`, "the class page of 9XPS opens and stays open");
+    assert.deepEqual(await chosen(page), ["9XPS", null], "with no course chosen");
+  });
+
+  test("a year chosen in the bar still leads through a single class to its single course", async () => {
+    enteredIn([single.id]);
+    const course = (await fetchAs(teacher, `/exam/api/classes/${single.id}`)).json.courses[0];
+    const { years } = (await fetchAs(teacher, "/exam/api/years")).json;
+    let other = years.find((candidate) => candidate.id !== year.id);
+    if (!other) other = (await fetchAs(teacher, "/exam/api/years", { method: "POST", body: { name: "2019/20", startsOn: "2019-09-02", summerStartsOn: "2020-02-10", endsOn: "2020-07-03" } })).json;
+    const page = teacher.page;
+    await openPage(page, `/exam/?year=${other.id}`, ".sl-exam-bar");
+    assert.equal(await settled(page), `/exam/?year=${other.id}`, "the other year's overview stays: it was named");
+    await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), page.select(".sl-exam-bar select[data-position='year']", String(year.id))]);
+    assert.equal(await settled(page), `/exam/courses/${course.id}`, "the config sheet of PSA 9XPS opens");
+    assert.deepEqual(await chosen(page), ["9XPS", "PSA"]);
   });
 });

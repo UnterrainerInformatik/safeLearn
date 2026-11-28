@@ -43,6 +43,59 @@ export function displayPerson(person) {
   return name || person.username;
 }
 
+/** Text as the teacher filter compares it: lowercase, accents taken off (`ö` → `o`). */
+function folded(text) {
+  return String(text ?? "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+}
+
+/**
+ * Whether `person` matches what was typed into a teacher filter
+ * (teacher-search-and-class-switch D1): every whitespace-separated piece of
+ * `query` is a substring of their family name, given name or username, case
+ * and accents aside, in any order. An empty query matches everyone.
+ */
+export function matchesPerson(person, query) {
+  const haystack = folded([person.familyName, person.givenName, person.username].filter(Boolean).join(" "));
+  return folded(query)
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((piece) => haystack.includes(piece));
+}
+
+/**
+ * A search field that narrows a list of teachers as the admin types (D2):
+ * `rows` are `{ person, element }`, each element shown or hidden by `hidden`,
+ * never rebuilt, so a ticked box stays ticked while hidden. `showEmpty`
+ * false keeps every row hidden until something is typed. `value` is typed
+ * in from the start; `onInput` runs after each narrowing with what is typed.
+ * Answers the field and the "no teacher matches" line.
+ */
+function teacherFilter(rows, { showEmpty = true, value = "", onInput = null } = {}) {
+  const input = h("input", {
+    type: "search",
+    class: "sl-exam-teacher-filter",
+    placeholder: t("exam.classes.teacherFilterPlaceholder"),
+    "aria-label": t("exam.classes.teacherFilterLabel"),
+    autocomplete: "off",
+  });
+  input.value = value;
+  const none = h("p", { class: "sl-exam-quiet sl-exam-teacher-none", hidden: true }, t("exam.classes.teacherFilterNone"));
+  const refresh = () => {
+    const query = input.value.trim();
+    let shown = 0;
+    for (const { person, element } of rows) {
+      const show = (query !== "" || showEmpty) && matchesPerson(person, query);
+      element.hidden = !show;
+      if (show) shown++;
+    }
+    none.hidden = !(query !== "" && shown === 0);
+    onInput?.(query);
+  };
+  input.addEventListener("input", refresh);
+  refresh();
+  return { input, none };
+}
+
 /**
  * What marks a course's Matura candidate (`exam-participant-role`): the class
  * that colours the cell or the name, and `text` on hover. `candidateNote`
@@ -496,7 +549,7 @@ class ClassesHome extends ExamElement {
     const box = (person) => h("input", { type: "checkbox", value: person.username, checked: person.lastYear, "aria-label": displayPerson(person) });
     const entry = (person) => {
       const tick = box(person);
-      return { tick, item: h("li", {}, h("label", {}, tick, " ", displayPerson(person), " ", h("span", { class: "sl-exam-quiet" }, person.username))) };
+      return { person, tick, item: h("li", {}, h("label", {}, tick, " ", displayPerson(person), " ", h("span", { class: "sl-exam-quiet" }, person.username))) };
     };
     const lastYear = proposal.people.filter((person) => person.lastYear).map(entry);
     const newcomers = proposal.people.filter((person) => !person.lastYear).map(entry);
@@ -504,6 +557,13 @@ class ClassesHome extends ExamElement {
     const teachers = proposal.teachers ?? [];
     const lastTeachers = teachers.filter((teacher) => teacher.lastYear).map(entry);
     const otherTeachers = teachers.filter((teacher) => !teacher.lastYear).map(entry);
+    // The directory's other teachers narrowed by typing; the list opens with the first letter (D4).
+    const otherDetails = h("details", {}, h("summary", {}, t("exam.years.showOtherTeachers")), h("ul", { class: "sl-exam-checklist sl-exam-checklist-long sl-exam-next-other-teachers" }, otherTeachers.map(({ item }) => item)));
+    const otherFind = teacherFilter(otherTeachers.map(({ person, item }) => ({ person, element: item })), {
+      onInput: (query) => {
+        if (query) otherDetails.open = true;
+      },
+    });
     const courses = proposal.courses.map((course) => ({
       course,
       tick: h("input", { type: "checkbox", value: String(course.id), checked: true, "aria-label": course.subject }),
@@ -543,7 +603,7 @@ class ClassesHome extends ExamElement {
         h("div", {},
           h("h4", {}, t("exam.years.otherTeachers", { count: otherTeachers.length })),
           otherTeachers.length
-            ? h("details", {}, h("summary", {}, t("exam.years.showOtherTeachers")), h("ul", { class: "sl-exam-checklist sl-exam-checklist-long sl-exam-next-other-teachers" }, otherTeachers.map(({ item }) => item)))
+            ? [h("p", {}, otherFind.input), otherDetails, otherFind.none]
             : h("p", { class: "sl-exam-quiet" }, t("exam.years.noOtherTeachers"))
         )
       ),
@@ -633,13 +693,12 @@ function checklist(people, className = "sl-exam-checklist") {
   const boxes = people.map((person) =>
     h("input", { type: "checkbox", value: person.username, "aria-label": displayPerson(person) })
   );
-  const list = h(
-    "ul",
-    { class: className },
-    people.map((person, index) =>
-      h("li", {}, h("label", {}, boxes[index], " ", displayPerson(person), " ", h("span", { class: "sl-exam-quiet" }, person.username)))
-    )
+  const items = people.map((person, index) =>
+    h("li", {}, h("label", {}, boxes[index], " ", displayPerson(person), " ", h("span", { class: "sl-exam-quiet" }, person.username)))
   );
+  const list = h("ul", { class: className }, items);
+  // The rows a teacher filter narrows; hidden boxes keep their tick and count in `ticked()`.
+  list.rows = people.map((person, index) => ({ person, element: items[index] }));
   list.ticked = () => boxes.filter((box) => box.checked).map((box) => box.value);
   list.tickAll = (checked) => boxes.forEach((box) => (box.checked = checked));
   list.addPerson = (person) => {
@@ -689,6 +748,7 @@ class ClassNew extends ExamElement {
 
     // The teachers to enter in the class, nobody ticked (`class-teachers`).
     const teacherList = checklist(teachers.teachers ?? [], "sl-exam-checklist sl-exam-checklist-long sl-exam-class-new-teachers");
+    const teacherFind = teacherFilter(teacherList.rows);
 
     const extra = h("input", { placeholder: t("exam.classes.usernamePlaceholder"), "aria-label": t("exam.classes.addByUsernameLabel") });
     const addExtra = () => {
@@ -716,7 +776,7 @@ class ClassNew extends ExamElement {
       members,
       h("p", {}, extra, " ", h("button", { type: "button", class: "sl-exam-action", onclick: addExtra }, t("exam.classes.addByUsername"))),
       h("h3", {}, t("exam.classes.teachers")),
-      teachers.ready ? teacherList : h("p", { class: "sl-exam-quiet" }, directoryNotice(teachers.state) ?? t("exam.classes.directoryLoading")),
+      teachers.ready ? [h("p", {}, teacherFind.input), teacherList, teacherFind.none] : h("p", { class: "sl-exam-quiet" }, directoryNotice(teachers.state) ?? t("exam.classes.directoryLoading")),
       h("p", {}, h("button", { type: "button", class: "sl-exam-primary", onclick: create }, t("exam.classes.createClass"))),
       line
     ));
@@ -795,27 +855,33 @@ class ClassView extends ExamElement {
     );
     let picker = null;
     if (admin) {
+      // The directory's other teachers as matches under a filter field, nothing shown before typing (D3).
       const offered = (directory?.teachers ?? []).filter((teacher) => !entered.has(teacher.username));
-      const select = h(
-        "select",
-        { class: "sl-exam-teacher-picker", "aria-label": t("exam.classes.teacherPickerLabel") },
-        h("option", { value: "" }, "–"),
-        offered.map((teacher) => h("option", { value: teacher.username }, `${displayPerson(teacher)} (${teacher.username})`))
-      );
+      const rows = offered.map((teacher) => ({
+        person: teacher,
+        element: h(
+          "li",
+          { "data-username": teacher.username },
+          displayPerson(teacher),
+          " ",
+          h("span", { class: "sl-exam-quiet" }, teacher.username),
+          " ",
+          button({
+            label: t("exam.classes.enterTeacher"),
+            class: "sl-exam-teacher-add",
+            action: change(() => examApi(`/classes/${klass.id}/teachers`, { method: "POST", body: { username: teacher.username } })),
+          })
+        ),
+      }));
+      // What was typed survives the reload after entering a match, so the next one is a click away.
+      const filter = teacherFilter(rows, { showEmpty: false, value: this.teacherQuery ?? "", onInput: (query) => (this.teacherQuery = query) });
       picker = directory?.ready
         ? h(
-            "p",
-            {},
-            select,
-            " ",
-            button({
-              label: t("exam.classes.enterTeacher"),
-              class: "sl-exam-teacher-add",
-              action: (event) => {
-                if (!select.value) return;
-                change(() => examApi(`/classes/${klass.id}/teachers`, { method: "POST", body: { username: select.value } }))(event);
-              },
-            })
+            "div",
+            { class: "sl-exam-teacher-picker" },
+            h("label", {}, t("exam.classes.teacherPickerLabel"), " ", filter.input),
+            h("ul", { class: "sl-exam-checklist sl-exam-teacher-matches" }, rows.map(({ element }) => element)),
+            filter.none
           )
         : h("p", { class: "sl-exam-quiet" }, directoryNotice(directory?.state) ?? t("exam.classes.directoryLoading"));
     }

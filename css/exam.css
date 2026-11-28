@@ -91,6 +91,22 @@
   margin: 2px 0;
 }
 
+/* The field that narrows a list of teachers (`class-teachers`), and the class
+   page's matches beneath it, drawn like a checklist. */
+.sl-exam-teacher-filter {
+  width: min(100%, 24em);
+}
+
+.sl-exam-teacher-matches {
+  max-height: 40vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.sl-exam-teacher-matches:not(:has(li:not([hidden]))) {
+  display: none;
+}
+
 .sl-exam-form {
   display: flex;
   flex-wrap: wrap;

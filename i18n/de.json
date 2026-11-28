@@ -222,7 +222,10 @@
       "noTeachersEntered": "In dieser Klasse ist keine Lehrkraft eingetragen.",
       "removeTeacherArmed": "Noch einmal klicken, um {name} aus dieser Klasse zu entfernen",
       "teacherPickerLabel": "Einzutragende Lehrkraft",
-      "enterTeacher": "Lehrkraft eintragen"
+      "enterTeacher": "Lehrkraft eintragen",
+      "teacherFilterPlaceholder": "Name oder Benutzername, z. B. gru lei",
+      "teacherFilterLabel": "Lehrkräfte filtern",
+      "teacherFilterNone": "Keine Lehrkraft passt."
     },
     "common": {
       "cancel": "Abbrechen",

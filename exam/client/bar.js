@@ -7,9 +7,11 @@
  *
  * A class or course position with nothing chosen and exactly one choice is
  * chosen at once, as if the teacher had chosen it (class-bound-teachers D7):
- * on the module's start page, and on a page reached by choosing a year or a
- * class in the bar. A page reached any other way - a position's link, an
- * emptied position, a link on a page - stays as it is.
+ * on the module's start page, on a page reached by choosing a year in the
+ * bar, and on a page the bar chose this way. A class the teacher chose stays
+ * open, even with a single course (teacher-search-and-class-switch D5); so
+ * does a page reached any other way - a position's link, an emptied
+ * position, a link on a page.
  */
 
 import { elementFor, h, t } from "./frame.js";
@@ -119,9 +121,9 @@ function keptDestination(option, { semester, current }) {
 
 /**
  * The key under which a page learns that it was reached by choosing a year
- * or a class in the bar, or by the bar choosing a single choice for the
- * teacher: only then, and on the module's start page, does it choose a
- * single choice in turn (class-bound-teachers D7).
+ * in the bar, or by the bar choosing a single choice for the teacher: only
+ * then, and on the module's start page, does it choose a single choice in
+ * turn (class-bound-teachers D7, teacher-search-and-class-switch D5).
  */
 const cascadeKey = "sl-exam-bar-cascade";
 
@@ -145,7 +147,7 @@ function cascadeTo(target) {
   }
 }
 
-/** Whether this page was reached by a choice of year or class, or by the bar's own; asked once. */
+/** Whether this page was reached by a choice of year, or by the bar's own; asked once. */
 function reachedByChoice() {
   try {
     const reached = window.sessionStorage.getItem(cascadeKey) === here();
@@ -190,9 +192,9 @@ export function connectBar(bar) {
     const target =
       keptDestination(select.selectedOptions[0], bar.dataset) ?? destination(select.dataset.position, select.value, bar.dataset);
     if (!target) return;
-    // A year or a class chosen lets the page it opens choose a single choice to its right;
-    // emptying a position, or choosing a course, is the teacher's last word.
-    if (select.value !== "" && (select.dataset.position === "year" || select.dataset.position === "class")) cascadeTo(target);
+    // A year chosen lets the page it opens choose a single choice to its right; a class or
+    // a course chosen, or a position emptied, is the teacher's last word (D5).
+    if (select.value !== "" && select.dataset.position === "year") cascadeTo(target);
     window.location.assign(target);
   });
   bar.addEventListener("click", (event) => {
