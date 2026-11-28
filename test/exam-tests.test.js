@@ -597,9 +597,11 @@ function running({ duration = 15, window = 50, participants = null } = {}) {
   const seed = seeded();
   const test = createTest(seed.db, seed.course.id, { name: "T", questionIds: seed.ids });
   const sitting = createSitting(seed.db, test.id, { opensAt: inMinutes(60), closesAt: inMinutes(60 + window), durationMinutes: duration, participants });
-  // Opened a minute ago, as far as the attempts are concerned.
-  seed.db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ? WHERE id = ?").run(inMinutes(-1), inMinutes(window - 1), sitting.id);
-  return { ...seed, test, sitting: { ...sitting, closesAt: inMinutes(window - 1) } };
+  // Opened a minute ago, as far as the attempts are concerned. The closing time is read once,
+  // so the database and the answer agree to the millisecond.
+  const closesAt = inMinutes(window - 1);
+  seed.db.prepare("UPDATE sitting SET opens_at = ?, closes_at = ? WHERE id = ?").run(inMinutes(-1), closesAt, sitting.id);
+  return { ...seed, test, sitting: { ...sitting, closesAt } };
 }
 
 const attemptRow = (db, id) => db.prepare("SELECT * FROM attempt WHERE id = ?").get(id);
